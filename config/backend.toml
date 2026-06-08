@@ -1,0 +1,15 @@
+addr = "127.0.0.1"
+port = 3600
+database_path = "data/ft.db"
+frontend_config_path = "config/frontend.toml"
+
+[llm]
+api_base = "http://192.168.1.17:8080/v1"
+api_key = ""
+model = "glm-4.7-flash"
+think = false
+
+[vision]
+api_base = "http://192.168.1.17:8080/v1"
+api_key = ""
+model = "qwen2.5-vl-7b"

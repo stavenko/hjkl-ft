@@ -1,0 +1,18 @@
+[serve]
+port = 3601
+
+[watch]
+ignore = ["dist", "node_modules", "styles/output.css"]
+
+[[hooks]]
+stage = "pre_build"
+command = "cp"
+command_arguments = ["styles/input.css", "styles/output.css"]
+
+[[proxy]]
+rewrite = "/api/"
+backend = "http://127.0.0.1:3600/api/"
+
+[[proxy]]
+rewrite = "/config/"
+backend = "http://127.0.0.1:3600/config/"

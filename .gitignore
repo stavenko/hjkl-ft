@@ -1,0 +1,11 @@
+/target
+/dist
+/data
+data.db
+data.db-shm
+data.db-wal
+node_modules
+frontend/styles/output.css
+frontend/dist
+.playwright-mcp/
+screenshot-*.png

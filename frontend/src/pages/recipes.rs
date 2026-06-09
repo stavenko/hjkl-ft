@@ -60,12 +60,13 @@ pub fn RecipesPage() -> impl IntoView {
         <div>
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
                 <h1 class="title is-4" style="margin-bottom: 0;">{t("recipes.title")}</h1>
-                <button class="button is-link" on:click=on_create>{t("recipes.new")}</button>
+                <button attr:data-testid="recipes-btn-new" class="button is-link" on:click=on_create>{t("recipes.new")}</button>
             </div>
 
             <div class="field mb-4">
                 <div class="control">
                     <input
+                        attr:data-testid="recipes-input-search"
                         type="text"
                         placeholder=t("recipes.search_placeholder")
                         class="input is-small"

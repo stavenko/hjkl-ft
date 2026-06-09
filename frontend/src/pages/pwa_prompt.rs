@@ -262,6 +262,7 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                 </div>
 
                 <button
+                    attr:data-testid="pwa-btn-dismiss"
                     class="button is-ghost has-text-grey"
                     style="text-decoration: underline; font-size: 0.85rem;"
                     on:click=dismiss

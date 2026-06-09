@@ -60,6 +60,7 @@ pub struct PairingSession {
 #[serde(rename_all = "lowercase")]
 pub enum PairingStatus {
     Pending,
+    Approved,
     Claimed,
     Completed,
     Expired,

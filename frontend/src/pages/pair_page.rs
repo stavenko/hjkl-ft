@@ -55,10 +55,13 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
                         .and_then(|v| v.as_str())
                         .unwrap_or_default()
                         .to_string();
+                    let secret = resp.get("secret")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
                     step.set(PairStep::ShowQr { qr_url, pairing_id: pairing_id.clone() });
                     loading.set(false);
-                    // Start polling for approval
-                    poll_until_done(pairing_id, step, error).await;
+                    poll_until_done_unauthenticated(pairing_id, secret, step, error).await;
                 }
                 Err(e) => {
                     error.set(Some(e));
@@ -123,6 +126,7 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
                     PairStep::Menu => view! {
                         <div style="display: flex; flex-direction: column; gap: 1rem;">
                             <button
+                                attr:data-testid="pair-new-btn-scan"
                                 class="button is-link is-medium is-fullwidth"
                                 disabled=move || loading.get()
                                 on:click=open_scanner
@@ -130,6 +134,7 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
                                 {t("pair.scan_qr")}
                             </button>
                             <button
+                                attr:data-testid="pair-new-btn-show"
                                 class="button is-light is-medium is-fullwidth"
                                 disabled=move || loading.get()
                                 on:click=show_qr
@@ -137,6 +142,7 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
                                 {t("pair.show_qr")}
                             </button>
                             <button
+                                attr:data-testid="pair-new-btn-back"
                                 class="button is-text is-medium is-fullwidth"
                                 on:click=move |_| on_back.call(())
                             >
@@ -151,10 +157,11 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
                         let copied = create_rw_signal(false);
                         view! {
                             <p class="mb-4 has-text-grey">{t("pair.show_hint_new")}</p>
-                            <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                            <div attr:data-testid="pair-new-qr-display" style="display: flex; justify-content: center; margin-bottom: 1rem;">
                                 <QrCode data=url size=240 />
                             </div>
                             <button
+                                attr:data-testid="pair-new-btn-copy-link"
                                 class="button is-small is-light is-fullwidth mb-3"
                                 on:click=move |_| {
                                     let u = url_for_copy.clone();
@@ -168,6 +175,7 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
                             </button>
                             <p class="has-text-grey is-size-7 mb-4">{t("pair.waiting")}</p>
                             <button
+                                attr:data-testid="pair-new-btn-back"
                                 class="button is-text"
                                 on:click=move |_| step.set(PairStep::Menu)
                             >
@@ -218,8 +226,7 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
                         .to_string();
                     step.set(PairStep::ShowQr { qr_url, pairing_id: pairing_id.clone() });
                     loading.set(false);
-                    // Poll for completion
-                    poll_until_done(pairing_id, step, error).await;
+                    poll_until_done_authenticated(pairing_id, step, error).await;
                 }
                 Err(e) => {
                     error.set(Some(e));
@@ -282,6 +289,7 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
                 PairStep::Menu => view! {
                     <div style="display: flex; flex-direction: column; gap: 1rem;">
                         <button
+                            attr:data-testid="pair-logged-btn-show"
                             class="button is-link is-medium is-fullwidth"
                             disabled=move || loading.get()
                             on:click=show_qr
@@ -289,6 +297,7 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
                             {t("pair.show_qr")}
                         </button>
                         <button
+                            attr:data-testid="pair-logged-btn-scan"
                             class="button is-light is-medium is-fullwidth"
                             disabled=move || loading.get()
                             on:click=open_scanner
@@ -296,6 +305,7 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
                             {t("pair.scan_qr")}
                         </button>
                         <button
+                            attr:data-testid="pair-logged-btn-back"
                             class="button is-text is-medium is-fullwidth"
                             on:click=move |_| on_close.call(())
                         >
@@ -310,10 +320,11 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
                     let copied = create_rw_signal(false);
                     view! {
                         <p class="mb-4 has-text-grey">{t("pair.show_hint_logged")}</p>
-                        <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                        <div attr:data-testid="pair-logged-qr-display" style="display: flex; justify-content: center; margin-bottom: 1rem;">
                             <QrCode data=url size=240 />
                         </div>
                         <button
+                            attr:data-testid="pair-logged-btn-copy-link"
                             class="button is-small is-light is-fullwidth mb-3"
                             on:click=move |_| {
                                 let u = url_for_copy.clone();
@@ -327,6 +338,7 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
                         </button>
                         <p class="has-text-grey is-size-7 mb-4">{t("pair.waiting")}</p>
                         <button
+                            attr:data-testid="pair-logged-btn-back"
                             class="button is-text"
                             on:click=move |_| step.set(PairStep::Menu)
                         >
@@ -343,6 +355,7 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
                     <div>
                         <p class="has-text-success is-size-5 mb-4">{t("pair.success")}</p>
                         <button
+                            attr:data-testid="pair-logged-btn-back"
                             class="button is-link"
                             on:click=move |_| on_close.call(())
                         >
@@ -413,26 +426,24 @@ mod tests {
 }
 
 /// Poll /pair/status/:id every 2 seconds until status is "completed" or "expired".
-async fn poll_until_done(
+/// Poll for logged-in device (uses authenticated /pair/status)
+async fn poll_until_done_authenticated(
     pairing_id: String,
     step: RwSignal<PairStep>,
     error: RwSignal<Option<String>>,
 ) {
     loop {
-        // If user navigated away from the QR view, stop polling
         if !matches!(step.get_untracked(), PairStep::ShowQr { .. }) {
             return;
         }
-
         gloo_timers_sleep(2000).await;
-
         match auth::pair_status(&pairing_id).await {
             Ok(resp) => {
                 let status = resp.get("status")
                     .and_then(|v| v.as_str())
                     .unwrap_or("pending");
                 match status {
-                    "completed" => {
+                    "completed" | "claimed" => {
                         step.set(PairStep::Done);
                         return;
                     }
@@ -441,12 +452,45 @@ async fn poll_until_done(
                         step.set(PairStep::Menu);
                         return;
                     }
-                    _ => { /* keep polling */ }
+                    _ => {}
                 }
             }
-            Err(_) => {
-                // Transient network error -- keep trying
+            Err(_) => {}
+        }
+    }
+}
+
+/// Poll for new device (uses unauthenticated /pair/check)
+async fn poll_until_done_unauthenticated(
+    pairing_id: String,
+    secret: String,
+    step: RwSignal<PairStep>,
+    error: RwSignal<Option<String>>,
+) {
+    loop {
+        if !matches!(step.get_untracked(), PairStep::ShowQr { .. }) {
+            return;
+        }
+        gloo_timers_sleep(2000).await;
+        match auth::pair_check(&pairing_id, &secret).await {
+            Ok(resp) => {
+                let status = resp.get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("pending");
+                match status {
+                    "completed" | "claimed" | "approved" => {
+                        step.set(PairStep::Done);
+                        return;
+                    }
+                    "expired" => {
+                        error.set(Some(t("pair.expired").to_string()));
+                        step.set(PairStep::Menu);
+                        return;
+                    }
+                    _ => {}
+                }
             }
+            Err(_) => {}
         }
     }
 }

@@ -14,6 +14,7 @@ pub fn QrCode(data: String, #[prop(default = 200)] size: u32) -> impl IntoView {
 
     view! {
         <div
+            attr:data-testid="qr-code-display"
             style=format!("width: {}px; height: {}px;", size, size)
             inner_html=svg_string
         />

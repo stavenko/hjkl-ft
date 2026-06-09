@@ -593,8 +593,9 @@ impl AuthDO {
             return Response::error("invalid secret", 403);
         }
 
-        // Bind user to session (keep Pending - claim will change to Claimed)
+        // Bind user to session and mark as approved
         session.user_id = user_id.to_string();
+        session.status = PairingStatus::Approved;
         let updated = serde_json::to_string(&session)
             .map_err(|e| Error::RustError(format!("serialize: {e}")))?;
         self.state.storage().put(&key, updated).await?;
@@ -622,7 +623,7 @@ impl AuthDO {
             self.state.storage().put(&key, updated).await?;
             return Response::error("pairing session expired", 410);
         }
-        if session.status != PairingStatus::Pending {
+        if session.status != PairingStatus::Pending && session.status != PairingStatus::Approved {
             return Response::error(
                 format!(
                     "pairing session already {}",
@@ -635,7 +636,7 @@ impl AuthDO {
             return Response::error("invalid secret", 403);
         }
 
-        // Must have a user_id bound (from approve)
+        // Must have a user_id bound (from create or approve)
         if session.user_id.is_empty() {
             return Response::error("pairing session not yet approved", 409);
         }

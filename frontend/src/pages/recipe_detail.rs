@@ -164,7 +164,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                     <div>
                         // Header
                         <div class="mb-5">
-                            <a href="/recipes" class="is-size-7 has-text-grey">{t("recipe.back")}</a>
+                            <a attr:data-testid="recipe-detail-link-back" href="/recipes" class="is-size-7 has-text-grey">{t("recipe.back")}</a>
                             {if is_finalized {
                                 view! {
                                     <h1 class="title is-4" style="margin-top: 0.5rem;">{&r.name}</h1>
@@ -172,6 +172,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                             } else {
                                 view! {
                                     <input
+                                        attr:data-testid="recipe-detail-input-name"
                                         type="text"
                                         class="input is-medium"
                                         style="border: none; border-bottom: 1px solid transparent; box-shadow: none; background: transparent; font-weight: bold; width: 100%; padding-left: 0; margin-top: 0.5rem;"
@@ -201,6 +202,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                                 {if !is_finalized {
                                                     view! {
                                                         <button
+                                                            attr:data-testid="recipe-detail-btn-edit-weight"
                                                             class="button is-ghost is-small has-text-link"
                                                             style="height: auto; text-decoration: none;"
                                                             on:click={
@@ -219,6 +221,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                                             <span class="is-size-7">{format!("{g:.0}{}", t("common.unit.g"))}</span>
                                                         </button>
                                                         <button
+                                                            attr:data-testid="recipe-detail-btn-remove-ingredient"
                                                             class="button is-ghost has-text-grey-light"
                                                             style="height: 2.5rem; width: 2.5rem; padding: 0; text-decoration: none;"
                                                             on:click={
@@ -323,7 +326,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                     </div>
                                     <p class="is-size-7 has-text-grey mt-3">
                                         {t("recipe.other_nutrients_hint")} " "
-                                        <a href="/settings">{t("recipe.settings_link")}</a>
+                                        <a attr:data-testid="recipe-detail-link-settings" href="/settings">{t("recipe.settings_link")}</a>
                                     </p>
                                 </div>
                             }
@@ -333,10 +336,12 @@ pub fn RecipeDetailPage() -> impl IntoView {
                         <Show when=move || !is_finalized>
                             <div class="buttons">
                                 <button
+                                    attr:data-testid="recipe-detail-btn-add-ingredient"
                                     class="button is-link"
                                     on:click=move |_| show_add_modal.set(true)
                                 >{t("recipe.add_ingredient")}</button>
                                 <button
+                                    attr:data-testid="recipe-detail-btn-finalize"
                                     class="button is-success"
                                     on:click=move |_| show_finalize.set(true)
                                 >{t("recipe.finalize")}</button>
@@ -389,7 +394,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                 <div class="modal-card" style="max-width: 24rem;">
                                     <header class="modal-card-head">
                                         <p class="modal-card-title">{t("recipe.finalize_title")}</p>
-                                        <button class="delete" on:click=move |_| show_finalize.set(false)></button>
+                                        <button attr:data-testid="recipe-detail-btn-finalize-close" class="delete" on:click=move |_| show_finalize.set(false)></button>
                                     </header>
                                     <form on:submit=on_finalize>
                                         <section class="modal-card-body">
@@ -400,6 +405,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                             <div class="field has-addons">
                                                 <div class="control is-expanded">
                                                     <input
+                                                        attr:data-testid="recipe-detail-input-final-weight"
                                                         type="text"
                                                         inputmode="decimal"
                                                         placeholder={move || format!("{:.0}", total_ingredient_weight())}
@@ -415,8 +421,8 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                         </section>
                                         <footer class="modal-card-foot">
                                             <div class="buttons">
-                                                <button type="submit" class="button is-success">{t("recipe.finalize")}</button>
-                                                <button type="button" class="button" on:click=move |_| show_finalize.set(false)>{t("common.cancel")}</button>
+                                                <button attr:data-testid="recipe-detail-btn-finalize-submit" type="submit" class="button is-success">{t("recipe.finalize")}</button>
+                                                <button attr:data-testid="recipe-detail-btn-finalize-cancel" type="button" class="button" on:click=move |_| show_finalize.set(false)>{t("common.cancel")}</button>
                                             </div>
                                         </footer>
                                     </form>

@@ -17,15 +17,15 @@ test.describe('Flow A: Logged-in shows QR → new device claims', () => {
     const { cdpSession } = await registerAccount(page);
 
     // -- Step 2: Navigate to Settings → Connect device → Show QR --
-    await page.locator('nav a[href="/settings"]').click();
+    await page.getByTestId('nav-settings').click();
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.locator('.button.is-link.is-light', { hasText: 'Подключить устройство' });
+    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click({ timeout: 15_000 });
 
-    const showQrBtn = page.getByText('Показать QR-код');
+    const showQrBtn = page.getByTestId('pair-logged-btn-show');
     await expect(showQrBtn).toBeVisible({ timeout: 5_000 });
 
     // Intercept /pair/create to get QR data
@@ -113,12 +113,12 @@ test.describe('Flow B: New device shows QR → logged-in approves → auto-claim
     await page.waitForTimeout(3000);
 
     // Should see auth page (onboarding)
-    const loginBtn = page.getByText('Войти', { exact: true });
+    const loginBtn = page.getByTestId('auth-btn-login');
     await expect(loginBtn).toBeVisible({ timeout: 15_000 });
     await loginBtn.click();
 
     // -- Step 3: Click "Показать QR-код" on login screen --
-    const showQrBtn = page.getByText('Показать QR-код').first();
+    const showQrBtn = page.getByTestId('auth-btn-show-qr');
     await expect(showQrBtn).toBeVisible({ timeout: 5_000 });
 
     // Intercept /pair/request to get pairing data

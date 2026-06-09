@@ -118,6 +118,7 @@ pub fn SettingsPage() -> impl IntoView {
                                     <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px solid #f0f0f0;">
                                         <label class="checkbox" style="width: 7rem; flex-shrink: 0; display: flex; align-items: center; gap: 0.25rem; white-space: nowrap;">
                                             <input type="checkbox"
+                                                attr:data-testid=format!("settings-checkbox-{}", name.to_lowercase())
                                                 prop:checked=is_on
                                                 on:change={
                                                     let n = name_s.clone();
@@ -294,7 +295,7 @@ pub fn SettingsPage() -> impl IntoView {
 
                         // Add custom goal
                         <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 0;">
-                            <input type="text" placeholder=t("settings.nutrient_placeholder") class="input is-small"
+                            <input type="text" attr:data-testid="settings-input-new-nutrient" placeholder=t("settings.nutrient_placeholder") class="input is-small"
                                 style="width: 8rem;"
                                 prop:value=move || new_name.get()
                                 on:input=move |ev| new_name.set(event_target_value(&ev))
@@ -306,7 +307,7 @@ pub fn SettingsPage() -> impl IntoView {
                                     <option value="Mcg">"µg"</option>
                                 </select>
                             </div>
-                            <button class="button is-small is-link" on:click=add_custom>{t("settings.add")}</button>
+                            <button attr:data-testid="settings-btn-add-goal" class="button is-small is-link" on:click=add_custom>{t("settings.add")}</button>
                         </div>
                     </section>
 
@@ -314,6 +315,7 @@ pub fn SettingsPage() -> impl IntoView {
                         <h2 class="subtitle is-5 mb-4">{t("settings.language")}</h2>
                         <div class="buttons has-addons">
                             <button
+                                attr:data-testid="settings-btn-lang-ru"
                                 class=move || if crate::services::i18n::get_lang() == crate::services::i18n::Lang::Ru {
                                     "button is-small is-link is-selected"
                                 } else {
@@ -325,6 +327,7 @@ pub fn SettingsPage() -> impl IntoView {
                                 }
                             >"Русский"</button>
                             <button
+                                attr:data-testid="settings-btn-lang-en"
                                 class=move || if crate::services::i18n::get_lang() == crate::services::i18n::Lang::En {
                                     "button is-small is-link is-selected"
                                 } else {
@@ -341,6 +344,7 @@ pub fn SettingsPage() -> impl IntoView {
                     <section class="mt-6">
                         <h2 class="subtitle is-5 mb-4">{t("settings.add_device")}</h2>
                         <button
+                            attr:data-testid="settings-btn-add-device"
                             class="button is-link is-light"
                             on:click=move |_| show_pair.set(true)
                         >
@@ -351,6 +355,7 @@ pub fn SettingsPage() -> impl IntoView {
                     <section class="mt-6">
                         <h2 class="subtitle is-5 mb-4">{t("settings.data")}</h2>
                         <button
+                            attr:data-testid="settings-btn-wipe-all"
                             class="button is-danger is-light"
                             on:click=move |_| {
                                 spawn_local(async move {

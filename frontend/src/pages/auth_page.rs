@@ -138,8 +138,8 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
 
     let error_view = move || {
         error.get().map(|e| view! {
-            <div class="notification is-danger is-light mb-4" style="text-align: left;">
-                <button class="delete" on:click=move |_| error.set(None)></button>
+            <div attr:data-testid="auth-error" class="notification is-danger is-light mb-4" style="text-align: left;">
+                <button attr:data-testid="auth-btn-dismiss-error" class="delete" on:click=move |_| error.set(None)></button>
                 {e}
             </div>
         })
@@ -156,10 +156,11 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                         <div style="max-width: 24rem; width: 100%;">
                             <h1 class="title is-4 mb-4">{t("pair.show_qr")}</h1>
                             <p class="has-text-grey mb-4">{t("auth.show_qr_hint")}</p>
-                            <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                            <div attr:data-testid="auth-qr-display" style="display: flex; justify-content: center; margin-bottom: 1rem;">
                                 <QrCode data=url size=240 />
                             </div>
                             <button
+                                attr:data-testid="auth-btn-copy-link"
                                 class="button is-small is-light is-fullwidth mb-3"
                                 on:click=move |_| {
                                     let u = url_copy.clone();
@@ -175,6 +176,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             </button>
                             <p class="has-text-grey is-size-7 mb-4">{t("pair.waiting")}</p>
                             <button
+                                attr:data-testid="auth-btn-back"
                                 class="button is-ghost has-text-grey"
                                 style="text-decoration: underline;"
                                 on:click=move |_| step.set(AuthStep::Login)
@@ -206,6 +208,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             <div class="box mb-3" style="padding: 0.75rem;">
                                 <p class="is-size-7 has-text-grey mb-2">{t("auth.login_option1_hint")}</p>
                                 <button
+                                    attr:data-testid="auth-btn-show-qr"
                                     class="button is-link is-fullwidth"
                                     disabled=move || loading.get()
                                     on:click=on_show_qr
@@ -217,6 +220,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             <div class="box" style="padding: 0.75rem;">
                                 <p class="is-size-7 has-text-grey mb-2">{t("auth.login_option2_hint")}</p>
                                 <button
+                                    attr:data-testid="auth-btn-scan-qr"
                                     class="button is-link is-light is-fullwidth"
                                     disabled=move || loading.get()
                                     on:click=move |_| step.set(AuthStep::Scanning)
@@ -230,6 +234,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                         <div style="text-align: left; margin-bottom: 1.5rem;">
                             <p class="has-text-weight-semibold mb-3">{t("auth.login_no_device")}</p>
                             <button
+                                attr:data-testid="auth-btn-try-passkey"
                                 class="button is-light is-fullwidth"
                                 disabled=move || loading.get()
                                 on:click=on_try_passkey
@@ -239,6 +244,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                         </div>
 
                         <button
+                            attr:data-testid="auth-btn-back"
                             class="button is-ghost has-text-grey is-fullwidth"
                             style="font-size: 0.85rem; text-decoration: underline;"
                             on:click=move |_| { step.set(AuthStep::Main); error.set(None); }
@@ -262,6 +268,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
 
                         <div style="display: flex; flex-direction: column; gap: 1rem;">
                             <button
+                                attr:data-testid="auth-btn-register"
                                 class="button is-link is-medium is-fullwidth"
                                 disabled=move || loading.get()
                                 on:click=on_register
@@ -272,6 +279,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                                 {t("auth.already_used")}
                             </p>
                             <button
+                                attr:data-testid="auth-btn-login"
                                 class="button is-light is-medium is-fullwidth"
                                 disabled=move || loading.get()
                                 on:click=move |_| { step.set(AuthStep::Login); error.set(None); }

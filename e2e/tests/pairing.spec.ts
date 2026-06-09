@@ -34,7 +34,7 @@ test.describe('Device pairing (logged-in device)', () => {
     await page.waitForTimeout(3000);
 
     // TryingPassKey will fail (no credential), then shows auth page
-    const createBtn = page.getByText('Зарегистрироваться');
+    const createBtn = page.getByTestId('auth-btn-register');
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
     await createBtn.click();
 
@@ -59,40 +59,40 @@ test.describe('Device pairing (logged-in device)', () => {
   });
 
   test('Settings page shows "Add device" button', async ({ page }) => {
-    await page.locator('nav a[href="/settings"]').click();
+    await page.getByTestId('nav-settings').click();
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.getByText('Подключить устройство', { exact: false });
-    await expect(addDeviceBtn.first()).toBeVisible({ timeout: 10_000 });
+    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
+    await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
   });
 
   test('Click "Add device" shows pairing options (Show QR / Scan QR)', async ({ page }) => {
-    await page.locator('nav a[href="/settings"]').click();
+    await page.getByTestId('nav-settings').click();
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.locator('.button.is-link.is-light', { hasText: 'Подключить устройство' });
+    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click({ timeout: 15_000 });
 
     // Should see pairing options
-    const showQr = page.getByText('Показать QR-код');
-    const scanQr = page.getByText('Сканировать QR-код');
+    const showQr = page.getByTestId('pair-logged-btn-show');
+    const scanQr = page.getByTestId('pair-logged-btn-scan');
     await expect(showQr).toBeVisible({ timeout: 5_000 });
     await expect(scanQr).toBeVisible({ timeout: 5_000 });
   });
 
   test('Show QR creates valid pairing data that can be parsed', async ({ page }) => {
-    await page.locator('nav a[href="/settings"]').click();
+    await page.getByTestId('nav-settings').click();
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.locator('.button.is-link.is-light', { hasText: 'Подключить устройство' });
+    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click({ timeout: 15_000 });
 
-    const showQrBtn = page.getByText('Показать QR-код');
+    const showQrBtn = page.getByTestId('pair-logged-btn-show');
     await expect(showQrBtn).toBeVisible({ timeout: 5_000 });
 
     // Click Show QR and wait for /pair/create response
@@ -117,7 +117,7 @@ test.describe('Device pairing (logged-in device)', () => {
     await expect(waitingText).toBeVisible({ timeout: 5_000 });
 
     // Verify "Copy link" button is present
-    const copyBtn = page.getByText('Копировать ссылку');
+    const copyBtn = page.getByTestId('pair-logged-btn-copy-link');
     await expect(copyBtn).toBeVisible();
 
     // Verify the QR data can be parsed correctly (simulates what scanning device does)
@@ -166,11 +166,11 @@ test.describe('Device pairing (new device side)', () => {
   });
 
   test('Auth page shows login option after dismissing PWA prompt', async ({ page }) => {
-    const dismissBtn = page.getByText('Я хочу использовать в браузере');
+    const dismissBtn = page.getByTestId('pwa-btn-dismiss');
     await expect(dismissBtn).toBeVisible({ timeout: 10_000 });
     await dismissBtn.click();
 
-    const loginBtn = page.getByText('Войти', { exact: true });
+    const loginBtn = page.getByTestId('auth-btn-login');
     await expect(loginBtn).toBeVisible({ timeout: 10_000 });
   });
 
@@ -179,13 +179,13 @@ test.describe('Device pairing (new device side)', () => {
     await page.reload();
     await page.waitForTimeout(3000);
 
-    const loginBtn = page.getByText('Войти', { exact: true });
+    const loginBtn = page.getByTestId('auth-btn-login');
     await expect(loginBtn).toBeVisible({ timeout: 15_000 });
     await loginBtn.click();
 
-    const showQr = page.getByText('Показать QR-код').first();
-    const scanQr = page.getByText('Сканировать QR-код').first();
-    const tryPasskey = page.getByText('Попробовать войти с ключом входа');
+    const showQr = page.getByTestId('auth-btn-show-qr');
+    const scanQr = page.getByTestId('auth-btn-scan-qr');
+    const tryPasskey = page.getByTestId('auth-btn-try-passkey');
 
     await expect(showQr).toBeVisible({ timeout: 5_000 });
     await expect(scanQr).toBeVisible({ timeout: 5_000 });

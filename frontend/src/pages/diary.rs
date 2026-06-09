@@ -211,6 +211,7 @@ pub fn DiaryPage() -> impl IntoView {
             // - max on date input also prevents selecting future dates in the picker
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
                 <button
+                    attr:data-testid="diary-btn-prev-date"
                     class="button is-light is-rounded"
                     style="width: 3rem; height: 3rem; font-size: 1.2rem;"
                     on:click=move |_| change_date(-1)
@@ -231,6 +232,7 @@ pub fn DiaryPage() -> impl IntoView {
                         }
                     />
                     <button
+                        attr:data-testid="diary-btn-date"
                         class="button is-white is-size-5 has-text-weight-semibold"
                         on:click=move |_| {
                             let doc = web_sys::window().unwrap().document().unwrap();
@@ -245,6 +247,7 @@ pub fn DiaryPage() -> impl IntoView {
                 </div>
 
                 <button
+                    attr:data-testid="diary-btn-next-date"
                     class="button is-light is-rounded"
                     style="width: 3rem; height: 3rem; font-size: 1.2rem;"
                     disabled=move || is_today()
@@ -567,6 +570,7 @@ pub fn DiaryPage() -> impl IntoView {
             // Floating green + button
             <Show when=move || !show_add.get()>
                 <button
+                    attr:data-testid="diary-btn-add"
                     class="button is-success is-rounded"
                     style="position: fixed; bottom: 5.5rem; right: 1.5rem; z-index: 41; width: 3.5rem; height: 3.5rem; font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); border: none;"
                     on:click=move |_| show_add.set(true)

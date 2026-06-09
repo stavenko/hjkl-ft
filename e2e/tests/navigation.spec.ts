@@ -29,7 +29,7 @@ test.describe('App navigation', () => {
     await page.waitForTimeout(3000);
 
     // Wait for TryingPassKey → Auth page
-    const createBtn = page.getByText('Зарегистрироваться');
+    const createBtn = page.getByTestId('auth-btn-register');
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
     await createBtn.click();
 
@@ -44,7 +44,7 @@ test.describe('App navigation', () => {
     await page.waitForTimeout(1000);
 
     // Verify the auth overlay is gone by waiting for nav to be clickable
-    const navLink = page.locator('nav a[href="/recipes"]');
+    const navLink = page.getByTestId('nav-recipes');
     await expect(navLink).toBeVisible({ timeout: 10_000 });
   });
 
@@ -59,40 +59,40 @@ test.describe('App navigation', () => {
   });
 
   test('navigate to Recipes and back to Diary', async ({ page }) => {
-    await page.locator('nav a[href="/recipes"]').click();
+    await page.getByTestId('nav-recipes').click();
     await expect(page).toHaveURL(/\/recipes/);
     await expect(page.locator('h1', { hasText: 'Рецепты' })).toBeVisible({ timeout: 5_000 });
 
-    await page.locator('nav a[href="/"]').click();
+    await page.getByTestId('nav-diary').click();
     await expect(page).toHaveURL(/\/$/);
   });
 
   test('navigate to Settings', async ({ page }) => {
-    await page.locator('nav a[href="/settings"]').click();
+    await page.getByTestId('nav-settings').click();
     await expect(page).toHaveURL(/\/settings/);
     await expect(page.locator('h1', { hasText: 'Настройки' })).toBeVisible({ timeout: 5_000 });
   });
 
   test('navigate Diary → Recipes → Settings → Diary', async ({ page }) => {
     // Diary → Recipes
-    await page.locator('nav a[href="/recipes"]').click();
+    await page.getByTestId('nav-recipes').click();
     await expect(page).toHaveURL(/\/recipes/);
 
     // Recipes → Settings
-    await page.locator('nav a[href="/settings"]').click();
+    await page.getByTestId('nav-settings').click();
     await expect(page).toHaveURL(/\/settings/);
 
     // Settings → Diary
-    await page.locator('nav a[href="/"]').click();
+    await page.getByTestId('nav-diary').click();
     await expect(page).toHaveURL(/\/$/);
   });
 
   test('Settings page is interactive after navigation', async ({ page }) => {
-    await page.locator('nav a[href="/settings"]').click();
+    await page.getByTestId('nav-settings').click();
     await expect(page).toHaveURL(/\/settings/);
 
     // Toggle a goal checkbox
-    const caloriesCheckbox = page.getByRole('checkbox', { name: 'Калории' });
+    const caloriesCheckbox = page.getByTestId('settings-checkbox-calories');
     await expect(caloriesCheckbox).toBeVisible({ timeout: 5_000 });
     await caloriesCheckbox.check();
     await expect(caloriesCheckbox).toBeChecked();
@@ -100,13 +100,13 @@ test.describe('App navigation', () => {
 
   test('navigate back and forth multiple times without crash', async ({ page }) => {
     for (let i = 0; i < 5; i++) {
-      await page.locator('nav a[href="/recipes"]').click();
+      await page.getByTestId('nav-recipes').click();
       await expect(page).toHaveURL(/\/recipes/);
 
-      await page.locator('nav a[href="/settings"]').click();
+      await page.getByTestId('nav-settings').click();
       await expect(page).toHaveURL(/\/settings/);
 
-      await page.locator('nav a[href="/"]').click();
+      await page.getByTestId('nav-diary').click();
       await expect(page).toHaveURL(/\/$/);
     }
 

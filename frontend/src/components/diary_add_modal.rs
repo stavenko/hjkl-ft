@@ -52,18 +52,19 @@ pub fn DiaryAddModal(
                 <header class="modal-card-head" style="display: block; padding-bottom: 0.5rem;">
                     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
                         <p class="modal-card-title">{t("diary_add.title")}</p>
-                        <button class="delete" on:click=move |_| on_close.call(())></button>
+                        <button attr:data-testid="diary-add-btn-close" class="delete" on:click=move |_| on_close.call(())></button>
                     </div>
                     <div class="buttons has-addons mb-2">
-                        <button type="button" class=move || mode_cls("search")
+                        <button attr:data-testid="diary-add-btn-search-tab" type="button" class=move || mode_cls("search")
                             on:click=move |_| mode.set("search".into())>{t("diary_add.search")}</button>
-                        <button type="button" class=move || mode_cls("new")
+                        <button attr:data-testid="diary-add-btn-new-tab" type="button" class=move || mode_cls("new")
                             on:click=move |_| mode.set("new".into())>{t("diary_add.new")}</button>
                     </div>
                     <Show when=move || mode.get() == "search">
                         <div class="field has-addons" style="margin-bottom: 0;">
                             <div class="control is-expanded">
                                 <input
+                                    attr:data-testid="diary-add-input-search"
                                     type="text"
                                     placeholder=t("diary_add.search_placeholder")
                                     class="input is-small"
@@ -73,6 +74,7 @@ pub fn DiaryAddModal(
                             </div>
                             <div class="control">
                                 <button
+                                    attr:data-testid="diary-add-btn-clear-search"
                                     class="button is-small is-light"
                                     on:click=move |_| search.set(String::new())
                                 >"\u{00d7}"</button>
@@ -96,6 +98,7 @@ pub fn DiaryAddModal(
                                     view! {
                                         <FoodListItem food=food goals=goals>
                                             <button
+                                                attr:data-testid="diary-add-btn-pick-food"
                                                 class="button is-success is-rounded"
                                                 style="height: 2.75rem; width: 2.75rem; padding: 0; font-size: 1.4rem; font-weight: 700;"
                                                 disabled=move || already_added()
@@ -130,7 +133,7 @@ pub fn DiaryAddModal(
                     </Show>
                 </section>
                 <footer class="modal-card-foot" style="justify-content: flex-end;">
-                    <button class="button is-link" on:click=move |_| on_close.call(())>{t("diary_add.done")}</button>
+                    <button attr:data-testid="diary-add-btn-done" class="button is-link" on:click=move |_| on_close.call(())>{t("diary_add.done")}</button>
                 </footer>
             </div>
         </div>
@@ -147,7 +150,7 @@ pub fn DiaryAddModal(
                         <div class="modal-card" style="max-width: 22rem;">
                             <header class="modal-card-head">
                                 <p class="modal-card-title is-size-6">{t("diary_add.how_much")}</p>
-                                <button class="delete" on:click=move |_| weight_food.set(None)></button>
+                                <button attr:data-testid="diary-add-weight-btn-close" class="delete" on:click=move |_| weight_food.set(None)></button>
                             </header>
                             <section class="modal-card-body">
                                 <p class="is-size-7 has-text-grey has-text-weight-semibold mb-3"
@@ -157,6 +160,7 @@ pub fn DiaryAddModal(
                                 <div class="field has-addons has-addons-centered mb-3">
                                     <div class="control is-expanded">
                                         <input
+                                            attr:data-testid="diary-add-weight-input-grams"
                                             type="text"
                                             inputmode="decimal"
                                             class="input has-text-centered"
@@ -170,22 +174,22 @@ pub fn DiaryAddModal(
                                 </div>
 
                                 <div class="buttons is-centered mb-3">
-                                    <button type="button" class="button is-small is-light" on:click=move |_| adjust(-100.0)>"-100"</button>
-                                    <button type="button" class="button is-small is-light" on:click=move |_| adjust(-10.0)>"-10"</button>
-                                    <button type="button" class="button is-small is-light" on:click=move |_| adjust(10.0)>"+10"</button>
-                                    <button type="button" class="button is-small is-light" on:click=move |_| adjust(100.0)>"+100"</button>
+                                    <button attr:data-testid="diary-add-weight-btn-minus100" type="button" class="button is-small is-light" on:click=move |_| adjust(-100.0)>"-100"</button>
+                                    <button attr:data-testid="diary-add-weight-btn-minus10" type="button" class="button is-small is-light" on:click=move |_| adjust(-10.0)>"-10"</button>
+                                    <button attr:data-testid="diary-add-weight-btn-plus10" type="button" class="button is-small is-light" on:click=move |_| adjust(10.0)>"+10"</button>
+                                    <button attr:data-testid="diary-add-weight-btn-plus100" type="button" class="button is-small is-light" on:click=move |_| adjust(100.0)>"+100"</button>
                                 </div>
 
                                 {pkg.map(|pw| {
                                     view! {
                                         <div class="buttons is-centered mb-3">
-                                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(-pw)>
+                                            <button attr:data-testid="diary-add-weight-btn-pkg-minus" type="button" class="button is-small is-light" on:click=move |_| adjust(-pw)>
                                                 {format!("-{:.0}g", pw)}
                                             </button>
-                                            <button type="button" class="button is-small is-light" on:click=move |_| grams.set(format!("{pw}"))>
+                                            <button attr:data-testid="diary-add-weight-btn-pkg-exact" type="button" class="button is-small is-light" on:click=move |_| grams.set(format!("{pw}"))>
                                                 {format!("={:.0}g", pw)}
                                             </button>
-                                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(pw)>
+                                            <button attr:data-testid="diary-add-weight-btn-pkg-plus" type="button" class="button is-small is-light" on:click=move |_| adjust(pw)>
                                                 {format!("+{:.0}g", pw)}
                                             </button>
                                         </div>
@@ -193,8 +197,8 @@ pub fn DiaryAddModal(
                                 })}
                             </section>
                             <footer class="modal-card-foot" style="justify-content: flex-end;">
-                                <button class="button" on:click=move |_| weight_food.set(None)>{t("diary_add.cancel")}</button>
-                                <button class="button is-link"
+                                <button attr:data-testid="diary-add-weight-btn-cancel" class="button" on:click=move |_| weight_food.set(None)>{t("diary_add.cancel")}</button>
+                                <button attr:data-testid="diary-add-weight-btn-confirm" class="button is-link"
                                     on:click={
                                         let food = food_c.clone();
                                         move |_| {

@@ -68,6 +68,7 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/pair/create", pair::create_pairing)
         .post_async("/pair/request", pair::request_pairing)
         .post_async("/pair/approve", pair::approve_pairing)
+        .post_async("/pair/check", pair::check_pairing)
         .post_async("/pair/claim", pair::claim_pairing)
         .post_async("/pair/finish", pair::finish_pairing)
         .get_async("/pair/status/:id", pair::pairing_status)

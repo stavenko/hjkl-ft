@@ -46,7 +46,7 @@ pub fn is_token_valid() -> bool {
     get_token().is_some()
 }
 
-/// Returns true if token expires within the next 24 hours
+/// Returns true if token expires within 10% of its remaining lifetime
 pub fn is_token_expiring_soon() -> bool {
     let s = storage();
     let expires_str = match s.get_item(KEY_TOKEN_EXPIRES).ok().flatten() {
@@ -58,8 +58,9 @@ pub fn is_token_expiring_soon() -> bool {
         Err(_) => return false,
     };
     let now = (js_sys::Date::now() / 1000.0) as i64;
-    let one_day = 24 * 3600;
-    expires > now && (expires - now) < one_day
+    let remaining = expires - now;
+    if remaining <= 0 { return false; } // already expired, not "expiring soon"
+    remaining < 120 // less than 2 minutes left
 }
 
 pub fn is_token_expired() -> bool {
@@ -510,6 +511,14 @@ pub async fn pair_create() -> Result<serde_json::Value, String> {
 /// POST /pair/request -> { pairing_id, secret, qr_url }
 pub async fn pair_request() -> Result<serde_json::Value, String> {
     post_json("/pair/request", &serde_json::json!({})).await
+}
+
+/// Unauthenticated status check for polling.
+pub async fn pair_check(pairing_id: &str, secret: &str) -> Result<serde_json::Value, String> {
+    post_json("/pair/check", &serde_json::json!({
+        "pairing_id": pairing_id,
+        "secret": secret,
+    })).await
 }
 
 /// New device claims a pairing created by the logged-in device.

@@ -16,7 +16,7 @@ test.describe('PWA install prompt', () => {
     const dismissBtn = page.getByText('Я хочу использовать в браузере');
     await expect(dismissBtn).toBeVisible();
 
-    await expect(page.getByText('Создать аккаунт')).not.toBeVisible();
+    await expect(page.getByText('Зарегистрироваться')).not.toBeVisible();
   });
 
   test('dismiss PWA prompt → tries PassKey then shows auth page', async ({ page }) => {
@@ -26,7 +26,7 @@ test.describe('PWA install prompt', () => {
     await dismissBtn.click();
 
     // After dismiss: TryingPassKey (brief loading) → Auth page (no PassKey found)
-    const createBtn = page.getByText('Создать аккаунт');
+    const createBtn = page.getByText('Зарегистрироваться');
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
 
     const dismissed = await page.evaluate(() => localStorage.getItem('pwa_dismissed'));
@@ -42,7 +42,7 @@ test.describe('PWA install prompt', () => {
     await page.waitForTimeout(3000);
 
     // Should skip PWA prompt, try PassKey (fail), then show auth
-    const createBtn = page.getByText('Создать аккаунт');
+    const createBtn = page.getByText('Зарегистрироваться');
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
   });
 });
@@ -79,16 +79,15 @@ test.describe('Account creation with PassKey', () => {
     }
   });
 
-  test('auth page shows three options: create, pair, recovery', async ({ page }) => {
-    // After TryingPassKey fails (no credential), shows auth page
-    const createBtn = page.getByText('Создать аккаунт');
+  test('auth page shows register and login options', async ({ page }) => {
+    const createBtn = page.getByText('Зарегистрироваться');
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
 
-    const pairBtn = page.getByText('Подключить устройство');
-    await expect(pairBtn).toBeVisible({ timeout: 10_000 });
+    const alreadyUsed = page.getByText('Я уже пользовался этим приложением');
+    await expect(alreadyUsed).toBeVisible({ timeout: 5_000 });
 
-    const recoveryLink = page.getByText('Восстановить доступ по паролю');
-    await expect(recoveryLink).toBeVisible({ timeout: 5_000 });
+    const loginBtn = page.getByText('Войти', { exact: true });
+    await expect(loginBtn).toBeVisible({ timeout: 5_000 });
   });
 
   test('create account triggers PassKey flow and lands on app', async ({ page }) => {
@@ -107,7 +106,7 @@ test.describe('Account creation with PassKey', () => {
       if (msg.type() === 'error') console.log('BROWSER ERROR:', msg.text());
     });
 
-    const createBtn = page.getByText('Создать аккаунт');
+    const createBtn = page.getByText('Зарегистрироваться');
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
 
     await createBtn.click();
@@ -142,7 +141,7 @@ test.describe('Account creation with PassKey', () => {
 
   test('re-authentication after token expires', async ({ page }) => {
     // -- Step 1: Register account --
-    const createBtn = page.getByText('Создать аккаунт');
+    const createBtn = page.getByText('Зарегистрироваться');
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
     await createBtn.click();
 

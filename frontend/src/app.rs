@@ -8,7 +8,6 @@ use crate::services::{auth, platform};
 #[derive(Clone, Copy, PartialEq)]
 enum AppState {
     PwaPrompt,
-    TryingPassKey,
     Auth,
     Ready,
 }
@@ -19,7 +18,7 @@ fn initial_state() -> AppState {
     } else if auth::is_logged_in() {
         AppState::Ready
     } else {
-        AppState::TryingPassKey
+        AppState::Auth
     }
 }
 
@@ -35,27 +34,10 @@ pub fn App() -> impl IntoView {
                     if auth::is_logged_in() {
                         state.set(AppState::Ready);
                     } else {
-                        state.set(AppState::TryingPassKey);
+                        state.set(AppState::Auth);
                     }
                 }) />
             }.into_view()),
-
-            AppState::TryingPassKey => {
-                spawn_local(async move {
-                    match auth::authenticate().await {
-                        Ok(_) => state.set(AppState::Ready),
-                        Err(_) => state.set(AppState::Auth),
-                    }
-                });
-                Some(view! {
-                    <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: white; position: fixed; inset: 0; z-index: 100;">
-                        <div style="text-align: center;">
-                            <img src="/icon-192.png" alt="" style="width: 64px; height: 64px; border-radius: 12px; margin-bottom: 1rem; opacity: 0.5;" />
-                            <p class="has-text-grey">{t("auth.authenticating")}</p>
-                        </div>
-                    </div>
-                }.into_view())
-            },
 
             AppState::Auth => Some(view! {
                 <div style="position: fixed; inset: 0; z-index: 100; background: white;">
@@ -74,6 +56,31 @@ pub fn App() -> impl IntoView {
             {
                 let renewing = create_rw_signal(false);
                 let token_version = create_rw_signal(0u32);
+
+                // Re-schedule expire timer whenever token changes
+                create_effect(move |_| {
+                    let _ = token_version.get();
+                    spawn_local(async move {
+                        if let Some(expires_str) = web_sys::window()
+                            .and_then(|w| w.local_storage().ok().flatten())
+                            .and_then(|s| s.get_item("token_expires_at").ok().flatten())
+                        {
+                            if let Ok(expires) = expires_str.parse::<f64>() {
+                                let now = js_sys::Date::now() / 1000.0;
+                                let ms = ((expires - now) * 1000.0).max(0.0) as i32;
+                                if ms > 0 {
+                                    let promise = js_sys::Promise::new(&mut |resolve, _| {
+                                        let window = web_sys::window().expect("no window");
+                                        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
+                                    });
+                                    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+                                    token_version.update(|v| *v += 1);
+                                }
+                            }
+                        }
+                    });
+                });
+
                 let renew = move |_| {
                     renewing.set(true);
                     spawn_local(async move {

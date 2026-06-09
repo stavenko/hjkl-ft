@@ -209,11 +209,18 @@ fn en(key: &str) -> &'static str {
         "settings.language" => "Language",
 
         // Auth
-        "auth.subtitle" => "Sign in to sync your data across devices",
-        "auth.create_account" => "Create new account",
-        "auth.login_device" => "I already have an account",
+        "auth.main_description" => "This app works locally on your device and does not store data on remote servers. However, some features — such as syncing between devices or AI — require signing in.",
+        "auth.create_account" => "Sign up",
+        "auth.already_used" => "I already use this app:",
         "auth.creating" => "Creating...",
         "auth.authenticating" => "Signing in...",
+        "auth.login_title" => "Sign in",
+        "auth.login_have_device" => "If you have another signed-in device:",
+        "auth.login_option1_hint" => "On the other device: Settings → Connect device → Scan QR code. Then press here:",
+        "auth.login_option2_hint" => "On the other device: Settings → Connect device → Show QR code. Then press here:",
+        "auth.login_no_device" => "If you don't have a signed-in device:",
+        "auth.try_passkey" => "Try signing in with PassKey",
+        "auth.show_qr_hint" => "Show this QR code to your signed-in device",
         // QR scanner
         "qr.no_camera" => "No camera found on this device.",
         "qr.permission_denied" => "Camera access denied. Allow camera in browser settings.",
@@ -447,11 +454,18 @@ fn ru(key: &str) -> &'static str {
         "settings.language" => "Язык",
 
         // Авторизация
-        "auth.subtitle" => "Войдите, чтобы синхронизировать данные между устройствами",
-        "auth.create_account" => "Создать аккаунт",
-        "auth.login_device" => "У меня уже есть аккаунт",
+        "auth.main_description" => "Это приложение работает локально на вашем устройстве и не хранит данные на удалённых серверах. Однако для некоторых функций — таких как синхронизация между устройствами или ИИ — необходимо авторизоваться.",
+        "auth.create_account" => "Зарегистрироваться",
+        "auth.already_used" => "Я уже пользовался этим приложением:",
         "auth.creating" => "Создаю...",
         "auth.authenticating" => "Вхожу...",
+        "auth.login_title" => "Войти",
+        "auth.login_have_device" => "Если у вас есть другое устройство, где вы вошли:",
+        "auth.login_option1_hint" => "На другом устройстве: Настройки → Подключить устройство → Сканировать QR-код. Затем нажмите здесь:",
+        "auth.login_option2_hint" => "На другом устройстве: Настройки → Подключить устройство → Показать QR-код. Затем нажмите здесь:",
+        "auth.login_no_device" => "Если у вас нет залогиненного устройства:",
+        "auth.try_passkey" => "Попробовать войти с ключом входа",
+        "auth.show_qr_hint" => "Покажите этот QR-код залогиненному устройству",
         // QR сканер
         "qr.no_camera" => "Камера не найдена на этом устройстве.",
         "qr.permission_denied" => "Доступ к камере запрещён. Разрешите камеру в настройках браузера.",

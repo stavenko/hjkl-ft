@@ -888,7 +888,7 @@ impl DurableObject for AuthDO {
                     .ok_or_else(|| Error::RustError("missing credential".into()))?;
                 self.handle_pair_finish(pairing_id, credential).await
             }
-            "/pair/status" => {
+            "/pair/status" | "/pair/check" => {
                 let body: serde_json::Value = req.json().await?;
                 let pairing_id = body
                     .get("pairing_id")

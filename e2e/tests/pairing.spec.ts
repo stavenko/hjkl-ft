@@ -34,7 +34,7 @@ test.describe('Device pairing (logged-in device)', () => {
     await page.waitForTimeout(3000);
 
     // TryingPassKey will fail (no credential), then shows auth page
-    const createBtn = page.getByText('Создать аккаунт');
+    const createBtn = page.getByText('Зарегистрироваться');
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
     await createBtn.click();
 
@@ -165,28 +165,30 @@ test.describe('Device pairing (new device side)', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('Auth page shows "Add device" button after dismissing PWA prompt', async ({ page }) => {
-    // Dismiss PWA prompt
+  test('Auth page shows login option after dismissing PWA prompt', async ({ page }) => {
     const dismissBtn = page.getByText('Я хочу использовать в браузере');
     await expect(dismissBtn).toBeVisible({ timeout: 10_000 });
     await dismissBtn.click();
 
-    // Should now see the auth page with "Add device" option
-    const addDeviceBtn = page.getByText('Подключить устройство');
-    await expect(addDeviceBtn).toBeVisible({ timeout: 5_000 });
+    const loginBtn = page.getByText('Войти', { exact: true });
+    await expect(loginBtn).toBeVisible({ timeout: 10_000 });
   });
 
-  test('"Add device" on auth page is visible alongside create and recovery', async ({ page }) => {
+  test('Login screen shows pair options', async ({ page }) => {
     await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
     await page.reload();
     await page.waitForTimeout(3000);
 
-    const createBtn = page.getByText('Создать аккаунт');
-    const addDeviceBtn = page.getByText('Подключить устройство');
-    const recoveryBtn = page.getByText('Восстановить доступ по паролю');
+    const loginBtn = page.getByText('Войти', { exact: true });
+    await expect(loginBtn).toBeVisible({ timeout: 15_000 });
+    await loginBtn.click();
 
-    await expect(createBtn).toBeVisible({ timeout: 15_000 });
-    await expect(addDeviceBtn).toBeVisible({ timeout: 5_000 });
-    await expect(recoveryBtn).toBeVisible({ timeout: 5_000 });
+    const showQr = page.getByText('Показать QR-код').first();
+    const scanQr = page.getByText('Сканировать QR-код').first();
+    const tryPasskey = page.getByText('Попробовать войти с ключом входа');
+
+    await expect(showQr).toBeVisible({ timeout: 5_000 });
+    await expect(scanQr).toBeVisible({ timeout: 5_000 });
+    await expect(tryPasskey).toBeVisible({ timeout: 5_000 });
   });
 });

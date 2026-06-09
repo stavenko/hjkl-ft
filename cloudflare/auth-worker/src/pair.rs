@@ -168,6 +168,26 @@ pub async fn approve_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<
 
 // ---- POST /pair/claim (no auth) ----
 
+/// Unauthenticated status check: new device polls this to see if pairing was approved.
+pub async fn check_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let body: serde_json::Value = req.json().await
+        .map_err(|e| Error::RustError(format!("invalid body: {e}")))?;
+    let pairing_id = body.get("pairing_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::RustError("missing pairing_id".into()))?;
+    let stub = auth_do_stub(&ctx.env)?;
+    let do_body = serde_json::json!({ "pairing_id": pairing_id });
+    let internal_req = do_request("/pair/check", &do_body)?;
+    let mut resp = stub.fetch_with_request(internal_req).await?;
+
+    if resp.status_code() != 200 {
+        let err = ErrorResponse { error: "pairing not found".into() };
+        return Ok(Response::from_json(&err)?.with_status(404));
+    }
+
+    Ok(resp)
+}
+
 pub async fn claim_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let body: serde_json::Value = req
         .json()

@@ -29,7 +29,7 @@ test.describe('App navigation', () => {
     await page.waitForTimeout(3000);
 
     // Wait for TryingPassKey → Auth page
-    const createBtn = page.getByText('Создать аккаунт');
+    const createBtn = page.getByText('Зарегистрироваться');
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
     await createBtn.click();
 

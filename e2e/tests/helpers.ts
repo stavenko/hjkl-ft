@@ -60,7 +60,7 @@ export async function registerAccount(page: Page): Promise<{ cdpSession: CDPSess
   await page.waitForTimeout(3000);
 
   // TryingPassKey → fail → Auth page
-  const createBtn = page.getByText('Создать аккаунт');
+  const createBtn = page.getByText('Зарегистрироваться');
   await expect(createBtn).toBeVisible({ timeout: 15_000 });
   await createBtn.click();
 

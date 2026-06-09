@@ -102,7 +102,11 @@ pub async fn authenticate_finish(mut req: Request, ctx: RouteContext<()>) -> Res
 
     let token_response = token::create_token(user_id, vec!["auth".to_string()], &secret)?;
 
-    Response::from_json(&token_response)
+    Response::from_json(&serde_json::json!({
+        "user_id": user_id,
+        "token": token_response.token,
+        "expires_at": token_response.expires_at,
+    }))
 }
 
 // ---- Add device (requires existing session) ----

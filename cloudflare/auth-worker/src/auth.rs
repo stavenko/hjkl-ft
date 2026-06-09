@@ -62,7 +62,25 @@ pub async fn register_finish(mut req: Request, ctx: RouteContext<()>) -> Result<
     let internal_req = do_request("/passkey/register/finish", &do_body)?;
     let resp = stub.fetch_with_request(internal_req).await?;
 
-    Ok(resp)
+    if resp.status_code() != 200 {
+        return Ok(resp);
+    }
+
+    // Issue JWT after successful registration
+    let secret = ctx
+        .env
+        .secret("JWT_SECRET")
+        .map(|s| s.to_string())
+        .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
+
+    let token_response = token::create_token(username, vec!["auth".to_string()], &secret)?;
+
+    Response::from_json(&serde_json::json!({
+        "ok": true,
+        "user_id": username,
+        "token": token_response.token,
+        "expires_at": token_response.expires_at,
+    }))
 }
 
 // ---- Authentication ----

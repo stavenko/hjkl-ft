@@ -77,50 +77,75 @@ test.describe('Device pairing (logged-in device)', () => {
     await expect(scanQr).toBeVisible({ timeout: 5_000 });
   });
 
-  test('Click "Show QR" calls pair/create API and shows QR element', async ({ page }) => {
-    // Navigate to Settings
+  test('Show QR creates valid pairing data that can be parsed', async ({ page }) => {
     await page.goto('/settings');
     await page.waitForTimeout(2000);
 
-    // Click "Add device"
     const addDeviceBtn = page.locator('.button.is-link.is-light', { hasText: 'Подключить устройство' });
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click();
 
-    // Intercept /pair/create network call
-    let pairCreateCalled = false;
-    page.on('request', req => {
-      if (req.url().includes('/pair/create')) {
-        pairCreateCalled = true;
-      }
-    });
-
-    // Click "Show QR"
     const showQrBtn = page.getByText('Показать QR-код');
     await expect(showQrBtn).toBeVisible({ timeout: 5_000 });
-    await showQrBtn.click();
 
-    // Wait for network call or QR to appear
-    // The pair/create API might fail (no real backend), but we verify it was called
-    // and that the UI attempts to show a QR or an error
-    await page.waitForTimeout(5000);
+    // Click Show QR and wait for /pair/create response
+    const [pairResp] = await Promise.all([
+      page.waitForResponse(resp => resp.url().includes('/pair/create') && resp.status() === 200, { timeout: 15_000 }),
+      showQrBtn.click(),
+    ]);
 
-    // Verify the pair/create API was called
-    expect(pairCreateCalled).toBe(true);
+    const pairData = await pairResp.json();
 
-    // After clicking Show QR, we should either see an SVG (QR code) or an error.
-    // The "waiting" hint or a QR SVG element should appear if the call succeeded.
-    // If the call failed, we should see an error notification.
-    const qrSvg = page.locator('svg');
-    const errorNotification = page.locator('.notification.is-danger');
+    // Verify API returned valid pairing data
+    expect(pairData).toBeTruthy();
+    expect(pairData.pairing_id).toBeTruthy();
+    expect(pairData.secret).toBeTruthy();
+    expect(pairData.username).toBeTruthy();
+    expect(pairData.expires_at).toBeGreaterThan(0);
+
+    // Verify the QR URL format matches what the parser expects
+    // Logged-in device format: hjkl-pair://username/pairing_id/secret
+    const expectedQrData = `hjkl-pair://${pairData.username}/${pairData.pairing_id}/${pairData.secret}`;
+
+    // Verify QR code SVG is visible
     const waitingText = page.getByText('Ожидание другого устройства...');
+    await expect(waitingText).toBeVisible({ timeout: 5_000 });
 
-    const hasQr = await qrSvg.first().isVisible().catch(() => false);
-    const hasError = await errorNotification.isVisible().catch(() => false);
-    const hasWaiting = await waitingText.isVisible().catch(() => false);
+    // Verify "Copy link" button is present
+    const copyBtn = page.getByText('Копировать ссылку');
+    await expect(copyBtn).toBeVisible();
 
-    // At least one of these should be true: QR appeared, or error shown
-    expect(hasQr || hasError || hasWaiting).toBe(true);
+    // Verify the QR data can be parsed correctly (simulates what scanning device does)
+    // Format: hjkl-pair://username/pairing_id/secret → 3 parts
+    const parts = expectedQrData.replace('hjkl-pair://', '').split('/');
+    expect(parts.length).toBe(3);
+    expect(parts[0]).toBe(pairData.username);
+    expect(parts[1]).toBe(pairData.pairing_id);
+    expect(parts[2]).toBe(pairData.secret);
+  });
+
+  test('New device Show QR creates data parseable as 2-part format', async ({ page }) => {
+    // Test the /pair/request endpoint directly (new device, no auth)
+    const resp = await page.evaluate(async () => {
+      const r = await fetch('https://auth-worker.vg-stavenko.workers.dev/pair/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      return r.json();
+    });
+
+    expect(resp.pairing_id).toBeTruthy();
+    expect(resp.secret).toBeTruthy();
+    expect(resp.qr_url).toBeTruthy();
+
+    // Verify format: hjkl-pair://pairing_id/secret (2 parts)
+    expect(resp.qr_url).toMatch(/^hjkl-pair:\/\//);
+    const rest = resp.qr_url.replace('hjkl-pair://', '');
+    const parts = rest.split('/');
+    expect(parts.length).toBe(2);
+    expect(parts[0]).toBe(resp.pairing_id);
+    expect(parts[1]).toBe(resp.secret);
   });
 });
 

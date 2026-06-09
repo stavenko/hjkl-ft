@@ -359,18 +359,68 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Parse "hjkl-pair://username/pairing_id/secret" into (username, pairing_id, secret).
+/// Parse QR pair URL into (username, pairing_id, secret).
+/// Supports two formats:
+///   "hjkl-pair://username/pairing_id/secret" (from logged-in device /pair/create)
+///   "hjkl-pair://pairing_id/secret" (from new device /pair/request)
 fn parse_pair_url(url: &str) -> Option<(String, String, String)> {
     let rest = url.strip_prefix("hjkl-pair://")?;
     let parts: Vec<&str> = rest.splitn(3, '/').collect();
-    if parts.len() == 3 && !parts[0].is_empty() && !parts[1].is_empty() && !parts[2].is_empty() {
-        Some((
-            parts[0].to_string(),
-            parts[1].to_string(),
-            parts[2].to_string(),
-        ))
-    } else {
-        None
+    match parts.len() {
+        3 if !parts[0].is_empty() && !parts[1].is_empty() && !parts[2].is_empty() => {
+            Some((parts[0].to_string(), parts[1].to_string(), parts[2].to_string()))
+        }
+        2 if !parts[0].is_empty() && !parts[1].is_empty() => {
+            // No username — will need to get it from /pair/claim response
+            Some((String::new(), parts[0].to_string(), parts[1].to_string()))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_three_parts() {
+        let result = parse_pair_url("hjkl-pair://myuser/abc123/secretXYZ");
+        assert_eq!(result, Some(("myuser".into(), "abc123".into(), "secretXYZ".into())));
+    }
+
+    #[test]
+    fn test_parse_two_parts() {
+        let result = parse_pair_url("hjkl-pair://abc123/secretXYZ");
+        assert_eq!(result, Some(("".into(), "abc123".into(), "secretXYZ".into())));
+    }
+
+    #[test]
+    fn test_parse_wrong_prefix() {
+        assert_eq!(parse_pair_url("https://example.com"), None);
+    }
+
+    #[test]
+    fn test_parse_empty() {
+        assert_eq!(parse_pair_url("hjkl-pair://"), None);
+    }
+
+    #[test]
+    fn test_parse_single_part() {
+        assert_eq!(parse_pair_url("hjkl-pair://onlyid"), None);
+    }
+
+    #[test]
+    fn test_parse_real_request_url() {
+        let url = "hjkl-pair://i9o2kaa/1-i-2uAFu8-PN3qF3eyrqQUiqj_LYjbf98edQbiOV60";
+        let result = parse_pair_url(url);
+        assert_eq!(result, Some(("".into(), "i9o2kaa".into(), "1-i-2uAFu8-PN3qF3eyrqQUiqj_LYjbf98edQbiOV60".into())));
+    }
+
+    #[test]
+    fn test_parse_real_create_url() {
+        let url = "hjkl-pair://user123/abc456/secret789";
+        let result = parse_pair_url(url);
+        assert_eq!(result, Some(("user123".into(), "abc456".into(), "secret789".into())));
     }
 }
 

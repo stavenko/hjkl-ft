@@ -17,25 +17,9 @@ pub struct TokenClaims {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct RegisterBeginRequest {
-    pub username: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct RegisterFinishRequest {
-    pub username: String,
     pub credential: serde_json::Value,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AuthenticateBeginRequest {
-    pub username: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AuthenticateFinishRequest {
-    pub username: String,
-    pub credential: serde_json::Value,
+    pub user_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,7 +29,7 @@ pub struct RecoverySetRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RecoveryAuthRequest {
-    pub username: String,
+    pub user_id: String,
     pub recovery_key: String,
 }
 
@@ -66,7 +50,6 @@ pub struct ErrorResponse {
 pub struct PairingSession {
     pub pairing_id: String,
     pub secret_hash: String,
-    pub username: String,
     pub user_id: String,
     pub created_at: i64,
     pub expires_at: i64,
@@ -83,23 +66,13 @@ pub enum PairingStatus {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PairCreateResponse {
-    pub pairing_id: String,
-    pub secret: String,
-    pub username: String,
-    pub expires_at: i64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct PairClaimRequest {
-    pub username: String,
     pub pairing_id: String,
     pub secret: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PairFinishRequest {
-    pub username: String,
     pub pairing_id: String,
     pub credential: serde_json::Value,
 }
@@ -143,44 +116,15 @@ mod tests {
         assert_eq!(decoded.exp, claims.exp);
         assert_eq!(decoded.caps, claims.caps);
 
-        // RegisterBeginRequest
-        let req = RegisterBeginRequest {
-            username: "alice".to_string(),
-        };
-        let json = serde_json::to_string(&req).expect("serialize RegisterBeginRequest");
-        let decoded: RegisterBeginRequest =
-            serde_json::from_str(&json).expect("deserialize RegisterBeginRequest");
-        assert_eq!(decoded.username, req.username);
-
         // RegisterFinishRequest
         let req = RegisterFinishRequest {
-            username: "bob".to_string(),
+            user_id: "user-123".to_string(),
             credential: serde_json::json!({"id": "cred-1", "type": "public-key"}),
         };
         let json = serde_json::to_string(&req).expect("serialize RegisterFinishRequest");
         let decoded: RegisterFinishRequest =
             serde_json::from_str(&json).expect("deserialize RegisterFinishRequest");
-        assert_eq!(decoded.username, req.username);
-        assert_eq!(decoded.credential, req.credential);
-
-        // AuthenticateBeginRequest
-        let req = AuthenticateBeginRequest {
-            username: "carol".to_string(),
-        };
-        let json = serde_json::to_string(&req).expect("serialize AuthenticateBeginRequest");
-        let decoded: AuthenticateBeginRequest =
-            serde_json::from_str(&json).expect("deserialize AuthenticateBeginRequest");
-        assert_eq!(decoded.username, req.username);
-
-        // AuthenticateFinishRequest
-        let req = AuthenticateFinishRequest {
-            username: "dave".to_string(),
-            credential: serde_json::json!({"response": {"authenticatorData": "abc"}}),
-        };
-        let json = serde_json::to_string(&req).expect("serialize AuthenticateFinishRequest");
-        let decoded: AuthenticateFinishRequest =
-            serde_json::from_str(&json).expect("deserialize AuthenticateFinishRequest");
-        assert_eq!(decoded.username, req.username);
+        assert_eq!(decoded.user_id, req.user_id);
         assert_eq!(decoded.credential, req.credential);
 
         // RecoverySetRequest
@@ -194,13 +138,13 @@ mod tests {
 
         // RecoveryAuthRequest
         let req = RecoveryAuthRequest {
-            username: "eve".to_string(),
+            user_id: "user-456".to_string(),
             recovery_key: "recovery-456".to_string(),
         };
         let json = serde_json::to_string(&req).expect("serialize RecoveryAuthRequest");
         let decoded: RecoveryAuthRequest =
             serde_json::from_str(&json).expect("deserialize RecoveryAuthRequest");
-        assert_eq!(decoded.username, req.username);
+        assert_eq!(decoded.user_id, req.user_id);
         assert_eq!(decoded.recovery_key, req.recovery_key);
 
         // TokenResponse

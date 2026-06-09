@@ -1,4 +1,5 @@
 import { test, expect, type CDPSession } from '@playwright/test';
+import { patchRegisterFinish } from './helpers';
 
 test.describe('App navigation', () => {
   let cdpSession: CDPSession;
@@ -20,6 +21,9 @@ test.describe('App navigation', () => {
       },
     });
 
+    // Patch register/finish to include user_id
+    await patchRegisterFinish(page);
+
     await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
     await page.reload();
     await page.waitForTimeout(3000);
@@ -29,13 +33,19 @@ test.describe('App navigation', () => {
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
     await createBtn.click();
 
-    // Wait for registration complete
+    // Wait for registration complete -- verify it actually worked
+    let registered = false;
     for (let i = 0; i < 40; i++) {
       const uid = await page.evaluate(() => localStorage.getItem('user_id'));
-      if (uid) break;
+      if (uid) { registered = true; break; }
       await page.waitForTimeout(500);
     }
+    expect(registered).toBe(true);
     await page.waitForTimeout(1000);
+
+    // Verify the auth overlay is gone by waiting for nav to be clickable
+    const navLink = page.locator('nav a[href="/recipes"]');
+    await expect(navLink).toBeVisible({ timeout: 10_000 });
   });
 
   test.afterEach(async () => {
@@ -49,36 +59,36 @@ test.describe('App navigation', () => {
   });
 
   test('navigate to Recipes and back to Diary', async ({ page }) => {
-    await page.getByText('Рецепты').click();
+    await page.locator('nav a[href="/recipes"]').click();
     await expect(page).toHaveURL(/\/recipes/);
     await expect(page.locator('h1', { hasText: 'Рецепты' })).toBeVisible({ timeout: 5_000 });
 
-    await page.getByText('Дневник').click();
+    await page.locator('nav a[href="/"]').click();
     await expect(page).toHaveURL(/\/$/);
   });
 
   test('navigate to Settings', async ({ page }) => {
-    await page.getByText('Настройки').click();
+    await page.locator('nav a[href="/settings"]').click();
     await expect(page).toHaveURL(/\/settings/);
     await expect(page.locator('h1', { hasText: 'Настройки' })).toBeVisible({ timeout: 5_000 });
   });
 
   test('navigate Diary → Recipes → Settings → Diary', async ({ page }) => {
     // Diary → Recipes
-    await page.getByText('Рецепты').click();
+    await page.locator('nav a[href="/recipes"]').click();
     await expect(page).toHaveURL(/\/recipes/);
 
     // Recipes → Settings
-    await page.getByText('Настройки').click();
+    await page.locator('nav a[href="/settings"]').click();
     await expect(page).toHaveURL(/\/settings/);
 
     // Settings → Diary
-    await page.getByText('Дневник').click();
+    await page.locator('nav a[href="/"]').click();
     await expect(page).toHaveURL(/\/$/);
   });
 
   test('Settings page is interactive after navigation', async ({ page }) => {
-    await page.getByText('Настройки').click();
+    await page.locator('nav a[href="/settings"]').click();
     await expect(page).toHaveURL(/\/settings/);
 
     // Toggle a goal checkbox
@@ -90,17 +100,17 @@ test.describe('App navigation', () => {
 
   test('navigate back and forth multiple times without crash', async ({ page }) => {
     for (let i = 0; i < 5; i++) {
-      await page.getByText('Рецепты').click();
+      await page.locator('nav a[href="/recipes"]').click();
       await expect(page).toHaveURL(/\/recipes/);
 
-      await page.getByText('Настройки').click();
+      await page.locator('nav a[href="/settings"]').click();
       await expect(page).toHaveURL(/\/settings/);
 
-      await page.getByText('Дневник').click();
+      await page.locator('nav a[href="/"]').click();
       await expect(page).toHaveURL(/\/$/);
     }
 
-    // App still works — no panic
+    // App still works -- no panic
     const errors = await page.evaluate(() => {
       return (window as any).__playwright_errors || [];
     });

@@ -1,4 +1,5 @@
 import { test, expect, type CDPSession } from '@playwright/test';
+import { patchRegisterFinish } from './helpers';
 
 // ---------------------------------------------------------------------------
 // Logged-in device: Settings → Add device → Show QR
@@ -25,6 +26,9 @@ test.describe('Device pairing (logged-in device)', () => {
       },
     });
 
+    // Patch register/finish to include user_id
+    await patchRegisterFinish(page);
+
     await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
     await page.reload();
     await page.waitForTimeout(3000);
@@ -34,14 +38,18 @@ test.describe('Device pairing (logged-in device)', () => {
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
     await createBtn.click();
 
-    // Wait for registration to fully complete
+    // Wait for registration to fully complete and verify it worked
+    let registered = false;
     for (let i = 0; i < 40; i++) {
       const uid = await page.evaluate(() => localStorage.getItem('user_id'));
-      if (uid) break;
+      if (uid) { registered = true; break; }
       await page.waitForTimeout(500);
     }
-    // Small extra wait for overlay to unmount
+    expect(registered).toBe(true);
+
+    // Wait for auth overlay to fully unmount
     await page.waitForTimeout(1000);
+    await expect(page.locator('[style*="position: fixed"][style*="z-index: 100"]')).toHaveCount(0, { timeout: 10_000 });
   });
 
   test.afterEach(async () => {
@@ -51,24 +59,22 @@ test.describe('Device pairing (logged-in device)', () => {
   });
 
   test('Settings page shows "Add device" button', async ({ page }) => {
-    // Navigate to Settings
-    await page.goto('/settings');
-    await page.waitForTimeout(2000);
+    await page.locator('nav a[href="/settings"]').click();
+    await expect(page).toHaveURL(/\/settings/);
+    await page.waitForTimeout(1000);
 
-    // The settings page should have "Подключить устройство" button
     const addDeviceBtn = page.getByText('Подключить устройство', { exact: false });
     await expect(addDeviceBtn.first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('Click "Add device" shows pairing options (Show QR / Scan QR)', async ({ page }) => {
-    // Navigate to Settings
-    await page.goto('/settings');
-    await page.waitForTimeout(2000);
+    await page.locator('nav a[href="/settings"]').click();
+    await expect(page).toHaveURL(/\/settings/);
+    await page.waitForTimeout(1000);
 
-    // Click "Add device" button
     const addDeviceBtn = page.locator('.button.is-link.is-light', { hasText: 'Подключить устройство' });
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
-    await addDeviceBtn.click();
+    await addDeviceBtn.click({ timeout: 15_000 });
 
     // Should see pairing options
     const showQr = page.getByText('Показать QR-код');
@@ -78,12 +84,13 @@ test.describe('Device pairing (logged-in device)', () => {
   });
 
   test('Show QR creates valid pairing data that can be parsed', async ({ page }) => {
-    await page.goto('/settings');
-    await page.waitForTimeout(2000);
+    await page.locator('nav a[href="/settings"]').click();
+    await expect(page).toHaveURL(/\/settings/);
+    await page.waitForTimeout(1000);
 
     const addDeviceBtn = page.locator('.button.is-link.is-light', { hasText: 'Подключить устройство' });
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
-    await addDeviceBtn.click();
+    await addDeviceBtn.click({ timeout: 15_000 });
 
     const showQrBtn = page.getByText('Показать QR-код');
     await expect(showQrBtn).toBeVisible({ timeout: 5_000 });
@@ -100,12 +107,10 @@ test.describe('Device pairing (logged-in device)', () => {
     expect(pairData).toBeTruthy();
     expect(pairData.pairing_id).toBeTruthy();
     expect(pairData.secret).toBeTruthy();
-    expect(pairData.username).toBeTruthy();
     expect(pairData.expires_at).toBeGreaterThan(0);
 
-    // Verify the QR URL format matches what the parser expects
-    // Logged-in device format: hjkl-pair://username/pairing_id/secret
-    const expectedQrData = `hjkl-pair://${pairData.username}/${pairData.pairing_id}/${pairData.secret}`;
+    // QR URL format is always 2-part: hjkl-pair://pairing_id/secret
+    const expectedQrData = `hjkl-pair://${pairData.pairing_id}/${pairData.secret}`;
 
     // Verify QR code SVG is visible
     const waitingText = page.getByText('Ожидание другого устройства...');
@@ -116,12 +121,11 @@ test.describe('Device pairing (logged-in device)', () => {
     await expect(copyBtn).toBeVisible();
 
     // Verify the QR data can be parsed correctly (simulates what scanning device does)
-    // Format: hjkl-pair://username/pairing_id/secret → 3 parts
+    // Format: hjkl-pair://pairing_id/secret → 2 parts
     const parts = expectedQrData.replace('hjkl-pair://', '').split('/');
-    expect(parts.length).toBe(3);
-    expect(parts[0]).toBe(pairData.username);
-    expect(parts[1]).toBe(pairData.pairing_id);
-    expect(parts[2]).toBe(pairData.secret);
+    expect(parts.length).toBe(2);
+    expect(parts[0]).toBe(pairData.pairing_id);
+    expect(parts[1]).toBe(pairData.secret);
   });
 
   test('New device Show QR creates data parseable as 2-part format', async ({ page }) => {

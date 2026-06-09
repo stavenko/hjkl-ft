@@ -9,9 +9,17 @@ command = "cargo install -q worker-build && worker-build --release"
 name = "USER_DO"
 class_name = "UserDO"
 
+[[durable_objects.bindings]]
+name = "AUTH_DO"
+class_name = "AuthDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["UserDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["AuthDO"]
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"

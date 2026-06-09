@@ -1,13 +1,34 @@
 use worker::*;
 
 mod auth;
+mod auth_do;
 mod pair;
 mod recovery;
 mod token;
 mod types;
 mod user_do;
 
+pub use auth_do::AuthDO;
 pub use user_do::UserDO;
+
+/// Get the global AuthDO stub (single instance for all auth operations).
+pub(crate) fn auth_do_stub(env: &Env) -> Result<worker::durable::Stub> {
+    let namespace = env.durable_object("AUTH_DO")?;
+    namespace.id_from_name("global")?.get_stub()
+}
+
+/// Build an internal POST request to a Durable Object with the given path and JSON body.
+pub(crate) fn do_request(path: &str, body: &serde_json::Value) -> Result<Request> {
+    let url = format!("https://internal{path}");
+    let body_str = serde_json::to_string(body)
+        .map_err(|e| Error::RustError(format!("serialize DO request: {e}")))?;
+    Request::new_with_init(
+        &url,
+        RequestInit::new()
+            .with_method(Method::Post)
+            .with_body(Some(wasm_bindgen::JsValue::from_str(&body_str))),
+    )
+}
 
 fn add_cors(resp: Response) -> Result<Response> {
     let mut headers = Headers::new();

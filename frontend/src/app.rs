@@ -27,10 +27,8 @@ fn initial_state() -> AppState {
 pub fn App() -> impl IntoView {
     let state = create_rw_signal(initial_state());
 
-    let is_ready = move || state.get() == AppState::Ready;
-
     view! {
-        // Overlays: PWA prompt, auth — shown on top
+        // Overlays
         {move || match state.get() {
             AppState::PwaPrompt => Some(view! {
                 <pages::pwa_prompt::PwaPrompt on_dismiss=Callback::new(move |_| {
@@ -70,8 +68,46 @@ pub fn App() -> impl IntoView {
             AppState::Ready => None,
         }}
 
-        // Router always mounted — never destroyed
+        // Router always mounted
         <Router>
+            // Session expiry banner — renew via PassKey, panic on failure
+            {
+                let renewing = create_rw_signal(false);
+                let token_version = create_rw_signal(0u32);
+                let renew = move |_| {
+                    renewing.set(true);
+                    spawn_local(async move {
+                        auth::authenticate().await
+                            .expect("PassKey re-authentication failed on existing user — this is a bug");
+                        renewing.set(false);
+                        token_version.update(|v| *v += 1);
+                    });
+                };
+                move || {
+                    let _ = token_version.get(); // subscribe to token changes
+                    if auth::is_token_expired() {
+                        Some(view! {
+                            <div style="position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: #ffe08a; color: #363636; padding: 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem;">
+                                <span>{t("auth.session_expired")}</span>
+                                <button class="button is-small" disabled=move || renewing.get() on:click=renew>
+                                    {move || if renewing.get() { "..." } else { t("auth.login_again") }}
+                                </button>
+                            </div>
+                        })
+                    } else if auth::is_token_expiring_soon() {
+                        Some(view! {
+                            <div style="position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: #f5f5f5; color: #363636; padding: 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem;">
+                                <span>{t("auth.session_expiring")}</span>
+                                <button class="button is-small" disabled=move || renewing.get() on:click=renew>
+                                    {move || if renewing.get() { "..." } else { t("auth.login_again") }}
+                                </button>
+                            </div>
+                        })
+                    } else {
+                        None
+                    }
+                }
+            }
             <div style="padding-bottom: 4.5rem;">
                 <div style="padding: 0.75rem;">
                     <Routes>

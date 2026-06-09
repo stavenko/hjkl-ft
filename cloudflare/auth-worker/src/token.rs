@@ -86,7 +86,7 @@ pub fn create_token(
     secret: &str,
 ) -> Result<TokenResponse> {
     let now = now_secs();
-    let exp = now + 3600; // 1 hour
+    let exp = now + 600; // 10 minutes (debug)
 
     let claims = TokenClaims {
         sub: user_id.to_string(),

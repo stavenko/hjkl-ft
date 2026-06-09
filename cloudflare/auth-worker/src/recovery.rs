@@ -1,9 +1,9 @@
-use serde_json::json;
 use worker::*;
 
+use crate::auth_do::create_recovery_hash;
 use crate::token;
 use crate::types::{ErrorResponse, RecoveryAuthRequest, RecoverySetRequest};
-use crate::user_do::create_recovery_hash;
+use crate::{auth_do_stub, do_request};
 
 pub async fn set_recovery_key(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     // Validate session token
@@ -25,55 +25,41 @@ pub async fn set_recovery_key(mut req: Request, ctx: RouteContext<()>) -> Result
 
     // Hash the recovery key
     let hash_data = create_recovery_hash(&body.recovery_key);
-    let hash_json = serde_json::to_string(&hash_data)
-        .map_err(|e| Error::RustError(format!("serialize hash: {e}")))?;
 
-    // Get UserDO stub by user_id and store the hash via internal request
-    let namespace = ctx.env.durable_object("USER_DO")?;
-    let stub = namespace.id_from_name(&user_id)?.get_stub()?;
-
-    // Send internal request to UserDO to store the recovery hash
-    let internal_req = Request::new_with_init(
-        "https://internal/recovery/set",
-        RequestInit::new()
-            .with_method(Method::Post)
-            .with_body(Some(wasm_bindgen::JsValue::from_str(&hash_json))),
-    )?;
-
+    // Forward to AuthDO
+    let stub = auth_do_stub(&ctx.env)?;
+    let do_body = serde_json::json!({
+        "user_id": user_id,
+        "hash_data": hash_data,
+    });
+    let internal_req = do_request("/recovery/set", &do_body)?;
     let resp = stub.fetch_with_request(internal_req).await?;
+
     if resp.status_code() != 200 {
         return Response::error("failed to store recovery hash", 500);
     }
 
-    Response::from_json(&json!({ "status": "ok" }))
+    Response::from_json(&serde_json::json!({ "status": "ok" }))
 }
 
 pub async fn authenticate_with_recovery(
     mut req: Request,
     ctx: RouteContext<()>,
 ) -> Result<Response> {
-    // Parse request body
     let body: RecoveryAuthRequest = req
         .json()
         .await
         .map_err(|e| Error::RustError(format!("invalid request body: {e}")))?;
 
-    // Get UserDO stub by username
-    let namespace = ctx.env.durable_object("USER_DO")?;
-    let stub = namespace.id_from_name(&body.username)?.get_stub()?;
-
-    // Send internal request to UserDO to verify recovery key
-    let verify_payload = serde_json::to_string(&json!({ "recovery_key": body.recovery_key }))
-        .map_err(|e| Error::RustError(format!("serialize: {e}")))?;
-
-    let internal_req = Request::new_with_init(
-        "https://internal/recovery/verify",
-        RequestInit::new()
-            .with_method(Method::Post)
-            .with_body(Some(wasm_bindgen::JsValue::from_str(&verify_payload))),
-    )?;
-
+    // Forward to AuthDO
+    let stub = auth_do_stub(&ctx.env)?;
+    let do_body = serde_json::json!({
+        "user_id": body.user_id,
+        "recovery_key": body.recovery_key,
+    });
+    let internal_req = do_request("/recovery/verify", &do_body)?;
     let mut resp = stub.fetch_with_request(internal_req).await?;
+
     if resp.status_code() != 200 {
         let body = ErrorResponse {
             error: "invalid recovery key".into(),
@@ -81,7 +67,6 @@ pub async fn authenticate_with_recovery(
         return Ok(Response::from_json(&body)?.with_status(401));
     }
 
-    // Parse verification result
     let result: serde_json::Value = resp.json().await?;
     let valid = result
         .get("valid")
@@ -103,7 +88,7 @@ pub async fn authenticate_with_recovery(
         .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
 
     let token_response =
-        token::create_token(&body.username, vec!["auth".to_string()], &secret)?;
+        token::create_token(&body.user_id, vec!["auth".to_string()], &secret)?;
 
     Response::from_json(&token_response)
 }

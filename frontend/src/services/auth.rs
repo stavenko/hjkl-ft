@@ -46,6 +46,26 @@ pub fn is_token_valid() -> bool {
     get_token().is_some()
 }
 
+/// Returns true if token expires within the next 24 hours
+pub fn is_token_expiring_soon() -> bool {
+    let s = storage();
+    let expires_str = match s.get_item(KEY_TOKEN_EXPIRES).ok().flatten() {
+        Some(s) => s,
+        None => return false,
+    };
+    let expires: i64 = match expires_str.parse() {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let now = (js_sys::Date::now() / 1000.0) as i64;
+    let one_day = 24 * 3600;
+    expires > now && (expires - now) < one_day
+}
+
+pub fn is_token_expired() -> bool {
+    is_logged_in() && !is_token_valid()
+}
+
 pub fn logout() {
     let s = storage();
     let _ = s.remove_item(KEY_USER_ID);
@@ -290,13 +310,9 @@ pub async fn register() -> Result<String, String> {
     let begin_resp = post_json("/register/begin", &serde_json::json!({})).await
         .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
 
-    let username = begin_resp.get("username")
-        .and_then(|v| v.as_str())
-        .ok_or("server did not return username")?
-        .to_string();
     let user_id = begin_resp.get("user_id")
         .and_then(|v| v.as_str())
-        .unwrap_or(&username)
+        .ok_or("server did not return user_id")?
         .to_string();
 
     let public_key = begin_resp.get("publicKey")
@@ -327,10 +343,15 @@ pub async fn register() -> Result<String, String> {
     let credential_json = serialize_credential(&credential)?;
 
     let finish_resp = post_json("/register/finish", &serde_json::json!({
-        "username": username,
+        "user_id": user_id,
         "credential": credential_json
     })).await
         .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
+
+    let user_id = finish_resp.get("user_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&user_id)
+        .to_string();
 
     set_user(&user_id);
 
@@ -410,6 +431,7 @@ pub async fn ensure_token() -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 async fn post_json_auth(path: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let token = get_token().ok_or_else(|| crate::services::i18n::t("auth.session_expired").to_string())?;
     let url = format!("{}{}", auth_base_url(), path);
     let body_str = serde_json::to_string(body).map_err(|e| e.to_string())?;
 
@@ -419,10 +441,8 @@ async fn post_json_auth(path: &str, body: &serde_json::Value) -> Result<serde_js
 
     let headers = web_sys::Headers::new().map_err(|e| format!("{:?}", e))?;
     headers.set("Content-Type", "application/json").map_err(|e| format!("{:?}", e))?;
-    if let Some(token) = get_token() {
-        headers.set("Authorization", &format!("Bearer {}", token))
-            .map_err(|e| format!("{:?}", e))?;
-    }
+    headers.set("Authorization", &format!("Bearer {}", token))
+        .map_err(|e| format!("{:?}", e))?;
     opts.set_headers(&headers);
 
     let request = web_sys::Request::new_with_str_and_init(&url, &opts)
@@ -494,9 +514,8 @@ pub async fn pair_request() -> Result<serde_json::Value, String> {
 
 /// New device claims a pairing created by the logged-in device.
 /// Receives a publicKey challenge, creates a PassKey, finishes registration.
-pub async fn pair_claim(username: &str, pairing_id: &str, secret: &str) -> Result<String, String> {
+pub async fn pair_claim(pairing_id: &str, secret: &str) -> Result<String, String> {
     let claim_resp = post_json("/pair/claim", &serde_json::json!({
-        "username": username,
         "pairing_id": pairing_id,
         "secret": secret,
     })).await
@@ -506,7 +525,7 @@ pub async fn pair_claim(username: &str, pairing_id: &str, secret: &str) -> Resul
         .ok_or("missing publicKey in claim response")?;
     let user_id = claim_resp.get("user_id")
         .and_then(|v| v.as_str())
-        .unwrap_or(username)
+        .ok_or("missing user_id in claim response")?
         .to_string();
 
     let pk_js = build_create_options(public_key)?;
@@ -535,10 +554,14 @@ pub async fn pair_claim(username: &str, pairing_id: &str, secret: &str) -> Resul
 
     let finish_resp = post_json("/pair/finish", &serde_json::json!({
         "pairing_id": pairing_id,
-        "secret": secret,
         "credential": credential_json,
     })).await
         .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
+
+    let user_id = finish_resp.get("user_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&user_id)
+        .to_string();
 
     set_user(&user_id);
 

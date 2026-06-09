@@ -1,6 +1,7 @@
 use worker::*;
 
 mod auth;
+mod pair;
 mod recovery;
 mod token;
 mod types;
@@ -43,6 +44,10 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/add-device/finish", auth::add_device_finish)
         .post_async("/recovery/set", recovery::set_recovery_key)
         .post_async("/recovery/authenticate", recovery::authenticate_with_recovery)
+        .post_async("/pair/create", pair::create_pairing)
+        .post_async("/pair/claim", pair::claim_pairing)
+        .post_async("/pair/finish", pair::finish_pairing)
+        .get_async("/pair/status/:id", pair::pairing_status)
         .post_async("/token/validate", token::validate_token)
         .run(req, env)
         .await;

@@ -217,6 +217,10 @@ fn en(key: &str) -> &'static str {
         "auth.error_network" => "Could not connect to server. Check your internet connection.",
         "auth.error_passkey" => "PassKey is not supported in this browser.",
         "auth.error_cancelled" => "PassKey creation was cancelled.",
+        "auth.recovery_link" => "Recover access with password",
+        "auth.recovery_title" => "Recover access",
+        "auth.recovery_hint" => "Enter your recovery password to regain access to your account.",
+        "auth.back" => "Back",
 
         // PWA prompt
         "pwa.description" => "This is an app for managing your nutrition and building healthy eating habits. It can work as an app on your phone. To do that, you need to install it.",
@@ -257,6 +261,22 @@ fn en(key: &str) -> &'static str {
         // Firefox desktop
         "pwa.inst.firefox.1" => "Firefox desktop does not support PWA install. Use Chrome, Edge, or Safari.",
         "pwa.use_browser" => "I want to use it in the browser anyway",
+
+        // Pairing
+        "pair.title" => "Connect device",
+        "pair.show_qr" => "Show QR code",
+        "pair.scan_qr" => "Scan QR code",
+        "pair.waiting" => "Waiting for the other device...",
+        "pair.success" => "Device connected!",
+        "pair.expired" => "QR code expired. Try again.",
+        "pair.error" => "Pairing failed. Try again.",
+        "pair.scan_hint" => "Point camera at the QR code on the other device",
+        "pair.show_hint_logged" => "Show this QR code to your new device",
+        "pair.show_hint_new" => "Show this QR code to your logged-in device",
+        "pair.add_device" => "Add device",
+        "pair.back" => "Back",
+        "pair.error_invalid_qr" => "Invalid QR code. Expected hjkl-pair:// link.",
+        "settings.add_device" => "Add device",
 
         _ => "???",
     }
@@ -424,6 +444,10 @@ fn ru(key: &str) -> &'static str {
         "auth.error_network" => "Не удалось подключиться к серверу. Проверьте интернет.",
         "auth.error_passkey" => "PassKey не поддерживается в этом браузере.",
         "auth.error_cancelled" => "Создание PassKey было отменено.",
+        "auth.recovery_link" => "Восстановить доступ по паролю",
+        "auth.recovery_title" => "Восстановление доступа",
+        "auth.recovery_hint" => "Введите пароль восстановления для доступа к аккаунту.",
+        "auth.back" => "Назад",
 
         // PWA
         "pwa.description" => "Это приложение для организации питания и формирования здоровых пищевых привычек. Оно может работать как приложение в вашем телефоне. Для этого его нужно установить.",
@@ -454,6 +478,22 @@ fn ru(key: &str) -> &'static str {
         "pwa.inst.edge.2" => "Нажмите «Установить» для подтверждения",
         "pwa.inst.firefox.1" => "Firefox на компьютере не поддерживает установку PWA. Используйте Chrome, Edge или Safari.",
         "pwa.use_browser" => "Я хочу использовать в браузере",
+
+        // Pairing
+        "pair.title" => "Подключить устройство",
+        "pair.show_qr" => "Показать QR-код",
+        "pair.scan_qr" => "Сканировать QR-код",
+        "pair.waiting" => "Ожидание другого устройства...",
+        "pair.success" => "Устройство подключено!",
+        "pair.expired" => "QR-код истёк. Попробуйте снова.",
+        "pair.error" => "Не удалось подключить. Попробуйте снова.",
+        "pair.scan_hint" => "Наведите камеру на QR-код на другом устройстве",
+        "pair.show_hint_logged" => "Покажите этот QR-код новому устройству",
+        "pair.show_hint_new" => "Покажите этот QR-код залогиненному устройству",
+        "pair.add_device" => "Подключить устройство",
+        "pair.back" => "Назад",
+        "pair.error_invalid_qr" => "Неверный QR-код. Ожидалась ссылка hjkl-pair://.",
+        "settings.add_device" => "Подключить устройство",
 
         _ => "???",
     }

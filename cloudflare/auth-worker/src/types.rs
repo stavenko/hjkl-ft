@@ -60,6 +60,55 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
+// ---- Pairing types ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingSession {
+    pub pairing_id: String,
+    pub secret_hash: String,
+    pub username: String,
+    pub user_id: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub status: PairingStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PairingStatus {
+    Pending,
+    Claimed,
+    Completed,
+    Expired,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PairCreateResponse {
+    pub pairing_id: String,
+    pub secret: String,
+    pub username: String,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PairClaimRequest {
+    pub username: String,
+    pub pairing_id: String,
+    pub secret: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PairFinishRequest {
+    pub username: String,
+    pub pairing_id: String,
+    pub credential: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PairStatusResponse {
+    pub status: PairingStatus,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

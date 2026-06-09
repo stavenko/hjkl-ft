@@ -13,11 +13,14 @@ use std::cell::RefCell;
 use wasm_bindgen::JsCast;
 use worker::*;
 
+use crate::types::{PairingSession, PairingStatus};
+
 const STORAGE_KEY_CREDENTIALS: &str = "credentials";
 const STORAGE_KEY_STATES_PREFIX: &str = "pk_state:";
 const STORAGE_KEY_RECOVERY_HASH: &str = "recovery_hash";
 const STORAGE_KEY_USERNAME: &str = "username";
 const STORAGE_KEY_USER_ID: &str = "user_id";
+const STORAGE_KEY_PAIRING_PREFIX: &str = "pairing:";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -413,6 +416,107 @@ impl UserDO {
         let valid = verify_recovery_key(recovery_key, &data)?;
         Response::from_json(&serde_json::json!({ "valid": valid }))
     }
+
+    // ---- Pairing handlers ----
+
+    fn pairing_storage_key(pairing_id: &str) -> String {
+        format!("{STORAGE_KEY_PAIRING_PREFIX}{pairing_id}")
+    }
+
+    pub(crate) async fn handle_pairing_create(
+        &self,
+        pairing_id: &str,
+        secret_hash: &str,
+        username: &str,
+        user_id: &str,
+        created_at: i64,
+        expires_at: i64,
+    ) -> Result<Response> {
+        let session = PairingSession {
+            pairing_id: pairing_id.to_string(),
+            secret_hash: secret_hash.to_string(),
+            username: username.to_string(),
+            user_id: user_id.to_string(),
+            created_at,
+            expires_at,
+            status: PairingStatus::Pending,
+        };
+        let json = serde_json::to_string(&session)
+            .map_err(|e| Error::RustError(format!("serialize pairing session: {e}")))?;
+        self.state
+            .storage()
+            .put(&Self::pairing_storage_key(pairing_id), json)
+            .await?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    pub(crate) async fn handle_pairing_get(&self, pairing_id: &str) -> Result<Response> {
+        let key = Self::pairing_storage_key(pairing_id);
+        let stored: Option<String> = self.state.storage().get(&key).await?;
+        match stored {
+            Some(json) => {
+                let mut session: PairingSession = serde_json::from_str(&json)
+                    .map_err(|e| Error::RustError(format!("parse pairing session: {e}")))?;
+                let now = now_ms() / 1000;
+                if session.status == PairingStatus::Pending && session.expires_at < now {
+                    session.status = PairingStatus::Expired;
+                }
+                Response::from_json(&session)
+            }
+            None => Response::error("pairing session not found", 404),
+        }
+    }
+
+    pub(crate) async fn handle_pairing_claim(&self, pairing_id: &str) -> Result<Response> {
+        let key = Self::pairing_storage_key(pairing_id);
+        let stored: Option<String> = self.state.storage().get(&key).await?;
+        let json_str =
+            stored.ok_or_else(|| Error::RustError("pairing session not found".into()))?;
+        let mut session: PairingSession = serde_json::from_str(&json_str)
+            .map_err(|e| Error::RustError(format!("parse pairing session: {e}")))?;
+
+        let now = now_ms() / 1000;
+        if session.expires_at < now {
+            session.status = PairingStatus::Expired;
+            let updated = serde_json::to_string(&session)
+                .map_err(|e| Error::RustError(format!("serialize: {e}")))?;
+            self.state.storage().put(&key, updated).await?;
+            return Response::error("pairing session expired", 410);
+        }
+        if session.status != PairingStatus::Pending {
+            return Response::error(
+                format!("pairing session already {}", serde_json::to_string(&session.status).unwrap_or_default()),
+                409,
+            );
+        }
+
+        session.status = PairingStatus::Claimed;
+        let updated = serde_json::to_string(&session)
+            .map_err(|e| Error::RustError(format!("serialize: {e}")))?;
+        self.state.storage().put(&key, updated).await?;
+
+        Response::from_json(&session)
+    }
+
+    pub(crate) async fn handle_pairing_complete(&self, pairing_id: &str) -> Result<Response> {
+        let key = Self::pairing_storage_key(pairing_id);
+        let stored: Option<String> = self.state.storage().get(&key).await?;
+        let json_str =
+            stored.ok_or_else(|| Error::RustError("pairing session not found".into()))?;
+        let mut session: PairingSession = serde_json::from_str(&json_str)
+            .map_err(|e| Error::RustError(format!("parse pairing session: {e}")))?;
+
+        if session.status != PairingStatus::Claimed {
+            return Response::error("pairing session not in claimed state", 409);
+        }
+
+        session.status = PairingStatus::Completed;
+        let updated = serde_json::to_string(&session)
+            .map_err(|e| Error::RustError(format!("serialize: {e}")))?;
+        self.state.storage().put(&key, updated).await?;
+
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
 }
 
 impl DurableObject for UserDO {
@@ -461,6 +565,40 @@ impl DurableObject for UserDO {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing recovery_key".into()))?;
                 self.handle_recovery_verify(recovery_key).await
+            }
+            "/pairing/create" => {
+                let body: serde_json::Value = req.json().await?;
+                let pairing_id = body.get("pairing_id").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing pairing_id".into()))?;
+                let secret_hash = body.get("secret_hash").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing secret_hash".into()))?;
+                let username = body.get("username").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing username".into()))?;
+                let user_id = body.get("user_id").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let created_at = body.get("created_at").and_then(|v| v.as_i64())
+                    .ok_or_else(|| Error::RustError("missing created_at".into()))?;
+                let expires_at = body.get("expires_at").and_then(|v| v.as_i64())
+                    .ok_or_else(|| Error::RustError("missing expires_at".into()))?;
+                self.handle_pairing_create(pairing_id, secret_hash, username, user_id, created_at, expires_at).await
+            }
+            "/pairing/get" => {
+                let body: serde_json::Value = req.json().await?;
+                let pairing_id = body.get("pairing_id").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing pairing_id".into()))?;
+                self.handle_pairing_get(pairing_id).await
+            }
+            "/pairing/claim" => {
+                let body: serde_json::Value = req.json().await?;
+                let pairing_id = body.get("pairing_id").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing pairing_id".into()))?;
+                self.handle_pairing_claim(pairing_id).await
+            }
+            "/pairing/complete" => {
+                let body: serde_json::Value = req.json().await?;
+                let pairing_id = body.get("pairing_id").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing pairing_id".into()))?;
+                self.handle_pairing_complete(pairing_id).await
             }
             _ => Response::error(format!("unknown DO path: {path}"), 404),
         }

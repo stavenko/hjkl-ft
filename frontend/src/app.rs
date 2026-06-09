@@ -8,6 +8,7 @@ use crate::services::{auth, platform};
 #[derive(Clone, Copy, PartialEq)]
 enum AppState {
     PwaPrompt,
+    TryingPassKey,
     Auth,
     Ready,
 }
@@ -15,10 +16,10 @@ enum AppState {
 fn initial_state() -> AppState {
     if platform::needs_pwa_prompt() {
         AppState::PwaPrompt
-    } else if !auth::is_logged_in() {
-        AppState::Auth
-    } else {
+    } else if auth::is_logged_in() {
         AppState::Ready
+    } else {
+        AppState::TryingPassKey
     }
 }
 
@@ -33,10 +34,29 @@ pub fn App() -> impl IntoView {
                     if auth::is_logged_in() {
                         state.set(AppState::Ready);
                     } else {
-                        state.set(AppState::Auth);
+                        state.set(AppState::TryingPassKey);
                     }
                 }) />
             }.into_view(),
+
+            AppState::TryingPassKey => {
+                // Try silent PassKey auth — if key exists, go straight to app
+                spawn_local(async move {
+                    match auth::authenticate().await {
+                        Ok(_) => state.set(AppState::Ready),
+                        Err(_) => state.set(AppState::Auth),
+                    }
+                });
+                // Show loading while trying
+                view! {
+                    <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: white;">
+                        <div style="text-align: center;">
+                            <img src="/icon-192.png" alt="" style="width: 64px; height: 64px; border-radius: 12px; margin-bottom: 1rem; opacity: 0.5;" />
+                            <p class="has-text-grey">{t("auth.authenticating")}</p>
+                        </div>
+                    </div>
+                }.into_view()
+            },
 
             AppState::Auth => view! {
                 <pages::auth_page::AuthPage on_authenticated=Callback::new(move |_| {

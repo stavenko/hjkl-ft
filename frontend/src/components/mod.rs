@@ -7,3 +7,5 @@ pub mod food_modal;
 pub mod food_weight_modal;
 pub mod new_food_panel;
 pub mod weight_modal;
+pub mod qr_code;
+pub mod qr_scanner;

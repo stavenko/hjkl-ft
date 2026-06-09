@@ -404,3 +404,163 @@ pub async fn ensure_token() -> Result<String, String> {
     authenticate().await?;
     get_token().ok_or("auth succeeded but no token".into())
 }
+
+// ---------------------------------------------------------------------------
+// Device pairing
+// ---------------------------------------------------------------------------
+
+async fn post_json_auth(path: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let url = format!("{}{}", auth_base_url(), path);
+    let body_str = serde_json::to_string(body).map_err(|e| e.to_string())?;
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    opts.set_body(&JsValue::from_str(&body_str));
+
+    let headers = web_sys::Headers::new().map_err(|e| format!("{:?}", e))?;
+    headers.set("Content-Type", "application/json").map_err(|e| format!("{:?}", e))?;
+    if let Some(token) = get_token() {
+        headers.set("Authorization", &format!("Bearer {}", token))
+            .map_err(|e| format!("{:?}", e))?;
+    }
+    opts.set_headers(&headers);
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts)
+        .map_err(|e| format!("{:?}", e))?;
+
+    let window = web_sys::window().expect("no window");
+    let resp_val = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|e| format!("{:?}", e))?;
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response")?;
+
+    let text = JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
+        .await
+        .map_err(|e| format!("{:?}", e))?;
+    let text = text.as_string().ok_or("response not string")?;
+
+    if !resp.ok() {
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+
+    serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+async fn get_json(path: &str) -> Result<serde_json::Value, String> {
+    let url = format!("{}{}", auth_base_url(), path);
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("GET");
+
+    let headers = web_sys::Headers::new().map_err(|e| format!("{:?}", e))?;
+    if let Some(token) = get_token() {
+        headers.set("Authorization", &format!("Bearer {}", token))
+            .map_err(|e| format!("{:?}", e))?;
+    }
+    opts.set_headers(&headers);
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts)
+        .map_err(|e| format!("{:?}", e))?;
+
+    let window = web_sys::window().expect("no window");
+    let resp_val = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|e| format!("{:?}", e))?;
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response")?;
+
+    let text = JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
+        .await
+        .map_err(|e| format!("{:?}", e))?;
+    let text = text.as_string().ok_or("response not string")?;
+
+    if !resp.ok() {
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+
+    serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+/// Logged-in device creates a pairing invitation.
+/// POST /pair/create (authenticated) -> { pairing_id, secret, qr_url }
+pub async fn pair_create() -> Result<serde_json::Value, String> {
+    post_json_auth("/pair/create", &serde_json::json!({})).await
+}
+
+/// New (unauthenticated) device requests a pairing.
+/// POST /pair/request -> { pairing_id, secret, qr_url }
+pub async fn pair_request() -> Result<serde_json::Value, String> {
+    post_json("/pair/request", &serde_json::json!({})).await
+}
+
+/// New device claims a pairing created by the logged-in device.
+/// Receives a publicKey challenge, creates a PassKey, finishes registration.
+pub async fn pair_claim(username: &str, pairing_id: &str, secret: &str) -> Result<String, String> {
+    let claim_resp = post_json("/pair/claim", &serde_json::json!({
+        "username": username,
+        "pairing_id": pairing_id,
+        "secret": secret,
+    })).await
+        .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
+
+    let public_key = claim_resp.get("publicKey")
+        .ok_or("missing publicKey in claim response")?;
+    let user_id = claim_resp.get("user_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(username)
+        .to_string();
+
+    let pk_js = build_create_options(public_key)?;
+
+    let create_opts = js_sys::Object::new();
+    js_sys::Reflect::set(&create_opts, &"publicKey".into(), &pk_js)
+        .map_err(|e| format!("{:?}", e))?;
+
+    let cred_promise = web_sys::window().expect("no window")
+        .navigator()
+        .credentials()
+        .create_with_options(create_opts.unchecked_ref())
+        .map_err(|e| {
+            leptos::logging::error!("credentials.create error: {:?}", e);
+            crate::services::i18n::t("auth.error_passkey").to_string()
+        })?;
+
+    let credential = JsFuture::from(cred_promise)
+        .await
+        .map_err(|e| {
+            leptos::logging::error!("PassKey create rejected: {:?}", e);
+            crate::services::i18n::t("auth.error_cancelled").to_string()
+        })?;
+
+    let credential_json = serialize_credential(&credential)?;
+
+    let finish_resp = post_json("/pair/finish", &serde_json::json!({
+        "pairing_id": pairing_id,
+        "secret": secret,
+        "credential": credential_json,
+    })).await
+        .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
+
+    set_user(&user_id);
+
+    if let (Some(token), Some(exp)) = (
+        finish_resp.get("token").and_then(|v| v.as_str()),
+        finish_resp.get("expires_at").and_then(|v| v.as_i64()),
+    ) {
+        set_token(token, exp);
+    }
+
+    Ok(user_id)
+}
+
+/// Logged-in device approves a pairing request from the new device.
+pub async fn pair_approve(pairing_id: &str, secret: &str) -> Result<serde_json::Value, String> {
+    post_json_auth("/pair/approve", &serde_json::json!({
+        "pairing_id": pairing_id,
+        "secret": secret,
+    })).await
+}
+
+/// Poll pairing status. Returns the JSON with a "status" field.
+pub async fn pair_status(pairing_id: &str) -> Result<serde_json::Value, String> {
+    get_json(&format!("/pair/status/{}", pairing_id)).await
+}

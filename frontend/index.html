@@ -34,6 +34,11 @@ if ('serviceWorker' in navigator) {
         });
     });
 }
+window.addEventListener('appinstalled', function() {
+    // Force reload after PWA install so the new window gets fresh content
+    window.location.reload();
+});
+
 </script>
 </body>
 </html>

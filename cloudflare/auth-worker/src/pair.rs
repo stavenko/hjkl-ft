@@ -244,7 +244,10 @@ pub async fn claim_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<Re
         .await
         .map_err(|e| Error::RustError(format!("invalid request body: {e}")))?;
 
-    let stub = user_stub(&ctx, &body.username)?;
+    // Flow A (3-part QR): username is the user DO name
+    // Flow B (2-part QR): username is empty → global __pairing_requests__ DO
+    let do_name = if body.username.is_empty() { "__pairing_requests__" } else { &body.username };
+    let stub = user_stub(&ctx, do_name)?;
 
     // Get the pairing session to verify the secret
     let get_body = serde_json::json!({ "pairing_id": body.pairing_id });
@@ -297,10 +300,15 @@ pub async fn claim_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<Re
         return Response::error("failed to claim pairing session", 500);
     }
 
-    // Start passkey registration for the same user (new device)
+    // Start passkey registration on the USER's DO (not the global pairing DO)
+    let user_do_stub = if session.username.is_empty() {
+        stub // Flow A: stub is already the user DO
+    } else {
+        user_stub(&ctx, &session.username)?
+    };
     let reg_body = serde_json::json!({ "username": session.username });
     let reg_req = do_request("/passkey/register/begin", &reg_body)?;
-    let reg_resp = stub.fetch_with_request(reg_req).await?;
+    let reg_resp = user_do_stub.fetch_with_request(reg_req).await?;
 
     Ok(reg_resp)
 }
@@ -313,7 +321,8 @@ pub async fn finish_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<R
         .await
         .map_err(|e| Error::RustError(format!("invalid request body: {e}")))?;
 
-    let stub = user_stub(&ctx, &body.username)?;
+    let do_name = if body.username.is_empty() { "__pairing_requests__" } else { &body.username };
+    let stub = user_stub(&ctx, do_name)?;
 
     // Verify pairing session is in claimed state
     let get_body = serde_json::json!({ "pairing_id": body.pairing_id });
@@ -339,10 +348,15 @@ pub async fn finish_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<R
         return Ok(Response::from_json(&err)?.with_status(409));
     }
 
-    // Complete passkey registration
+    // Complete passkey registration on the USER's DO
+    let user_do_stub = if session.username.is_empty() {
+        user_stub(&ctx, do_name)?
+    } else {
+        user_stub(&ctx, &session.username)?
+    };
     let finish_body = serde_json::json!({ "credential": body.credential });
     let finish_req = do_request("/passkey/register/finish", &finish_body)?;
-    let resp = stub.fetch_with_request(finish_req).await?;
+    let resp = user_do_stub.fetch_with_request(finish_req).await?;
 
     if resp.status_code() != 200 {
         return Ok(resp);

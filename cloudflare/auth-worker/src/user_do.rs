@@ -505,14 +505,15 @@ impl UserDO {
         let mut session: PairingSession = serde_json::from_str(&json_str)
             .map_err(|e| Error::RustError(format!("parse pairing session: {e}")))?;
 
-        session.status = PairingStatus::Claimed;
+        // Keep Pending — claim will verify secret and change to Claimed
+        // Just bind the user so claim knows which user DO to register on
         session.user_id = user_id.to_string();
         session.username = username.to_string();
         let updated = serde_json::to_string(&session)
             .map_err(|e| Error::RustError(format!("serialize: {e}")))?;
         self.state.storage().put(&key, updated).await?;
 
-        Response::from_json(&serde_json::json!({ "ok": true }))
+        Response::from_json(&serde_json::json!({ "ok": true, "username": username }))
     }
 
     pub(crate) async fn handle_pairing_complete(&self, pairing_id: &str) -> Result<Response> {

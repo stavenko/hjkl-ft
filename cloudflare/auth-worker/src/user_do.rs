@@ -498,6 +498,23 @@ impl UserDO {
         Response::from_json(&session)
     }
 
+    pub(crate) async fn handle_pairing_approve(&self, pairing_id: &str, user_id: &str, username: &str) -> Result<Response> {
+        let key = Self::pairing_storage_key(pairing_id);
+        let stored: Option<String> = self.state.storage().get(&key).await?;
+        let json_str = stored.ok_or_else(|| Error::RustError("pairing session not found".into()))?;
+        let mut session: PairingSession = serde_json::from_str(&json_str)
+            .map_err(|e| Error::RustError(format!("parse pairing session: {e}")))?;
+
+        session.status = PairingStatus::Claimed;
+        session.user_id = user_id.to_string();
+        session.username = username.to_string();
+        let updated = serde_json::to_string(&session)
+            .map_err(|e| Error::RustError(format!("serialize: {e}")))?;
+        self.state.storage().put(&key, updated).await?;
+
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
     pub(crate) async fn handle_pairing_complete(&self, pairing_id: &str) -> Result<Response> {
         let key = Self::pairing_storage_key(pairing_id);
         let stored: Option<String> = self.state.storage().get(&key).await?;
@@ -593,6 +610,16 @@ impl DurableObject for UserDO {
                 let pairing_id = body.get("pairing_id").and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing pairing_id".into()))?;
                 self.handle_pairing_claim(pairing_id).await
+            }
+            "/pairing/approve" => {
+                let body: serde_json::Value = req.json().await?;
+                let pairing_id = body.get("pairing_id").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing pairing_id".into()))?;
+                let user_id = body.get("user_id").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let username = body.get("username").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing username".into()))?;
+                self.handle_pairing_approve(pairing_id, user_id, username).await
             }
             "/pairing/complete" => {
                 let body: serde_json::Value = req.json().await?;

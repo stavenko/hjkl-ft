@@ -124,6 +124,118 @@ pub async fn create_pairing(req: Request, ctx: RouteContext<()>) -> Result<Respo
     Response::from_json(&response)
 }
 
+// ---- POST /pair/request (no auth, new device) ----
+// New device generates a pairing request. Stored in a global "pairing-requests" DO.
+// Returns { pairing_id, secret, qr_url } — the QR encodes pairing_id + secret.
+// Logged-in device scans QR → calls /pair/approve → binds to its user.
+
+pub async fn request_pairing(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let pairing_id = generate_pairing_id();
+    let secret = generate_secret();
+    let secret_hash = hash_secret(&secret);
+    let now = now_secs();
+    let expires_at = now + 300;
+
+    let stub = {
+        let namespace = ctx.env.durable_object("USER_DO")?;
+        namespace.id_from_name("__pairing_requests__")?.get_stub()?
+    };
+
+    let do_body = serde_json::json!({
+        "pairing_id": pairing_id,
+        "secret_hash": secret_hash,
+        "username": "",
+        "user_id": "",
+        "created_at": now,
+        "expires_at": expires_at,
+    });
+    let internal_req = do_request("/pairing/create", &do_body)?;
+    let resp = stub.fetch_with_request(internal_req).await?;
+
+    if resp.status_code() != 200 {
+        return Response::error("failed to create pairing request", 500);
+    }
+
+    let qr_url = format!("hjkl-pair://{}/{}", pairing_id, secret);
+
+    Response::from_json(&serde_json::json!({
+        "pairing_id": pairing_id,
+        "secret": secret,
+        "qr_url": qr_url,
+        "expires_at": expires_at,
+    }))
+}
+
+// ---- POST /pair/approve (authenticated) ----
+// Logged-in device scans QR from new device, approves the pairing by binding it to its user.
+
+pub async fn approve_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let user_id = match token::validate_from_header(&req, &ctx.env) {
+        Ok(sub) => sub,
+        Err(e) => {
+            let body = ErrorResponse {
+                error: format!("authentication required: {e}"),
+            };
+            return Ok(Response::from_json(&body)?.with_status(401));
+        }
+    };
+
+    let body: serde_json::Value = req.json().await
+        .map_err(|e| Error::RustError(format!("invalid body: {e}")))?;
+    let pairing_id = body.get("pairing_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::RustError("missing pairing_id".into()))?;
+    let secret = body.get("secret")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::RustError("missing secret".into()))?;
+
+    // Get the pending request from global DO
+    let global_stub = {
+        let namespace = ctx.env.durable_object("USER_DO")?;
+        namespace.id_from_name("__pairing_requests__")?.get_stub()?
+    };
+
+    let get_body = serde_json::json!({ "pairing_id": pairing_id });
+    let get_req = do_request("/pairing/get", &get_body)?;
+    let mut get_resp = global_stub.fetch_with_request(get_req).await?;
+
+    if get_resp.status_code() != 200 {
+        let err = ErrorResponse { error: "pairing request not found".into() };
+        return Ok(Response::from_json(&err)?.with_status(404));
+    }
+
+    let session: PairingSession = get_resp.json().await
+        .map_err(|e| Error::RustError(format!("parse session: {e}")))?;
+
+    if session.expires_at < now_secs() {
+        let err = ErrorResponse { error: "pairing request expired".into() };
+        return Ok(Response::from_json(&err)?.with_status(410));
+    }
+    if session.status != PairingStatus::Pending {
+        let err = ErrorResponse { error: "pairing request already used".into() };
+        return Ok(Response::from_json(&err)?.with_status(409));
+    }
+    if !verify_secret(secret, &session.secret_hash) {
+        let err = ErrorResponse { error: "invalid secret".into() };
+        return Ok(Response::from_json(&err)?.with_status(403));
+    }
+
+    // Mark as claimed in global DO and store the user binding
+    let claim_body = serde_json::json!({
+        "pairing_id": pairing_id,
+        "user_id": user_id,
+        "username": user_id,
+    });
+    let claim_req = do_request("/pairing/approve", &claim_body)?;
+    let claim_resp = global_stub.fetch_with_request(claim_req).await?;
+
+    if claim_resp.status_code() != 200 {
+        return Response::error("failed to approve pairing", 500);
+    }
+
+    Response::from_json(&serde_json::json!({ "status": "approved" }))
+}
+
 // ---- POST /pair/claim (no auth) ----
 
 pub async fn claim_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {

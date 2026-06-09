@@ -214,6 +214,14 @@ fn en(key: &str) -> &'static str {
         "auth.login_device" => "I already have an account",
         "auth.creating" => "Creating...",
         "auth.authenticating" => "Signing in...",
+        // QR scanner
+        "qr.no_camera" => "No camera found on this device.",
+        "qr.permission_denied" => "Camera access denied. Allow camera in browser settings.",
+        "qr.camera_error" => "Could not start camera.",
+        "qr.copy_link" => "Copy link",
+        "qr.copied" => "Copied!",
+        "qr.paste_link" => "Paste link",
+
         "auth.error_network" => "Could not connect to server. Check your internet connection.",
         "auth.error_passkey" => "PassKey is not supported in this browser.",
         "auth.error_cancelled" => "PassKey creation was cancelled.",
@@ -441,6 +449,14 @@ fn ru(key: &str) -> &'static str {
         "auth.login_device" => "У меня уже есть аккаунт",
         "auth.creating" => "Создаю...",
         "auth.authenticating" => "Вхожу...",
+        // QR сканер
+        "qr.no_camera" => "Камера не найдена на этом устройстве.",
+        "qr.permission_denied" => "Доступ к камере запрещён. Разрешите камеру в настройках браузера.",
+        "qr.camera_error" => "Не удалось запустить камеру.",
+        "qr.copy_link" => "Копировать ссылку",
+        "qr.copied" => "Скопировано!",
+        "qr.paste_link" => "Вставить ссылку",
+
         "auth.error_network" => "Не удалось подключиться к серверу. Проверьте интернет.",
         "auth.error_passkey" => "PassKey не поддерживается в этом браузере.",
         "auth.error_cancelled" => "Создание PassKey было отменено.",

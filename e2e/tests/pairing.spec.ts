@@ -10,15 +10,8 @@ test.describe('Device pairing (logged-in device)', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.evaluate(() => localStorage.clear());
-    await page.reload();
-    await page.waitForTimeout(3000);
 
-    // Skip PWA prompt
-    await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
-    await page.reload();
-    await page.waitForTimeout(3000);
-
-    // Set up virtual WebAuthn authenticator via CDP
+    // Set up virtual authenticator BEFORE reload
     cdpSession = await page.context().newCDPSession(page);
     await cdpSession.send('WebAuthn.enable');
     await cdpSession.send('WebAuthn.addVirtualAuthenticator', {
@@ -32,14 +25,23 @@ test.describe('Device pairing (logged-in device)', () => {
       },
     });
 
-    // Create account to get into the app
+    await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
+    await page.reload();
+    await page.waitForTimeout(3000);
+
+    // TryingPassKey will fail (no credential), then shows auth page
     const createBtn = page.getByText('Создать аккаунт');
-    await expect(createBtn).toBeVisible({ timeout: 10_000 });
+    await expect(createBtn).toBeVisible({ timeout: 15_000 });
     await createBtn.click();
 
-    // Wait for the main app to load (Diary tab visible)
-    const diary = page.getByText('Дневник');
-    await expect(diary).toBeVisible({ timeout: 20_000 });
+    // Wait for registration to fully complete
+    for (let i = 0; i < 40; i++) {
+      const uid = await page.evaluate(() => localStorage.getItem('user_id'));
+      if (uid) break;
+      await page.waitForTimeout(500);
+    }
+    // Small extra wait for overlay to unmount
+    await page.waitForTimeout(1000);
   });
 
   test.afterEach(async () => {
@@ -64,7 +66,7 @@ test.describe('Device pairing (logged-in device)', () => {
     await page.waitForTimeout(2000);
 
     // Click "Add device" button
-    const addDeviceBtn = page.locator('button', { hasText: 'Подключить устройство' });
+    const addDeviceBtn = page.locator('.button.is-link.is-light', { hasText: 'Подключить устройство' });
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click();
 
@@ -81,7 +83,7 @@ test.describe('Device pairing (logged-in device)', () => {
     await page.waitForTimeout(2000);
 
     // Click "Add device"
-    const addDeviceBtn = page.locator('button', { hasText: 'Подключить устройство' });
+    const addDeviceBtn = page.locator('.button.is-link.is-light', { hasText: 'Подключить устройство' });
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click();
 

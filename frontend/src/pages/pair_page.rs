@@ -4,6 +4,14 @@ use crate::services::i18n::t;
 use crate::components::qr_code::QrCode;
 use crate::components::qr_scanner::QrScanner;
 
+async fn copy_to_clipboard(text: &str) -> Result<(), wasm_bindgen::JsValue> {
+    let window = web_sys::window().expect("no window");
+    let clipboard = window.navigator().clipboard();
+    let promise = clipboard.write_text(text);
+    wasm_bindgen_futures::JsFuture::from(promise).await?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Shared types
 // ---------------------------------------------------------------------------
@@ -139,11 +147,25 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
 
                     PairStep::ShowQr { ref qr_url, .. } => {
                         let url = qr_url.clone();
+                        let url_for_copy = qr_url.clone();
+                        let copied = create_rw_signal(false);
                         view! {
                             <p class="mb-4 has-text-grey">{t("pair.show_hint_new")}</p>
                             <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
                                 <QrCode data=url size=240 />
                             </div>
+                            <button
+                                class="button is-small is-light is-fullwidth mb-3"
+                                on:click=move |_| {
+                                    let u = url_for_copy.clone();
+                                    spawn_local(async move {
+                                        let _ = copy_to_clipboard(&u).await;
+                                        copied.set(true);
+                                    });
+                                }
+                            >
+                                {move || if copied.get() { t("qr.copied") } else { t("qr.copy_link") }}
+                            </button>
                             <p class="has-text-grey is-size-7 mb-4">{t("pair.waiting")}</p>
                             <button
                                 class="button is-text"
@@ -284,11 +306,25 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
 
                 PairStep::ShowQr { ref qr_url, .. } => {
                     let url = qr_url.clone();
+                    let url_for_copy = qr_url.clone();
+                    let copied = create_rw_signal(false);
                     view! {
                         <p class="mb-4 has-text-grey">{t("pair.show_hint_logged")}</p>
                         <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
                             <QrCode data=url size=240 />
                         </div>
+                        <button
+                            class="button is-small is-light is-fullwidth mb-3"
+                            on:click=move |_| {
+                                let u = url_for_copy.clone();
+                                spawn_local(async move {
+                                    let _ = copy_to_clipboard(&u).await;
+                                    copied.set(true);
+                                });
+                            }
+                        >
+                            {move || if copied.get() { t("qr.copied") } else { t("qr.copy_link") }}
+                        </button>
                         <p class="has-text-grey is-size-7 mb-4">{t("pair.waiting")}</p>
                         <button
                             class="button is-text"

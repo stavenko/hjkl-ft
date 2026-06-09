@@ -2,7 +2,11 @@ use leptos::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{HtmlVideoElement, MediaStream, MediaStreamConstraints};
+use web_sys::{HtmlCanvasElement, HtmlVideoElement, MediaStream, MediaStreamConstraints};
+
+use crate::services::i18n::t;
+
+// ── BarcodeDetector binding (Chrome/Edge only) ──
 
 #[wasm_bindgen]
 extern "C" {
@@ -31,6 +35,37 @@ fn create_barcode_detector() -> Result<BarcodeDetector, JsValue> {
     BarcodeDetector::new(&opts.into())
 }
 
+// ── rqrr fallback decoder ──
+
+fn decode_qr_from_grayscale(data: &[u8], width: u32, height: u32) -> Option<String> {
+    let mut img = rqrr::PreparedImage::prepare_from_greyscale(
+        width as usize,
+        height as usize,
+        |x, y| data[y * width as usize + x],
+    );
+    let grids = img.detect_grids();
+    for grid in grids {
+        if let Ok((_, content)) = grid.decode() {
+            return Some(content);
+        }
+    }
+    None
+}
+
+fn rgba_to_grayscale(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let len = (width * height) as usize;
+    let mut gray = Vec::with_capacity(len);
+    for i in 0..len {
+        let r = rgba[i * 4] as u32;
+        let g = rgba[i * 4 + 1] as u32;
+        let b = rgba[i * 4 + 2] as u32;
+        gray.push(((r * 299 + g * 587 + b * 114) / 1000) as u8);
+    }
+    gray
+}
+
+// ── Component ──
+
 #[component]
 pub fn QrScanner(on_scan: Callback<String>, on_close: Callback<()>) -> impl IntoView {
     let video_ref = create_node_ref::<leptos::html::Video>();
@@ -57,21 +92,18 @@ pub fn QrScanner(on_scan: Callback<String>, on_close: Callback<()>) -> impl Into
     };
 
     create_effect(move |_| {
-        if !barcode_detector_available() {
-            error_msg.set(Some(
-                "BarcodeDetector API is not available in this browser. Try Chrome or Edge on Android/desktop."
-                    .to_string(),
-            ));
-            return;
-        }
-
         spawn_local(async move {
-            if let Err(e) = start_scanning(video_ref, stream_signal, scanning, on_scan)
-                .await
-            {
-                let msg = e
-                    .as_string()
-                    .unwrap_or_else(|| format!("{:?}", e));
+            if let Err(e) = start_scanning(video_ref, stream_signal, scanning, on_scan).await {
+                let raw = e.as_string()
+                    .unwrap_or_else(|| format!("{:?}", e))
+                    .to_lowercase();
+                let msg = if raw.contains("not found") || raw.contains("notfounderror") {
+                    t("qr.no_camera").to_string()
+                } else if raw.contains("not allowed") || raw.contains("permission") {
+                    t("qr.permission_denied").to_string()
+                } else {
+                    t("qr.camera_error").to_string()
+                };
                 error_msg.set(Some(msg));
             }
         });
@@ -86,14 +118,12 @@ pub fn QrScanner(on_scan: Callback<String>, on_close: Callback<()>) -> impl Into
             <div class="modal-background" on:click=close></div>
             <div class="modal-card" style="max-width: 28rem;">
                 <header class="modal-card-head">
-                    <p class="modal-card-title is-size-6">"Scan QR Code"</p>
+                    <p class="modal-card-title is-size-6">{t("pair.scan_qr")}</p>
                     <button class="delete" on:click=close></button>
                 </header>
                 <section class="modal-card-body" style="padding: 0; position: relative;">
                     {move || error_msg.get().map(|msg| view! {
-                        <div class="notification is-danger m-3">
-                            {msg}
-                        </div>
+                        <div class="notification is-danger m-3">{msg}</div>
                     })}
                     <video
                         node_ref=video_ref
@@ -103,8 +133,21 @@ pub fn QrScanner(on_scan: Callback<String>, on_close: Callback<()>) -> impl Into
                         style="width: 100%; display: block;"
                     ></video>
                 </section>
-                <footer class="modal-card-foot">
-                    <button class="button" on:click=close>"Close"</button>
+                <footer class="modal-card-foot" style="justify-content: space-between;">
+                    <button class="button" on:click=close>{t("common.cancel")}</button>
+                    <button
+                        class="button is-light"
+                        on:click=move |_| {
+                            let on_scan = on_scan.clone();
+                            spawn_local(async move {
+                                if let Ok(text) = paste_from_clipboard().await {
+                                    if !text.is_empty() {
+                                        on_scan.call(text);
+                                    }
+                                }
+                            });
+                        }
+                    >{t("qr.paste_link")}</button>
                 </footer>
             </div>
         </div>
@@ -121,67 +164,68 @@ async fn start_scanning(
     let navigator = window.navigator();
     let media_devices = navigator
         .media_devices()
-        .map_err(|e| JsValue::from_str(&format!("No media devices: {:?}", e)))?;
+        .map_err(|_| JsValue::from_str("NotFoundError"))?;
 
     let constraints = MediaStreamConstraints::new();
     let video_constraints = js_sys::Object::new();
     let facing_mode = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &facing_mode,
-        &JsValue::from_str("ideal"),
-        &JsValue::from_str("environment"),
-    )?;
-    js_sys::Reflect::set(
-        &video_constraints,
-        &JsValue::from_str("facingMode"),
-        &facing_mode,
-    )?;
+    js_sys::Reflect::set(&facing_mode, &"ideal".into(), &"environment".into())?;
+    js_sys::Reflect::set(&video_constraints, &"facingMode".into(), &facing_mode)?;
     constraints.set_video(&video_constraints.into());
     constraints.set_audio(&JsValue::FALSE);
 
     let stream_promise = media_devices.get_user_media_with_constraints(&constraints)?;
     let stream_js = JsFuture::from(stream_promise).await?;
     let stream: MediaStream = stream_js.unchecked_into();
-
     stream_signal.set(Some(stream.clone()));
 
-    // Wait for video element to be available
     let video_el: HtmlVideoElement = loop {
         if let Some(el) = video_ref.get_untracked() {
             let html_el: &web_sys::HtmlElement = &el;
             break html_el.clone().unchecked_into::<HtmlVideoElement>();
         }
-        gloo_timers_sleep(50).await;
+        sleep_ms(50).await;
     };
 
     video_el.set_src_object(Some(&stream));
-
-    // Wait for video to start playing
-    let play_promise = video_el.play().map_err(|e| {
-        JsValue::from_str(&format!("Failed to play video: {:?}", e))
-    })?;
+    let play_promise = video_el.play().map_err(|e| JsValue::from_str(&format!("{:?}", e)))?;
     JsFuture::from(play_promise).await?;
 
-    // Wait for video dimensions to be known
     loop {
         if video_el.video_width() > 0 && video_el.video_height() > 0 {
             break;
         }
-        gloo_timers_sleep(100).await;
+        sleep_ms(100).await;
     }
 
-    let detector = create_barcode_detector()?;
+    let use_barcode_api = barcode_detector_available();
+    let detector = if use_barcode_api {
+        Some(create_barcode_detector()?)
+    } else {
+        None
+    };
 
-    // Scan loop
+    // Create offscreen canvas for rqrr fallback
+    let document = window.document().expect("no document");
+    let canvas: HtmlCanvasElement = document
+        .create_element("canvas")
+        .map_err(|e| JsValue::from_str(&format!("{:?}", e)))?
+        .unchecked_into();
+
     loop {
         if !scanning.get_untracked() {
             break;
         }
 
-        match detect_from_video(&detector, &video_el).await {
+        let result = if let Some(ref det) = detector {
+            detect_barcode_api(det, &video_el).await
+        } else {
+            detect_rqrr(&video_el, &canvas)
+        };
+
+        match result {
             Ok(Some(value)) => {
                 scanning.set(false);
-                // Stop stream before calling back
                 if let Some(s) = stream_signal.get_untracked() {
                     let tracks = s.get_tracks();
                     for i in 0..tracks.length() {
@@ -195,21 +239,16 @@ async fn start_scanning(
                 return Ok(());
             }
             Ok(None) => {}
-            Err(_) => {
-                // Detection can fail transiently; just retry
-            }
+            Err(_) => {}
         }
 
-        gloo_timers_sleep(150).await;
+        sleep_ms(200).await;
     }
 
     Ok(())
 }
 
-async fn detect_from_video(
-    detector: &BarcodeDetector,
-    video: &HtmlVideoElement,
-) -> Result<Option<String>, JsValue> {
+async fn detect_barcode_api(detector: &BarcodeDetector, video: &HtmlVideoElement) -> Result<Option<String>, JsValue> {
     let promise = detector.detect(&video.into())?;
     let result = JsFuture::from(promise).await?;
     let barcodes: js_sys::Array = result.unchecked_into();
@@ -219,15 +258,52 @@ async fn detect_from_video(
     }
 
     let first = barcodes.get(0);
-    let raw_value = js_sys::Reflect::get(&first, &JsValue::from_str("rawValue"))?;
+    let raw_value = js_sys::Reflect::get(&first, &"rawValue".into())?;
     match raw_value.as_string() {
         Some(s) if !s.is_empty() => Ok(Some(s)),
         _ => Ok(None),
     }
 }
 
-async fn gloo_timers_sleep(ms: u32) {
-    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+fn detect_rqrr(video: &HtmlVideoElement, canvas: &HtmlCanvasElement) -> Result<Option<String>, JsValue> {
+    let w = video.video_width();
+    let h = video.video_height();
+    if w == 0 || h == 0 {
+        return Ok(None);
+    }
+
+    canvas.set_width(w);
+    canvas.set_height(h);
+
+    let ctx = canvas
+        .get_context("2d")
+        .map_err(|e| JsValue::from_str(&format!("{:?}", e)))?
+        .ok_or_else(|| JsValue::from_str("no 2d context"))?
+        .unchecked_into::<web_sys::CanvasRenderingContext2d>();
+
+    ctx.draw_image_with_html_video_element(video, 0.0, 0.0)
+        .map_err(|e| JsValue::from_str(&format!("{:?}", e)))?;
+
+    let image_data = ctx
+        .get_image_data(0.0, 0.0, w as f64, h as f64)
+        .map_err(|e| JsValue::from_str(&format!("{:?}", e)))?;
+
+    let rgba = image_data.data().to_vec();
+    let gray = rgba_to_grayscale(&rgba, w, h);
+
+    Ok(decode_qr_from_grayscale(&gray, w, h))
+}
+
+async fn paste_from_clipboard() -> Result<String, JsValue> {
+    let window = web_sys::window().expect("no window");
+    let clipboard = window.navigator().clipboard();
+    let promise = clipboard.read_text();
+    let val = JsFuture::from(promise).await?;
+    Ok(val.as_string().unwrap_or_default())
+}
+
+async fn sleep_ms(ms: u32) {
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
         let window = web_sys::window().expect("no window");
         let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms as i32);
     });

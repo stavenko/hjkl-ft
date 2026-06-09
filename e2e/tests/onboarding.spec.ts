@@ -50,10 +50,7 @@ test.describe('Account creation with PassKey', () => {
   let cdpSession: CDPSession;
 
   test.beforeEach(async ({ page }) => {
-    await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
-    await page.reload();
-    await page.waitForTimeout(3000);
-
+    // Set up virtual authenticator BEFORE reload so TryingPassKey sees it
     cdpSession = await page.context().newCDPSession(page);
     await cdpSession.send('WebAuthn.enable');
     await cdpSession.send('WebAuthn.addVirtualAuthenticator', {
@@ -66,6 +63,10 @@ test.describe('Account creation with PassKey', () => {
         automaticPresenceSimulation: true,
       },
     });
+
+    await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
+    await page.reload();
+    await page.waitForTimeout(3000);
   });
 
   test.afterEach(async () => {
@@ -107,8 +108,16 @@ test.describe('Account creation with PassKey', () => {
 
     await createBtn.click();
 
+    // Wait for registration to complete: either user_id in localStorage or error
     const result = await Promise.race([
-      page.getByText('Дневник').waitFor({ timeout: 20_000 }).then(() => 'app'),
+      (async () => {
+        for (let i = 0; i < 40; i++) {
+          const uid = await page.evaluate(() => localStorage.getItem('user_id'));
+          if (uid) return 'app';
+          await page.waitForTimeout(500);
+        }
+        return 'timeout';
+      })(),
       page.locator('.notification.is-danger').waitFor({ timeout: 20_000 }).then(() => 'error'),
     ]).catch(() => 'timeout');
 

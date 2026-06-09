@@ -1,0 +1,2 @@
+api_base_url = ""
+auth_base_url = "https://auth-worker.vg-stavenko.workers.dev"

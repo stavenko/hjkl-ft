@@ -27,6 +27,13 @@ web-sys = { version = "0.3", features = [
     "FileList",
     "HtmlInputElement",
     "Blob",
+    "MediaQueryList",
+    "Storage",
+    "CredentialsContainer",
+    "CredentialCreationOptions",
+    "CredentialRequestOptions",
+    "PublicKeyCredentialCreationOptions",
+    "PublicKeyCredentialRequestOptions",
 ] }
 gloo-net = "0.6"
 uuid = { version = "1", features = ["v7", "js"] }

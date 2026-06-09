@@ -1,6 +1,8 @@
 pub mod api;
+pub mod auth;
 pub mod config;
 pub mod db;
 pub mod i18n;
 pub mod local;
+pub mod platform;
 pub mod sync;

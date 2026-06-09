@@ -10,6 +10,8 @@ const CONFIG_URL: &str = "/config/frontend.toml";
 #[derive(Debug, Clone, Deserialize)]
 pub struct FrontendConfig {
     pub api_base_url: String,
+    #[serde(default)]
+    pub auth_base_url: String,
 }
 
 static CONFIG: OnceLock<FrontendConfig> = OnceLock::new();

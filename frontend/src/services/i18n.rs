@@ -208,6 +208,56 @@ fn en(key: &str) -> &'static str {
         // Language
         "settings.language" => "Language",
 
+        // Auth
+        "auth.subtitle" => "Sign in to sync your data across devices",
+        "auth.create_account" => "Create new account",
+        "auth.login_device" => "I already have an account",
+        "auth.creating" => "Creating...",
+        "auth.authenticating" => "Signing in...",
+        "auth.error_network" => "Could not connect to server. Check your internet connection.",
+        "auth.error_passkey" => "PassKey is not supported in this browser.",
+        "auth.error_cancelled" => "PassKey creation was cancelled.",
+
+        // PWA prompt
+        "pwa.description" => "This is an app for managing your nutrition and building healthy eating habits. It can work as an app on your phone. To do that, you need to install it.",
+        "pwa.title.ios" => "How to install on iPhone:",
+        "pwa.title.android" => "How to install on Android:",
+        "pwa.title.macos" => "How to install on Mac:",
+        "pwa.title.desktop" => "How to install:",
+        // iOS Safari
+        "pwa.inst.ios_safari.1" => "Tap the Share button \u{1F4E4} at the bottom of the screen",
+        "pwa.inst.ios_safari.2" => "Scroll down and tap \"Add to Home Screen\"",
+        "pwa.inst.ios_safari.3" => "Tap \"Add\" in the top right corner",
+        // iOS Chrome/Firefox
+        "pwa.inst.ios_other.1" => "PWA install is only supported in Safari on iOS",
+        "pwa.inst.ios_other.2" => "Open this page in Safari and follow the instructions",
+        // Android Chrome
+        "pwa.inst.android_chrome.1" => "Tap the menu \u{22ee} (three dots) in the top right",
+        "pwa.inst.android_chrome.2" => "Tap \"Add to Home screen\" or \"Install app\"",
+        "pwa.inst.android_chrome.3" => "Tap \"Install\" to confirm",
+        // Android Samsung
+        "pwa.inst.android_samsung.1" => "Tap the menu \u{2261} at the bottom right",
+        "pwa.inst.android_samsung.2" => "Tap \"Add page to\" \u{2192} \"Home screen\"",
+        // Android Firefox
+        "pwa.inst.android_firefox.1" => "Tap the menu \u{22ee} (three dots)",
+        "pwa.inst.android_firefox.2" => "Tap \"Install\"",
+        "pwa.inst.android_firefox.3" => "Confirm the installation",
+        // Android Yandex
+        "pwa.inst.android_yandex.1" => "Tap the menu \u{22ee} (three dots)",
+        "pwa.inst.android_yandex.2" => "Tap \"Add to Home screen\"",
+        // macOS Safari
+        "pwa.inst.macos_safari.1" => "In the menu bar: File \u{2192} Add to Dock",
+        "pwa.inst.macos_safari.2" => "The app will appear in your Dock",
+        // Chrome (desktop & macOS)
+        "pwa.inst.chrome.1" => "Click the install icon in the address bar",
+        "pwa.inst.chrome.2" => "Click \"Install\" in the popup",
+        // Edge
+        "pwa.inst.edge.1" => "Click the \u{2026} menu \u{2192} Apps \u{2192} Install this site as an app",
+        "pwa.inst.edge.2" => "Click \"Install\" to confirm",
+        // Firefox desktop
+        "pwa.inst.firefox.1" => "Firefox desktop does not support PWA install. Use Chrome, Edge, or Safari.",
+        "pwa.use_browser" => "I want to use it in the browser anyway",
+
         _ => "???",
     }
 }
@@ -364,6 +414,46 @@ fn ru(key: &str) -> &'static str {
 
         // Язык
         "settings.language" => "Язык",
+
+        // Авторизация
+        "auth.subtitle" => "Войдите, чтобы синхронизировать данные между устройствами",
+        "auth.create_account" => "Создать аккаунт",
+        "auth.login_device" => "У меня уже есть аккаунт",
+        "auth.creating" => "Создаю...",
+        "auth.authenticating" => "Вхожу...",
+        "auth.error_network" => "Не удалось подключиться к серверу. Проверьте интернет.",
+        "auth.error_passkey" => "PassKey не поддерживается в этом браузере.",
+        "auth.error_cancelled" => "Создание PassKey было отменено.",
+
+        // PWA
+        "pwa.description" => "Это приложение для организации питания и формирования здоровых пищевых привычек. Оно может работать как приложение в вашем телефоне. Для этого его нужно установить.",
+        "pwa.title.ios" => "Как установить на iPhone:",
+        "pwa.title.android" => "Как установить на Android:",
+        "pwa.title.macos" => "Как установить на Mac:",
+        "pwa.title.desktop" => "Как установить:",
+        "pwa.inst.ios_safari.1" => "Нажмите кнопку «Поделиться» \u{1F4E4} внизу экрана",
+        "pwa.inst.ios_safari.2" => "Прокрутите вниз и нажмите «На экран Домой»",
+        "pwa.inst.ios_safari.3" => "Нажмите «Добавить» в правом верхнем углу",
+        "pwa.inst.ios_other.1" => "Установка PWA на iOS работает только в Safari",
+        "pwa.inst.ios_other.2" => "Откройте эту страницу в Safari и следуйте инструкции",
+        "pwa.inst.android_chrome.1" => "Нажмите меню \u{22ee} (три точки) в правом верхнем углу",
+        "pwa.inst.android_chrome.2" => "Нажмите «Добавить на главный экран» или «Установить»",
+        "pwa.inst.android_chrome.3" => "Нажмите «Установить» для подтверждения",
+        "pwa.inst.android_samsung.1" => "Нажмите меню \u{2261} в правом нижнем углу",
+        "pwa.inst.android_samsung.2" => "Нажмите «Добавить страницу на» \u{2192} «Главный экран»",
+        "pwa.inst.android_firefox.1" => "Нажмите меню \u{22ee} (три точки)",
+        "pwa.inst.android_firefox.2" => "Нажмите «Установить»",
+        "pwa.inst.android_firefox.3" => "Подтвердите установку",
+        "pwa.inst.android_yandex.1" => "Нажмите меню \u{22ee} (три точки)",
+        "pwa.inst.android_yandex.2" => "Нажмите «Добавить на Домашний экран»",
+        "pwa.inst.macos_safari.1" => "В меню: Файл \u{2192} Добавить в Dock",
+        "pwa.inst.macos_safari.2" => "Приложение появится в вашем Dock",
+        "pwa.inst.chrome.1" => "Нажмите значок установки в адресной строке",
+        "pwa.inst.chrome.2" => "Нажмите «Установить» во всплывающем окне",
+        "pwa.inst.edge.1" => "Меню \u{2026} \u{2192} Приложения \u{2192} Установить этот сайт как приложение",
+        "pwa.inst.edge.2" => "Нажмите «Установить» для подтверждения",
+        "pwa.inst.firefox.1" => "Firefox на компьютере не поддерживает установку PWA. Используйте Chrome, Edge или Safari.",
+        "pwa.use_browser" => "Я хочу использовать в браузере",
 
         _ => "???",
     }

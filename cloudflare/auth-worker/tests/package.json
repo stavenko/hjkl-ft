@@ -1,0 +1,12 @@
+{
+  "name": "auth-worker-tests",
+  "private": true,
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0",
+    "miniflare": "^3.0.0",
+    "@cloudflare/workers-types": "^4.0.0"
+  }
+}

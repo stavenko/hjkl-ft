@@ -13,7 +13,9 @@ use std::cell::RefCell;
 use wasm_bindgen::JsCast;
 use worker::*;
 
-use crate::types::{PairingSession, PairingStatus};
+use crate::types::{PairingSession, PairingStatus, PushSubscription};
+
+use crate::types::{TokenListResponse, TokenMetadata};
 
 // Storage key prefixes for the global AuthDO
 const STORAGE_KEY_CRED_PREFIX: &str = "cred:";
@@ -21,6 +23,10 @@ const STORAGE_KEY_USER_CREDS_PREFIX: &str = "user_creds:";
 const STORAGE_KEY_USER_PREFIX: &str = "user:";
 const STORAGE_KEY_PAIRING_PREFIX: &str = "pairing:";
 const STORAGE_KEY_STATE_PREFIX: &str = "pk_state:";
+const STORAGE_KEY_TOKEN_PREFIX: &str = "token:";
+const STORAGE_KEY_USER_TOKENS_PREFIX: &str = "user_tokens:";
+const STORAGE_KEY_PUSH_SUB_PREFIX: &str = "push_sub:";
+const STORAGE_KEY_USER_PUSH_SUBS_PREFIX: &str = "user_push_subs:";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -402,10 +408,15 @@ impl AuthDO {
 
     // ---- Registration handlers ----
 
-    async fn handle_register_begin(&self, user_id: Option<&str>) -> Result<Response> {
+    async fn handle_register_begin(&self, user_id: Option<&str>, display_name: Option<&str>) -> Result<Response> {
         let user_id = match user_id {
             Some(id) if !id.is_empty() => id.to_string(),
             _ => uuid::Uuid::new_v4().to_string(),
+        };
+
+        let display_name = match display_name {
+            Some(n) if !n.trim().is_empty() => n.trim().to_string(),
+            _ => user_id.clone(),
         };
 
         let config = self.passkey_config();
@@ -423,7 +434,7 @@ impl AuthDO {
         }
 
         let options =
-            start_registration(&store, &user_id, &user_id, &user_id, &config, now_ms())
+            start_registration(&store, &user_id, &display_name, &display_name, &config, now_ms())
                 .await
                 .map_err(|e| Error::RustError(format!("registration begin: {e}")))?;
 
@@ -648,13 +659,18 @@ impl AuthDO {
 
         // Start passkey registration for the bound user
         let user_id = session.user_id.clone();
+        // For pairing, load display_name from user metadata if available
+        let dn = match self.load_user_metadata(&user_id).await? {
+            Some(_) => user_id.clone(), // existing user, use user_id as fallback
+            None => user_id.clone(),
+        };
         let config = self.passkey_config();
         let credentials = self.load_user_credentials(&user_id).await?;
         let states = self.load_states().await?;
         let store = DoPasskeyStore::new(credentials, states);
 
         let options =
-            start_registration(&store, &user_id, &user_id, &user_id, &config, now_ms())
+            start_registration(&store, &user_id, &dn, &dn, &config, now_ms())
                 .await
                 .map_err(|e| Error::RustError(format!("registration begin: {e}")))?;
 
@@ -730,6 +746,201 @@ impl AuthDO {
         }
     }
 
+    // ---- Token storage handlers ----
+
+    async fn handle_token_store(
+        &self,
+        token_id: &str,
+        user_id: &str,
+        fingerprint: &str,
+        created_at: i64,
+    ) -> Result<Response> {
+        let meta = TokenMetadata {
+            token_id: token_id.to_string(),
+            user_id: user_id.to_string(),
+            fingerprint: fingerprint.to_string(),
+            created_at,
+            last_used_at: created_at,
+        };
+        let meta_json = serde_json::to_string(&meta)
+            .map_err(|e| Error::RustError(format!("serialize token metadata: {e}")))?;
+        let token_key = format!("{STORAGE_KEY_TOKEN_PREFIX}{token_id}");
+        self.state.storage().put(&token_key, meta_json).await?;
+
+        // Append token_id to user's token list
+        let list_key = format!("{STORAGE_KEY_USER_TOKENS_PREFIX}{user_id}");
+        let stored: Option<String> = self.state.storage().get(&list_key).await?;
+        let mut token_ids: Vec<String> = match stored {
+            Some(json) => serde_json::from_str(&json)
+                .map_err(|e| Error::RustError(format!("parse user_tokens: {e}")))?,
+            None => Vec::new(),
+        };
+        if !token_ids.contains(&token_id.to_string()) {
+            token_ids.push(token_id.to_string());
+            let list_json = serde_json::to_string(&token_ids)
+                .map_err(|e| Error::RustError(format!("serialize token list: {e}")))?;
+            self.state.storage().put(&list_key, list_json).await?;
+        }
+
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    async fn handle_token_validate(&self, token_id: &str) -> Result<Response> {
+        let token_key = format!("{STORAGE_KEY_TOKEN_PREFIX}{token_id}");
+        let stored: Option<String> = self.state.storage().get(&token_key).await?;
+        match stored {
+            Some(json) => {
+                // Update last_used_at
+                let mut meta: TokenMetadata = serde_json::from_str(&json)
+                    .map_err(|e| Error::RustError(format!("parse token metadata: {e}")))?;
+                meta.last_used_at = now_ms() / 1000;
+                let updated = serde_json::to_string(&meta)
+                    .map_err(|e| Error::RustError(format!("serialize token metadata: {e}")))?;
+                self.state.storage().put(&token_key, updated).await?;
+                Response::from_json(&serde_json::json!({ "ok": true }))
+            }
+            None => Response::error("token not found", 404),
+        }
+    }
+
+    async fn handle_token_list(&self, user_id: &str) -> Result<Response> {
+        let list_key = format!("{STORAGE_KEY_USER_TOKENS_PREFIX}{user_id}");
+        let stored: Option<String> = self.state.storage().get(&list_key).await?;
+        let token_ids: Vec<String> = match stored {
+            Some(json) => serde_json::from_str(&json)
+                .map_err(|e| Error::RustError(format!("parse user_tokens: {e}")))?,
+            None => Vec::new(),
+        };
+
+        let mut tokens = Vec::new();
+        for tid in &token_ids {
+            let token_key = format!("{STORAGE_KEY_TOKEN_PREFIX}{tid}");
+            let stored: Option<String> = self.state.storage().get(&token_key).await?;
+            if let Some(json) = stored {
+                if let Ok(meta) = serde_json::from_str::<TokenMetadata>(&json) {
+                    tokens.push(meta);
+                }
+            }
+        }
+
+        let resp = TokenListResponse { tokens };
+        Response::from_json(&resp)
+    }
+
+    // ---- Push subscription handlers ----
+
+    fn subscription_hash(endpoint: &str) -> String {
+        use sha2::Digest;
+        let hash = sha2::Sha256::digest(endpoint.as_bytes());
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&hash[..16])
+    }
+
+    async fn handle_push_subscribe(
+        &self,
+        user_id: &str,
+        subscription: PushSubscription,
+    ) -> Result<Response> {
+        let sub_hash = Self::subscription_hash(&subscription.endpoint);
+
+        // Store the subscription
+        let sub_key = format!("{STORAGE_KEY_PUSH_SUB_PREFIX}{user_id}:{sub_hash}");
+        let sub_json = serde_json::to_string(&subscription)
+            .map_err(|e| Error::RustError(format!("serialize push subscription: {e}")))?;
+        self.state.storage().put(&sub_key, sub_json).await?;
+
+        // Add to user's subscription list
+        let list_key = format!("{STORAGE_KEY_USER_PUSH_SUBS_PREFIX}{user_id}");
+        let stored: Option<String> = self.state.storage().get(&list_key).await?;
+        let mut sub_hashes: Vec<String> = match stored {
+            Some(json) => serde_json::from_str(&json)
+                .map_err(|e| Error::RustError(format!("parse user_push_subs: {e}")))?,
+            None => Vec::new(),
+        };
+        if !sub_hashes.contains(&sub_hash) {
+            sub_hashes.push(sub_hash);
+            let list_json = serde_json::to_string(&sub_hashes)
+                .map_err(|e| Error::RustError(format!("serialize sub hash list: {e}")))?;
+            self.state.storage().put(&list_key, list_json).await?;
+        }
+
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    async fn handle_push_unsubscribe(
+        &self,
+        user_id: &str,
+        endpoint: &str,
+    ) -> Result<Response> {
+        let sub_hash = Self::subscription_hash(endpoint);
+
+        // Delete the subscription
+        let sub_key = format!("{STORAGE_KEY_PUSH_SUB_PREFIX}{user_id}:{sub_hash}");
+        self.state.storage().delete(&sub_key).await?;
+
+        // Remove from user's subscription list
+        let list_key = format!("{STORAGE_KEY_USER_PUSH_SUBS_PREFIX}{user_id}");
+        let stored: Option<String> = self.state.storage().get(&list_key).await?;
+        if let Some(json) = stored {
+            let mut sub_hashes: Vec<String> = serde_json::from_str(&json)
+                .map_err(|e| Error::RustError(format!("parse user_push_subs: {e}")))?;
+            sub_hashes.retain(|h| h != &sub_hash);
+            let list_json = serde_json::to_string(&sub_hashes)
+                .map_err(|e| Error::RustError(format!("serialize sub hash list: {e}")))?;
+            self.state.storage().put(&list_key, list_json).await?;
+        }
+
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    async fn handle_push_list(&self, user_id: &str) -> Result<Response> {
+        let list_key = format!("{STORAGE_KEY_USER_PUSH_SUBS_PREFIX}{user_id}");
+        let stored: Option<String> = self.state.storage().get(&list_key).await?;
+        let sub_hashes: Vec<String> = match stored {
+            Some(json) => serde_json::from_str(&json)
+                .map_err(|e| Error::RustError(format!("parse user_push_subs: {e}")))?,
+            None => Vec::new(),
+        };
+
+        let mut subscriptions = Vec::new();
+        for hash in &sub_hashes {
+            let sub_key = format!("{STORAGE_KEY_PUSH_SUB_PREFIX}{user_id}:{hash}");
+            let stored: Option<String> = self.state.storage().get(&sub_key).await?;
+            if let Some(json) = stored {
+                if let Ok(sub) = serde_json::from_str::<PushSubscription>(&json) {
+                    subscriptions.push(sub);
+                }
+            }
+        }
+
+        Response::from_json(&serde_json::json!({ "subscriptions": subscriptions }))
+    }
+
+    async fn handle_push_list_all(&self) -> Result<Response> {
+        // List all push subscriptions across all users
+        let map = self.state.storage()
+            .list_with_options(
+                worker::durable::ListOptions::new().prefix(STORAGE_KEY_PUSH_SUB_PREFIX),
+            )
+            .await?;
+
+        let mut subscriptions = Vec::new();
+        let iter = js_sys::try_iter(&map).ok().flatten();
+        if let Some(iter) = iter {
+            for entry in iter {
+                let entry = entry.map_err(Error::from)?;
+                let arr: js_sys::Array = entry.unchecked_into();
+                let val = arr.get(1);
+                if let Ok(json_str) = serde_wasm_bindgen::from_value::<String>(val) {
+                    if let Ok(sub) = serde_json::from_str::<PushSubscription>(&json_str) {
+                        subscriptions.push(sub);
+                    }
+                }
+            }
+        }
+
+        Response::from_json(&subscriptions)
+    }
+
     // ---- Recovery handlers ----
 
     async fn handle_recovery_set(
@@ -779,7 +990,8 @@ impl DurableObject for AuthDO {
             "/register/begin" => {
                 let body: serde_json::Value = req.json().await.unwrap_or_default();
                 let user_id = body.get("user_id").and_then(|v| v.as_str());
-                self.handle_register_begin(user_id).await
+                let display_name = body.get("display_name").and_then(|v| v.as_str());
+                self.handle_register_begin(user_id, display_name).await
             }
             "/register/finish" => {
                 let body: serde_json::Value = req.json().await?;
@@ -896,6 +1108,80 @@ impl DurableObject for AuthDO {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing pairing_id".into()))?;
                 self.handle_pair_status(pairing_id).await
+            }
+            "/token/store" => {
+                let body: serde_json::Value = req.json().await?;
+                let token_id = body
+                    .get("token_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing token_id".into()))?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let fingerprint = body
+                    .get("fingerprint")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let created_at = body
+                    .get("created_at")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| Error::RustError("missing created_at".into()))?;
+                self.handle_token_store(token_id, user_id, fingerprint, created_at)
+                    .await
+            }
+            "/token/validate" => {
+                let body: serde_json::Value = req.json().await?;
+                let token_id = body
+                    .get("token_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing token_id".into()))?;
+                self.handle_token_validate(token_id).await
+            }
+            "/token/list" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_token_list(user_id).await
+            }
+            "/push/subscribe" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let subscription: PushSubscription = serde_json::from_value(
+                    body.get("subscription")
+                        .cloned()
+                        .ok_or_else(|| Error::RustError("missing subscription".into()))?,
+                )
+                .map_err(|e| Error::RustError(format!("parse subscription: {e}")))?;
+                self.handle_push_subscribe(user_id, subscription).await
+            }
+            "/push/unsubscribe" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let endpoint = body
+                    .get("endpoint")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing endpoint".into()))?;
+                self.handle_push_unsubscribe(user_id, endpoint).await
+            }
+            "/push/list-all" => {
+                self.handle_push_list_all().await
+            }
+            "/push/list" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_push_list(user_id).await
             }
             "/recovery/set" => {
                 let body: serde_json::Value = req.json().await?;

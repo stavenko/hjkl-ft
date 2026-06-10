@@ -3,6 +3,7 @@ use worker::*;
 mod auth;
 mod auth_do;
 mod pair;
+mod push;
 mod recovery;
 mod token;
 mod types;
@@ -73,6 +74,11 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/pair/finish", pair::finish_pairing)
         .get_async("/pair/status/:id", pair::pairing_status)
         .post_async("/token/validate", token::validate_token)
+        .get_async("/tokens", token::list_tokens)
+        .get_async("/push/vapid-key", push::vapid_key)
+        .post_async("/push/subscribe", push::subscribe)
+        .post_async("/push/unsubscribe", push::unsubscribe)
+        .post_async("/push/send", push::send)
         .run(req, env)
         .await;
 
@@ -85,5 +91,12 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let _ = headers.set("Access-Control-Allow-Origin", "*");
             Ok(resp)
         }
+    }
+}
+
+#[event(scheduled)]
+async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    if let Err(e) = push::send_scheduled_reminders(&env).await {
+        console_log!("Scheduled push failed: {}", e);
     }
 }

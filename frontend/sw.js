@@ -61,3 +61,41 @@ self.addEventListener('fetch', function(event) {
         })
     );
 });
+
+self.addEventListener('push', function(event) {
+    var data = { title: 'Food Tracker', body: 'New notification', icon: '/icon-192.png' };
+
+    if (event.data) {
+        try {
+            data = event.data.json();
+        } catch (e) {
+            data.body = event.data.text();
+        }
+    }
+
+    event.waitUntil(
+        self.registration.showNotification(data.title || 'Food Tracker', {
+            body: data.body || '',
+            icon: data.icon || '/icon-192.png',
+            badge: '/icon-192.png',
+            data: data.url || '/',
+            tag: data.tag || 'default',
+        })
+    );
+});
+
+self.addEventListener('notificationclick', function(event) {
+    event.notification.close();
+    var url = event.notification.data || '/';
+    event.waitUntil(
+        clients.matchAll({ type: 'window' }).then(function(windowClients) {
+            for (var i = 0; i < windowClients.length; i++) {
+                var client = windowClients[i];
+                if (client.url.includes(self.location.origin) && 'focus' in client) {
+                    return client.focus();
+                }
+            }
+            return clients.openWindow(url);
+        })
+    );
+});

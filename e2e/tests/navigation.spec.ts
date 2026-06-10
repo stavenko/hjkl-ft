@@ -31,6 +31,12 @@ test.describe('App navigation', () => {
     // Wait for TryingPassKey → Auth page
     const createBtn = page.getByTestId('auth-btn-register');
     await expect(createBtn).toBeVisible({ timeout: 15_000 });
+
+    // Fill in display name (required for registration)
+    const nameInput = page.getByTestId('auth-input-name');
+    await nameInput.fill('Test User');
+    await expect(createBtn).toBeEnabled({ timeout: 2_000 });
+
     await createBtn.click();
 
     // Wait for registration complete -- verify it actually worked

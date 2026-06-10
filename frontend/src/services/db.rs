@@ -8,6 +8,8 @@ thread_local! {
     static DB: RefCell<Option<Rexie>> = RefCell::new(None);
 }
 
+// TODO: scope DB by user_id — change name to "hjkl-ft-{user_id}" so each user
+// gets their own IndexedDB. After login, reinitialize DB with the user's ID.
 pub async fn init() {
     let rexie = Rexie::builder("hjkl-ft")
         .version(2)

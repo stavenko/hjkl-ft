@@ -14,6 +14,21 @@ pub struct TokenClaims {
     pub iat: i64,
     pub exp: i64,
     pub caps: Vec<String>,
+    pub token_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenMetadata {
+    pub token_id: String,
+    pub user_id: String,
+    pub fingerprint: String,
+    pub created_at: i64,
+    pub last_used_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TokenListResponse {
+    pub tokens: Vec<TokenMetadata>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -83,6 +98,20 @@ pub struct PairStatusResponse {
     pub status: PairingStatus,
 }
 
+// ---- Push subscription types ----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushSubscription {
+    pub endpoint: String,
+    pub keys: PushSubscriptionKeys,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushSubscriptionKeys {
+    pub p256dh: String, // base64url
+    pub auth: String,   // base64url
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,6 +138,7 @@ mod tests {
             iat: 1700000000,
             exp: 1700003600,
             caps: vec!["write".to_string()],
+            token_id: "tok-abc".to_string(),
         };
         let json = serde_json::to_string(&claims).expect("serialize TokenClaims");
         let decoded: TokenClaims = serde_json::from_str(&json).expect("deserialize TokenClaims");
@@ -116,6 +146,7 @@ mod tests {
         assert_eq!(decoded.iat, claims.iat);
         assert_eq!(decoded.exp, claims.exp);
         assert_eq!(decoded.caps, claims.caps);
+        assert_eq!(decoded.token_id, claims.token_id);
 
         // RegisterFinishRequest
         let req = RegisterFinishRequest {

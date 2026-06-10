@@ -232,6 +232,10 @@ pub async fn finish_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<R
         .get("credential")
         .cloned()
         .ok_or_else(|| Error::RustError("missing credential".into()))?;
+    let fingerprint = body
+        .get("fingerprint")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let stub = auth_do_stub(&ctx.env)?;
     let do_body = serde_json::json!({
@@ -262,7 +266,11 @@ pub async fn finish_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<R
         .map(|s| s.to_string())
         .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
 
-    let token_response = token::create_token(user_id, vec!["auth".to_string()], &secret)?;
+    let (token_response, token_id) =
+        token::create_token(user_id, fingerprint, vec!["auth".to_string()], &secret)?;
+
+    // Store token metadata in DO
+    token::store_token_in_do(&ctx.env, &token_id, user_id, fingerprint).await?;
 
     Response::from_json(&serde_json::json!({
         "token": token_response.token,

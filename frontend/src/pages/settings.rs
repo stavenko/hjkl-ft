@@ -1,7 +1,7 @@
 use leptos::*;
 use api_types::*;
 
-use crate::services::{local, sync};
+use crate::services::{auth, local, push, sync};
 use crate::services::i18n::t;
 use crate::pages::pair_page::PairPageLoggedIn;
 
@@ -342,14 +342,120 @@ pub fn SettingsPage() -> impl IntoView {
                     </section>
 
                     <section class="mt-6">
-                        <h2 class="subtitle is-5 mb-4">{t("settings.add_device")}</h2>
+                        <h2 class="subtitle is-5 mb-4">{t("settings.privacy")}</h2>
+
                         <button
                             attr:data-testid="settings-btn-add-device"
-                            class="button is-link is-light"
+                            class="button is-link is-light mb-4"
                             on:click=move |_| show_pair.set(true)
                         >
                             {t("settings.add_device")}
                         </button>
+
+                        <h3 class="is-size-6 has-text-weight-semibold mb-3">{t("settings.active_sessions")}</h3>
+                        {
+                            let tokens_res = create_resource(
+                                || (),
+                                |_| async { auth::fetch_tokens().await.unwrap_or_default() },
+                            );
+                            let my_fp = auth::current_fingerprint();
+                            move || {
+                                let my_fp = my_fp.clone();
+                                tokens_res.get().map(|tokens| {
+                                    if tokens.is_empty() {
+                                        view! { <p class="is-size-7 has-text-grey">"--"</p> }.into_view()
+                                    } else {
+                                        tokens.into_iter().map(|tok| {
+                                            let fp = tok.get("fingerprint").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            let created = tok.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            let last_used = tok.get("last_used_at").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            let is_current = fp == my_fp;
+                                            let short_fp = if fp.len() > 8 { &fp[..8] } else { &fp };
+                                            let label = if is_current {
+                                                format!("{} ({})", short_fp, t("settings.current_device"))
+                                            } else {
+                                                short_fp.to_string()
+                                            };
+                                            let bg = if is_current { "background: #f0fff4;" } else { "" };
+                                            view! {
+                                                <div style=format!("padding: 0.4rem 0.5rem; border-bottom: 1px solid #f0f0f0; {bg}")>
+                                                    <span class="is-size-7 has-text-weight-medium">{label}</span>
+                                                    <br/>
+                                                    <span class="is-size-7 has-text-grey">
+                                                        {format!("created: {}", created)}
+                                                    </span>
+                                                    {if !last_used.is_empty() {
+                                                        view! { <span class="is-size-7 has-text-grey">{format!(" | last used: {}", last_used)}</span> }.into_view()
+                                                    } else {
+                                                        view! {}.into_view()
+                                                    }}
+                                                </div>
+                                            }
+                                        }).collect::<Vec<_>>().into_view()
+                                    }
+                                })
+                            }
+                        }
+                    </section>
+
+                    <section class="mt-6">
+                        <h2 class="subtitle is-5 mb-4">{t("settings.notifications")}</h2>
+                        {
+                            let push_subscribed = create_rw_signal(push::is_subscribed());
+                            let push_loading = create_rw_signal(false);
+                            let push_supported = push::is_supported();
+                            view! {
+                                {if !push_supported {
+                                    view! {
+                                        <p class="is-size-7 has-text-grey">{t("settings.push_not_supported")}</p>
+                                    }.into_view()
+                                } else {
+                                    view! {
+                                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                            <button
+                                                class=move || if push_subscribed.get() {
+                                                    "button is-small is-danger is-light"
+                                                } else {
+                                                    "button is-small is-link"
+                                                }
+                                                prop:disabled=move || push_loading.get()
+                                                on:click=move |_| {
+                                                    push_loading.set(true);
+                                                    let is_on = push_subscribed.get_untracked();
+                                                    spawn_local(async move {
+                                                        if is_on {
+                                                            match push::unsubscribe().await {
+                                                                Ok(()) => push_subscribed.set(false),
+                                                                Err(e) => leptos::logging::error!("push unsubscribe: {}", e),
+                                                            }
+                                                        } else {
+                                                            match push::subscribe().await {
+                                                                Ok(()) => push_subscribed.set(true),
+                                                                Err(e) => leptos::logging::error!("push subscribe: {}", e),
+                                                            }
+                                                        }
+                                                        push_loading.set(false);
+                                                    });
+                                                }
+                                            >
+                                                {move || if push_subscribed.get() {
+                                                    t("settings.push_disable")
+                                                } else {
+                                                    t("settings.push_enable")
+                                                }}
+                                            </button>
+                                            {move || if push_subscribed.get() {
+                                                view! {
+                                                    <span class="is-size-7 has-text-success">{t("settings.push_enabled")}</span>
+                                                }.into_view()
+                                            } else {
+                                                view! {}.into_view()
+                                            }}
+                                        </div>
+                                    }.into_view()
+                                }}
+                            }
+                        }
                     </section>
 
                     <section class="mt-6">

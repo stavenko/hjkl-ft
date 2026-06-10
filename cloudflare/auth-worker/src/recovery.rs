@@ -46,10 +46,18 @@ pub async fn authenticate_with_recovery(
     mut req: Request,
     ctx: RouteContext<()>,
 ) -> Result<Response> {
-    let body: RecoveryAuthRequest = req
+    let raw_body: serde_json::Value = req
         .json()
         .await
         .map_err(|e| Error::RustError(format!("invalid request body: {e}")))?;
+
+    let body: RecoveryAuthRequest = serde_json::from_value(raw_body.clone())
+        .map_err(|e| Error::RustError(format!("invalid request body: {e}")))?;
+
+    let fingerprint = raw_body
+        .get("fingerprint")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     // Forward to AuthDO
     let stub = auth_do_stub(&ctx.env)?;
@@ -74,10 +82,10 @@ pub async fn authenticate_with_recovery(
         .unwrap_or(false);
 
     if !valid {
-        let body = ErrorResponse {
+        let err_body = ErrorResponse {
             error: "invalid recovery key".into(),
         };
-        return Ok(Response::from_json(&body)?.with_status(401));
+        return Ok(Response::from_json(&err_body)?.with_status(401));
     }
 
     // Issue a new session token
@@ -87,8 +95,11 @@ pub async fn authenticate_with_recovery(
         .map(|s| s.to_string())
         .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
 
-    let token_response =
-        token::create_token(&body.user_id, vec!["auth".to_string()], &secret)?;
+    let (token_response, token_id) =
+        token::create_token(&body.user_id, fingerprint, vec!["auth".to_string()], &secret)?;
+
+    // Store token metadata in DO
+    token::store_token_in_do(&ctx.env, &token_id, &body.user_id, fingerprint).await?;
 
     Response::from_json(&token_response)
 }

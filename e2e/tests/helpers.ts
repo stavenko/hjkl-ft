@@ -62,6 +62,12 @@ export async function registerAccount(page: Page): Promise<{ cdpSession: CDPSess
   // TryingPassKey → fail → Auth page
   const createBtn = page.getByTestId('auth-btn-register');
   await expect(createBtn).toBeVisible({ timeout: 15_000 });
+
+  // Fill in display name (required for registration)
+  const nameInput = page.getByTestId('auth-input-name');
+  await nameInput.fill('Test User');
+  await expect(createBtn).toBeEnabled({ timeout: 2_000 });
+
   await createBtn.click();
 
   // Wait for registration complete

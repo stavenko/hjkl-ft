@@ -6,9 +6,16 @@ use crate::{auth_do_stub, do_request};
 
 // ---- Registration ----
 
-pub async fn register_begin(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+pub async fn register_begin(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let body: serde_json::Value = req.json().await.unwrap_or_default();
+    let display_name = body
+        .get("display_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let stub = auth_do_stub(&ctx.env)?;
-    let internal_req = do_request("/register/begin", &serde_json::json!({}))?;
+    let internal_req = do_request("/register/begin", &serde_json::json!({
+        "display_name": display_name
+    }))?;
     let resp = stub.fetch_with_request(internal_req).await?;
     Ok(resp)
 }
@@ -27,6 +34,10 @@ pub async fn register_finish(mut req: Request, ctx: RouteContext<()>) -> Result<
         .get("user_id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| Error::RustError("missing user_id in finish request".into()))?;
+    let fingerprint = body
+        .get("fingerprint")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let stub = auth_do_stub(&ctx.env)?;
     let do_body = serde_json::json!({ "credential": credential, "user_id": user_id });
@@ -44,7 +55,11 @@ pub async fn register_finish(mut req: Request, ctx: RouteContext<()>) -> Result<
         .map(|s| s.to_string())
         .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
 
-    let token_response = token::create_token(user_id, vec!["auth".to_string()], &secret)?;
+    let (token_response, token_id) =
+        token::create_token(user_id, fingerprint, vec!["auth".to_string()], &secret)?;
+
+    // Store token metadata in DO
+    token::store_token_in_do(&ctx.env, &token_id, user_id, fingerprint).await?;
 
     Response::from_json(&serde_json::json!({
         "ok": true,
@@ -73,6 +88,10 @@ pub async fn authenticate_finish(mut req: Request, ctx: RouteContext<()>) -> Res
         .get("credential")
         .cloned()
         .ok_or_else(|| Error::RustError("missing credential".into()))?;
+    let fingerprint = body
+        .get("fingerprint")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let stub = auth_do_stub(&ctx.env)?;
     let do_body = serde_json::json!({ "credential": credential });
@@ -100,7 +119,11 @@ pub async fn authenticate_finish(mut req: Request, ctx: RouteContext<()>) -> Res
         .map(|s| s.to_string())
         .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
 
-    let token_response = token::create_token(user_id, vec!["auth".to_string()], &secret)?;
+    let (token_response, token_id) =
+        token::create_token(user_id, fingerprint, vec!["auth".to_string()], &secret)?;
+
+    // Store token metadata in DO
+    token::store_token_in_do(&ctx.env, &token_id, user_id, fingerprint).await?;
 
     Response::from_json(&serde_json::json!({
         "user_id": user_id,

@@ -18,6 +18,10 @@ sha2 = "0.10"
 chrono = { version = "0.4", features = ["wasm-bindgen"] }
 base64 = "0.22"
 argon2 = "0.5"
+aes-gcm = "0.10"
+hkdf = "0.12"
+p256 = { version = "0.13", features = ["ecdsa", "ecdh"] }
+elliptic-curve = { version = "0.13", features = ["sec1"] }
 async-trait = "0.1"
 serde-wasm-bindgen = "0.6"
 js-sys = "0.3"

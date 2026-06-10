@@ -17,12 +17,14 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
     let step = create_rw_signal(AuthStep::Main);
     let loading = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);
+    let display_name = create_rw_signal(String::new());
 
     let on_register = move |_| {
+        let name = display_name.get_untracked();
         loading.set(true);
         error.set(None);
         spawn_local(async move {
-            match auth::register().await {
+            match auth::register(&name).await {
                 Ok(_) => on_authenticated.call(()),
                 Err(e) => {
                     error.set(Some(e));
@@ -267,10 +269,20 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                         {error_view}
 
                         <div style="display: flex; flex-direction: column; gap: 1rem;">
+                            <input
+                                attr:data-testid="auth-input-name"
+                                class="input is-medium"
+                                type="text"
+                                placeholder=t("auth.name_placeholder")
+                                prop:value=move || display_name.get()
+                                on:input=move |ev| {
+                                    display_name.set(event_target_value(&ev));
+                                }
+                            />
                             <button
                                 attr:data-testid="auth-btn-register"
                                 class="button is-link is-medium is-fullwidth"
-                                disabled=move || loading.get()
+                                disabled=move || loading.get() || display_name.get().trim().is_empty()
                                 on:click=on_register
                             >
                                 {move || if loading.get() { t("auth.creating") } else { t("auth.create_account") }}

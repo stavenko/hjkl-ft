@@ -10,8 +10,14 @@ export default defineConfig({
   },
   projects: [
     {
+      name: 'csp',
+      testMatch: 'csp.spec.ts',
+      use: { browserName: 'chromium', bypassCSP: false },
+    },
+    {
       name: 'chromium',
-      use: { browserName: 'chromium' },
+      testIgnore: 'csp.spec.ts',
+      use: { browserName: 'chromium', bypassCSP: true },
     },
   ],
 });

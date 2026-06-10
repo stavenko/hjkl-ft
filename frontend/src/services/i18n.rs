@@ -232,13 +232,12 @@ fn en(key: &str) -> &'static str {
         "auth.error_network" => "Could not connect to server. Check your internet connection.",
         "auth.error_passkey" => "PassKey is not supported in this browser.",
         "auth.error_cancelled" => "PassKey creation was cancelled.",
-        "auth.session_expired" => "Session expired. Sign in again.",
-        "auth.session_expiring" => "Session expires soon.",
-        "auth.login_again" => "Sign in",
         "auth.recovery_link" => "Recover access with password",
         "auth.recovery_title" => "Recover access",
         "auth.recovery_hint" => "Enter your recovery password to regain access to your account.",
         "auth.back" => "Back",
+        "auth.name_placeholder" => "Your name",
+        "auth.name_label" => "Display name",
 
         // PWA prompt
         "pwa.description" => "This is an app for managing your nutrition and building healthy eating habits. It can work as an app on your phone. To do that, you need to install it.",
@@ -295,6 +294,16 @@ fn en(key: &str) -> &'static str {
         "pair.back" => "Back",
         "pair.error_invalid_qr" => "Invalid QR code. Expected hjkl-pair:// link.",
         "settings.add_device" => "Add device",
+        "settings.privacy" => "Privacy",
+        "settings.active_sessions" => "Active sessions",
+        "settings.current_device" => "This device",
+
+        // Notifications
+        "settings.notifications" => "Notifications",
+        "settings.push_enable" => "Enable push notifications",
+        "settings.push_disable" => "Disable push notifications",
+        "settings.push_enabled" => "Notifications enabled",
+        "settings.push_not_supported" => "Push notifications not supported in this browser",
 
         _ => "???",
     }
@@ -477,13 +486,12 @@ fn ru(key: &str) -> &'static str {
         "auth.error_network" => "Не удалось подключиться к серверу. Проверьте интернет.",
         "auth.error_passkey" => "PassKey не поддерживается в этом браузере.",
         "auth.error_cancelled" => "Создание PassKey было отменено.",
-        "auth.session_expired" => "Сессия истекла. Войдите снова.",
-        "auth.session_expiring" => "Сессия скоро истечёт.",
-        "auth.login_again" => "Войти",
         "auth.recovery_link" => "Восстановить доступ по паролю",
         "auth.recovery_title" => "Восстановление доступа",
         "auth.recovery_hint" => "Введите пароль восстановления для доступа к аккаунту.",
         "auth.back" => "Назад",
+        "auth.name_placeholder" => "Ваше имя",
+        "auth.name_label" => "Имя",
 
         // PWA
         "pwa.description" => "Это приложение для организации питания и формирования здоровых пищевых привычек. Оно может работать как приложение в вашем телефоне. Для этого его нужно установить.",
@@ -530,6 +538,16 @@ fn ru(key: &str) -> &'static str {
         "pair.back" => "Назад",
         "pair.error_invalid_qr" => "Неверный QR-код. Ожидалась ссылка hjkl-pair://.",
         "settings.add_device" => "Подключить устройство",
+        "settings.privacy" => "Приватность",
+        "settings.active_sessions" => "Активные сессии",
+        "settings.current_device" => "Это устройство",
+
+        // Уведомления
+        "settings.notifications" => "Уведомления",
+        "settings.push_enable" => "Включить уведомления",
+        "settings.push_disable" => "Отключить уведомления",
+        "settings.push_enabled" => "Уведомления включены",
+        "settings.push_not_supported" => "Push-уведомления не поддерживаются в этом браузере",
 
         _ => "???",
     }

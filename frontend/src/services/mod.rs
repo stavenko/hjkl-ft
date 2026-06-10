@@ -5,4 +5,5 @@ pub mod db;
 pub mod i18n;
 pub mod local;
 pub mod platform;
+pub mod push;
 pub mod sync;

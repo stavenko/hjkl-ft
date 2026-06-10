@@ -43,6 +43,14 @@ web-sys = { version = "0.3", features = [
     "CanvasRenderingContext2d",
     "ImageData",
     "Clipboard",
+    "Screen",
+    "ServiceWorkerRegistration",
+    "PushManager",
+    "PushSubscription",
+    "PushSubscriptionOptions",
+    "PushSubscriptionOptionsInit",
+    "NotificationPermission",
+    "Notification",
 ] }
 gloo-net = "0.6"
 uuid = { version = "1", features = ["v7", "js"] }
@@ -55,3 +63,4 @@ serde_json = "1"
 serde-wasm-bindgen = "0.6"
 fast_qr = { version = "0.12", features = ["svg"] }
 rqrr = "0.8"
+sha2 = "0.10"

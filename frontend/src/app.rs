@@ -15,7 +15,7 @@ enum AppState {
 fn initial_state() -> AppState {
     if platform::needs_pwa_prompt() {
         AppState::PwaPrompt
-    } else if auth::is_logged_in() {
+    } else if auth::get_user_id().is_some() {
         AppState::Ready
     } else {
         AppState::Auth
@@ -31,7 +31,7 @@ pub fn App() -> impl IntoView {
         {move || match state.get() {
             AppState::PwaPrompt => Some(view! {
                 <pages::pwa_prompt::PwaPrompt on_dismiss=Callback::new(move |_| {
-                    if auth::is_logged_in() {
+                    if auth::get_user_id().is_some() {
                         state.set(AppState::Ready);
                     } else {
                         state.set(AppState::Auth);
@@ -52,69 +52,6 @@ pub fn App() -> impl IntoView {
 
         // Router always mounted
         <Router>
-            // Session expiry banner — renew via PassKey, panic on failure
-            {
-                let renewing = create_rw_signal(false);
-                let token_version = create_rw_signal(0u32);
-
-                // Re-schedule expire timer whenever token changes
-                create_effect(move |_| {
-                    let _ = token_version.get();
-                    spawn_local(async move {
-                        if let Some(expires_str) = web_sys::window()
-                            .and_then(|w| w.local_storage().ok().flatten())
-                            .and_then(|s| s.get_item("token_expires_at").ok().flatten())
-                        {
-                            if let Ok(expires) = expires_str.parse::<f64>() {
-                                let now = js_sys::Date::now() / 1000.0;
-                                let ms = ((expires - now) * 1000.0).max(0.0) as i32;
-                                if ms > 0 {
-                                    let promise = js_sys::Promise::new(&mut |resolve, _| {
-                                        let window = web_sys::window().expect("no window");
-                                        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
-                                    });
-                                    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-                                    token_version.update(|v| *v += 1);
-                                }
-                            }
-                        }
-                    });
-                });
-
-                let renew = move |_| {
-                    renewing.set(true);
-                    spawn_local(async move {
-                        auth::authenticate().await
-                            .expect("PassKey re-authentication failed on existing user — this is a bug");
-                        renewing.set(false);
-                        token_version.update(|v| *v += 1);
-                    });
-                };
-                move || {
-                    let _ = token_version.get(); // subscribe to token changes
-                    if auth::is_token_expired() {
-                        Some(view! {
-                            <div attr:data-testid="banner-session-expired" style="position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: #ffe08a; color: #363636; padding: 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem;">
-                                <span>{t("auth.session_expired")}</span>
-                                <button attr:data-testid="btn-session-renew" class="button is-small" disabled=move || renewing.get() on:click=renew>
-                                    {move || if renewing.get() { "..." } else { t("auth.login_again") }}
-                                </button>
-                            </div>
-                        })
-                    } else if auth::is_token_expiring_soon() {
-                        Some(view! {
-                            <div attr:data-testid="banner-session-expiring" style="position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: #f5f5f5; color: #363636; padding: 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem;">
-                                <span>{t("auth.session_expiring")}</span>
-                                <button attr:data-testid="btn-session-renew" class="button is-small" disabled=move || renewing.get() on:click=renew>
-                                    {move || if renewing.get() { "..." } else { t("auth.login_again") }}
-                                </button>
-                            </div>
-                        })
-                    } else {
-                        None
-                    }
-                }
-            }
             <div style="padding-bottom: 4.5rem;">
                 <div style="padding: 0.75rem;">
                     <Routes>

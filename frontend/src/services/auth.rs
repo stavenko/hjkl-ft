@@ -1,10 +1,10 @@
+use base64::Engine;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
 const KEY_USER_ID: &str = "user_id";
 const KEY_AUTH_TOKEN: &str = "auth_token";
-const KEY_TOKEN_EXPIRES: &str = "token_expires_at";
 
 fn storage() -> web_sys::Storage {
     web_sys::window()
@@ -19,59 +19,45 @@ pub fn get_user_id() -> Option<String> {
     storage().get_item(KEY_USER_ID).ok().flatten()
 }
 
-pub fn is_logged_in() -> bool {
-    get_user_id().is_some()
-}
-
 fn set_user(user_id: &str) {
     storage().set_item(KEY_USER_ID, user_id).expect("write user_id");
 }
 
-fn set_token(token: &str, expires_at: i64) {
-    let s = storage();
-    s.set_item(KEY_AUTH_TOKEN, token).expect("write token");
-    s.set_item(KEY_TOKEN_EXPIRES, &expires_at.to_string()).expect("write expires");
+fn set_token(token: &str) {
+    storage().set_item(KEY_AUTH_TOKEN, token).expect("write token");
 }
 
 pub fn get_token() -> Option<String> {
-    let s = storage();
-    let token = s.get_item(KEY_AUTH_TOKEN).ok().flatten()?;
-    let expires_str = s.get_item(KEY_TOKEN_EXPIRES).ok().flatten()?;
-    let expires: i64 = expires_str.parse().ok()?;
-    let now = (js_sys::Date::now() / 1000.0) as i64;
-    if now < expires { Some(token) } else { None }
-}
-
-pub fn is_token_valid() -> bool {
-    get_token().is_some()
-}
-
-/// Returns true if token expires within 10% of its remaining lifetime
-pub fn is_token_expiring_soon() -> bool {
-    let s = storage();
-    let expires_str = match s.get_item(KEY_TOKEN_EXPIRES).ok().flatten() {
-        Some(s) => s,
-        None => return false,
-    };
-    let expires: i64 = match expires_str.parse() {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    let now = (js_sys::Date::now() / 1000.0) as i64;
-    let remaining = expires - now;
-    if remaining <= 0 { return false; } // already expired, not "expiring soon"
-    remaining < 120 // less than 2 minutes left
-}
-
-pub fn is_token_expired() -> bool {
-    is_logged_in() && !is_token_valid()
+    storage().get_item(KEY_AUTH_TOKEN).ok().flatten()
 }
 
 pub fn logout() {
     let s = storage();
     let _ = s.remove_item(KEY_USER_ID);
     let _ = s.remove_item(KEY_AUTH_TOKEN);
-    let _ = s.remove_item(KEY_TOKEN_EXPIRES);
+}
+
+fn generate_fingerprint() -> String {
+    let window = web_sys::window().expect("no window");
+    let ua = window.navigator().user_agent().unwrap_or_default();
+    let screen = window.screen().ok();
+    let w = screen.as_ref().map(|s| s.width().unwrap_or(0)).unwrap_or(0);
+    let h = screen.as_ref().map(|s| s.height().unwrap_or(0)).unwrap_or(0);
+    let lang = window.navigator().language().unwrap_or_default();
+    let tz = js_sys::Reflect::get(
+        &js_sys::Intl::DateTimeFormat::new(&js_sys::Array::new(), &js_sys::Object::new())
+            .resolved_options(),
+        &"timeZone".into(),
+    )
+    .ok()
+    .and_then(|v| v.as_string())
+    .unwrap_or_default();
+
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{ua}|{w}x{h}|{lang}|{tz}"));
+    let hash = hasher.finalize();
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&hash[..16])
 }
 
 fn auth_base_url() -> String {
@@ -190,20 +176,12 @@ fn build_create_options(public_key: &serde_json::Value) -> Result<JsValue, Strin
     if let Some(attestation) = public_key.get("attestation").and_then(|v| v.as_str()) {
         let _ = js_sys::Reflect::set(&pk, &"attestation".into(), &JsValue::from_str(attestation));
     }
-    if let Some(auth_sel) = public_key.get("authenticatorSelection") {
+    {
         let sel = js_sys::Object::new();
-        if let Some(v) = auth_sel.get("authenticatorAttachment").and_then(|v| v.as_str()) {
-            let _ = js_sys::Reflect::set(&sel, &"authenticatorAttachment".into(), &JsValue::from_str(v));
-        }
-        if let Some(v) = auth_sel.get("residentKey").and_then(|v| v.as_str()) {
-            let _ = js_sys::Reflect::set(&sel, &"residentKey".into(), &JsValue::from_str(v));
-        }
-        if let Some(v) = auth_sel.get("requireResidentKey").and_then(|v| v.as_bool()) {
-            let _ = js_sys::Reflect::set(&sel, &"requireResidentKey".into(), &JsValue::from_bool(v));
-        }
-        if let Some(v) = auth_sel.get("userVerification").and_then(|v| v.as_str()) {
-            let _ = js_sys::Reflect::set(&sel, &"userVerification".into(), &JsValue::from_str(v));
-        }
+        let _ = js_sys::Reflect::set(&sel, &"authenticatorAttachment".into(), &JsValue::from_str("platform"));
+        let _ = js_sys::Reflect::set(&sel, &"residentKey".into(), &JsValue::from_str("required"));
+        let _ = js_sys::Reflect::set(&sel, &"requireResidentKey".into(), &JsValue::from_bool(true));
+        let _ = js_sys::Reflect::set(&sel, &"userVerification".into(), &JsValue::from_str("required"));
         let _ = js_sys::Reflect::set(&pk, &"authenticatorSelection".into(), &sel);
     }
 
@@ -307,8 +285,12 @@ fn serialize_credential(credential: &JsValue) -> Result<serde_json::Value, Strin
 }
 
 /// Register a new account
-pub async fn register() -> Result<String, String> {
-    let begin_resp = post_json("/register/begin", &serde_json::json!({})).await
+pub async fn register(display_name: &str) -> Result<String, String> {
+    let fingerprint = generate_fingerprint();
+    let begin_resp = post_json("/register/begin", &serde_json::json!({
+        "display_name": display_name,
+        "fingerprint": fingerprint
+    })).await
         .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
 
     let user_id = begin_resp.get("user_id")
@@ -345,7 +327,8 @@ pub async fn register() -> Result<String, String> {
 
     let finish_resp = post_json("/register/finish", &serde_json::json!({
         "user_id": user_id,
-        "credential": credential_json
+        "credential": credential_json,
+        "fingerprint": fingerprint
     })).await
         .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
 
@@ -356,11 +339,8 @@ pub async fn register() -> Result<String, String> {
 
     set_user(&user_id);
 
-    if let (Some(token), Some(exp)) = (
-        finish_resp.get("token").and_then(|v| v.as_str()),
-        finish_resp.get("expires_at").and_then(|v| v.as_i64()),
-    ) {
-        set_token(token, exp);
+    if let Some(token) = finish_resp.get("token").and_then(|v| v.as_str()) {
+        set_token(token);
     }
 
     Ok(user_id)
@@ -368,7 +348,10 @@ pub async fn register() -> Result<String, String> {
 
 /// Authenticate with existing PassKey (discoverable credential)
 pub async fn authenticate() -> Result<String, String> {
-    let begin_resp = post_json("/authenticate/begin", &serde_json::json!({})).await
+    let fingerprint = generate_fingerprint();
+    let begin_resp = post_json("/authenticate/begin", &serde_json::json!({
+        "fingerprint": fingerprint
+    })).await
         .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
 
     let public_key = begin_resp.get("publicKey")
@@ -399,7 +382,8 @@ pub async fn authenticate() -> Result<String, String> {
     let credential_json = serialize_credential(&credential)?;
 
     let finish_resp = post_json("/authenticate/finish", &serde_json::json!({
-        "credential": credential_json
+        "credential": credential_json,
+        "fingerprint": fingerprint
     })).await
         .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
 
@@ -409,22 +393,10 @@ pub async fn authenticate() -> Result<String, String> {
     let token = finish_resp.get("token")
         .and_then(|v| v.as_str())
         .ok_or("missing token")?;
-    let expires_at = finish_resp.get("expires_at")
-        .and_then(|v| v.as_i64())
-        .ok_or("missing expires_at")?;
 
     set_user(user_id);
-    set_token(token, expires_at);
+    set_token(token);
     Ok(user_id.to_string())
-}
-
-/// Ensure valid token before API call
-pub async fn ensure_token() -> Result<String, String> {
-    if let Some(token) = get_token() {
-        return Ok(token);
-    }
-    authenticate().await?;
-    get_token().ok_or("auth succeeded but no token".into())
 }
 
 // ---------------------------------------------------------------------------
@@ -432,7 +404,7 @@ pub async fn ensure_token() -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 async fn post_json_auth(path: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let token = get_token().ok_or_else(|| crate::services::i18n::t("auth.session_expired").to_string())?;
+    let token = get_token().ok_or_else(|| "not authenticated".to_string())?;
     let url = format!("{}{}", auth_base_url(), path);
     let body_str = serde_json::to_string(body).map_err(|e| e.to_string())?;
 
@@ -574,11 +546,8 @@ pub async fn pair_claim(pairing_id: &str, secret: &str) -> Result<String, String
 
     set_user(&user_id);
 
-    if let (Some(token), Some(exp)) = (
-        finish_resp.get("token").and_then(|v| v.as_str()),
-        finish_resp.get("expires_at").and_then(|v| v.as_i64()),
-    ) {
-        set_token(token, exp);
+    if let Some(token) = finish_resp.get("token").and_then(|v| v.as_str()) {
+        set_token(token);
     }
 
     Ok(user_id)
@@ -595,4 +564,17 @@ pub async fn pair_approve(pairing_id: &str, secret: &str) -> Result<serde_json::
 /// Poll pairing status. Returns the JSON with a "status" field.
 pub async fn pair_status(pairing_id: &str) -> Result<serde_json::Value, String> {
     get_json(&format!("/pair/status/{}", pairing_id)).await
+}
+
+/// Fetch active tokens/sessions for the current user.
+pub async fn fetch_tokens() -> Result<Vec<serde_json::Value>, String> {
+    let resp = get_json("/tokens").await?;
+    resp.as_array()
+        .cloned()
+        .ok_or_else(|| "expected array from /tokens".to_string())
+}
+
+/// Return the fingerprint of the current device (for highlighting in session list).
+pub fn current_fingerprint() -> String {
+    generate_fingerprint()
 }

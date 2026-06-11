@@ -1,18 +1,37 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 
+use leptos::*;
 use rexie::{ObjectStore, Rexie, TransactionMode};
 use serde::{de::DeserializeOwned, Serialize};
 use wasm_bindgen::JsValue;
 
 thread_local! {
     static DB: RefCell<Option<Rexie>> = RefCell::new(None);
+    static STORE_VERSIONS: RefCell<HashMap<&'static str, RwSignal<u32>>> = RefCell::new(HashMap::new());
+}
+
+pub fn version(store_name: &'static str) -> RwSignal<u32> {
+    STORE_VERSIONS.with(|cell| {
+        let map = cell.borrow();
+        *map.get(store_name).expect("db::init() must be called before db::version()")
+    })
+}
+
+fn bump(store_name: &str) {
+    STORE_VERSIONS.with(|cell| {
+        let map = cell.borrow();
+        if let Some(sig) = map.get(store_name) {
+            sig.update(|v| *v += 1);
+        }
+    });
 }
 
 // TODO: scope DB by user_id — change name to "hjkl-ft-{user_id}" so each user
 // gets their own IndexedDB. After login, reinitialize DB with the user's ID.
 pub async fn init() {
     let rexie = Rexie::builder("hjkl-ft")
-        .version(2)
+        .version(3)
         .add_object_store(
             ObjectStore::new("foods")
                 .key_path("id")
@@ -52,12 +71,29 @@ pub async fn init() {
                 .add_index(rexie::Index::new("food_id", "food_id"))
                 .add_index(rexie::Index::new("created_at", "created_at")),
         )
+        .add_object_store(
+            ObjectStore::new("weight_entries")
+                .key_path("id")
+                .add_index(rexie::Index::new("date", "date"))
+                .add_index(rexie::Index::new("updated_at", "updated_at")),
+        )
         .add_object_store(ObjectStore::new("_sync_meta").key_path("key"))
         .build()
         .await
         .expect("failed to open IndexedDB");
 
     DB.with(|cell| cell.replace(Some(rexie)));
+
+    const STORES: &[&str] = &[
+        "foods", "diary", "recipes", "recipe_ingredients",
+        "goals", "food_drafts", "weight_entries", "_sync_meta",
+    ];
+    STORE_VERSIONS.with(|cell| {
+        let mut map = cell.borrow_mut();
+        for &name in STORES {
+            map.entry(name).or_insert_with(|| create_rw_signal(0u32));
+        }
+    });
 }
 
 fn with_db<F, R>(f: F) -> R
@@ -80,6 +116,7 @@ pub async fn put<T: Serialize>(store_name: &str, value: &T) {
     let js_val = serde_wasm_bindgen::to_value(value).expect("serialize failed");
     store.put(&js_val, None).await.expect("put failed");
     tx.done().await.expect("transaction failed");
+    bump(store_name);
 }
 
 pub async fn get<T: DeserializeOwned>(store_name: &str, id: &str) -> Option<T> {
@@ -102,6 +139,7 @@ pub async fn delete(store_name: &str, id: &str) {
     let key = JsValue::from_str(id);
     store.delete(key).await.expect("delete failed");
     tx.done().await.expect("transaction failed");
+    bump(store_name);
 }
 
 pub async fn list_all<T: DeserializeOwned>(store_name: &str) -> Vec<T> {
@@ -150,7 +188,7 @@ pub async fn count(store_name: &str) -> u32 {
 }
 
 pub async fn wipe_all() {
-    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "_sync_meta"];
+    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "_sync_meta"];
     for store in stores {
         clear(store).await;
     }
@@ -164,4 +202,5 @@ pub async fn clear(store_name: &str) {
     let store = tx.store(store_name).expect("store not found");
     store.clear().await.expect("clear failed");
     tx.done().await.expect("transaction failed");
+    bump(store_name);
 }

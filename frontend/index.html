@@ -2,11 +2,12 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="FT" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1a2e" media="(prefers-color-scheme: dark)" />
     <title>Food Tracker</title>
     <link rel="manifest" href="manifest.json" />
     <link data-trunk rel="css" href="styles/output.css" />
@@ -22,6 +23,9 @@
     <link rel="apple-touch-icon" href="icon-192.png" />
 </head>
 <body>
+<div id="splash" style="display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--bulma-background, #fafafa);">
+    <span style="font-size: 2rem; opacity: 0.5;">FT</span>
+</div>
 <script>
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').then(function(reg) {

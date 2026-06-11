@@ -155,7 +155,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
     view! {
         <Show
             when=move || recipe.get().is_some()
-            fallback=|| view! { <p class="has-text-grey">{t("recipe.loading")}</p> }
+            fallback=|| view! { <p class="has-text-grey">{move || t("recipe.loading")}</p> }
         >
             {move || {
                 let r = recipe.get().unwrap();
@@ -164,7 +164,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                     <div>
                         // Header
                         <div class="mb-5">
-                            <a attr:data-testid="recipe-detail-link-back" href="/recipes" class="is-size-7 has-text-grey">{t("recipe.back")}</a>
+                            <a attr:data-testid="recipe-detail-link-back" href="/recipes" class="is-size-7 has-text-grey">{move || t("recipe.back")}</a>
                             {if is_finalized {
                                 view! {
                                     <h1 class="title is-4" style="margin-top: 0.5rem;">{&r.name}</h1>
@@ -218,7 +218,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                                                 }
                                                             }
                                                         >
-                                                            <span class="is-size-7">{format!("{g:.0}{}", t("common.unit.g"))}</span>
+                                                            <span class="is-size-7">{move || format!("{g:.0}{}", t("common.unit.g"))}</span>
                                                         </button>
                                                         <button
                                                             attr:data-testid="recipe-detail-btn-remove-ingredient"
@@ -237,15 +237,15 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                                     }.into_view()
                                                 } else {
                                                     view! {
-                                                        <span class="is-size-7 has-text-grey">{format!("{g:.0}{}", t("common.unit.g"))}</span>
+                                                        <span class="is-size-7 has-text-grey">{move || format!("{g:.0}{}", t("common.unit.g"))}</span>
                                                     }.into_view()
                                                 }}
                                             </FoodListItem>
                                         }.into_view()
                                     } else {
                                         view! {
-                                            <div style="padding: 0.5rem 0; border-bottom: 1px solid #f0f0f0;">
-                                                <span class="is-size-7 has-text-grey">{t("recipe.unknown_food")}</span>
+                                            <div style="padding: 0.5rem 0; border-bottom: 1px solid var(--bulma-border-weak);">
+                                                <span class="is-size-7 has-text-grey">{move || t("recipe.unknown_food")}</span>
                                             </div>
                                         }.into_view()
                                     }
@@ -293,13 +293,13 @@ pub fn RecipeDetailPage() -> impl IntoView {
                             view! {
                                 <div class="box py-3 px-4 mb-4">
                                     <p class="is-size-7 has-text-weight-semibold mb-3">
-                                        {format!("{} ({:.0}{})", t("recipe.nutrients_whole"), total_ingredient_weight(), t("common.unit.g"))}
+                                        {move || format!("{} ({:.0}{})", t("recipe.nutrients_whole"), total_ingredient_weight(), t("common.unit.g"))}
                                     </p>
                                     <div style=grid_style>
                                         {has_per100.then(|| view! {
                                             <span class="is-size-7"></span>
-                                            <span class="is-size-7 has-text-grey has-text-weight-semibold">{t("recipe.whole_dish")}</span>
-                                            <span class="is-size-7 has-text-grey has-text-weight-semibold">{t("recipe.per_100g")}</span>
+                                            <span class="is-size-7 has-text-grey has-text-weight-semibold">{move || t("recipe.whole_dish")}</span>
+                                            <span class="is-size-7 has-text-grey has-text-weight-semibold">{move || t("recipe.per_100g")}</span>
                                         })}
                                         {gs.iter().map(|goal| {
                                             let (val, raw_unit) = match goal.nutrient.as_str() {
@@ -325,8 +325,8 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                         }).collect::<Vec<_>>()}
                                     </div>
                                     <p class="is-size-7 has-text-grey mt-3">
-                                        {t("recipe.other_nutrients_hint")} " "
-                                        <a attr:data-testid="recipe-detail-link-settings" href="/settings">{t("recipe.settings_link")}</a>
+                                        {move || t("recipe.other_nutrients_hint")} " "
+                                        <a attr:data-testid="recipe-detail-link-settings" href="/settings">{move || t("recipe.settings_link")}</a>
                                     </p>
                                 </div>
                             }
@@ -339,12 +339,12 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                     attr:data-testid="recipe-detail-btn-add-ingredient"
                                     class="button is-link"
                                     on:click=move |_| show_add_modal.set(true)
-                                >{t("recipe.add_ingredient")}</button>
+                                >{move || t("recipe.add_ingredient")}</button>
                                 <button
                                     attr:data-testid="recipe-detail-btn-finalize"
                                     class="button is-success"
                                     on:click=move |_| show_finalize.set(true)
-                                >{t("recipe.finalize")}</button>
+                                >{move || t("recipe.finalize")}</button>
                             </div>
                         </Show>
 
@@ -393,13 +393,13 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                 <div class="modal-background" on:click=move |_| show_finalize.set(false)></div>
                                 <div class="modal-card" style="max-width: 24rem;">
                                     <header class="modal-card-head">
-                                        <p class="modal-card-title">{t("recipe.finalize_title")}</p>
+                                        <p class="modal-card-title">{move || t("recipe.finalize_title")}</p>
                                         <button attr:data-testid="recipe-detail-btn-finalize-close" class="delete" on:click=move |_| show_finalize.set(false)></button>
                                     </header>
                                     <form on:submit=on_finalize>
                                         <section class="modal-card-body">
                                             <p class="is-size-7 has-text-grey mb-3">
-                                                {t("recipe.total_weight")} " "
+                                                {move || t("recipe.total_weight")} " "
                                                 <span class="has-text-weight-semibold">{move || format!("{:.0}{}", total_ingredient_weight(), t("common.unit.g"))}</span>
                                             </p>
                                             <div class="field has-addons">
@@ -415,14 +415,14 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                                     />
                                                 </div>
                                                 <div class="control">
-                                                    <a class="button is-static">{t("common.unit.g")}</a>
+                                                    <a class="button is-static">{move || t("common.unit.g")}</a>
                                                 </div>
                                             </div>
                                         </section>
                                         <footer class="modal-card-foot">
                                             <div class="buttons">
-                                                <button attr:data-testid="recipe-detail-btn-finalize-submit" type="submit" class="button is-success">{t("recipe.finalize")}</button>
-                                                <button attr:data-testid="recipe-detail-btn-finalize-cancel" type="button" class="button" on:click=move |_| show_finalize.set(false)>{t("common.cancel")}</button>
+                                                <button attr:data-testid="recipe-detail-btn-finalize-submit" type="submit" class="button is-success">{move || t("recipe.finalize")}</button>
+                                                <button attr:data-testid="recipe-detail-btn-finalize-cancel" type="button" class="button" on:click=move |_| show_finalize.set(false)>{move || t("common.cancel")}</button>
                                             </div>
                                         </footer>
                                     </form>

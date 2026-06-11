@@ -80,5 +80,14 @@ export async function registerAccount(page: Page): Promise<{ cdpSession: CDPSess
   expect(userId).toBeTruthy();
   await page.waitForTimeout(1000);
 
+  // Dismiss push onboarding if it appears
+  const skipBtn = page.getByTestId('push-onboarding-btn-skip');
+  const navDiary = page.getByTestId('nav-diary');
+  const visible = await skipBtn.isVisible({ timeout: 3000 }).catch(() => false);
+  if (visible) {
+    await skipBtn.click();
+  }
+  await expect(navDiary).toBeVisible({ timeout: 10_000 });
+
   return { cdpSession, userId };
 }

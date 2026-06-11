@@ -10,6 +10,8 @@ pub fn FoodListItem(
     goals: Signal<Vec<Goal>>,
     #[prop(optional)]
     grams: Option<f64>,
+    #[prop(optional)]
+    icon: Option<&'static str>,
     /// Content rendered on the right side (action buttons)
     children: Children,
 ) -> impl IntoView {
@@ -17,8 +19,9 @@ pub fn FoodListItem(
     let food_c = food.clone();
 
     view! {
-        <div style="display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #f0f0f0;">
+        <div attr:data-testid="food-list-item" attr:data-food-name=food.name.clone() style="display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--bulma-border-weak);">
             <div style="flex: 1; min-width: 0; overflow-wrap: break-word;">
+                {icon.map(|i| view! { <span attr:data-testid="food-item-icon" style="margin-right: 4px; font-size: 14px;">{i}</span> })}
                 <span class="is-size-6 has-text-weight-medium">{&food.name}</span>
                 <div style="display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem;">
                     {move || {
@@ -27,7 +30,7 @@ pub fn FoodListItem(
                         use crate::services::i18n;
                         let badge = |label: &str, val: f64, unit: &str| {
                             view! {
-                                <span class="tag is-light is-small">
+                                <span class="tag is-small">
                                     {format!("{} {:.0}", label, val)}
                                     " "
                                     <span class="has-text-grey-light">{unit.to_string()}</span>

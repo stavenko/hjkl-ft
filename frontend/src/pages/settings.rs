@@ -1,478 +1,331 @@
 use leptos::*;
-use api_types::*;
+use leptos_router::*;
+use serde::Serialize;
 
-use crate::services::{auth, local, push, sync};
-use crate::services::i18n::t;
-use crate::pages::pair_page::PairPageLoggedIn;
+use crate::services::{push, db, i18n::t};
 
-const STANDARD_NUTRIENTS: &[(&str, &str)] = &[
-    ("Calories", "kcal"),
-    ("Protein", "g"),
-    ("Fat", "g"),
-    ("Carbs", "g"),
-];
-
-fn is_standard(name: &str) -> bool {
-    STANDARD_NUTRIENTS.iter().any(|(n, _)| *n == name)
-}
+const IOS_BG: &str = "background: var(--bulma-background); min-height: 100vh; padding: 16px; margin: -0.75rem;";
+const IOS_CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden;";
+const IOS_SECTION_LABEL: &str = "text-transform: uppercase; letter-spacing: 0.02em; padding: 24px 0 8px 16px; margin: 0;";
+const IOS_SEPARATOR: &str = "border-bottom: 0.5px solid var(--bulma-border-weak); margin-left: 16px;";
 
 #[component]
 pub fn SettingsPage() -> impl IntoView {
-    let show_pair = create_rw_signal(false);
-    let version = create_rw_signal(0u32);
-    let goals_res = create_resource(
-        move || version.get(),
-        |_| async { local::list_goals().await },
-    );
-    let goals = move || goals_res.get().unwrap_or_default();
-    let invalidate = move || version.update(|v| *v += 1);
+    let navigate = use_navigate();
 
-    // New custom goal form
-    let new_name = create_rw_signal(String::new());
-    let new_unit = create_rw_signal("G".to_string());
+    view! {
+        <div style=IOS_BG>
+            <h1 class="is-size-1 has-text-weight-bold" style="margin: 0 0 8px 0;">{move || t("settings.title")}</h1>
 
-    let add_custom = move |_| {
-        let name = new_name.get_untracked();
-        if name.is_empty() { return; }
-        let unit = match new_unit.get_untracked().as_str() {
-            "Mg" => GoalUnit::Mg,
-            "Mcg" => GoalUnit::Mcg,
-            _ => GoalUnit::G,
-        };
-        spawn_local(async move {
-            let input = CreateGoalInput {
-                nutrient: name,
-                direction: GoalDirection::AtLeast,
-                amount: 0.0,
-                unit,
-                period: GoalPeriod::Day,
-            };
-            local::create_goal(input).await;
-            invalidate();
-            sync::push_background();
-        });
-        new_name.set(String::new());
-    };
+            // ---- Goals row ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.goals")}</p>
+            <div style=IOS_CARD>
+                <button
+                    attr:data-testid="settings-btn-goals"
+                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                    on:click={
+                        let nav = navigate.clone();
+                        move |_| {
+                            let nav = nav.clone();
+                            nav("/settings/goals", Default::default());
+                        }
+                    }
+                >
+                    <span class="is-size-6">{move || t("settings.goals")}</span>
+                    <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
+                </button>
+            </div>
 
-    let save_goal = move |goal: Goal| {
-        spawn_local(async move {
-            local::update_goal(&goal).await;
-            invalidate();
-            sync::push_background();
-        });
-    };
+            // ---- Language section ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.language")}</p>
+            <div style=IOS_CARD>
+                <button
+                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                    attr:data-testid="settings-btn-lang-ru"
+                    on:click=move |_| {
+                        crate::services::i18n::set_lang(crate::services::i18n::Lang::Ru);
+                    }
+                >
+                    <span class="is-size-6">"Русский"</span>
+                    {move || if crate::services::i18n::get_lang() == crate::services::i18n::Lang::Ru {
+                        view! { <span class="has-text-link is-size-5">"✓"</span> }.into_view()
+                    } else {
+                        view! {}.into_view()
+                    }}
+                </button>
+                <div style=IOS_SEPARATOR></div>
+                <button
+                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                    attr:data-testid="settings-btn-lang-en"
+                    on:click=move |_| {
+                        crate::services::i18n::set_lang(crate::services::i18n::Lang::En);
+                    }
+                >
+                    <span class="is-size-6">"English"</span>
+                    {move || if crate::services::i18n::get_lang() == crate::services::i18n::Lang::En {
+                        view! { <span class="has-text-link is-size-5">"✓"</span> }.into_view()
+                    } else {
+                        view! {}.into_view()
+                    }}
+                </button>
+            </div>
 
-    let delete_goal = move |id: String| {
-        spawn_local(async move {
-            local::delete_goal(&id).await;
-            invalidate();
-            sync::push_background();
-        });
-    };
+            // ---- Privacy row ----
+            <div style="margin-top: 24px;">
+                <div style=IOS_CARD>
+                    <button
+                        attr:data-testid="settings-btn-privacy"
+                        style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                        on:click={
+                            let nav = navigate.clone();
+                            move |_| {
+                                let nav = nav.clone();
+                                nav("/settings/privacy", Default::default());
+                            }
+                        }
+                    >
+                        <span class="is-size-6">{move || t("settings.privacy")}</span>
+                        <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
+                    </button>
+                </div>
+            </div>
 
-    let toggle_standard = move |nutrient: &str, unit_str: &str| {
-        let nutrient = nutrient.to_string();
-        let unit_str = unit_str.to_string();
-        spawn_local(async move {
-            let all = local::list_goals().await;
-            if let Some(existing) = all.iter().find(|g| g.nutrient == nutrient) {
-                local::delete_goal(&existing.id).await;
-            } else {
-                let unit = if unit_str == "kcal" { GoalUnit::Kcal } else { GoalUnit::G };
-                let input = CreateGoalInput {
-                    nutrient,
-                    direction: GoalDirection::AtMost,
-                    amount: 0.0,
-                    unit,
-                    period: GoalPeriod::Day,
-                };
-                local::create_goal(input).await;
-            }
-            invalidate();
-            sync::push_background();
-        });
+            // ---- Notifications section ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.notifications")}</p>
+            <div style=IOS_CARD>
+                {
+                    let push_ver = create_rw_signal(0u32);
+                    let push_subscribed = move || { push_ver.get(); push::is_subscribed() };
+                    let push_loading = create_rw_signal(false);
+                    let push_supported = push::is_supported();
+                    view! {
+                        <div style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+                            <span class="is-size-6">{move || t("settings.notifications")}</span>
+                            {if !push_supported {
+                                view! {
+                                    <span class="is-size-7 has-text-grey-light">{move || t("settings.push_not_supported")}</span>
+                                }.into_view()
+                            } else {
+                                view! {
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <button
+                                            class=move || if push_subscribed() {
+                                                "button is-danger is-size-7"
+                                            } else {
+                                                "button is-link is-size-7"
+                                            }
+                                            style="border-radius: 16px; padding: 6px 14px;"
+                                            prop:disabled=move || push_loading.get()
+                                            on:click=move |_| {
+                                                push_loading.set(true);
+                                                let is_on = push_subscribed();
+                                                spawn_local(async move {
+                                                    if is_on {
+                                                        match push::unsubscribe().await {
+                                                            Ok(()) => {},
+                                                            Err(e) => leptos::logging::error!("push unsubscribe: {}", e),
+                                                        }
+                                                    } else {
+                                                        match push::subscribe().await {
+                                                            Ok(()) => {},
+                                                            Err(e) => leptos::logging::error!("push subscribe: {}", e),
+                                                        }
+                                                    }
+                                                    push_ver.update(|v| *v += 1);
+                                                    push_loading.set(false);
+                                                });
+                                            }
+                                        >
+                                            {move || if push_subscribed() {
+                                                t("settings.push_disable")
+                                            } else {
+                                                t("settings.push_enable")
+                                            }}
+                                        </button>
+                                    </div>
+                                }.into_view()
+                            }}
+                        </div>
+                    }
+                }
+            </div>
+
+            // ---- Notification schedule section ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.schedule")}</p>
+            <div style=IOS_CARD>
+                {
+                    let wi_on = create_rw_signal(false);
+                    let wi_time = create_rw_signal("07:00".to_string());
+                    let bf_on = create_rw_signal(false);
+                    let bf_time = create_rw_signal("09:00".to_string());
+                    let lu_on = create_rw_signal(false);
+                    let lu_time = create_rw_signal("13:00".to_string());
+                    let di_on = create_rw_signal(false);
+                    let di_time = create_rw_signal("19:00".to_string());
+
+                    spawn_local(async move {
+                        if let Some(val) = db::get::<serde_json::Value>("_sync_meta", "notification_schedule").await {
+                            if let Some(s) = val.get("weigh_in") {
+                                if let Some(v) = s.get("enabled").and_then(|v| v.as_bool()) { wi_on.set(v); }
+                                if let Some(v) = s.get("time").and_then(|v| v.as_str()) { wi_time.set(v.to_string()); }
+                            }
+                            if let Some(s) = val.get("breakfast") {
+                                if let Some(v) = s.get("enabled").and_then(|v| v.as_bool()) { bf_on.set(v); }
+                                if let Some(v) = s.get("time").and_then(|v| v.as_str()) { bf_time.set(v.to_string()); }
+                            }
+                            if let Some(s) = val.get("lunch") {
+                                if let Some(v) = s.get("enabled").and_then(|v| v.as_bool()) { lu_on.set(v); }
+                                if let Some(v) = s.get("time").and_then(|v| v.as_str()) { lu_time.set(v.to_string()); }
+                            }
+                            if let Some(s) = val.get("dinner") {
+                                if let Some(v) = s.get("enabled").and_then(|v| v.as_bool()) { di_on.set(v); }
+                                if let Some(v) = s.get("time").and_then(|v| v.as_str()) { di_time.set(v.to_string()); }
+                            }
+                        }
+                    });
+
+                    view! {
+                        <ScheduleRow label="settings.weigh_in" slot_id="weigh_in" enabled=wi_on time=wi_time
+                            wi_on bf_on lu_on di_on wi_time bf_time lu_time di_time />
+                        <div style=IOS_SEPARATOR></div>
+                        <ScheduleRow label="settings.breakfast" slot_id="breakfast" enabled=bf_on time=bf_time
+                            wi_on bf_on lu_on di_on wi_time bf_time lu_time di_time />
+                        <div style=IOS_SEPARATOR></div>
+                        <ScheduleRow label="settings.lunch" slot_id="lunch" enabled=lu_on time=lu_time
+                            wi_on bf_on lu_on di_on wi_time bf_time lu_time di_time />
+                        <div style=IOS_SEPARATOR></div>
+                        <ScheduleRow label="settings.dinner" slot_id="dinner" enabled=di_on time=di_time
+                            wi_on bf_on lu_on di_on wi_time bf_time lu_time di_time />
+                    }
+                }
+            </div>
+
+            // ---- Data section ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.data")}</p>
+            <div style=IOS_CARD>
+                <button
+                    attr:data-testid="settings-btn-wipe-all"
+                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                    on:click=move |_| {
+                        let win = web_sys::window().unwrap();
+                        if win.confirm_with_message(&t("settings.wipe_confirm")).unwrap_or(false) {
+                            spawn_local(async move {
+                                crate::services::db::wipe_all().await;
+                            });
+                        }
+                    }
+                >
+                    <span class="is-size-6 has-text-danger">{move || t("settings.wipe_all")}</span>
+                </button>
+            </div>
+
+            <div style="height: 40px;"></div>
+        </div>
+    }
+}
+
+const TOGGLE_BASE: &str = "appearance: none; -webkit-appearance: none; width: 51px; min-width: 51px; height: 31px; border-radius: 16px; border: none; padding: 2px; cursor: pointer; margin-left: 12px;";
+const TOGGLE_KNOB: &str = "width: 27px; height: 27px; border-radius: 14px; background: var(--bulma-scheme-main); box-shadow: 0 1px 3px rgba(0,0,0,0.2); pointer-events: none;";
+
+#[component]
+fn ScheduleRow(
+    label: &'static str,
+    slot_id: &'static str,
+    enabled: RwSignal<bool>,
+    time: RwSignal<String>,
+    wi_on: RwSignal<bool>,
+    bf_on: RwSignal<bool>,
+    lu_on: RwSignal<bool>,
+    di_on: RwSignal<bool>,
+    wi_time: RwSignal<String>,
+    bf_time: RwSignal<String>,
+    lu_time: RwSignal<String>,
+    di_time: RwSignal<String>,
+) -> impl IntoView {
+    let save = move || {
+        save_notification_schedule(wi_on, bf_on, lu_on, di_on, wi_time, bf_time, lu_time, di_time);
     };
 
     view! {
-        {move || if show_pair.get() {
-            view! {
-                <PairPageLoggedIn on_close=Callback::new(move |_| show_pair.set(false)) />
-            }.into_view()
-        } else {
-            view! {
-                <div>
-                    <h1 class="title is-4 mb-5">{t("settings.title")}</h1>
-
-                    <section>
-                        <h2 class="subtitle is-5 mb-4">{t("settings.goals")}</h2>
-
-                        // Standard KBJU — toggle on/off, inline edit when enabled
-                        {move || {
-                            let gs = goals();
-                            STANDARD_NUTRIENTS.iter().map(|(name, unit)| {
-                                let existing = gs.iter().find(|g| g.nutrient == *name).cloned();
-                                let is_on = existing.is_some();
-                                let name_s = name.to_string();
-                                let unit_s = unit.to_string();
-                                view! {
-                                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px solid #f0f0f0;">
-                                        <label class="checkbox" style="width: 7rem; flex-shrink: 0; display: flex; align-items: center; gap: 0.25rem; white-space: nowrap;">
-                                            <input type="checkbox"
-                                                attr:data-testid=format!("settings-checkbox-{}", name.to_lowercase())
-                                                prop:checked=is_on
-                                                on:change={
-                                                    let n = name_s.clone();
-                                                    let u = unit_s.clone();
-                                                    move |_| toggle_standard(&n, &u)
-                                                }
-                                            />
-                                            {crate::services::i18n::nutrient_name(name)}
-                                        </label>
-                                        {if let Some(goal) = existing {
-                                            let gid = goal.id.clone();
-                                            let gid2 = goal.id.clone();
-                                            let gid3 = goal.id.clone();
-                                            let g_nutrient = goal.nutrient.clone();
-                                            let g_key = goal.key.clone();
-                                            let g_unit = goal.unit;
-                                            let g_created = goal.created_at.clone();
-                                            view! {
-                                                <div class="select is-small">
-                                                    <select
-                                                        on:change={
-                                                            let id = gid.clone();
-                                                            let n = g_nutrient.clone();
-                                                            let k = g_key.clone();
-                                                            let u = g_unit;
-                                                            let cr = g_created.clone();
-                                                            move |ev| {
-                                                                let dir = match event_target_value(&ev).as_str() {
-                                                                    "AtMost" => GoalDirection::AtMost,
-                                                                    _ => GoalDirection::AtLeast,
-                                                                };
-                                                                let cur = goals().into_iter().find(|g| g.id == id).unwrap();
-                                                                save_goal(Goal { id: id.clone(), nutrient: n.clone(), key: k.clone(), direction: dir, amount: cur.amount, unit: u, period: cur.period, created_at: cr.clone(), updated_at: String::new() });
-                                                            }
-                                                        }
-                                                    >
-                                                        <option value="AtLeast" selected=goal.direction == GoalDirection::AtLeast>{t("settings.not_less")}</option>
-                                                        <option value="AtMost" selected=goal.direction == GoalDirection::AtMost>{t("settings.not_more")}</option>
-                                                    </select>
-                                                </div>
-                                                <input type="text" inputmode="decimal" class="input is-small"
-                                                    style="width: 5rem;"
-                                                    value=format!("{}", goal.amount)
-                                                    on:change={
-                                                        let id = gid3.clone();
-                                                        move |ev| {
-                                                            let val: f64 = event_target_value(&ev).parse().unwrap_or(0.0);
-                                                            if let Some(mut g) = goals().into_iter().find(|g| g.id == id) {
-                                                                g.amount = val;
-                                                                save_goal(g);
-                                                            }
-                                                        }
-                                                    }
-                                                />
-                                                <span class="is-size-7 has-text-grey">{crate::services::i18n::unit_label(unit)}</span>
-                                                <div class="select is-small">
-                                                    {
-                                                        let gid_per = goal.id.clone();
-                                                        let cur_period = goal.period;
-                                                        view! {
-                                                            <select
-                                                                on:change=move |ev| {
-                                                                    let per = match event_target_value(&ev).as_str() {
-                                                                        "Week" => GoalPeriod::Week,
-                                                                        "Month" => GoalPeriod::Month,
-                                                                        _ => GoalPeriod::Day,
-                                                                    };
-                                                                    if let Some(mut g) = goals().into_iter().find(|g| g.id == gid_per) {
-                                                                        g.period = per;
-                                                                        save_goal(g);
-                                                                    }
-                                                                }
-                                                            >
-                                                                <option value="Day" selected=cur_period == GoalPeriod::Day>{t("settings.period.day")}</option>
-                                                                <option value="Week" selected=cur_period == GoalPeriod::Week>{t("settings.period.week")}</option>
-                                                                <option value="Month" selected=cur_period == GoalPeriod::Month>{t("settings.period.month")}</option>
-                                                            </select>
-                                                        }
-                                                    }
-                                                </div>
-                                            }.into_view()
-                                        } else {
-                                            view! { <span class="is-size-7 has-text-grey">{t("settings.off")}</span> }.into_view()
-                                        }}
-                                    </div>
-                                }
-                            }).collect::<Vec<_>>()
-                        }}
-
-                        // Custom goals — editable inline rows
-                        {move || {
-                            goals().into_iter().filter(|g| !is_standard(&g.nutrient)).map(|goal| {
-                                let gid = goal.id.clone();
-                                let gid2 = goal.id.clone();
-                                let gid3 = goal.id.clone();
-                                let gid4 = goal.id.clone();
-                                let gid_del = goal.id.clone();
-                                view! {
-                                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px solid #f0f0f0;">
-                                        <span class="is-size-7 has-text-weight-medium" style="width: 7rem; flex-shrink: 0;">{&goal.nutrient}</span>
-                                        <div class="select is-small">
-                                            <select
-                                                on:change={
-                                                    let id = gid2.clone();
-                                                    move |ev| {
-                                                        let dir = match event_target_value(&ev).as_str() {
-                                                            "AtMost" => GoalDirection::AtMost,
-                                                            _ => GoalDirection::AtLeast,
-                                                        };
-                                                        if let Some(mut g) = goals().into_iter().find(|g| g.id == id) {
-                                                            g.direction = dir;
-                                                            save_goal(g);
-                                                        }
-                                                    }
-                                                }
-                                            >
-                                                <option value="AtLeast" selected=goal.direction == GoalDirection::AtLeast>{t("settings.not_less")}</option>
-                                                <option value="AtMost" selected=goal.direction == GoalDirection::AtMost>{t("settings.not_more")}</option>
-                                            </select>
-                                        </div>
-                                        <input type="text" inputmode="decimal" class="input is-small"
-                                            style="width: 5rem;"
-                                            value=format!("{}", goal.amount)
-                                            on:change={
-                                                let id = gid4.clone();
-                                                move |ev| {
-                                                    let val: f64 = event_target_value(&ev).parse().unwrap_or(0.0);
-                                                    if let Some(mut g) = goals().into_iter().find(|g| g.id == id) {
-                                                        g.amount = val;
-                                                        save_goal(g);
-                                                    }
-                                                }
-                                            }
-                                        />
-                                        <span class="is-size-7 has-text-grey">{crate::services::i18n::unit_label(goal.unit.label())}</span>
-                                        <div class="select is-small">
-                                            {
-                                                let gid_per = goal.id.clone();
-                                                let cur_period = goal.period;
-                                                view! {
-                                                    <select
-                                                        on:change=move |ev| {
-                                                            let per = match event_target_value(&ev).as_str() {
-                                                                "Week" => GoalPeriod::Week,
-                                                                "Month" => GoalPeriod::Month,
-                                                                _ => GoalPeriod::Day,
-                                                            };
-                                                            if let Some(mut g) = goals().into_iter().find(|g| g.id == gid_per) {
-                                                                g.period = per;
-                                                                save_goal(g);
-                                                            }
-                                                        }
-                                                    >
-                                                        <option value="Day" selected=cur_period == GoalPeriod::Day>{t("settings.period.day")}</option>
-                                                        <option value="Week" selected=cur_period == GoalPeriod::Week>{t("settings.period.week")}</option>
-                                                        <option value="Month" selected=cur_period == GoalPeriod::Month>{t("settings.period.month")}</option>
-                                                    </select>
-                                                }
-                                            }
-                                        </div>
-                                        <button
-                                            class="button is-ghost has-text-grey-light"
-                                            style="height: 2rem; width: 2rem; padding: 0; text-decoration: none;"
-                                            on:click=move |_| delete_goal(gid_del.clone())
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
-                                            </svg>
-                                        </button>
-                                    </div>
-                                }
-                            }).collect::<Vec<_>>()
-                        }}
-
-                        // Add custom goal
-                        <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 0;">
-                            <input type="text" attr:data-testid="settings-input-new-nutrient" placeholder=t("settings.nutrient_placeholder") class="input is-small"
-                                style="width: 8rem;"
-                                prop:value=move || new_name.get()
-                                on:input=move |ev| new_name.set(event_target_value(&ev))
-                            />
-                            <div class="select is-small">
-                                <select on:change=move |ev| new_unit.set(event_target_value(&ev))>
-                                    <option value="G">{t("common.unit.g")}</option>
-                                    <option value="Mg">"mg"</option>
-                                    <option value="Mcg">"µg"</option>
-                                </select>
-                            </div>
-                            <button attr:data-testid="settings-btn-add-goal" class="button is-small is-link" on:click=add_custom>{t("settings.add")}</button>
-                        </div>
-                    </section>
-
-                    <section class="mt-6">
-                        <h2 class="subtitle is-5 mb-4">{t("settings.language")}</h2>
-                        <div class="buttons has-addons">
-                            <button
-                                attr:data-testid="settings-btn-lang-ru"
-                                class=move || if crate::services::i18n::get_lang() == crate::services::i18n::Lang::Ru {
-                                    "button is-small is-link is-selected"
-                                } else {
-                                    "button is-small"
-                                }
-                                on:click=move |_| {
-                                    crate::services::i18n::set_lang(crate::services::i18n::Lang::Ru);
-                                    invalidate();
-                                }
-                            >"Русский"</button>
-                            <button
-                                attr:data-testid="settings-btn-lang-en"
-                                class=move || if crate::services::i18n::get_lang() == crate::services::i18n::Lang::En {
-                                    "button is-small is-link is-selected"
-                                } else {
-                                    "button is-small"
-                                }
-                                on:click=move |_| {
-                                    crate::services::i18n::set_lang(crate::services::i18n::Lang::En);
-                                    invalidate();
-                                }
-                            >"English"</button>
-                        </div>
-                    </section>
-
-                    <section class="mt-6">
-                        <h2 class="subtitle is-5 mb-4">{t("settings.privacy")}</h2>
-
-                        <button
-                            attr:data-testid="settings-btn-add-device"
-                            class="button is-link is-light mb-4"
-                            on:click=move |_| show_pair.set(true)
-                        >
-                            {t("settings.add_device")}
-                        </button>
-
-                        <h3 class="is-size-6 has-text-weight-semibold mb-3">{t("settings.active_sessions")}</h3>
-                        {
-                            let tokens_res = create_resource(
-                                || (),
-                                |_| async { auth::fetch_tokens().await.unwrap_or_default() },
-                            );
-                            let my_fp = auth::current_fingerprint();
-                            move || {
-                                let my_fp = my_fp.clone();
-                                tokens_res.get().map(|tokens| {
-                                    if tokens.is_empty() {
-                                        view! { <p class="is-size-7 has-text-grey">"--"</p> }.into_view()
-                                    } else {
-                                        tokens.into_iter().map(|tok| {
-                                            let fp = tok.get("fingerprint").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                            let created = tok.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                            let last_used = tok.get("last_used_at").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                            let is_current = fp == my_fp;
-                                            let short_fp = if fp.len() > 8 { &fp[..8] } else { &fp };
-                                            let label = if is_current {
-                                                format!("{} ({})", short_fp, t("settings.current_device"))
-                                            } else {
-                                                short_fp.to_string()
-                                            };
-                                            let bg = if is_current { "background: #f0fff4;" } else { "" };
-                                            view! {
-                                                <div style=format!("padding: 0.4rem 0.5rem; border-bottom: 1px solid #f0f0f0; {bg}")>
-                                                    <span class="is-size-7 has-text-weight-medium">{label}</span>
-                                                    <br/>
-                                                    <span class="is-size-7 has-text-grey">
-                                                        {format!("created: {}", created)}
-                                                    </span>
-                                                    {if !last_used.is_empty() {
-                                                        view! { <span class="is-size-7 has-text-grey">{format!(" | last used: {}", last_used)}</span> }.into_view()
-                                                    } else {
-                                                        view! {}.into_view()
-                                                    }}
-                                                </div>
-                                            }
-                                        }).collect::<Vec<_>>().into_view()
-                                    }
-                                })
-                            }
-                        }
-                    </section>
-
-                    <section class="mt-6">
-                        <h2 class="subtitle is-5 mb-4">{t("settings.notifications")}</h2>
-                        {
-                            let push_subscribed = create_rw_signal(push::is_subscribed());
-                            let push_loading = create_rw_signal(false);
-                            let push_supported = push::is_supported();
-                            view! {
-                                {if !push_supported {
-                                    view! {
-                                        <p class="is-size-7 has-text-grey">{t("settings.push_not_supported")}</p>
-                                    }.into_view()
-                                } else {
-                                    view! {
-                                        <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                            <button
-                                                class=move || if push_subscribed.get() {
-                                                    "button is-small is-danger is-light"
-                                                } else {
-                                                    "button is-small is-link"
-                                                }
-                                                prop:disabled=move || push_loading.get()
-                                                on:click=move |_| {
-                                                    push_loading.set(true);
-                                                    let is_on = push_subscribed.get_untracked();
-                                                    spawn_local(async move {
-                                                        if is_on {
-                                                            match push::unsubscribe().await {
-                                                                Ok(()) => push_subscribed.set(false),
-                                                                Err(e) => leptos::logging::error!("push unsubscribe: {}", e),
-                                                            }
-                                                        } else {
-                                                            match push::subscribe().await {
-                                                                Ok(()) => push_subscribed.set(true),
-                                                                Err(e) => leptos::logging::error!("push subscribe: {}", e),
-                                                            }
-                                                        }
-                                                        push_loading.set(false);
-                                                    });
-                                                }
-                                            >
-                                                {move || if push_subscribed.get() {
-                                                    t("settings.push_disable")
-                                                } else {
-                                                    t("settings.push_enable")
-                                                }}
-                                            </button>
-                                            {move || if push_subscribed.get() {
-                                                view! {
-                                                    <span class="is-size-7 has-text-success">{t("settings.push_enabled")}</span>
-                                                }.into_view()
-                                            } else {
-                                                view! {}.into_view()
-                                            }}
-                                        </div>
-                                    }.into_view()
-                                }}
-                            }
-                        }
-                    </section>
-
-                    <section class="mt-6">
-                        <h2 class="subtitle is-5 mb-4">{t("settings.data")}</h2>
-                        <button
-                            attr:data-testid="settings-btn-wipe-all"
-                            class="button is-danger is-light"
-                            on:click=move |_| {
-                                spawn_local(async move {
-                                    crate::services::db::wipe_all().await;
-                                    invalidate();
-                                });
-                            }
-                        >{t("settings.wipe_all")}</button>
-                    </section>
-                </div>
-            }.into_view()
-        }}
+        <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px;">
+            <span class="is-size-6" style="flex: 1;">{move || t(label)}</span>
+            <input
+                type="time"
+                attr:data-testid=format!("schedule-time-{}", slot_id)
+                style="background: var(--bulma-background); border: none; border-radius: 8px; padding: 4px 8px; color: var(--bulma-link); width: 90px; text-align: center;"
+                class="is-size-6"
+                prop:value=move || time.get()
+                on:change=move |ev| {
+                    time.set(event_target_value(&ev));
+                    save();
+                }
+            />
+            <button
+                attr:data-testid=format!("schedule-toggle-{}", slot_id)
+                style=move || format!(
+                    "{}background: {};",
+                    TOGGLE_BASE,
+                    if enabled.get() { "var(--bulma-success)" } else { "var(--bulma-border)" }
+                )
+                on:click=move |_| {
+                    enabled.update(|v| *v = !*v);
+                    save();
+                }
+            >
+                <div style=move || format!(
+                    "{}transform: {};",
+                    TOGGLE_KNOB,
+                    if enabled.get() { "translateX(20px)" } else { "translateX(0)" }
+                )></div>
+            </button>
+        </div>
     }
+}
+
+#[derive(Serialize)]
+struct SlotData {
+    enabled: bool,
+    time: String,
+}
+
+#[derive(Serialize)]
+struct ScheduleRecord {
+    key: String,
+    weigh_in: SlotData,
+    breakfast: SlotData,
+    lunch: SlotData,
+    dinner: SlotData,
+}
+
+fn save_notification_schedule(
+    wi_on: RwSignal<bool>,
+    bf_on: RwSignal<bool>,
+    lu_on: RwSignal<bool>,
+    di_on: RwSignal<bool>,
+    wi_time: RwSignal<String>,
+    bf_time: RwSignal<String>,
+    lu_time: RwSignal<String>,
+    di_time: RwSignal<String>,
+) {
+    let record = ScheduleRecord {
+        key: "notification_schedule".to_string(),
+        weigh_in: SlotData { enabled: wi_on.get_untracked(), time: wi_time.get_untracked() },
+        breakfast: SlotData { enabled: bf_on.get_untracked(), time: bf_time.get_untracked() },
+        lunch: SlotData { enabled: lu_on.get_untracked(), time: lu_time.get_untracked() },
+        dinner: SlotData { enabled: di_on.get_untracked(), time: di_time.get_untracked() },
+    };
+    spawn_local(async move {
+        db::put("_sync_meta", &record).await;
+        let offset = -(js_sys::Date::new_0().get_timezone_offset() as i32);
+        let payload = serde_json::json!({
+            "utc_offset_minutes": offset,
+            "weigh_in": {"enabled": record.weigh_in.enabled, "time": record.weigh_in.time},
+            "breakfast": {"enabled": record.breakfast.enabled, "time": record.breakfast.time},
+            "lunch": {"enabled": record.lunch.enabled, "time": record.lunch.time},
+            "dinner": {"enabled": record.dinner.enabled, "time": record.dinner.time},
+        });
+        if let Err(e) = push::sync_notification_schedule(payload).await {
+            leptos::logging::error!("sync schedule: {}", e);
+        }
+    });
 }

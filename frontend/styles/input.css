@@ -1,4 +1,4 @@
-@import "https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css";
+/* Bulma is prepended by pre_build hook */
 
 @font-face {
   font-family: "Inter";
@@ -42,8 +42,23 @@
 
 body {
   font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  overscroll-behavior: none;
+  background-color: var(--bulma-background);
+}
+
+* {
+  touch-action: manipulation;
 }
 
 .modal-background {
   background-color: rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  input[type="date"],
+  input[type="text"],
+  input[type="number"],
+  textarea {
+    color-scheme: dark;
+  }
 }

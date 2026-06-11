@@ -104,6 +104,26 @@ pub struct FoodDraft {
     pub created_at: String,
 }
 
+impl FoodDraft {
+    pub fn to_food(&self) -> Food {
+        Food {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            kcal: self.kcal,
+            protein: self.protein,
+            fat: self.fat,
+            carbs: self.carbs,
+            nutrients: self.nutrients.clone(),
+            package_weight: self.package_weight,
+            is_recipe: false,
+            recipe_id: None,
+            archived: false,
+            created_at: self.created_at.clone(),
+            updated_at: String::new(),
+        }
+    }
+}
+
 // --- Request/Response DTOs ---
 
 // Food
@@ -372,6 +392,22 @@ pub struct UpdateGoalInput {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ListGoalOutput {
     pub goals: Vec<Goal>,
+}
+
+// --- Weight tracking ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeightEntry {
+    pub id: String,
+    pub date: String,
+    pub weight_kg: f64,
+    pub no_water: bool,
+    pub no_food: bool,
+    pub no_wash: bool,
+    pub used_toilet: bool,
+    pub morning: bool,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 // --- Sync types ---

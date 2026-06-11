@@ -97,8 +97,14 @@ test.describe('App navigation', () => {
     await page.getByTestId('nav-settings').click();
     await expect(page).toHaveURL(/\/settings/);
 
+    // Navigate to Goals page
+    const goalsBtn = page.getByTestId('settings-btn-goals');
+    await expect(goalsBtn).toBeVisible({ timeout: 5_000 });
+    await goalsBtn.click();
+    await expect(page).toHaveURL(/\/settings\/goals/);
+
     // Toggle a goal checkbox
-    const caloriesCheckbox = page.getByTestId('settings-checkbox-calories');
+    const caloriesCheckbox = page.getByTestId('goals-checkbox-calories');
     await expect(caloriesCheckbox).toBeVisible({ timeout: 5_000 });
     await caloriesCheckbox.check();
     await expect(caloriesCheckbox).toBeChecked();

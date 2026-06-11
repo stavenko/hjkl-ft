@@ -52,14 +52,14 @@ pub fn FoodsPage() -> impl IntoView {
         <div>
             <div class="level mb-4">
                 <div class="level-left">
-                    <h1 class="title is-4">{t("foods.title")}</h1>
+                    <h1 class="title is-4">{move || t("foods.title")}</h1>
                 </div>
                 <div class="level-right">
                     <button
                         class="button is-link"
                         on:click=move |_| show_modal.set(true)
                     >
-                        {t("foods.add")}
+                        {move || t("foods.add")}
                     </button>
                 </div>
             </div>
@@ -78,7 +78,7 @@ pub fn FoodsPage() -> impl IntoView {
                                     </div>
                                     <div class="level-right">
                                         <span class="is-size-7 has-text-grey mr-4">
-                                            {format!("{:.0} {}", food.kcal, t("common.unit.kcal"))}
+                                            {move || format!("{:.0} {}", food.kcal, t("common.unit.kcal"))}
                                         </span>
                                         <span class="is-size-7 has-text-grey mr-4">
                                             {format!("P {:.1}", food.protein)}

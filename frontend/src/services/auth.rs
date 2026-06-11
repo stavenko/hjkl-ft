@@ -5,6 +5,7 @@ use wasm_bindgen_futures::JsFuture;
 
 const KEY_USER_ID: &str = "user_id";
 const KEY_AUTH_TOKEN: &str = "auth_token";
+const KEY_TOKEN_ID: &str = "token_id";
 
 fn storage() -> web_sys::Storage {
     web_sys::window()
@@ -25,6 +26,25 @@ fn set_user(user_id: &str) {
 
 fn set_token(token: &str) {
     storage().set_item(KEY_AUTH_TOKEN, token).expect("write token");
+    // Extract token_id from JWT payload and store separately
+    if let Some(token_id) = extract_token_id_from_jwt(token) {
+        storage().set_item(KEY_TOKEN_ID, &token_id).expect("write token_id");
+    }
+}
+
+fn extract_token_id_from_jwt(token: &str) -> Option<String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[1])
+        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(parts[1]))
+        .ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+    json.get("token_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 pub fn get_token() -> Option<String> {
@@ -35,6 +55,12 @@ pub fn logout() {
     let s = storage();
     let _ = s.remove_item(KEY_USER_ID);
     let _ = s.remove_item(KEY_AUTH_TOKEN);
+    let _ = s.remove_item(KEY_TOKEN_ID);
+}
+
+/// Return the token_id stored in localStorage (extracted from JWT on login).
+pub fn current_token_id() -> Option<String> {
+    storage().get_item(KEY_TOKEN_ID).ok().flatten()
 }
 
 fn generate_fingerprint() -> String {
@@ -569,9 +595,14 @@ pub async fn pair_status(pairing_id: &str) -> Result<serde_json::Value, String> 
 /// Fetch active tokens/sessions for the current user.
 pub async fn fetch_tokens() -> Result<Vec<serde_json::Value>, String> {
     let resp = get_json("/tokens").await?;
+    // The API returns {"tokens": [...]}, unwrap the inner array
+    if let Some(arr) = resp.get("tokens").and_then(|v| v.as_array()) {
+        return Ok(arr.clone());
+    }
+    // Fallback: maybe it's already a flat array
     resp.as_array()
         .cloned()
-        .ok_or_else(|| "expected array from /tokens".to_string())
+        .ok_or_else(|| "expected array or {tokens:[...]} from /tokens".to_string())
 }
 
 /// Return the fingerprint of the current device (for highlighting in session list).

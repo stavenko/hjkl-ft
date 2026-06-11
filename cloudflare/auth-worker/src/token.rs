@@ -104,7 +104,7 @@ pub fn create_token(
         iat: now,
         exp: FAR_FUTURE_EXP,
         caps: capabilities,
-        token_id: token_id.clone(),
+        token_id: Some(token_id.clone()),
     };
 
     let token = sign_jwt(&claims, secret)?;
@@ -152,7 +152,7 @@ pub fn create_ephemeral_token(
         iat: now,
         exp,
         caps: vec![capability.to_string()],
-        token_id: uuid::Uuid::new_v4().to_string(),
+        token_id: Some(uuid::Uuid::new_v4().to_string()),
     };
 
     let jwt = sign_jwt(&claims, secret)?;
@@ -202,13 +202,14 @@ pub async fn validate_from_header_full(req: &Request, env: &Env) -> Result<Strin
         .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
     let claims = validate_token_from_request(req, &secret)?;
 
-    // Check token exists in DO storage
-    let stub = auth_do_stub(env)?;
-    let do_body = serde_json::json!({ "token_id": claims.token_id });
-    let internal_req = do_request("/token/validate", &do_body)?;
-    let resp = stub.fetch_with_request(internal_req).await?;
-    if resp.status_code() != 200 {
-        return Err(Error::RustError("token has been revoked".into()));
+    if let Some(ref tid) = claims.token_id {
+        let stub = auth_do_stub(env)?;
+        let do_body = serde_json::json!({ "token_id": tid });
+        let internal_req = do_request("/token/validate", &do_body)?;
+        let resp = stub.fetch_with_request(internal_req).await?;
+        if resp.status_code() != 200 {
+            return Err(Error::RustError("token has been revoked".into()));
+        }
     }
 
     Ok(claims.sub)
@@ -232,16 +233,17 @@ pub async fn validate_token(req: Request, ctx: RouteContext<()>) -> Result<Respo
         }
     };
 
-    // Verify token exists in DO storage (not revoked) and update last_used_at
-    let stub = auth_do_stub(&ctx.env)?;
-    let do_body = serde_json::json!({ "token_id": claims.token_id });
-    let internal_req = do_request("/token/validate", &do_body)?;
-    let resp = stub.fetch_with_request(internal_req).await?;
-    if resp.status_code() != 200 {
-        let body = ErrorResponse {
-            error: "token has been revoked".into(),
-        };
-        return Ok(Response::from_json(&body)?.with_status(401));
+    if let Some(ref tid) = claims.token_id {
+        let stub = auth_do_stub(&ctx.env)?;
+        let do_body = serde_json::json!({ "token_id": tid });
+        let internal_req = do_request("/token/validate", &do_body)?;
+        let resp = stub.fetch_with_request(internal_req).await?;
+        if resp.status_code() != 200 {
+            let body = ErrorResponse {
+                error: "token has been revoked".into(),
+            };
+            return Ok(Response::from_json(&body)?.with_status(401));
+        }
     }
 
     Response::from_json(&claims)
@@ -292,7 +294,7 @@ mod tests {
 
         assert_eq!(claims.sub, user_id);
         assert_eq!(claims.caps, caps);
-        assert_eq!(claims.token_id, token_id);
+        assert_eq!(claims.token_id, Some(token_id));
         assert!(claims.iat <= current_timestamp());
         assert_eq!(claims.exp, FAR_FUTURE_EXP);
     }

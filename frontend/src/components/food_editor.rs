@@ -5,15 +5,14 @@ use api_types::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
-use crate::services::api;
+use crate::services::ai;
 use crate::services::i18n::t;
+use crate::services::local;
 
-/// Food creation form with AI fill.
-/// `on_draft` is called automatically when AI fills the form — no manual save button.
 #[component]
 pub fn FoodEditor(
     custom_nutrients: Signal<Vec<NutrientSpec>>,
-    on_draft: Callback<Food>,
+    on_draft: Callback<(Food, Option<String>)>,
 ) -> impl IntoView {
     let name = create_rw_signal(String::new());
     let kcal = create_rw_signal(String::new());
@@ -22,7 +21,9 @@ pub fn FoodEditor(
     let carbs = create_rw_signal(String::new());
     let custom_values = create_rw_signal(BTreeMap::<String, String>::new());
     let ai_loading = create_rw_signal(false);
+    let ai_error = create_rw_signal(None::<String>);
     let ai_details = create_rw_signal(BTreeMap::<String, AiNutrientDetail>::new());
+    let draft_id = create_rw_signal(None::<String>);
 
     let photos_base64 = create_rw_signal(Vec::<String>::new());
     let photo_count = create_rw_signal(0usize);
@@ -77,8 +78,6 @@ pub fn FoodEditor(
         }
         custom_values.set(cv);
         ai_details.set(details);
-
-        on_draft.call(build_food());
     };
 
     let on_file_change = move |ev: leptos::ev::Event| {
@@ -106,24 +105,46 @@ pub fn FoodEditor(
         let n = name.get_untracked();
         if images.is_empty() && n.is_empty() { return; }
         ai_loading.set(true);
+        ai_error.set(None);
         let nutrients_list = custom_nutrients.get_untracked();
         spawn_local(async move {
-            if !images.is_empty() {
+            let result = if !images.is_empty() {
                 let input = AiVisionInput { images, custom_nutrients: nutrients_list };
-                match api::post::<_, AiLookupOutput>("/food/ai-vision", &input).await {
-                    Ok(result) => apply_result(&result),
-                    Err(_) => leptos::logging::error!("AI vision failed"),
-                }
+                ai::vision(&input).await
             } else {
                 let input = AiLookupInput { name: n, custom_nutrients: nutrients_list };
-                match api::post::<_, AiLookupOutput>("/food/ai-lookup", &input).await {
-                    Ok(result) => apply_result(&result),
-                    Err(_) => leptos::logging::error!("AI lookup failed"),
+                ai::lookup(&input).await
+            };
+            match result {
+                Ok(output) => {
+                    apply_result(&output);
+                    let draft = local::save_draft(&build_food()).await;
+                    draft_id.set(Some(draft.id));
+                }
+                Err(e) => {
+                    ai_error.set(Some(e));
                 }
             }
             ai_loading.set(false);
         });
     };
+
+    create_effect(move |prev: Option<()>| {
+        let _ = name.get();
+        let _ = kcal.get();
+        let _ = protein.get();
+        let _ = fat.get();
+        let _ = carbs.get();
+        let _ = custom_values.get();
+        if prev.is_some() {
+            if let Some(id) = draft_id.get_untracked() {
+                let food = build_food();
+                spawn_local(async move {
+                    local::update_draft_fields(&id, &food).await;
+                });
+            }
+        }
+    });
 
     let ai_hint = move |field_key: &str| {
         let key = field_key.to_string();
@@ -138,8 +159,8 @@ pub fn FoodEditor(
                     );
                     view! {
                         <span
-                            class="has-text-link is-size-7 ml-1"
-                            style="cursor: help; text-decoration: underline; user-select: none;"
+                            class="has-text-link is-size-7"
+                            style="margin-left: 4px; cursor: help; text-decoration: underline;"
                             title=tip
                         >"?"</span>
                     }
@@ -152,170 +173,140 @@ pub fn FoodEditor(
         <div on:keydown=move |ev: leptos::ev::KeyboardEvent| {
             if ev.key() == "Enter" { ev.prevent_default(); }
         }>
-            // Name
-            <div class="field mb-3">
-                <div class="control">
-                    <input type="text" placeholder=t("food_editor.product_name") class="input is-small"
-                        prop:value=move || name.get()
-                        on:input=move |ev| name.set(event_target_value(&ev)) />
-                </div>
-            </div>
+            // Name input
+            <input type="text"
+                placeholder=t("food_editor.product_name")
+                class="is-size-6"
+                style="width: 100%; padding: 10px 12px; border: none; border-radius: 10px; background: var(--bulma-background); color: var(--bulma-text); outline: none; box-sizing: border-box; margin-bottom: 10px;"
+                prop:value=move || name.get()
+                on:input=move |ev| name.set(event_target_value(&ev))
+            />
 
-            // Photos
-            <div class="field mb-3">
+            // Photo + AI buttons row
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
                 <input type="file" accept="image/*" multiple=true
                     id="food-photo-input"
                     style="display: none;"
                     on:change=on_file_change />
-                <div class="control">
-                    <button type="button"
-                        class="button is-small is-light is-fullwidth"
-                        on:click=move |_| {
-                            let doc = web_sys::window().unwrap().document().unwrap();
-                            let el = doc.get_element_by_id("food-photo-input").unwrap();
-                            use wasm_bindgen::JsCast;
-                            let input: &web_sys::HtmlInputElement = el.unchecked_ref();
-                            input.click();
-                        }
-                    >
-                        {move || {
-                            let c = photo_count.get();
-                            if c == 0 {
-                                t("food_editor.add_photo").to_string()
-                            } else {
-                                format!("{c} photo(s) attached")
-                            }
-                        }}
-                    </button>
-                </div>
-            </div>
-
-            // AI button
-            <div class="field mb-4">
-                <div class="control">
-                    <button type="button"
-                        class="button is-small is-link is-fullwidth"
-                        disabled=move || ai_loading.get() || (name.get().is_empty() && photo_count.get() == 0)
-                        on:click=on_ai
-                    >
-                        <span class="icon is-small mr-1">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26z"/>
-                            </svg>
-                        </span>
-                        {move || if ai_loading.get() { t("food_editor.filling") } else { t("food_editor.fill_info") }}
-                    </button>
-                </div>
-            </div>
-
-            <hr class="my-2" />
-
-            <div class="field is-horizontal mb-2">
-                <div class="field-label is-small">
-                    <label class="label">{t("food_editor.calories")} {ai_hint("kcal")}</label>
-                </div>
-                <div class="field-body">
-                    <div class="field has-addons">
-                        <div class="control is-expanded">
-                            <input type="text" inputmode="decimal" placeholder="165" class="input is-small"
-                                prop:value=move || kcal.get()
-                                on:input=move |ev| kcal.set(event_target_value(&ev)) />
-                        </div>
-                        <div class="control">
-                            <a class="button is-small is-static">{t("common.unit.kcal")}</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="field is-horizontal mb-2">
-                <div class="field-label is-small">
-                    <label class="label">{t("food_editor.protein")} {ai_hint("protein")}</label>
-                </div>
-                <div class="field-body">
-                    <div class="field has-addons">
-                        <div class="control is-expanded">
-                            <input type="text" inputmode="decimal" placeholder="31" class="input is-small"
-                                prop:value=move || protein.get()
-                                on:input=move |ev| protein.set(event_target_value(&ev)) />
-                        </div>
-                        <div class="control">
-                            <a class="button is-small is-static">{t("common.unit.g")}</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="field is-horizontal mb-2">
-                <div class="field-label is-small">
-                    <label class="label">{t("food_editor.fat")} {ai_hint("fat")}</label>
-                </div>
-                <div class="field-body">
-                    <div class="field has-addons">
-                        <div class="control is-expanded">
-                            <input type="text" inputmode="decimal" placeholder="3.6" class="input is-small"
-                                prop:value=move || fat.get()
-                                on:input=move |ev| fat.set(event_target_value(&ev)) />
-                        </div>
-                        <div class="control">
-                            <a class="button is-small is-static">{t("common.unit.g")}</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="field is-horizontal mb-2">
-                <div class="field-label is-small">
-                    <label class="label">{t("food_editor.carbs")} {ai_hint("carbs")}</label>
-                </div>
-                <div class="field-body">
-                    <div class="field has-addons">
-                        <div class="control is-expanded">
-                            <input type="text" inputmode="decimal" placeholder="0" class="input is-small"
-                                prop:value=move || carbs.get()
-                                on:input=move |ev| carbs.set(event_target_value(&ev)) />
-                        </div>
-                        <div class="control">
-                            <a class="button is-small is-static">{t("common.unit.g")}</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            // Custom nutrients
-            <Show when=move || !custom_nutrients.get().is_empty()>
-                <hr class="my-2" />
-            </Show>
-            <For
-                each=move || custom_nutrients.get()
-                key=|s| s.key.clone()
-                children=move |spec| {
-                    let key = spec.name.clone();
-                    let key2 = spec.name.clone();
-                    let hint_key = spec.name.clone();
-                    let unit = spec.unit_label.clone();
-                    view! {
-                        <div class="field is-horizontal mb-2">
-                            <div class="field-label is-small">
-                                <label class="label">{spec.name.clone()} {ai_hint(&hint_key)}</label>
-                            </div>
-                            <div class="field-body">
-                                <div class="field has-addons">
-                                    <div class="control is-expanded">
-                                        <input type="text" inputmode="decimal" placeholder="0" class="input is-small"
-                                            prop:value=move || custom_values.get().get(&key).cloned().unwrap_or_default()
-                                            on:input=move |ev| {
-                                                let v = event_target_value(&ev);
-                                                let k = key2.clone();
-                                                custom_values.update(|m| { m.insert(k, v); });
-                                            } />
-                                    </div>
-                                    <div class="control">
-                                        <a class="button is-small is-static">{unit}</a>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                <button type="button"
+                    class="is-size-7"
+                    style="flex: 1; padding: 8px 0; border: 1px solid var(--bulma-border-weak); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); cursor: pointer;"
+                    on:click=move |_| {
+                        let doc = web_sys::window().unwrap().document().unwrap();
+                        let el = doc.get_element_by_id("food-photo-input").unwrap();
+                        use wasm_bindgen::JsCast;
+                        let input: &web_sys::HtmlInputElement = el.unchecked_ref();
+                        input.click();
                     }
-                }
-            />
+                >
+                    {move || {
+                        let c = photo_count.get();
+                        if c == 0 {
+                            format!("\u{1f4f7} {}", t("food_editor.add_photo"))
+                        } else {
+                            format!("\u{1f4f7} {c}")
+                        }
+                    }}
+                </button>
+                <button type="button"
+                    class="button is-link is-size-7"
+                    style="flex: 1; padding: 8px 0; border: none; border-radius: 10px; cursor: pointer;"
+                    disabled=move || ai_loading.get() || (name.get().is_empty() && photo_count.get() == 0)
+                    on:click=on_ai
+                >
+                    {move || if ai_loading.get() {
+                        format!("\u{2728} {}", t("food_editor.filling"))
+                    } else {
+                        format!("\u{2728} {}", t("food_editor.fill_info"))
+                    }}
+                </button>
+            </div>
+
+            {move || ai_error.get().map(|e| view! {
+                <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-bottom: 10px; background: var(--bulma-danger-light); border-radius: 10px;">
+                    {e}
+                </div>
+            })}
+
+            // Nutrient fields card
+            <div style="background: var(--bulma-background); border-radius: 12px; overflow: hidden;">
+                <NutrientRow label=t("food_editor.calories") unit=t("common.unit.kcal") placeholder="165"
+                    value=kcal hint=ai_hint("kcal").into_view() last=false />
+                <NutrientRow label=t("food_editor.protein") unit=t("common.unit.g") placeholder="31"
+                    value=protein hint=ai_hint("protein").into_view() last=false />
+                <NutrientRow label=t("food_editor.fat") unit=t("common.unit.g") placeholder="3.6"
+                    value=fat hint=ai_hint("fat").into_view() last=false />
+                <NutrientRow label=t("food_editor.carbs") unit=t("common.unit.g") placeholder="0"
+                    value=carbs hint=ai_hint("carbs").into_view()
+                    last=Signal::derive(move || custom_nutrients.get().is_empty()) />
+                <For
+                    each=move || custom_nutrients.get()
+                    key=|s| s.key.clone()
+                    children=move |spec| {
+                        let key = spec.name.clone();
+                        let key2 = spec.name.clone();
+                        let hint_key = spec.name.clone();
+                        let unit = spec.unit_label.clone();
+                        let sig = create_rw_signal(
+                            custom_values.get_untracked().get(&key).cloned().unwrap_or_default()
+                        );
+                        create_effect(move |_| {
+                            let val = sig.get();
+                            let k = key2.clone();
+                            custom_values.update(|m| { m.insert(k, val); });
+                        });
+                        view! {
+                            <NutrientRow label=spec.name.leak() unit=unit.leak() placeholder="0"
+                                value=sig hint=ai_hint(&hint_key).into_view() last=true />
+                        }
+                    }
+                />
+            </div>
+
+            // Add button
+            <button type="button"
+                class="button is-link is-size-6 has-text-weight-semibold"
+                style="width: 100%; padding: 12px 0; margin-top: 16px; border: none; border-radius: 10px; cursor: pointer;"
+                disabled=move || name.get().is_empty()
+                on:click=move |_| on_draft.call((build_food(), draft_id.get_untracked()))
+            >
+                {move || t("food_editor.add")}
+            </button>
+        </div>
+    }
+}
+
+#[component]
+fn NutrientRow(
+    label: &'static str,
+    unit: &'static str,
+    placeholder: &'static str,
+    value: RwSignal<String>,
+    hint: View,
+    #[prop(into)] last: MaybeSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <div>
+            <div style="display: flex; align-items: center; padding: 10px 12px; background: var(--bulma-scheme-main);">
+                <span class="is-size-6" style="color: var(--bulma-text); min-width: 80px;">
+                    {label}
+                </span>
+                {hint}
+                <div style="flex: 1;"></div>
+                <input type="text" inputmode="decimal"
+                    placeholder=placeholder
+                    class="is-size-6"
+                    style="width: 80px; text-align: right; padding: 4px 8px; border: none; background: var(--bulma-background); color: var(--bulma-text); border-radius: 8px; outline: none;"
+                    prop:value=move || value.get()
+                    on:input=move |ev| value.set(event_target_value(&ev))
+                />
+                <span class="has-text-grey-light is-size-7" style="margin-left: 6px; min-width: 30px;">
+                    {unit}
+                </span>
+            </div>
+            <Show when=move || !last.get()>
+                <div style="border-bottom: 0.5px solid var(--bulma-border-weak); margin-left: 12px;"></div>
+            </Show>
         </div>
     }
 }

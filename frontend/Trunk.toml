@@ -6,8 +6,13 @@ ignore = ["dist", "node_modules", "styles/output.css"]
 
 [[hooks]]
 stage = "pre_build"
-command = "cp"
-command_arguments = ["styles/input.css", "styles/output.css"]
+command = "bash"
+command_arguments = ["-c", "cat styles/bulma.min.css styles/input.css > styles/output.css"]
+
+[[hooks]]
+stage = "post_build"
+command = "bash"
+command_arguments = ["scripts/extract-inline-module.sh"]
 
 [[proxy]]
 rewrite = "/api/"

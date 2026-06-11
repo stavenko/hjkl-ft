@@ -69,7 +69,13 @@ test.describe('Device pairing (logged-in device)', () => {
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
+    // Navigate to Privacy page where "Add device" now lives
+    const privacyBtn = page.getByTestId('settings-btn-privacy');
+    await expect(privacyBtn).toBeVisible({ timeout: 10_000 });
+    await privacyBtn.click();
+    await page.waitForTimeout(1000);
+
+    const addDeviceBtn = page.getByTestId('privacy-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
   });
 
@@ -78,7 +84,13 @@ test.describe('Device pairing (logged-in device)', () => {
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
+    // Navigate to Privacy page where "Add device" now lives
+    const privacyBtn = page.getByTestId('settings-btn-privacy');
+    await expect(privacyBtn).toBeVisible({ timeout: 10_000 });
+    await privacyBtn.click();
+    await page.waitForTimeout(1000);
+
+    const addDeviceBtn = page.getByTestId('privacy-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click({ timeout: 15_000 });
 
@@ -94,7 +106,13 @@ test.describe('Device pairing (logged-in device)', () => {
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
+    // Navigate to Privacy page where "Add device" now lives
+    const privacyBtn = page.getByTestId('settings-btn-privacy');
+    await expect(privacyBtn).toBeVisible({ timeout: 10_000 });
+    await privacyBtn.click();
+    await page.waitForTimeout(1000);
+
+    const addDeviceBtn = page.getByTestId('privacy-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click({ timeout: 15_000 });
 

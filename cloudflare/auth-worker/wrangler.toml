@@ -25,9 +25,3 @@ new_sqlite_classes = ["AuthDO"]
 JWT_SECRET = "dev-secret-change-in-production"
 RP_ID = "hjkl-ft.pages.dev"
 RP_ORIGIN = "https://hjkl-ft.pages.dev"
-VAPID_PUBLIC_KEY = "BPxkM-mpShM42XvwL4CJ953bWIJbP5fDjSBXh_RMZItBLqO28gmzo4Y4xx2jrSabDxwgjIEUf2-YPkV7gW2_Cn4"
-VAPID_PRIVATE_KEY = "LqO28gmzo4Y4xx2jrSabDxwgjIEUf2-YPkV7gW2_Cn4"
-VAPID_SUBJECT = "mailto:admin@hjkl.pro"
-
-[triggers]
-crons = ["0 * * * *"]

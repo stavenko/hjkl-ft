@@ -16,12 +16,18 @@ test.describe('Flow A: Logged-in shows QR → new device claims', () => {
     await page.waitForTimeout(3000);
     const { cdpSession } = await registerAccount(page);
 
-    // -- Step 2: Navigate to Settings → Connect device → Show QR --
+    // -- Step 2: Navigate to Settings → Privacy → Connect device → Show QR --
     await page.getByTestId('nav-settings').click();
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
+    // Navigate to Privacy page where "Add device" now lives
+    const privacyBtn = page.getByTestId('settings-btn-privacy');
+    await expect(privacyBtn).toBeVisible({ timeout: 10_000 });
+    await privacyBtn.click();
+    await page.waitForTimeout(1000);
+
+    const addDeviceBtn = page.getByTestId('privacy-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click({ timeout: 15_000 });
 

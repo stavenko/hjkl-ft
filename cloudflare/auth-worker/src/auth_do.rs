@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use wasm_bindgen::JsCast;
 use worker::*;
 
-use crate::types::{PairingSession, PairingStatus, PushSubscription};
+use crate::types::{PairingSession, PairingStatus};
 
 use crate::types::{TokenListResponse, TokenMetadata};
 
@@ -25,8 +25,6 @@ const STORAGE_KEY_PAIRING_PREFIX: &str = "pairing:";
 const STORAGE_KEY_STATE_PREFIX: &str = "pk_state:";
 const STORAGE_KEY_TOKEN_PREFIX: &str = "token:";
 const STORAGE_KEY_USER_TOKENS_PREFIX: &str = "user_tokens:";
-const STORAGE_KEY_PUSH_SUB_PREFIX: &str = "push_sub:";
-const STORAGE_KEY_USER_PUSH_SUBS_PREFIX: &str = "user_push_subs:";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -827,120 +825,6 @@ impl AuthDO {
         Response::from_json(&resp)
     }
 
-    // ---- Push subscription handlers ----
-
-    fn subscription_hash(endpoint: &str) -> String {
-        use sha2::Digest;
-        let hash = sha2::Sha256::digest(endpoint.as_bytes());
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&hash[..16])
-    }
-
-    async fn handle_push_subscribe(
-        &self,
-        user_id: &str,
-        subscription: PushSubscription,
-    ) -> Result<Response> {
-        let sub_hash = Self::subscription_hash(&subscription.endpoint);
-
-        // Store the subscription
-        let sub_key = format!("{STORAGE_KEY_PUSH_SUB_PREFIX}{user_id}:{sub_hash}");
-        let sub_json = serde_json::to_string(&subscription)
-            .map_err(|e| Error::RustError(format!("serialize push subscription: {e}")))?;
-        self.state.storage().put(&sub_key, sub_json).await?;
-
-        // Add to user's subscription list
-        let list_key = format!("{STORAGE_KEY_USER_PUSH_SUBS_PREFIX}{user_id}");
-        let stored: Option<String> = self.state.storage().get(&list_key).await?;
-        let mut sub_hashes: Vec<String> = match stored {
-            Some(json) => serde_json::from_str(&json)
-                .map_err(|e| Error::RustError(format!("parse user_push_subs: {e}")))?,
-            None => Vec::new(),
-        };
-        if !sub_hashes.contains(&sub_hash) {
-            sub_hashes.push(sub_hash);
-            let list_json = serde_json::to_string(&sub_hashes)
-                .map_err(|e| Error::RustError(format!("serialize sub hash list: {e}")))?;
-            self.state.storage().put(&list_key, list_json).await?;
-        }
-
-        Response::from_json(&serde_json::json!({ "ok": true }))
-    }
-
-    async fn handle_push_unsubscribe(
-        &self,
-        user_id: &str,
-        endpoint: &str,
-    ) -> Result<Response> {
-        let sub_hash = Self::subscription_hash(endpoint);
-
-        // Delete the subscription
-        let sub_key = format!("{STORAGE_KEY_PUSH_SUB_PREFIX}{user_id}:{sub_hash}");
-        self.state.storage().delete(&sub_key).await?;
-
-        // Remove from user's subscription list
-        let list_key = format!("{STORAGE_KEY_USER_PUSH_SUBS_PREFIX}{user_id}");
-        let stored: Option<String> = self.state.storage().get(&list_key).await?;
-        if let Some(json) = stored {
-            let mut sub_hashes: Vec<String> = serde_json::from_str(&json)
-                .map_err(|e| Error::RustError(format!("parse user_push_subs: {e}")))?;
-            sub_hashes.retain(|h| h != &sub_hash);
-            let list_json = serde_json::to_string(&sub_hashes)
-                .map_err(|e| Error::RustError(format!("serialize sub hash list: {e}")))?;
-            self.state.storage().put(&list_key, list_json).await?;
-        }
-
-        Response::from_json(&serde_json::json!({ "ok": true }))
-    }
-
-    async fn handle_push_list(&self, user_id: &str) -> Result<Response> {
-        let list_key = format!("{STORAGE_KEY_USER_PUSH_SUBS_PREFIX}{user_id}");
-        let stored: Option<String> = self.state.storage().get(&list_key).await?;
-        let sub_hashes: Vec<String> = match stored {
-            Some(json) => serde_json::from_str(&json)
-                .map_err(|e| Error::RustError(format!("parse user_push_subs: {e}")))?,
-            None => Vec::new(),
-        };
-
-        let mut subscriptions = Vec::new();
-        for hash in &sub_hashes {
-            let sub_key = format!("{STORAGE_KEY_PUSH_SUB_PREFIX}{user_id}:{hash}");
-            let stored: Option<String> = self.state.storage().get(&sub_key).await?;
-            if let Some(json) = stored {
-                if let Ok(sub) = serde_json::from_str::<PushSubscription>(&json) {
-                    subscriptions.push(sub);
-                }
-            }
-        }
-
-        Response::from_json(&serde_json::json!({ "subscriptions": subscriptions }))
-    }
-
-    async fn handle_push_list_all(&self) -> Result<Response> {
-        // List all push subscriptions across all users
-        let map = self.state.storage()
-            .list_with_options(
-                worker::durable::ListOptions::new().prefix(STORAGE_KEY_PUSH_SUB_PREFIX),
-            )
-            .await?;
-
-        let mut subscriptions = Vec::new();
-        let iter = js_sys::try_iter(&map).ok().flatten();
-        if let Some(iter) = iter {
-            for entry in iter {
-                let entry = entry.map_err(Error::from)?;
-                let arr: js_sys::Array = entry.unchecked_into();
-                let val = arr.get(1);
-                if let Ok(json_str) = serde_wasm_bindgen::from_value::<String>(val) {
-                    if let Ok(sub) = serde_json::from_str::<PushSubscription>(&json_str) {
-                        subscriptions.push(sub);
-                    }
-                }
-            }
-        }
-
-        Response::from_json(&subscriptions)
-    }
-
     // ---- Recovery handlers ----
 
     async fn handle_recovery_set(
@@ -1145,43 +1029,6 @@ impl DurableObject for AuthDO {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing user_id".into()))?;
                 self.handle_token_list(user_id).await
-            }
-            "/push/subscribe" => {
-                let body: serde_json::Value = req.json().await?;
-                let user_id = body
-                    .get("user_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
-                let subscription: PushSubscription = serde_json::from_value(
-                    body.get("subscription")
-                        .cloned()
-                        .ok_or_else(|| Error::RustError("missing subscription".into()))?,
-                )
-                .map_err(|e| Error::RustError(format!("parse subscription: {e}")))?;
-                self.handle_push_subscribe(user_id, subscription).await
-            }
-            "/push/unsubscribe" => {
-                let body: serde_json::Value = req.json().await?;
-                let user_id = body
-                    .get("user_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
-                let endpoint = body
-                    .get("endpoint")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| Error::RustError("missing endpoint".into()))?;
-                self.handle_push_unsubscribe(user_id, endpoint).await
-            }
-            "/push/list-all" => {
-                self.handle_push_list_all().await
-            }
-            "/push/list" => {
-                let body: serde_json::Value = req.json().await?;
-                let user_id = body
-                    .get("user_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
-                self.handle_push_list(user_id).await
             }
             "/recovery/set" => {
                 let body: serde_json::Value = req.json().await?;

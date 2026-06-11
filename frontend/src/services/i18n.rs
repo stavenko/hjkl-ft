@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use leptos::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Lang {
@@ -6,20 +7,99 @@ pub enum Lang {
     Ru,
 }
 
+const KEY_LANG: &str = "app_lang";
+const KEY_WEIGHT_UNIT: &str = "weight_unit";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum WeightUnit {
+    Kg,
+    Lbs,
+}
+
+impl WeightUnit {
+    pub fn to_kg(self, value: f64) -> f64 {
+        match self {
+            WeightUnit::Kg => value,
+            WeightUnit::Lbs => value * 0.45359237,
+        }
+    }
+
+    pub fn from_kg(self, kg: f64) -> f64 {
+        match self {
+            WeightUnit::Kg => kg,
+            WeightUnit::Lbs => kg / 0.45359237,
+        }
+    }
+}
+
+fn stored_weight_unit() -> WeightUnit {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(KEY_WEIGHT_UNIT).ok().flatten())
+        .map(|v| if v == "lbs" { WeightUnit::Lbs } else { WeightUnit::Kg })
+        .unwrap_or(WeightUnit::Kg)
+}
+
 thread_local! {
-    static CURRENT_LANG: Cell<Lang> = const { Cell::new(Lang::Ru) };
+    static WEIGHT_UNIT_SIGNAL: Cell<Option<RwSignal<WeightUnit>>> = const { Cell::new(None) };
+}
+
+pub fn init_weight_unit() {
+    let sig = create_rw_signal(stored_weight_unit());
+    WEIGHT_UNIT_SIGNAL.with(|c| c.set(Some(sig)));
+}
+
+pub fn weight_unit_signal() -> RwSignal<WeightUnit> {
+    WEIGHT_UNIT_SIGNAL.with(|c| c.get().expect("weight_unit not initialized"))
+}
+
+pub fn set_weight_unit(unit: WeightUnit) {
+    weight_unit_signal().set(unit);
+    if let Some(storage) = web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+    {
+        let val = match unit { WeightUnit::Kg => "kg", WeightUnit::Lbs => "lbs" };
+        storage.set_item(KEY_WEIGHT_UNIT, val).expect("write weight_unit");
+    }
+}
+
+fn stored_lang() -> Lang {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(KEY_LANG).ok().flatten())
+        .map(|v| if v == "en" { Lang::En } else { Lang::Ru })
+        .unwrap_or(Lang::Ru)
+}
+
+thread_local! {
+    static LANG_SIGNAL: Cell<Option<RwSignal<Lang>>> = const { Cell::new(None) };
+}
+
+pub fn init_lang() {
+    let sig = create_rw_signal(stored_lang());
+    LANG_SIGNAL.with(|c| c.set(Some(sig)));
+}
+
+fn lang_signal() -> RwSignal<Lang> {
+    LANG_SIGNAL.with(|c| c.get().expect("i18n not initialized"))
 }
 
 pub fn set_lang(lang: Lang) {
-    CURRENT_LANG.with(|l| l.set(lang));
+    lang_signal().set(lang);
+    if let Some(storage) = web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+    {
+        let val = match lang { Lang::En => "en", Lang::Ru => "ru" };
+        storage.set_item(KEY_LANG, val).expect("write lang");
+    }
 }
 
 pub fn get_lang() -> Lang {
-    CURRENT_LANG.with(|l| l.get())
+    lang_signal().get()
 }
 
 pub fn t(key: &str) -> &'static str {
-    match get_lang() {
+    match lang_signal().get() {
         Lang::En => en(key),
         Lang::Ru => ru(key),
     }
@@ -99,11 +179,23 @@ fn en(key: &str) -> &'static str {
         "diary.month.11" => "November",
         "diary.month.12" => "December",
 
+        // Diary: weekday prepositional (for "On Monday there were no entries")
+        "diary.weekday_prep.mon" => "On Monday",
+        "diary.weekday_prep.tue" => "On Tuesday",
+        "diary.weekday_prep.wed" => "On Wednesday",
+        "diary.weekday_prep.thu" => "On Thursday",
+        "diary.weekday_prep.fri" => "On Friday",
+        "diary.weekday_prep.sat" => "On Saturday",
+        "diary.weekday_prep.sun" => "On Sunday",
+
         // Diary: actions
         "diary.delete" => "Delete",
         "diary.repeat_today" => "Repeat today",
         "diary.no_entries" => "No entries for this day",
         "diary.per_week" => "per week",
+        "diary.empty_today_1" => "This is where your food log will appear. There are no entries yet.",
+        "diary.empty_today_2" => "To add an entry, tap the button below.",
+        "diary.empty_past" => "there were no entries. This day has passed and you can no longer add food to it. You can only add food for today.",
 
         // Diary add modal
         "diary_add.title" => "Add to diary",
@@ -113,6 +205,9 @@ fn en(key: &str) -> &'static str {
         "diary_add.done" => "Done",
         "diary_add.how_much" => "How much?",
         "diary_add.add" => "Add",
+        "diary_add.nothing_found" => "Nothing found",
+        "diary_add.new_food" => "New food",
+        "diary_add.add_new_food" => "Add new food",
 
         // Foods page
         "foods.title" => "Foods",
@@ -153,6 +248,7 @@ fn en(key: &str) -> &'static str {
         "settings.add" => "+ Add",
         "settings.data" => "Data",
         "settings.wipe_all" => "Wipe all data",
+        "settings.wipe_confirm" => "Are you sure? All local data will be deleted.",
         "settings.nutrient_placeholder" => "Omega 3, Fiber...",
 
         // Food editor
@@ -164,6 +260,7 @@ fn en(key: &str) -> &'static str {
         "food_editor.protein" => "Protein",
         "food_editor.fat" => "Fat",
         "food_editor.carbs" => "Carbs",
+        "food_editor.add" => "Add",
 
         // New food panel
         "new_food.title" => "New food",
@@ -187,6 +284,7 @@ fn en(key: &str) -> &'static str {
         "food_modal.title" => "Add Food",
 
         // Common
+        "common.back" => "Back",
         "common.cancel" => "Cancel",
         "common.unit.kcal" => "kcal",
         "common.unit.g" => "g",
@@ -298,12 +396,56 @@ fn en(key: &str) -> &'static str {
         "settings.active_sessions" => "Active sessions",
         "settings.current_device" => "This device",
 
+        // Privacy page
+        "privacy.title" => "Privacy",
+        "privacy.back" => "\u{2190} Settings",
+        "privacy.sessions" => "Active sessions",
+        "privacy.this_device" => "This device",
+        "privacy.add_device" => "Connect device",
+
+        // Goals page
+        "goals.title" => "Goals",
+        "goals.back" => "\u{2190} Settings",
+        "goals.standard" => "Standard nutrients",
+        "goals.custom" => "Custom nutrients",
+        "goals.no_custom" => "No custom nutrients added",
+        "goals.mode_track" => "Track",
+        "goals.mode_goal" => "Goal",
+
         // Notifications
         "settings.notifications" => "Notifications",
         "settings.push_enable" => "Enable push notifications",
         "settings.push_disable" => "Disable push notifications",
         "settings.push_enabled" => "Notifications enabled",
         "settings.push_not_supported" => "Push notifications not supported in this browser",
+        "settings.schedule" => "Notification schedule",
+        "settings.weigh_in" => "Weigh-in",
+        "settings.breakfast" => "Breakfast",
+        "settings.lunch" => "Lunch",
+        "settings.dinner" => "Dinner",
+
+        "push_onboarding.title" => "Notifications",
+        "push_onboarding.description" => "This app can send notifications to remind you to fill in some data during the day. You need to grant permission so your device can show them.",
+        "push_onboarding.allow" => "Allow notifications",
+        "push_onboarding.skip" => "Not now",
+        "push_onboarding.schedule_title" => "When to remind?",
+        "push_onboarding.schedule_description" => "Choose which meals you want to be reminded about.",
+        "push_onboarding.done" => "Done",
+        "push_onboarding.skip_schedule" => "Skip",
+
+        "weight.title" => "Weigh-in",
+        "weight.no_water" => "I didn't drink water",
+        "weight.no_food" => "I didn't eat",
+        "weight.no_wash" => "I didn't shower or wash my face",
+        "weight.used_toilet" => "I used the toilet before weighing",
+        "weight.morning" => "I'm weighing in the morning",
+        "weight.input_placeholder" => "Weight",
+        "weight.save" => "Save",
+        "weight.saved" => "Saved!",
+        "weight.unit_kg" => "kg",
+        "weight.unit_lbs" => "lbs",
+        "weight.widget_title" => "Weight",
+        "weight.widget_placeholder" => "Your weight chart will appear here. Not enough data to draw it yet — once you have at least three measurements, the chart will be shown.",
 
         _ => "???",
     }
@@ -353,11 +495,23 @@ fn ru(key: &str) -> &'static str {
         "diary.month.11" => "ноября",
         "diary.month.12" => "декабря",
 
+        // Дневник: дни недели с предлогом
+        "diary.weekday_prep.mon" => "В понедельник",
+        "diary.weekday_prep.tue" => "Во вторник",
+        "diary.weekday_prep.wed" => "В среду",
+        "diary.weekday_prep.thu" => "В четверг",
+        "diary.weekday_prep.fri" => "В пятницу",
+        "diary.weekday_prep.sat" => "В субботу",
+        "diary.weekday_prep.sun" => "В воскресенье",
+
         // Дневник: действия
         "diary.delete" => "Удалить",
         "diary.repeat_today" => "Повторить сегодня",
         "diary.no_entries" => "Нет записей за этот день",
         "diary.per_week" => "в неделю",
+        "diary.empty_today_1" => "Здесь будет список того, что вы съели. Пока что здесь нет ни одной записи.",
+        "diary.empty_today_2" => "Чтобы добавить запись — нажмите кнопку ниже.",
+        "diary.empty_past" => "не было ни одной записи. Этот день прошёл, и в него нельзя добавить еду. Еду можно добавить только сегодня.",
 
         // Модалка добавления в дневник
         "diary_add.title" => "Добавить в дневник",
@@ -367,6 +521,9 @@ fn ru(key: &str) -> &'static str {
         "diary_add.done" => "Готово",
         "diary_add.how_much" => "Сколько?",
         "diary_add.add" => "Добавить",
+        "diary_add.nothing_found" => "Ничего не найдено",
+        "diary_add.new_food" => "Новый продукт",
+        "diary_add.add_new_food" => "Добавить новый продукт",
 
         // Продукты
         "foods.title" => "Продукты",
@@ -407,6 +564,7 @@ fn ru(key: &str) -> &'static str {
         "settings.add" => "+ Добавить",
         "settings.data" => "Данные",
         "settings.wipe_all" => "Удалить все данные",
+        "settings.wipe_confirm" => "Вы уверены? Все локальные данные будут удалены.",
         "settings.nutrient_placeholder" => "Omega 3, Fiber...",
 
         // Редактор продукта
@@ -418,6 +576,7 @@ fn ru(key: &str) -> &'static str {
         "food_editor.protein" => "Белки",
         "food_editor.fat" => "Жиры",
         "food_editor.carbs" => "Углеводы",
+        "food_editor.add" => "Добавить",
 
         // Панель нового продукта
         "new_food.title" => "Новый продукт",
@@ -441,6 +600,7 @@ fn ru(key: &str) -> &'static str {
         "food_modal.title" => "Добавить продукт",
 
         // Общее
+        "common.back" => "Назад",
         "common.cancel" => "Отмена",
         "common.unit.kcal" => "ккал",
         "common.unit.g" => "г",
@@ -542,12 +702,56 @@ fn ru(key: &str) -> &'static str {
         "settings.active_sessions" => "Активные сессии",
         "settings.current_device" => "Это устройство",
 
+        // Страница приватности
+        "privacy.title" => "Приватность",
+        "privacy.back" => "\u{2190} Настройки",
+        "privacy.sessions" => "Активные сессии",
+        "privacy.this_device" => "Это устройство",
+        "privacy.add_device" => "Подключить устройство",
+
+        // Страница целей
+        "goals.title" => "Цели",
+        "goals.back" => "\u{2190} Настройки",
+        "goals.standard" => "Стандартные нутриенты",
+        "goals.custom" => "Пользовательские нутриенты",
+        "goals.no_custom" => "Нет пользовательских нутриентов",
+        "goals.mode_track" => "Следить",
+        "goals.mode_goal" => "Цель",
+
         // Уведомления
         "settings.notifications" => "Уведомления",
         "settings.push_enable" => "Включить уведомления",
         "settings.push_disable" => "Отключить уведомления",
         "settings.push_enabled" => "Уведомления включены",
         "settings.push_not_supported" => "Push-уведомления не поддерживаются в этом браузере",
+        "settings.schedule" => "Расписание уведомлений",
+        "settings.weigh_in" => "Взвешивание",
+        "settings.breakfast" => "Завтрак",
+        "settings.lunch" => "Обед",
+        "settings.dinner" => "Ужин",
+
+        "push_onboarding.title" => "Уведомления",
+        "push_onboarding.description" => "Это приложение может рассылать уведомления, чтобы проинформировать о необходимости заполнить некоторые данные в течение дня. Надо дать разрешение, чтобы ваше устройство могло вам их показывать.",
+        "push_onboarding.allow" => "Разрешить уведомления",
+        "push_onboarding.skip" => "Не сейчас",
+        "push_onboarding.schedule_title" => "Когда напоминать?",
+        "push_onboarding.schedule_description" => "Выберите приёмы пищи, о которых хотите получать напоминания.",
+        "push_onboarding.done" => "Готово",
+        "push_onboarding.skip_schedule" => "Пропустить",
+
+        "weight.title" => "Взвешивание",
+        "weight.no_water" => "Я не пил воду",
+        "weight.no_food" => "Я не ел",
+        "weight.no_wash" => "Я не мылся и не умывался",
+        "weight.used_toilet" => "Я сходил в туалет",
+        "weight.morning" => "Я взвешиваюсь с утра",
+        "weight.input_placeholder" => "Вес",
+        "weight.save" => "Сохранить",
+        "weight.saved" => "Сохранено!",
+        "weight.unit_kg" => "кг",
+        "weight.unit_lbs" => "фунты",
+        "weight.widget_title" => "Вес",
+        "weight.widget_placeholder" => "Здесь будет график вашего веса. Пока что график не изобразить, потому что слишком мало данных. Когда появится хотя бы три измерения, график будет нарисован.",
 
         _ => "???",
     }

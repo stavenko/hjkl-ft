@@ -414,11 +414,12 @@ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 [[package]]
 name = "arti-pipes"
 version = "0.1.0"
-source = "git+https://github.com/stavenko/arti-pipes#583a462f9ee56d63e5a053f8d62497e58457798f"
+source = "git+https://github.com/stavenko/arti-pipes#47abcf8737678ffcf6535a19f288ab54ba36c739"
 dependencies = [
  "async-stream",
  "async-trait",
  "futures",
+ "js-sys",
  "reqwest",
  "schemars",
  "serde",
@@ -428,6 +429,10 @@ dependencies = [
  "tokio-stream",
  "toml",
  "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
 ]
 
 [[package]]
@@ -1472,10 +1477,12 @@ name = "frontend"
 version = "0.1.0"
 dependencies = [
  "api-types",
+ "arti-pipes",
  "base64",
  "chrono",
  "console_error_panic_hook",
  "fast_qr",
+ "futures",
  "gloo-net",
  "js-sys",
  "leptos",
@@ -1483,6 +1490,7 @@ dependencies = [
  "postcard",
  "rexie",
  "rqrr",
+ "schemars",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -2626,6 +2634,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
 dependencies = [
  "hashbrown 0.15.5",
+]
+
+[[package]]
+name = "main-flow"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "base64",
+ "elliptic-curve",
+ "getrandom 0.2.17",
+ "hkdf",
+ "hmac",
+ "js-sys",
+ "p256",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "sha2 0.10.9",
+ "wasm-bindgen",
+ "worker",
 ]
 
 [[package]]
@@ -4864,6 +4892,16 @@ name = "web-sys"
 version = "0.3.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e0871acf327f283dc6da28a1696cdc64fb355ba9f935d052021fa77f35cce69"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

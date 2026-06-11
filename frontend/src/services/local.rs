@@ -36,6 +36,20 @@ pub async fn archive_food(id: &str, archived: bool) -> Option<Food> {
 
 // --- Diary ---
 
+pub async fn latest_diary_time_per_food() -> std::collections::BTreeMap<String, String> {
+    let entries: Vec<DiaryEntry> = db::list_all("diary").await;
+    let mut map = std::collections::BTreeMap::new();
+    for e in entries {
+        if e.deleted { continue; }
+        map.entry(e.food_id)
+            .and_modify(|existing: &mut String| {
+                if e.created_at > *existing { *existing = e.created_at.clone(); }
+            })
+            .or_insert(e.created_at);
+    }
+    map
+}
+
 pub async fn list_diary_range(dates: &[String]) -> Vec<DiaryEntry> {
     let mut all = Vec::new();
     for d in dates {
@@ -92,6 +106,28 @@ pub async fn remove_food_diary(entry_id: &str) -> Result<(), String> {
 // --- Food Drafts ---
 
 pub async fn save_draft(food: &Food) -> FoodDraft {
+    let new_keys: std::collections::BTreeSet<&str> =
+        food.nutrients.keys().map(|k| k.as_str()).collect();
+
+    let existing: Vec<FoodDraft> = db::list_all("food_drafts").await;
+    let matched = existing.into_iter().find(|d| {
+        d.name == food.name
+            && d.nutrients.len() == new_keys.len()
+            && d.nutrients.keys().all(|k| new_keys.contains(k.as_str()))
+    });
+
+    if let Some(mut draft) = matched {
+        draft.kcal = food.kcal;
+        draft.protein = food.protein;
+        draft.fat = food.fat;
+        draft.carbs = food.carbs;
+        draft.nutrients = food.nutrients.clone();
+        draft.package_weight = food.package_weight;
+        draft.created_at = now();
+        db::put("food_drafts", &draft).await;
+        return draft;
+    }
+
     let draft = FoodDraft {
         id: new_id(),
         name: food.name.clone(),
@@ -106,6 +142,26 @@ pub async fn save_draft(food: &Food) -> FoodDraft {
     };
     db::put("food_drafts", &draft).await;
     draft
+}
+
+pub async fn update_draft_fields(draft_id: &str, food: &Food) {
+    if let Some(mut draft) = db::get::<FoodDraft>("food_drafts", draft_id).await {
+        draft.name = food.name.clone();
+        draft.kcal = food.kcal;
+        draft.protein = food.protein;
+        draft.fat = food.fat;
+        draft.carbs = food.carbs;
+        draft.nutrients = food.nutrients.clone();
+        draft.package_weight = food.package_weight;
+        db::put("food_drafts", &draft).await;
+    }
+}
+
+pub async fn set_draft_food_id(draft_id: &str, food_id: &str) {
+    if let Some(mut draft) = db::get::<FoodDraft>("food_drafts", draft_id).await {
+        draft.food_id = Some(food_id.to_string());
+        db::put("food_drafts", &draft).await;
+    }
 }
 
 pub async fn list_drafts() -> Vec<FoodDraft> {
@@ -349,4 +405,46 @@ pub async fn update_goal(goal: &Goal) {
 
 pub async fn delete_goal(id: &str) {
     db::delete("goals", id).await;
+}
+
+// --- Weight Entries ---
+
+pub async fn save_weight(weight_kg: f64, no_water: bool, no_food: bool, no_wash: bool, used_toilet: bool, morning: bool) -> WeightEntry {
+    let date = today();
+    if let Some(mut existing) = get_weight_for_date(&date).await {
+        existing.weight_kg = weight_kg;
+        existing.no_water = no_water;
+        existing.no_food = no_food;
+        existing.no_wash = no_wash;
+        existing.used_toilet = used_toilet;
+        existing.morning = morning;
+        existing.updated_at = now();
+        db::put("weight_entries", &existing).await;
+        return existing;
+    }
+    let entry = WeightEntry {
+        id: new_id(),
+        date,
+        weight_kg,
+        no_water,
+        no_food,
+        no_wash,
+        used_toilet,
+        morning,
+        created_at: now(),
+        updated_at: now(),
+    };
+    db::put("weight_entries", &entry).await;
+    entry
+}
+
+pub async fn get_weight_for_date(date: &str) -> Option<WeightEntry> {
+    let entries: Vec<WeightEntry> = db::list_by_index("weight_entries", "date", date).await;
+    entries.into_iter().next()
+}
+
+pub async fn list_weight_entries() -> Vec<WeightEntry> {
+    let mut entries: Vec<WeightEntry> = db::list_all("weight_entries").await;
+    entries.sort_by(|a, b| a.date.cmp(&b.date));
+    entries
 }

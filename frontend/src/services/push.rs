@@ -3,6 +3,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
 const KEY_PUSH_SUBSCRIBED: &str = "push_subscribed";
+const KEY_PUSH_ONBOARDING_DISMISSED: &str = "push_onboarding_dismissed";
 
 fn window() -> web_sys::Window {
     web_sys::window().expect("no window")
@@ -46,6 +47,24 @@ fn set_subscribed(val: bool) {
     }
 }
 
+pub fn needs_push_onboarding() -> bool {
+    is_supported() && !is_subscribed() && !onboarding_dismissed()
+}
+
+fn onboarding_dismissed() -> bool {
+    storage()
+        .get_item(KEY_PUSH_ONBOARDING_DISMISSED)
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+pub fn dismiss_onboarding() {
+    storage()
+        .set_item(KEY_PUSH_ONBOARDING_DISMISSED, "true")
+        .expect("write push_onboarding_dismissed");
+}
+
 /// Request notification permission. Returns `true` if granted.
 pub async fn request_permission() -> Result<bool, String> {
     let promise = web_sys::Notification::request_permission()
@@ -71,17 +90,21 @@ pub async fn subscribe() -> Result<(), String> {
         return Err("Notification permission denied".to_string());
     }
 
-    let auth_base = {
+    let push_base = {
         let cfg = crate::services::config::get();
-        if cfg.auth_base_url.is_empty() {
-            cfg.api_base_url.clone()
+        if cfg.push_base_url.is_empty() {
+            if cfg.auth_base_url.is_empty() {
+                cfg.api_base_url.clone()
+            } else {
+                cfg.auth_base_url.clone()
+            }
         } else {
-            cfg.auth_base_url.clone()
+            cfg.push_base_url.clone()
         }
     };
 
     // 1. Fetch VAPID public key
-    let vapid_key = fetch_vapid_key(&auth_base).await?;
+    let vapid_key = fetch_vapid_key(&push_base).await?;
 
     // 2. Get service worker registration
     let registration = get_sw_registration().await?;
@@ -91,9 +114,10 @@ pub async fn subscribe() -> Result<(), String> {
 
     // 4. Extract subscription JSON and POST to server
     let sub_json = subscription_to_json(&subscription)?;
-    post_subscription(&auth_base, &sub_json).await?;
+    post_subscription(&push_base, &sub_json).await?;
 
     set_subscribed(true);
+    dismiss_onboarding();
     Ok(())
 }
 
@@ -134,6 +158,60 @@ pub async fn unsubscribe() -> Result<(), String> {
     }
 
     set_subscribed(false);
+    Ok(())
+}
+
+pub async fn sync_notification_schedule(schedule: serde_json::Value) -> Result<(), String> {
+    let push_base = {
+        let cfg = crate::services::config::get();
+        if cfg.push_base_url.is_empty() {
+            if cfg.auth_base_url.is_empty() {
+                cfg.api_base_url.clone()
+            } else {
+                cfg.auth_base_url.clone()
+            }
+        } else {
+            cfg.push_base_url.clone()
+        }
+    };
+
+    let token = match crate::services::auth::get_token() {
+        Some(t) => t,
+        None => return Ok(()),
+    };
+
+    let url = format!("{}/schedule", push_base);
+    let body_str = serde_json::to_string(&schedule).map_err(|e| e.to_string())?;
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    opts.set_body(&JsValue::from_str(&body_str));
+
+    let headers = web_sys::Headers::new().map_err(|e| format!("{:?}", e))?;
+    headers
+        .set("Content-Type", "application/json")
+        .map_err(|e| format!("{:?}", e))?;
+    headers
+        .set("Authorization", &format!("Bearer {}", token))
+        .map_err(|e| format!("{:?}", e))?;
+    opts.set_headers(&headers);
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts)
+        .map_err(|e| format!("{:?}", e))?;
+
+    let resp_val = JsFuture::from(window().fetch_with_request(&request))
+        .await
+        .map_err(|e| format!("{:?}", e))?;
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
+
+    if !resp.ok() {
+        let text = JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
+            .await
+            .map_err(|e| format!("{:?}", e))?;
+        let text = text.as_string().unwrap_or_default();
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+
     Ok(())
 }
 

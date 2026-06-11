@@ -53,32 +53,32 @@ pub fn WeightModal(
                                 />
                             </div>
                             <div class="control">
-                                <a class="button is-static">{t("common.unit.g")}</a>
+                                <a class="button is-static">{move || t("common.unit.g")}</a>
                             </div>
                         </div>
 
                         <div class="buttons is-centered mb-3">
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(-100.0)>"-100"</button>
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(-10.0)>"-10"</button>
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(10.0)>"+10"</button>
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(100.0)>"+100"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(-100.0)>"-100"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(-10.0)>"-10"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(10.0)>"+10"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(100.0)>"+100"</button>
                         </div>
 
                         {package_weight.filter(|pw| *pw > 0.0).map(|pw| {
                             view! {
                                 <div class="buttons is-centered mb-3">
-                                    <button type="button" class="button is-small is-light" on:click=move |_| adjust(-pw)>
-                                        {format!("-{:.0}{}", pw, t("common.unit.g"))}
+                                    <button type="button" class="button is-small" on:click=move |_| adjust(-pw)>
+                                        {move || format!("-{:.0}{}", pw, t("common.unit.g"))}
                                     </button>
-                                    <button type="button" class="button is-small is-light" on:click=set_one_package>
-                                        {format!("={:.0}{}", pw, t("common.unit.g"))}
+                                    <button type="button" class="button is-small" on:click=set_one_package>
+                                        {move || format!("={:.0}{}", pw, t("common.unit.g"))}
                                     </button>
-                                    <button type="button" class="button is-small is-light" on:click=move |_| adjust(pw)>
-                                        {format!("+{:.0}{}", pw, t("common.unit.g"))}
+                                    <button type="button" class="button is-small" on:click=move |_| adjust(pw)>
+                                        {move || format!("+{:.0}{}", pw, t("common.unit.g"))}
                                     </button>
                                 </div>
                                 <p class="is-size-7 has-text-grey has-text-centered">
-                                    {format!("{}: {:.0}{}", t("weight.package"), pw, t("common.unit.g"))}
+                                    {move || format!("{}: {:.0}{}", t("weight.package"), pw, t("common.unit.g"))}
                                 </p>
                             }
                         })}
@@ -86,10 +86,10 @@ pub fn WeightModal(
                         <div class="field is-grouped is-grouped-right mt-4">
                             <div class="control">
                                 <button type="button" class="button is-small"
-                                    on:click=move |_| on_close.call(())>{t("weight.cancel")}</button>
+                                    on:click=move |_| on_close.call(())>{move || t("weight.cancel")}</button>
                             </div>
                             <div class="control">
-                                <button type="submit" class="button is-small is-link">{t("weight.ok")}</button>
+                                <button type="submit" class="button is-small is-link">{move || t("weight.ok")}</button>
                             </div>
                         </div>
                     </form>

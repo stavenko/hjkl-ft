@@ -1,0 +1,29 @@
+name = "main-flow"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-01-01"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "PUSH_DO"
+class_name = "PushDO"
+
+[[durable_objects.bindings]]
+name = "SCHEDULE_DO"
+class_name = "ScheduleDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PushDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ScheduleDO"]
+
+[vars]
+JWT_SECRET = "dev-secret-change-in-production"
+VAPID_PUBLIC_KEY = "BHmCtJcYZNsO-xMLccKyWYSWTlxbILgd1HrRtSD4jy97PILpvdVaHadrt9anNmgdRDVWI5mIfkpSRkxSTL0AdsM"
+VAPID_PRIVATE_KEY = "2CX-Ehz-V8m_lysbW7az17KksEUlUcPRT0DS-5qfolY"
+VAPID_SUBJECT = "mailto:admin@hjkl.pro"
+

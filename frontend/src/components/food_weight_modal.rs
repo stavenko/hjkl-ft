@@ -54,8 +54,8 @@ pub fn FoodWeightModal(
                 <section class="modal-card-body">
                     // Food details panel
                     <Show when=move || show_details.get()>
-                        <div class="notification is-light mb-3">
-                            <p class="has-text-weight-medium is-size-7 mb-1">{t("weight.per_100g")}</p>
+                        <div class="notification mb-3">
+                            <p class="has-text-weight-medium is-size-7 mb-1">{move || t("weight.per_100g")}</p>
                             <div class="tags">
                                 <span class="tag is-small">{format!("{:.1} kcal", food_for_details.kcal)}</span>
                                 <span class="tag is-small">{format!("P {:.1}g", food_for_details.protein)}</span>
@@ -69,7 +69,7 @@ pub fn FoodWeightModal(
                                 view! { <p class="is-size-7">{items.join(", ")}</p> }
                             })}
                             {food_for_details.package_weight.filter(|w| *w > 0.0).map(|w| {
-                                view! { <p class="is-size-7">{format!("{}: {w:.0}{}", t("weight.package"), t("common.unit.g"))}</p> }
+                                view! { <p class="is-size-7">{move || format!("{}: {w:.0}{}", t("weight.package"), t("common.unit.g"))}</p> }
                             })}
                         </div>
                     </Show>
@@ -99,7 +99,7 @@ pub fn FoodWeightModal(
                                         _ => &goal.nutrient,
                                     };
                                     view! {
-                                        <span class="tag is-light is-small">
+                                        <span class="tag is-small">
                                             {format!("{label} {val:.0}{unit}")}
                                         </span>
                                     }
@@ -120,27 +120,27 @@ pub fn FoodWeightModal(
                                 />
                             </div>
                             <div class="control">
-                                <a class="button is-static">{t("common.unit.g")}</a>
+                                <a class="button is-static">{move || t("common.unit.g")}</a>
                             </div>
                         </div>
 
                         <div class="buttons is-centered mb-3">
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(-100.0)>"-100"</button>
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(-10.0)>"-10"</button>
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(10.0)>"+10"</button>
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(100.0)>"+100"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(-100.0)>"-100"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(-10.0)>"-10"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(10.0)>"+10"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(100.0)>"+100"</button>
                         </div>
 
                         {pkg.map(|pw| {
                             view! {
                                 <div class="buttons is-centered mb-3">
-                                    <button type="button" class="button is-small is-light" on:click=move |_| adjust(-pw)>
+                                    <button type="button" class="button is-small" on:click=move |_| adjust(-pw)>
                                         {format!("-{:.0}g", pw)}
                                     </button>
-                                    <button type="button" class="button is-small is-light" on:click=move |_| grams.set(format!("{pw}"))>
+                                    <button type="button" class="button is-small" on:click=move |_| grams.set(format!("{pw}"))>
                                         {format!("={:.0}g", pw)}
                                     </button>
-                                    <button type="button" class="button is-small is-light" on:click=move |_| adjust(pw)>
+                                    <button type="button" class="button is-small" on:click=move |_| adjust(pw)>
                                         {format!("+{:.0}g", pw)}
                                     </button>
                                 </div>
@@ -150,7 +150,7 @@ pub fn FoodWeightModal(
                         <div class="field is-grouped is-grouped-right mt-4">
                             <div class="control">
                                 <button type="button" class="button is-small"
-                                    on:click=move |_| on_close.call(())>{t("weight.cancel")}</button>
+                                    on:click=move |_| on_close.call(())>{move || t("weight.cancel")}</button>
                             </div>
                             <div class="control">
                                 <button type="submit" class="button is-small is-link">{submit_label}</button>

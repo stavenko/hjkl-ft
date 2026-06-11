@@ -154,16 +154,16 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                 let url_copy = qr_url.clone();
                 let copied = create_rw_signal(false);
                 view! {
-                    <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: white;">
+                    <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
                         <div style="max-width: 24rem; width: 100%;">
-                            <h1 class="title is-4 mb-4">{t("pair.show_qr")}</h1>
-                            <p class="has-text-grey mb-4">{t("auth.show_qr_hint")}</p>
+                            <h1 class="title is-4 mb-4">{move || t("pair.show_qr")}</h1>
+                            <p class="has-text-grey mb-4">{move || t("auth.show_qr_hint")}</p>
                             <div attr:data-testid="auth-qr-display" style="display: flex; justify-content: center; margin-bottom: 1rem;">
                                 <QrCode data=url size=240 />
                             </div>
                             <button
                                 attr:data-testid="auth-btn-copy-link"
-                                class="button is-small is-light is-fullwidth mb-3"
+                                class="button is-small is-fullwidth mb-3"
                                 on:click=move |_| {
                                     let u = url_copy.clone();
                                     spawn_local(async move {
@@ -176,13 +176,13 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             >
                                 {move || if copied.get() { t("qr.copied") } else { t("qr.copy_link") }}
                             </button>
-                            <p class="has-text-grey is-size-7 mb-4">{t("pair.waiting")}</p>
+                            <p class="has-text-grey is-size-7 mb-4">{move || t("pair.waiting")}</p>
                             <button
                                 attr:data-testid="auth-btn-back"
                                 class="button is-ghost has-text-grey"
                                 style="text-decoration: underline;"
                                 on:click=move |_| step.set(AuthStep::Login)
-                            >{t("auth.back")}</button>
+                            >{move || t("auth.back")}</button>
                         </div>
                     </div>
                 }.into_view()
@@ -196,48 +196,48 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
             }.into_view(),
 
             AuthStep::Login => view! {
-                <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: white;">
+                <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
                     <div style="max-width: 24rem; width: 100%;">
                         <img src="/icon-192.png" alt="Food Tracker" style="width: 64px; height: 64px; border-radius: 12px; margin-bottom: 1rem;" />
-                        <h1 class="title is-4" style="margin-bottom: 1.5rem;">{t("auth.login_title")}</h1>
+                        <h1 class="title is-4" style="margin-bottom: 1.5rem;">{move || t("auth.login_title")}</h1>
 
                         {error_view}
 
                         // Section 1: pair via another device
                         <div style="text-align: left; margin-bottom: 1.5rem;">
-                            <p class="has-text-weight-semibold mb-3">{t("auth.login_have_device")}</p>
+                            <p class="has-text-weight-semibold mb-3">{move || t("auth.login_have_device")}</p>
 
                             <div class="box mb-3" style="padding: 0.75rem;">
-                                <p class="is-size-7 has-text-grey mb-2">{t("auth.login_option1_hint")}</p>
+                                <p class="is-size-7 has-text-grey mb-2">{move || t("auth.login_option1_hint")}</p>
                                 <button
                                     attr:data-testid="auth-btn-show-qr"
                                     class="button is-link is-fullwidth"
                                     disabled=move || loading.get()
                                     on:click=on_show_qr
                                 >
-                                    {t("pair.show_qr")}
+                                    {move || t("pair.show_qr")}
                                 </button>
                             </div>
 
                             <div class="box" style="padding: 0.75rem;">
-                                <p class="is-size-7 has-text-grey mb-2">{t("auth.login_option2_hint")}</p>
+                                <p class="is-size-7 has-text-grey mb-2">{move || t("auth.login_option2_hint")}</p>
                                 <button
                                     attr:data-testid="auth-btn-scan-qr"
                                     class="button is-link is-light is-fullwidth"
                                     disabled=move || loading.get()
                                     on:click=move |_| step.set(AuthStep::Scanning)
                                 >
-                                    {t("pair.scan_qr")}
+                                    {move || t("pair.scan_qr")}
                                 </button>
                             </div>
                         </div>
 
                         // Section 2: no logged-in device
                         <div style="text-align: left; margin-bottom: 1.5rem;">
-                            <p class="has-text-weight-semibold mb-3">{t("auth.login_no_device")}</p>
+                            <p class="has-text-weight-semibold mb-3">{move || t("auth.login_no_device")}</p>
                             <button
                                 attr:data-testid="auth-btn-try-passkey"
-                                class="button is-light is-fullwidth"
+                                class="button is-fullwidth"
                                 disabled=move || loading.get()
                                 on:click=on_try_passkey
                             >
@@ -251,19 +251,19 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             style="font-size: 0.85rem; text-decoration: underline;"
                             on:click=move |_| { step.set(AuthStep::Main); error.set(None); }
                         >
-                            {t("auth.back")}
+                            {move || t("auth.back")}
                         </button>
                     </div>
                 </div>
             }.into_view(),
 
             AuthStep::Main => view! {
-                <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: white;">
+                <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
                     <div style="max-width: 24rem; width: 100%;">
                         <img src="/icon-192.png" alt="Food Tracker" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
                         <h1 class="title is-3" style="margin-bottom: 0.5rem;">"Food Tracker"</h1>
                         <p class="has-text-grey mb-5" style="font-size: 1.05rem; line-height: 1.6;">
-                            {t("auth.main_description")}
+                            {move || t("auth.main_description")}
                         </p>
 
                         {error_view}
@@ -288,15 +288,15 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                                 {move || if loading.get() { t("auth.creating") } else { t("auth.create_account") }}
                             </button>
                             <p class="has-text-grey mt-2 mb-1" style="font-size: 0.95rem;">
-                                {t("auth.already_used")}
+                                {move || t("auth.already_used")}
                             </p>
                             <button
                                 attr:data-testid="auth-btn-login"
-                                class="button is-light is-medium is-fullwidth"
+                                class="button is-medium is-fullwidth"
                                 disabled=move || loading.get()
                                 on:click=move |_| { step.set(AuthStep::Login); error.set(None); }
                             >
-                                {t("auth.login_title")}
+                                {move || t("auth.login_title")}
                             </button>
                         </div>
                     </div>

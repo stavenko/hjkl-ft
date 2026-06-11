@@ -44,14 +44,14 @@ pub fn AddIngredientModal(
             <div class="modal-card" style="max-width: 28rem; max-height: 80vh;">
                 <header class="modal-card-head" style="display: block; padding-bottom: 0.5rem;">
                     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
-                        <p class="modal-card-title">{t("add_ingredient.title")}</p>
+                        <p class="modal-card-title">{move || t("add_ingredient.title")}</p>
                         <button class="delete" on:click=move |_| on_close.call(())></button>
                     </div>
                     <div class="buttons has-addons mb-2">
                         <button type="button" class=move || mode_cls("search")
-                            on:click=move |_| mode.set("search".into())>{t("add_ingredient.search")}</button>
+                            on:click=move |_| mode.set("search".into())>{move || t("add_ingredient.search")}</button>
                         <button type="button" class=move || mode_cls("new")
-                            on:click=move |_| mode.set("new".into())>{t("add_ingredient.new")}</button>
+                            on:click=move |_| mode.set("new".into())>{move || t("add_ingredient.new")}</button>
                     </div>
                     <Show when=move || mode.get() == "search">
                         <div class="field has-addons" style="margin-bottom: 0;">
@@ -65,7 +65,7 @@ pub fn AddIngredientModal(
                                 />
                             </div>
                             <div class="control">
-                                <button class="button is-small is-light"
+                                <button class="button is-small"
                                     on:click=move |_| food_search.set(String::new())
                                 >"\u{00d7}"</button>
                             </div>
@@ -111,7 +111,7 @@ pub fn AddIngredientModal(
                     </Show>
                 </section>
                 <footer class="modal-card-foot" style="justify-content: flex-end;">
-                    <button class="button is-link" on:click=move |_| on_close.call(())>{t("add_ingredient.done")}</button>
+                    <button class="button is-link" on:click=move |_| on_close.call(())>{move || t("add_ingredient.done")}</button>
                 </footer>
             </div>
         </div>

@@ -1,2 +1,4 @@
 api_base_url = ""
 auth_base_url = "https://auth-worker.vg-stavenko.workers.dev"
+push_base_url = "https://main-flow.vg-stavenko.workers.dev"
+ai_base_url = "https://ai-worker.vg-stavenko.workers.dev"

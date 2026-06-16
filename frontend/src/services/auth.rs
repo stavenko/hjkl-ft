@@ -30,6 +30,9 @@ fn set_token(token: &str) {
     if let Some(token_id) = extract_token_id_from_jwt(token) {
         storage().set_item(KEY_TOKEN_ID, &token_id).expect("write token_id");
     }
+    // Reconcile with the server right after sign-in / pairing so a freshly-paired
+    // device pulls the account's existing data without waiting for a relaunch.
+    crate::services::sync::sync_now_background();
 }
 
 fn extract_token_id_from_jwt(token: &str) -> Option<String> {

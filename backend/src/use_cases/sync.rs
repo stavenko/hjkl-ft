@@ -5,7 +5,7 @@ use crate::providers::database::Database;
 pub fn dump(db: &Database) -> Result<SyncDumpResponse, ApiError> {
     db.with_conn(|conn| {
         let mut stmt = conn
-            .prepare("SELECT id, name, kcal, protein, fat, carbs, nutrients_json, package_weight, is_recipe, recipe_id, archived, created_at, updated_at FROM food WHERE deleted = 0")
+            .prepare("SELECT id, name, kcal, protein, fat, carbs, nutrients_json, package_weight, is_recipe, recipe_id, archived, is_restaurant, created_at, updated_at FROM food WHERE deleted = 0")
             .map_err(|_| ApiError::InternalError)?;
         let foods: Vec<Food> = stmt.query_map([], |row| {
             let nutrients_json: String = row.get(6)?;
@@ -17,19 +17,21 @@ pub fn dump(db: &Database) -> Result<SyncDumpResponse, ApiError> {
                 nutrients, package_weight: row.get(7)?,
                 is_recipe: row.get::<_, i32>(8)? != 0, recipe_id: row.get(9)?,
                 archived: row.get::<_, i32>(10)? != 0,
-                created_at: row.get(11)?, updated_at: row.get(12)?,
+                is_restaurant: row.get::<_, i32>(11)? != 0,
+                created_at: row.get(12)?, updated_at: row.get(13)?,
             })
         }).map_err(|_| ApiError::InternalError)?
         .collect::<Result<Vec<_>, _>>().map_err(|_| ApiError::InternalError)?;
 
         let mut stmt = conn
-            .prepare("SELECT id, food_id, date, time, grams, meal_label, created_at, updated_at FROM diary WHERE deleted = 0")
+            .prepare("SELECT id, food_id, date, time, grams, meal_label, waste_grams, created_at, updated_at FROM diary WHERE deleted = 0")
             .map_err(|_| ApiError::InternalError)?;
         let diary_entries: Vec<DiaryEntry> = stmt.query_map([], |row| {
             Ok(DiaryEntry {
                 id: row.get(0)?, food_id: row.get(1)?, date: row.get(2)?,
                 time: row.get(3)?, grams: row.get(4)?, meal_label: row.get(5)?,
-                deleted: false, created_at: row.get(6)?, updated_at: row.get(7)?,
+                waste_grams: row.get(6)?,
+                deleted: false, created_at: row.get(7)?, updated_at: row.get(8)?,
             })
         }).map_err(|_| ApiError::InternalError)?
         .collect::<Result<Vec<_>, _>>().map_err(|_| ApiError::InternalError)?;
@@ -76,7 +78,19 @@ pub fn dump(db: &Database) -> Result<SyncDumpResponse, ApiError> {
         }).map_err(|_| ApiError::InternalError)?
         .collect::<Result<Vec<_>, _>>().map_err(|_| ApiError::InternalError)?;
 
-        Ok(SyncDumpResponse { foods, diary_entries, recipes, recipe_ingredients, goals })
+        let mut stmt = conn
+            .prepare("SELECT key, value, updated_at FROM story")
+            .map_err(|_| ApiError::InternalError)?;
+        let story: Vec<StoryFlag> = stmt.query_map([], |row| {
+            Ok(StoryFlag {
+                key: row.get(0)?,
+                value: row.get::<_, i32>(1)? != 0,
+                updated_at: row.get(2)?,
+            })
+        }).map_err(|_| ApiError::InternalError)?
+        .collect::<Result<Vec<_>, _>>().map_err(|_| ApiError::InternalError)?;
+
+        Ok(SyncDumpResponse { foods, diary_entries, recipes, recipe_ingredients, goals, story })
     })
 }
 
@@ -85,18 +99,20 @@ pub fn push(db: &Database, payload: SyncPushPayload) -> Result<SyncPushResponse,
         for food in &payload.foods {
             let nutrients_json = serde_json::to_string(&food.nutrients).unwrap_or_default();
             conn.execute(
-                "INSERT INTO food (id, name, kcal, protein, fat, carbs, nutrients_json, package_weight, is_recipe, recipe_id, archived, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                "INSERT INTO food (id, name, kcal, protein, fat, carbs, nutrients_json, package_weight, is_recipe, recipe_id, archived, is_restaurant, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                  ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, kcal=excluded.kcal, protein=excluded.protein,
                    fat=excluded.fat, carbs=excluded.carbs, nutrients_json=excluded.nutrients_json,
                    package_weight=excluded.package_weight, is_recipe=excluded.is_recipe,
-                   recipe_id=excluded.recipe_id, archived=excluded.archived, updated_at=excluded.updated_at
+                   recipe_id=excluded.recipe_id, archived=excluded.archived,
+                   is_restaurant=excluded.is_restaurant, updated_at=excluded.updated_at
                  WHERE excluded.updated_at > food.updated_at",
                 rusqlite::params![
                     food.id, food.name, food.kcal, food.protein, food.fat, food.carbs,
                     nutrients_json, food.package_weight,
                     food.is_recipe as i32, food.recipe_id, food.archived as i32,
+                    food.is_restaurant as i32,
                     food.created_at, food.updated_at,
                 ],
             ).map_err(|_| ApiError::InternalError)?;
@@ -110,15 +126,17 @@ pub fn push(db: &Database, payload: SyncPushPayload) -> Result<SyncPushResponse,
                 ).map_err(|_| ApiError::InternalError)?;
             } else {
                 conn.execute(
-                    "INSERT INTO diary (id, food_id, date, time, grams, meal_label, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                    "INSERT INTO diary (id, food_id, date, time, grams, meal_label, waste_grams, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                      ON CONFLICT(id) DO UPDATE SET
                        food_id=excluded.food_id, date=excluded.date, time=excluded.time,
-                       grams=excluded.grams, meal_label=excluded.meal_label, updated_at=excluded.updated_at
+                       grams=excluded.grams, meal_label=excluded.meal_label,
+                       waste_grams=excluded.waste_grams, updated_at=excluded.updated_at
                      WHERE excluded.updated_at > diary.updated_at",
                     rusqlite::params![
                         entry.id, entry.food_id, entry.date, entry.time,
-                        entry.grams, entry.meal_label, entry.created_at, entry.updated_at,
+                        entry.grams, entry.meal_label, entry.waste_grams,
+                        entry.created_at, entry.updated_at,
                     ],
                 ).map_err(|_| ApiError::InternalError)?;
             }
@@ -168,6 +186,17 @@ pub fn push(db: &Database, payload: SyncPushPayload) -> Result<SyncPushResponse,
                     goal.id, goal.nutrient, goal.key, dir, goal.amount, unit, period,
                     goal.created_at, goal.updated_at,
                 ],
+            ).map_err(|_| ApiError::InternalError)?;
+        }
+
+        for flag in &payload.story {
+            conn.execute(
+                "INSERT INTO story (key, value, updated_at)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value=excluded.value, updated_at=excluded.updated_at
+                 WHERE excluded.updated_at > story.updated_at",
+                rusqlite::params![flag.key, flag.value as i32, flag.updated_at],
             ).map_err(|_| ApiError::InternalError)?;
         }
 

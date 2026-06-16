@@ -22,6 +22,8 @@ pub struct FrontendConfig {
     pub payment_base_url: String,
     #[serde(default)]
     pub ocr_queue_base_url: String,
+    #[serde(default)]
+    pub sync_base_url: String,
 }
 
 static CONFIG: OnceLock<FrontendConfig> = OnceLock::new();

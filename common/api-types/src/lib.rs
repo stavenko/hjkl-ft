@@ -439,6 +439,15 @@ pub struct StepEntry {
 
 // --- Sync types ---
 
+/// A story-progress flag, synced last-writer-wins by `updated_at` (like foods/goals).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoryFlag {
+    pub key: String,
+    pub value: bool,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncDumpResponse {
     pub foods: Vec<Food>,
@@ -446,6 +455,12 @@ pub struct SyncDumpResponse {
     pub recipes: Vec<Recipe>,
     pub recipe_ingredients: Vec<RecipeIngredient>,
     pub goals: Vec<Goal>,
+    #[serde(default)]
+    pub story: Vec<StoryFlag>,
+    #[serde(default)]
+    pub weight_entries: Vec<WeightEntry>,
+    #[serde(default)]
+    pub step_entries: Vec<StepEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -455,6 +470,12 @@ pub struct SyncPushPayload {
     pub recipes: Vec<Recipe>,
     pub recipe_ingredients: Vec<RecipeIngredient>,
     pub goals: Vec<Goal>,
+    #[serde(default)]
+    pub story: Vec<StoryFlag>,
+    #[serde(default)]
+    pub weight_entries: Vec<WeightEntry>,
+    #[serde(default)]
+    pub step_entries: Vec<StepEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

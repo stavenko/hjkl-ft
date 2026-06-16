@@ -32,8 +32,13 @@ pub fn main() {
         services::i18n::init_lang();
         services::i18n::init_weight_unit();
 
-        if online && services::sync::is_empty().await {
-            let _ = services::sync::pull_full_dump().await;
+        // Reconcile with the server on launch when signed in: push local changes,
+        // then pull the merged result (so changes — incl. deletions — made on other
+        // devices arrive). A signed-out / offline launch simply skips sync.
+        if online && services::auth::get_token().is_some() {
+            if let Err(e) = services::sync::sync_now().await {
+                leptos::logging::warn!("Launch sync failed: {e}");
+            }
         }
 
         if let Some(splash) = web_sys::window()
@@ -45,10 +50,37 @@ pub fn main() {
 
         leptos::mount_to_body(app::App);
 
+        // Re-reconcile with the server when the app regains focus, so a device
+        // that was backgrounded picks up changes made on other devices.
+        install_foreground_sync();
+
         // If the day rolled over since last open, pre-generate yesterday's
         // summary in the background (best-effort; gated by subscription).
         leptos::spawn_local(services::summary::pregen_on_day_change());
     });
+}
+
+#[cfg(not(test))]
+fn install_foreground_sync() {
+    use wasm_bindgen::prelude::Closure;
+    use wasm_bindgen::JsCast;
+
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else { return };
+    let cb = Closure::<dyn FnMut()>::new(move || {
+        // `document.hidden` is false when the tab/PWA is in the foreground.
+        let hidden = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| js_sys::Reflect::get(d.as_ref(), &"hidden".into()).ok())
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !hidden && services::auth::get_token().is_some() {
+            services::sync::sync_now_background();
+        }
+    });
+    let _ = document
+        .add_event_listener_with_callback("visibilitychange", cb.as_ref().unchecked_ref());
+    // Leak the closure: it must live for the whole app session.
+    cb.forget();
 }
 
 #[cfg(not(test))]

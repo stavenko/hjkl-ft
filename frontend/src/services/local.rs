@@ -174,10 +174,18 @@ pub async fn remove_food_diary(entry_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Danger zone — reset story progress: clears every flag in the `story` store.
-/// Local-only (story progress isn't synced to the server).
+/// Danger zone — reset story progress. Sets every flag to `false` with a fresh
+/// `updated_at` (rather than hard-clearing) so the reset is a last-writer-wins
+/// update that PROPAGATES across devices via sync — a plain `db::clear` would be
+/// re-populated from the server on the next pull. Caller pushes afterwards.
 pub async fn delete_story_progress() {
-    db::clear("story").await;
+    let flags: Vec<api_types::StoryFlag> = db::list_all("story").await;
+    let ts = now();
+    for mut f in flags {
+        f.value = false;
+        f.updated_at = ts.clone();
+        db::put("story", &f).await;
+    }
 }
 
 /// Danger zone — delete diary food entries (and their cached day-summaries).

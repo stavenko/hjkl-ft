@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::services::db;
+use crate::services::{db, sync};
 
 /// Task flag: the user committed to wanting a new body (chapter 1, intro).
 pub const WANT_NEW_BODY: &str = "want_new_body";
@@ -42,6 +42,10 @@ pub const SEX_SELECTED: &str = "sex_selected";
 struct Flag {
     key: String,
     value: bool,
+    // `updated_at` (RFC3339) drives last-writer-wins when story syncs across
+    // devices. `default` so flags written before sync existed still deserialize.
+    #[serde(default)]
+    updated_at: String,
 }
 
 /// Read a story progress flag. Defaults to `false` when not yet set.
@@ -49,9 +53,12 @@ pub async fn get_flag(key: &str) -> bool {
     db::get::<Flag>("story", key).await.map(|f| f.value).unwrap_or(false)
 }
 
-/// Persist a story progress flag in the IndexedDB `story` store.
+/// Persist a story progress flag in the IndexedDB `story` store, stamp it for
+/// cross-device sync, and push in the background so progress propagates.
 pub async fn set_flag(key: &str, value: bool) {
-    db::put("story", &Flag { key: key.to_string(), value }).await;
+    let updated_at = chrono::Utc::now().to_rfc3339();
+    db::put("story", &Flag { key: key.to_string(), value, updated_at }).await;
+    sync::push_background();
 }
 
 /// Complete the "first food entries" task if its trigger was armed (the section

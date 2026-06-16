@@ -1,0 +1,14 @@
+name = "sync-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[[durable_objects.bindings]]
+name = "SYNC_DO"
+class_name = "SyncDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SyncDO"]
+
+[vars]
+JWT_SECRET = "dev-secret-change-in-production"

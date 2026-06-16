@@ -111,9 +111,6 @@ pub async fn lookup(executor: &Qwen, input: AiLookupInput) -> Result<AiLookupOut
     });
 
     let output = result.output.await.map_err(|e| {
-        tracing::error!("LLM join error: {e}");
-        ApiError::InternalError
-    })?.map_err(|e| {
         tracing::error!("LLM output error: {e:?}");
         ApiError::InternalError
     })?;

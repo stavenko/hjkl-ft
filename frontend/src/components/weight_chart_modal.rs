@@ -5,6 +5,8 @@ use api_types::WeightEntry;
 use crate::components::weight_widget::chart_svg;
 use crate::components::mini_chart::short_date;
 use crate::services::i18n::{t, weight_unit_signal, WeightUnit};
+use crate::services::profile::{self, Sex};
+use crate::services::weight_cycle::{weight_cycle, CycleResult, CYCLE_WINDOW_DAYS};
 use crate::services::weight_trend::{
     weight_trend, BalanceState, Direction, WeightTrend, CONFIDENT, DEFAULT_WINDOW_DAYS,
 };
@@ -65,6 +67,56 @@ pub fn WeightChartModal(
         BalanceState::Maintenance => "var(--bulma-text)",
     };
 
+    // Female-only: menstrual-cycle detection + the de-cycled current weight.
+    let cycle_view = move || {
+        if profile::get_sex() != Some(Sex::Female) {
+            return None;
+        }
+        let es = entries.get();
+        let u = unit.get();
+        let ul = unit_label();
+        let label = t("weight.cycle.label");
+        let inner = match weight_cycle(&es, CYCLE_WINDOW_DAYS) {
+            CycleResult::Detected(f) => {
+                let latest_kg = es
+                    .iter()
+                    .max_by(|a, b| a.date.cmp(&b.date))
+                    .map(|e| e.weight_kg)
+                    .unwrap_or(0.0);
+                let decycled = u.from_kg(latest_kg - f.current_deviation_kg);
+                let amp = u.from_kg(f.amplitude_kg);
+                view! {
+                    <p class="is-size-7">
+                        <span class="has-text-grey">{format!("{}: ", label)}</span>
+                        <span class="has-text-weight-semibold">
+                            {format!("~{:.0} {} · ±{:.1} {}", f.period_days, t("weight.cycle.day_short"), amp, ul)}
+                        </span>
+                    </p>
+                    <p class="is-size-7">
+                        <span class="has-text-grey">{format!("{}: ", t("weight.cycle.decycled"))}</span>
+                        <span class="has-text-weight-semibold">{format!("{:.1} {}", decycled, ul)}</span>
+                    </p>
+                }
+                .into_view()
+            }
+            CycleResult::NotDetected { .. } => view! {
+                <p class="is-size-7">
+                    <span class="has-text-grey">{format!("{}: ", label)}</span>
+                    <span>{t("weight.cycle.none")}</span>
+                </p>
+            }
+            .into_view(),
+            CycleResult::Insufficient { .. } => view! {
+                <p class="is-size-7">
+                    <span class="has-text-grey">{format!("{}: ", label)}</span>
+                    <span>{t("weight.cycle.insufficient")}</span>
+                </p>
+            }
+            .into_view(),
+        };
+        Some(view! { <div style="margin-top: 6px; text-align: center;">{inner}</div> })
+    };
+
     view! {
         <div class="modal is-active" style="z-index: 70;">
             <div class="modal-background" on:click=move |_| on_close.call(())></div>
@@ -82,6 +134,7 @@ pub fn WeightChartModal(
                         <span class="is-size-7 has-text-grey">{move || format!("{}: ", t("weight.trend.title"))}</span>
                         <span class="is-size-7 has-text-weight-semibold" style:color=trend_color>{trend_text}</span>
                     </p>
+                    {cycle_view}
 
                     <button
                         class="button is-link is-fullwidth"

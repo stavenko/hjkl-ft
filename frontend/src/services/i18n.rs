@@ -536,6 +536,11 @@ fn en(key: &str) -> &'static str {
         "weight.trend.preliminary" => "preliminary",
         "weight.trend.week" => "week",
         "weight.trend.confidence" => "confidence",
+        "weight.cycle.label" => "Period",
+        "weight.cycle.none" => "no cycle detected",
+        "weight.cycle.insufficient" => "not enough data yet",
+        "weight.cycle.day_short" => "d",
+        "weight.cycle.decycled" => "Weight without the cycle",
 
         "steps.title" => "Steps",
         "steps.for_today" => "Recording evening steps for TODAY",
@@ -1144,6 +1149,11 @@ fn ru(key: &str) -> &'static str {
         "weight.trend.preliminary" => "предварительно",
         "weight.trend.week" => "нед",
         "weight.trend.confidence" => "достоверность",
+        "weight.cycle.label" => "Месячные",
+        "weight.cycle.none" => "цикл не обнаружен",
+        "weight.cycle.insufficient" => "пока недостаточно данных",
+        "weight.cycle.day_short" => "дн",
+        "weight.cycle.decycled" => "Вес без месячных",
 
         "steps.title" => "Шаги",
         "steps.for_today" => "Записываю шаги вечером за СЕГОДНЯ",

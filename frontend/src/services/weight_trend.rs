@@ -80,10 +80,11 @@ impl WeightTrend {
     }
 }
 
-/// Estimate the weight trend over the last `window_days` of measurements.
-pub fn weight_trend(entries: &[WeightEntry], window_days: i64) -> WeightTrend {
-    // Aggregate to one mean weight per calendar day, bounded to the trailing
-    // window ending at the latest measurement.
+/// Aggregate weigh-ins to one mean weight per calendar day, within the trailing
+/// `window_days` window ending at the latest measurement. Returns `(x, y)` where
+/// `x` is the day offset from the window start (sorted ascending) and `y` is the
+/// mean weight that day. Empty when there are no measurements.
+pub(crate) fn daily_means(entries: &[WeightEntry], window_days: i64) -> Vec<(f64, f64)> {
     let mut by_day: BTreeMap<chrono::NaiveDate, (f64, u32)> = BTreeMap::new();
     let mut latest: Option<chrono::NaiveDate> = None;
     for e in entries {
@@ -95,19 +96,20 @@ pub fn weight_trend(entries: &[WeightEntry], window_days: i64) -> WeightTrend {
         slot.0 += e.weight_kg;
         slot.1 += 1;
     }
-
     let Some(latest) = latest else {
-        return WeightTrend::Insufficient { days: 0 };
+        return Vec::new();
     };
     let window_start = latest - chrono::Duration::days(window_days - 1);
-
-    // (x = day offset from window start, y = mean weight that day)
-    let points: Vec<(f64, f64)> = by_day
+    by_day
         .into_iter()
         .filter(|(d, _)| *d >= window_start)
         .map(|(d, (sum, n))| ((d - window_start).num_days() as f64, sum / n as f64))
-        .collect();
+        .collect()
+}
 
+/// Estimate the weight trend over the last `window_days` of measurements.
+pub fn weight_trend(entries: &[WeightEntry], window_days: i64) -> WeightTrend {
+    let points = daily_means(entries, window_days);
     let days = points.len();
     if days < 2 {
         return WeightTrend::Insufficient { days };
@@ -234,7 +236,7 @@ fn betacf(a: f64, b: f64, x: f64) -> f64 {
 }
 
 /// Regularized incomplete beta function I_x(a, b).
-fn betai(a: f64, b: f64, x: f64) -> f64 {
+pub(crate) fn betai(a: f64, b: f64, x: f64) -> f64 {
     if x <= 0.0 {
         return 0.0;
     }

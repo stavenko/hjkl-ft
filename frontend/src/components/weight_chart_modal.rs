@@ -5,6 +5,9 @@ use api_types::WeightEntry;
 use crate::components::weight_widget::chart_svg;
 use crate::components::mini_chart::short_date;
 use crate::services::i18n::{t, weight_unit_signal, WeightUnit};
+use crate::services::weight_trend::{
+    weight_trend, BalanceState, Direction, WeightTrend, CONFIDENT, DEFAULT_WINDOW_DAYS,
+};
 
 #[component]
 pub fn WeightChartModal(
@@ -27,6 +30,41 @@ pub fn WeightChartModal(
         WeightUnit::Lbs => t("weight.unit_lbs"),
     };
 
+    // 14-day trend summary shown under the chart.
+    let trend_text = move || {
+        let u = unit.get();
+        let ul = unit_label();
+        match weight_trend(&entries.get(), DEFAULT_WINDOW_DAYS) {
+            WeightTrend::Insufficient { .. } => t("weight.trend.insufficient").to_string(),
+            WeightTrend::Tentative { direction, .. } => {
+                let (arrow, key) = dir_label(direction);
+                format!("{arrow} {} · {}", t(key), t("weight.trend.preliminary"))
+            }
+            WeightTrend::Estimated { direction, slope_kg_per_week, confidence, .. } => {
+                if confidence < CONFIDENT {
+                    t("weight.trend.unclear").to_string()
+                } else {
+                    let (arrow, key) = dir_label(direction);
+                    let rate = u.from_kg(slope_kg_per_week.abs());
+                    format!(
+                        "{arrow} {} · {:.1} {}/{} · {} {}%",
+                        t(key),
+                        rate,
+                        ul,
+                        t("weight.trend.week"),
+                        t("weight.trend.confidence"),
+                        (confidence * 100.0).round() as i64,
+                    )
+                }
+            }
+        }
+    };
+    let trend_color = move || match weight_trend(&entries.get(), DEFAULT_WINDOW_DAYS).balance() {
+        BalanceState::Deficit => "var(--bulma-success)",
+        BalanceState::Surplus => "#e0699b",
+        BalanceState::Maintenance => "var(--bulma-text)",
+    };
+
     view! {
         <div class="modal is-active" style="z-index: 70;">
             <div class="modal-background" on:click=move |_| on_close.call(())></div>
@@ -39,6 +77,11 @@ pub fn WeightChartModal(
                 // Fixed: chart + add button + explanation (always on top).
                 <div style="flex-shrink: 0; padding: 16px 20px; background: var(--bulma-scheme-main); border-bottom: 0.5px solid var(--bulma-border-weak);">
                     <div inner_html=move || chart_svg(&entries.get(), unit.get())></div>
+
+                    <p style="margin-top: 10px; text-align: center;">
+                        <span class="is-size-7 has-text-grey">{move || format!("{}: ", t("weight.trend.title"))}</span>
+                        <span class="is-size-7 has-text-weight-semibold" style:color=trend_color>{trend_text}</span>
+                    </p>
 
                     <button
                         class="button is-link is-fullwidth"
@@ -94,6 +137,14 @@ pub fn WeightChartModal(
                 </section>
             </div>
         </div>
+    }
+}
+
+/// Arrow glyph + i18n key for a trend direction.
+fn dir_label(direction: Direction) -> (&'static str, &'static str) {
+    match direction {
+        Direction::Down => ("\u{2193}", "weight.trend.down"),
+        Direction::Up => ("\u{2191}", "weight.trend.up"),
     }
 }
 

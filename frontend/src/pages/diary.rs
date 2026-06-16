@@ -506,7 +506,7 @@ pub fn DiaryPage() -> impl IntoView {
                 <div style="display: flex; gap: 0.75rem; align-items: stretch; margin-bottom: 0.75rem;">
                     // Native <button> wrappers: iOS Safari doesn't reliably fire
                     // delegated click events on non-interactive <div>s.
-                    <button type="button" style=WIDGET_BTN style:flex="1" on:click=move |_| show_weight_modal.set(true)>
+                    <button type="button" attr:data-testid="diary-weight-widget" style=WIDGET_BTN style:flex="1" on:click=move |_| show_weight_modal.set(true)>
                         <WeightWidget entries=Signal::derive(weight_entries) />
                     </button>
                     <button type="button" style=WIDGET_BTN style:flex="1" on:click=move |_| show_steps_modal.set(true)>

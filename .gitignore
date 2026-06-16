@@ -9,6 +9,8 @@ frontend/styles/output.css
 frontend/dist
 .playwright-mcp/
 screenshot-*.png
+/*.png
+.wrangler/
 *.tgz
 test-results/
 e2e/test-results/

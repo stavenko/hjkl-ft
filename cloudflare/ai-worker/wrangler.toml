@@ -5,5 +5,12 @@ compatibility_date = "2024-12-01"
 [ai]
 binding = "AI"
 
+# Cross-script binding to the subscription DO owned by payment-worker, so AI
+# requests can be gated on an active Trial/Paid plan.
+[[durable_objects.bindings]]
+name = "SUBSCRIPTION_DO"
+class_name = "SubscriptionDO"
+script_name = "payment-worker"
+
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"

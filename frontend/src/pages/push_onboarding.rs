@@ -39,6 +39,8 @@ pub fn PushOnboarding(on_done: Callback<()>) -> impl IntoView {
     let lu_time = create_rw_signal("13:00".to_string());
     let di_on = create_rw_signal(true);
     let di_time = create_rw_signal("19:00".to_string());
+    let st_on = create_rw_signal(true);
+    let st_time = create_rw_signal("22:00".to_string());
 
     let done_schedule = move |_| {
         let record = ScheduleRecord {
@@ -47,6 +49,7 @@ pub fn PushOnboarding(on_done: Callback<()>) -> impl IntoView {
             breakfast: SlotData { enabled: bf_on.get_untracked(), time: bf_time.get_untracked() },
             lunch: SlotData { enabled: lu_on.get_untracked(), time: lu_time.get_untracked() },
             dinner: SlotData { enabled: di_on.get_untracked(), time: di_time.get_untracked() },
+            steps: SlotData { enabled: st_on.get_untracked(), time: st_time.get_untracked() },
         };
         spawn_local(async move {
             db::put("_sync_meta", &record).await;
@@ -57,6 +60,7 @@ pub fn PushOnboarding(on_done: Callback<()>) -> impl IntoView {
                 "breakfast": {"enabled": record.breakfast.enabled, "time": record.breakfast.time},
                 "lunch": {"enabled": record.lunch.enabled, "time": record.lunch.time},
                 "dinner": {"enabled": record.dinner.enabled, "time": record.dinner.time},
+                "steps": {"enabled": record.steps.enabled, "time": record.steps.time},
             });
             if let Err(e) = push::sync_notification_schedule(payload).await {
                 leptos::logging::error!("sync schedule: {}", e);
@@ -140,6 +144,8 @@ pub fn PushOnboarding(on_done: Callback<()>) -> impl IntoView {
                             <OnboardingSlot label="settings.lunch" slot_id="lunch" enabled=lu_on time=lu_time />
                             <div style="border-bottom: 0.5px solid var(--bulma-border-weak); margin-left: 16px;"></div>
                             <OnboardingSlot label="settings.dinner" slot_id="dinner" enabled=di_on time=di_time />
+                            <div style="border-bottom: 0.5px solid var(--bulma-border-weak); margin-left: 16px;"></div>
+                            <OnboardingSlot label="settings.steps" slot_id="steps" enabled=st_on time=st_time />
                         </div>
 
                         <button
@@ -220,4 +226,5 @@ struct ScheduleRecord {
     breakfast: SlotData,
     lunch: SlotData,
     dinner: SlotData,
+    steps: SlotData,
 }

@@ -1,3 +1,9 @@
+//! # DEPRECATED
+//!
+//! This backend is no longer used. The app is offline-first (CRUD in
+//! IndexedDB) with AI + sync on the Cloudflare workers. Kept for reference
+//! only — do not extend or depend on it. See `backend/DEPRECATED.md`.
+
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};

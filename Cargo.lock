@@ -414,7 +414,7 @@ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 [[package]]
 name = "arti-pipes"
 version = "0.1.0"
-source = "git+https://github.com/stavenko/arti-pipes#47abcf8737678ffcf6535a19f288ab54ba36c739"
+source = "git+https://github.com/stavenko/arti-pipes#c52dbf8fbcded810a1bc9d06406120d95b391046"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -424,7 +424,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "toml",
@@ -1478,6 +1478,7 @@ version = "0.1.0"
 dependencies = [
  "api-types",
  "arti-pipes",
+ "async-trait",
  "base64",
  "chrono",
  "console_error_panic_hook",
@@ -2009,7 +2010,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",

@@ -2,9 +2,11 @@ use worker::*;
 use worker::durable::State;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NotificationSlot {
+    #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
     pub time: String,
 }
 
@@ -15,6 +17,8 @@ pub struct UserSchedule {
     pub breakfast: NotificationSlot,
     pub lunch: NotificationSlot,
     pub dinner: NotificationSlot,
+    #[serde(default)]
+    pub steps: NotificationSlot,
 }
 
 const STORAGE_SCHEDULE: &str = "schedule";
@@ -57,9 +61,10 @@ impl DurableObject for ScheduleDO {
                 let sched = UserSchedule {
                     utc_offset_minutes: 0,
                     weigh_in: NotificationSlot { enabled: true, time: "00:00".into() },
-                    breakfast: NotificationSlot { enabled: false, time: "00:00".into() },
-                    lunch: NotificationSlot { enabled: false, time: "00:00".into() },
-                    dinner: NotificationSlot { enabled: false, time: "00:00".into() },
+                    breakfast: NotificationSlot::default(),
+                    lunch: NotificationSlot::default(),
+                    dinner: NotificationSlot::default(),
+                    steps: NotificationSlot::default(),
                 };
                 let sched_json = serde_json::to_string(&sched)
                     .map_err(|e| Error::RustError(format!("serialize: {e}")))?;
@@ -131,6 +136,7 @@ impl ScheduleDO {
                 "breakfast" => schedule.breakfast.enabled,
                 "lunch" => schedule.lunch.enabled,
                 "dinner" => schedule.dinner.enabled,
+                "steps" => schedule.steps.enabled,
                 _ => false,
             };
 
@@ -153,11 +159,12 @@ impl ScheduleDO {
     }
 
     async fn schedule_next_alarm(&self, schedule: &UserSchedule, buffer_ms: u64) -> Result<()> {
-        let slots: [(&str, &NotificationSlot); 4] = [
+        let slots: [(&str, &NotificationSlot); 5] = [
             ("weigh_in", &schedule.weigh_in),
             ("breakfast", &schedule.breakfast),
             ("lunch", &schedule.lunch),
             ("dinner", &schedule.dinner),
+            ("steps", &schedule.steps),
         ];
 
         let now_ms = Date::now().as_millis() as u64;
@@ -208,9 +215,10 @@ impl ScheduleDO {
 fn notification_payload(slot: &str) -> String {
     let (body, tag, url) = match slot {
         "weigh_in" => ("\u{2696}\u{fe0f} Время взвеситься!", "weigh-in", "/weight"),
-        "breakfast" => ("\u{1f950} Время записать завтрак!", "breakfast", "/"),
-        "lunch" => ("\u{1f37d}\u{fe0f} Время записать обед!", "lunch", "/"),
-        "dinner" => ("\u{1f37d}\u{fe0f} Время записать ужин!", "dinner", "/"),
+        "breakfast" => ("\u{1f950} Время записать завтрак!", "breakfast", "/diary"),
+        "lunch" => ("\u{1f37d}\u{fe0f} Время записать обед!", "lunch", "/diary"),
+        "dinner" => ("\u{1f37d}\u{fe0f} Время записать ужин!", "dinner", "/diary"),
+        "steps" => ("\u{1f6b6} Время записать шаги!", "steps", "/steps"),
         _ => ("Напоминание", "reminder", "/"),
     };
 
@@ -220,6 +228,7 @@ fn notification_payload(slot: &str) -> String {
         "icon": "/icon-192.png",
         "tag": tag,
         "renotify": true,
+        "requireInteraction": true,
         "url": url,
         "actions": [{"action": "open", "title": "Открыть"}],
     }).to_string()

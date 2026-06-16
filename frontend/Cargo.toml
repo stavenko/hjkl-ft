@@ -23,6 +23,8 @@ web-sys = { version = "0.3", features = [
     "RequestMode",
     "Response",
     "Headers",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
     "File",
     "FileList",
     "HtmlInputElement",
@@ -38,9 +40,17 @@ web-sys = { version = "0.3", features = [
     "MediaStream",
     "MediaStreamConstraints",
     "MediaStreamTrack",
+    "MediaRecorder",
+    "MediaRecorderOptions",
+    "BlobEvent",
+    "BlobPropertyBag",
+    "Event",
+    "Url",
+    "HtmlAudioElement",
     "HtmlVideoElement",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
+    "ImageBitmap",
     "ImageData",
     "Clipboard",
     "Screen",
@@ -66,4 +76,5 @@ rqrr = "0.8"
 sha2 = "0.10"
 arti-pipes = { git = "https://github.com/stavenko/arti-pipes" }
 schemars = { version = "1", features = ["preserve_order"] }
+async-trait = "0.1"
 futures = "0.3"

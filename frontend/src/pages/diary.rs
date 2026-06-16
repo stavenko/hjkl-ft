@@ -6,8 +6,17 @@ use api_types::NutrientSpec;
 use crate::components::diary_add_modal::DiaryAddModal;
 use crate::components::food_weight_modal::FoodWeightModal;
 use crate::components::weight_widget::WeightWidget;
-use crate::services::{local, sync};
+use crate::components::weight_chart_modal::WeightChartModal;
+use crate::components::steps_widget::StepsWidget;
+use crate::components::steps_chart_modal::StepsChartModal;
+use crate::components::summary_block::SummaryBlock;
+use crate::components::food_edit_modal::FoodEditModal;
+use crate::services::{local, sync, db, story};
 use crate::services::i18n::t;
+
+/// Button reset so a native <button> can wrap a widget card transparently
+/// (iOS Safari fires clicks reliably on buttons, not on bare <div>s).
+const WIDGET_BTN: &str = "min-width: 0; cursor: pointer; appearance: none; -webkit-appearance: none; border: none; background: none; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; display: block;";
 
 fn format_date_relative(date_str: &str) -> String {
     use chrono::Datelike;
@@ -101,6 +110,20 @@ fn format_date_past_prefix(date_str: &str) -> String {
     }
 }
 
+/// Best-effort haptic tick. Works on Android (Vibration API); iOS Safari/PWA has
+/// no `navigator.vibrate` AT ALL, so we MUST feature-detect — calling the absent
+/// method throws, which previously aborted the long-press callback before the
+/// menu opened. Feature-detected → silent no-op on iOS.
+fn haptic(ms: u32) {
+    let Some(w) = web_sys::window() else { return };
+    let nav = w.navigator();
+    if let Ok(f) = js_sys::Reflect::get(&nav, &wasm_bindgen::JsValue::from_str("vibrate")) {
+        if f.is_function() {
+            let _ = nav.vibrate_with_duration(ms);
+        }
+    }
+}
+
 fn is_standard_nutrient(name: &str) -> bool {
     matches!(name, "Calories" | "Protein" | "Fat" | "Carbs")
 }
@@ -140,8 +163,10 @@ pub fn DiaryPage() -> impl IntoView {
     let version = create_rw_signal(0u32);
 
     let show_add = create_rw_signal(false);
-    let editing = create_rw_signal(None::<(String, Food, f64)>);
+    let editing = create_rw_signal(None::<(String, Food, f64, f64, bool)>);
     let menu_open = create_rw_signal(None::<String>);
+    // The diary entry whose product is being edited (КБЖУ + name, CoW on save).
+    let edit_food = create_rw_signal(None::<(String, Food)>);
 
     // All data comes from IndexedDB via resources. No manual signal mutation.
     let foods_res = create_resource(
@@ -177,6 +202,26 @@ pub fn DiaryPage() -> impl IntoView {
         move || version.get(),
         |_| async { local::list_weight_entries().await },
     );
+
+    // The weight chart appears at the same moment as the weigh-in reminder
+    // toggle in settings — i.e. once the setup section is done.
+    let story_ver = db::version("story");
+    let setup_done_res = create_resource(
+        move || story_ver.get(),
+        |_| async {
+            story::get_flag(story::LANGUAGE_CONFIGURED).await
+                && story::get_flag(story::NOTIFICATION_RECEIVED).await
+        },
+    );
+    let setup_done = move || setup_done_res.get().unwrap_or(false);
+    let show_weight_modal = create_rw_signal(false);
+
+    let steps_res = create_resource(
+        move || version.get(),
+        |_| async { local::list_step_entries().await },
+    );
+    let steps_entries = move || steps_res.get().unwrap_or_default();
+    let show_steps_modal = create_rw_signal(false);
 
     let foods = move || foods_res.get().unwrap_or_default();
     let goals = move || goals_res.get().unwrap_or_default();
@@ -235,13 +280,21 @@ pub fn DiaryPage() -> impl IntoView {
         date.get() == today
     };
 
+    let duplicate_entry = move |entry_id: String| {
+        spawn_local(async move {
+            local::duplicate_diary_entry(&entry_id).await;
+            invalidate();
+            sync::push_background();
+        });
+    };
+
     let nutrient_sum = move |nutrient: &str, es: &[DiaryEntry], fs: &[Food]| -> f64 {
         es.iter().map(|e| {
             let food = fs.iter().find(|f| f.id == e.food_id);
             food.map(|f| {
-                let factor = e.grams / 100.0;
+                let factor = (e.grams - e.waste_grams).max(0.0) / 100.0;
                 match nutrient {
-                    "Calories" => f.kcal * factor,
+                    "Calories" => f.effective_kcal() * factor,
                     "Protein" => f.protein * factor,
                     "Fat" => f.fat * factor,
                     "Carbs" => f.carbs * factor,
@@ -252,7 +305,18 @@ pub fn DiaryPage() -> impl IntoView {
     };
 
     view! {
-        <div style="display: flex; flex-direction: column; height: calc(100vh - 7rem);">
+        // Pinned app-shell: position: fixed makes the page immune to document
+        // scroll/overscroll (so the date header never slides up under the status
+        // bar), and padding-top: safe-area-inset keeps it below the notch. The
+        // header block is flex-shrink: 0; only the entries list scrolls.
+        <div style="position: fixed; inset: 0; padding: env(safe-area-inset-top) 0.75rem 0; display: flex; flex-direction: column; background: var(--bulma-background);">
+        // Tap-away backdrop: closes the open row menu when tapping outside it.
+        // pointerdown, not click: iOS Safari doesn't fire `click` on a bare <div>
+        // on tap, so the tap-away close never worked on iPhone.
+        {move || menu_open.get().is_some().then(|| view! {
+            <div style="position: fixed; inset: 0; z-index: 9;"
+                on:pointerdown=move |_| menu_open.set(None)></div>
+        })}
         // Sticky header: date + goals
         <div style="flex-shrink: 0;">
             // Date navigation: [←] [Вчера] [→]
@@ -368,9 +432,9 @@ pub fn DiaryPage() -> impl IntoView {
                             let week_total: f64 = we.iter().map(|e| {
                                 let food = fs.iter().find(|f| f.id == e.food_id);
                                 food.map(|f| {
-                                    let factor = e.grams / 100.0;
+                                    let factor = (e.grams - e.waste_grams).max(0.0) / 100.0;
                                     match name.as_str() {
-                                        "Calories" => f.kcal * factor,
+                                        "Calories" => f.effective_kcal() * factor,
                                         "Protein" => f.protein * factor,
                                         "Fat" => f.fat * factor,
                                         "Carbs" => f.carbs * factor,
@@ -438,7 +502,31 @@ pub fn DiaryPage() -> impl IntoView {
                 }}
             </div>
 
-            <WeightWidget entries=Signal::derive(weight_entries) />
+            {move || (is_today() && setup_done()).then(|| view! {
+                <div style="display: flex; gap: 0.75rem; align-items: stretch; margin-bottom: 0.75rem;">
+                    // Native <button> wrappers: iOS Safari doesn't reliably fire
+                    // delegated click events on non-interactive <div>s.
+                    <button type="button" style=WIDGET_BTN style:flex="1" on:click=move |_| show_weight_modal.set(true)>
+                        <WeightWidget entries=Signal::derive(weight_entries) />
+                    </button>
+                    <button type="button" style=WIDGET_BTN style:flex="1" on:click=move |_| show_steps_modal.set(true)>
+                        <StepsWidget entries=Signal::derive(steps_entries) />
+                    </button>
+                </div>
+            })}
+
+            {move || show_weight_modal.get().then(|| view! {
+                <WeightChartModal
+                    entries=Signal::derive(weight_entries)
+                    on_close=Callback::new(move |_| show_weight_modal.set(false))
+                />
+            })}
+            {move || show_steps_modal.get().then(|| view! {
+                <StepsChartModal
+                    entries=Signal::derive(steps_entries)
+                    on_close=Callback::new(move |_| show_steps_modal.set(false))
+                />
+            })}
 
         </div>
             {move || if entries().is_empty() {
@@ -463,44 +551,54 @@ pub fn DiaryPage() -> impl IntoView {
                         </div>
                     }.into_view()
                 } else {
-                    // Past day empty: no add button
+                    // Past day empty: no add button, but the weekly report is
+                    // still available (the day summary renders nothing if empty).
                     view! {
-                        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 24px;">
-                            <p style="font-size: 17px; color: var(--bulma-text-weak); margin: 0; text-align: center; line-height: 1.5;">
-                                {move || format!("{} {}", format_date_past_prefix(&date.get()), t("diary.empty_past"))}
-                            </p>
+                        <div attr:data-ios-scroll="1" style="flex: 1; overflow-y: auto; padding: 0 16px 5rem 16px;">
+                            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 8px 0 8px;">
+                                <p style="font-size: 17px; color: var(--bulma-text-weak); margin: 0; text-align: center; line-height: 1.5;">
+                                    {move || format!("{} {}", format_date_past_prefix(&date.get()), t("diary.empty_past"))}
+                                </p>
+                            </div>
+                            <SummaryBlock date=Signal::derive(move || date.get()) />
                         </div>
                     }.into_view()
                 }
             } else {
-                // Entries list — scrollable, padding-bottom for FAB
+                // Entries list — scrollable. The bottom padding MUST keep the last
+                // list item ABOVE the floating "+" FAB so they never overlap: the
+                // FAB sits at bottom: 5.5rem and is 3.5rem tall (its top is at 9rem
+                // from the viewport bottom), so padding-bottom must exceed that.
+                // 10rem = FAB top (9rem) + ~1rem gap. Keep in sync with the FAB
+                // position below if it ever changes.
                 view! {
-                    <div style="flex: 1; overflow-y: auto; padding-bottom: 5rem;">
+                    <div attr:data-ios-scroll="1" style="flex: 1; overflow-y: auto; padding-bottom: 10rem;">
                         {move || entries().into_iter().map(|entry| {
                             let entry_id = entry.id.clone();
                             let entry_id2 = entry.id.clone();
-                            let entry_id3 = entry.id.clone();
-                            let entry_id4 = entry.id.clone();
                             let fid = entry.food_id.clone();
                             let fid2 = entry.food_id.clone();
                             let fid3 = entry.food_id.clone();
                             let fid4 = entry.food_id.clone();
+                            let fid5 = entry.food_id.clone();
                             let g = entry.grams;
+                            let w = entry.waste_grams;
                             view! {
                                     <div style="display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--bulma-border-weak);">
                                         <div style="flex: 1; min-width: 0; overflow-wrap: break-word;">
-                                            <span class="is-size-6 has-text-weight-medium">
+                                            <span class="is-size-6 has-text-weight-medium"
+                                                style=move || if foods().iter().any(|f| f.id == fid5 && f.is_restaurant) { crate::components::food_list_item::RESTAURANT_NAME_STYLE } else { "" }>
                                                 {move || food_name(&fid)}
                                             </span>
                                             <div class="tags mt-1" style="margin-bottom: 0;">
                                                 {move || {
                                                     let fs = foods();
                                                     let food = fs.iter().find(|f| f.id == fid2);
-                                                    let factor = g / 100.0;
+                                                    let factor = (g - w).max(0.0) / 100.0;
                                                     let mut badges = Vec::new();
                                                     use crate::services::i18n;
                                                     if let Some(f) = food {
-                                                        badges.push((i18n::nutrient_badge("Calories"), f.kcal * factor, i18n::unit_label("kcal")));
+                                                        badges.push((i18n::nutrient_badge("Calories"), f.effective_kcal() * factor, i18n::unit_label("kcal")));
                                                         badges.push((i18n::nutrient_badge("Protein"), f.protein * factor, i18n::unit_label("g")));
                                                         badges.push((i18n::nutrient_badge("Fat"), f.fat * factor, i18n::unit_label("g")));
                                                         badges.push((i18n::nutrient_badge("Carbs"), f.carbs * factor, i18n::unit_label("g")));
@@ -540,48 +638,76 @@ pub fn DiaryPage() -> impl IntoView {
                                             {move || {
                                                 if is_today() {
                                                     let eid = entry_id.clone();
-                                                    let eid2 = entry_id2.clone();
-                                                    let eid3 = entry_id3.clone();
-                                                    let eid4 = entry_id4.clone();
+                                                    let eid_t = entry_id.clone();
+                                                    let eid_s = entry_id.clone();
+                                                    let eid_d = entry_id.clone();
+                                                    let eid_e = entry_id.clone();
+                                                    let eid_del = entry_id.clone();
                                                     let fid_e = fid3.clone();
+                                                    let fid_ed = fid3.clone();
                                                     view! {
                                                         <button
                                                             class="button is-ghost is-small has-text-link"
                                                             style="height: auto; text-decoration: none;"
                                                             on:click=move |_| {
                                                                 if let Some(food) = foods().into_iter().find(|f| f.id == fid_e) {
-                                                                    editing.set(Some((eid.clone(), food, g)));
+                                                                    let r = food.is_restaurant;
+                                                                    editing.set(Some((eid.clone(), food, g, w, r)));
                                                                 }
                                                             }
                                                         >
                                                             <span class="is-size-7">{move || format!("{:.0}{}", g, t("common.unit.g"))}</span>
                                                         </button>
+                                                        // Menu trigger (kebab "⋮" icon). Toggles the action menu,
+                                                        // which is anchored directly under this button.
                                                         <div style="position: relative;">
                                                             <button
                                                                 class="button is-ghost has-text-grey-light"
                                                                 style="height: 2.5rem; width: 2.5rem; padding: 0; text-decoration: none;"
                                                                 on:click=move |_| {
+                                                                    haptic(15);
                                                                     menu_open.update(|m| {
-                                                                        if m.as_deref() == Some(&eid2) { *m = None; }
-                                                                        else { *m = Some(eid2.clone()); }
+                                                                        if m.as_deref() == Some(&eid_t) { *m = None; }
+                                                                        else { *m = Some(eid_t.clone()); }
                                                                     });
                                                                 }
                                                             >
                                                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                                                                    <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                                                    <circle cx="10" cy="4" r="1.6"/>
+                                                                    <circle cx="10" cy="10" r="1.6"/>
+                                                                    <circle cx="10" cy="16" r="1.6"/>
                                                                 </svg>
                                                             </button>
-                                                            <Show when=move || menu_open.get().as_deref() == Some(&eid3)>
-                                                                <div style="position: absolute; right: 0; top: 100%; z-index: 10; background: var(--bulma-scheme-main); border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); min-width: 8rem; padding: 0.25rem 0;">
+                                                            <Show when=move || menu_open.get().as_deref() == Some(&eid_s)>
+                                                                <div style="position: absolute; right: 0; top: 100%; z-index: 10; background: var(--bulma-scheme-main); border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); min-width: 10rem; padding: 0.25rem 0;">
+                                                                    <button
+                                                                        class="button is-ghost is-small is-fullwidth"
+                                                                        style="justify-content: flex-start; text-decoration: none;"
+                                                                        on:click={
+                                                                            let id = eid_d.clone();
+                                                                            move |_| { duplicate_entry(id.clone()); menu_open.set(None); }
+                                                                        }
+                                                                    >{move || t("diary.duplicate")}</button>
+                                                                    <button
+                                                                        class="button is-ghost is-small is-fullwidth"
+                                                                        style="justify-content: flex-start; text-decoration: none;"
+                                                                        on:click={
+                                                                            let id = eid_e.clone();
+                                                                            let fid_edit = fid_ed.clone();
+                                                                            move |_| {
+                                                                                if let Some(food) = foods().into_iter().find(|f| f.id == fid_edit) {
+                                                                                    edit_food.set(Some((id.clone(), food)));
+                                                                                }
+                                                                                menu_open.set(None);
+                                                                            }
+                                                                        }
+                                                                    >{move || t("diary.edit")}</button>
                                                                     <button
                                                                         class="button is-ghost is-small is-fullwidth has-text-danger"
                                                                         style="justify-content: flex-start; text-decoration: none;"
                                                                         on:click={
-                                                                            let id = eid4.clone();
-                                                                            move |_| {
-                                                                                delete_entry(id.clone());
-                                                                                menu_open.set(None);
-                                                                            }
+                                                                            let id = eid_del.clone();
+                                                                            move |_| { delete_entry(id.clone()); menu_open.set(None); }
                                                                         }
                                                                     >{move || t("diary.delete")}</button>
                                                                 </div>
@@ -629,7 +755,7 @@ pub fn DiaryPage() -> impl IntoView {
                                                                             menu_open.set(None);
                                                                             spawn_local(async move {
                                                                                 if let Some(food) = local::list_foods().await.into_iter().find(|f| f.id == fid) {
-                                                                                    let _ = local::save_food_to_diary(&food, g).await;
+                                                                                    let _ = local::save_food_to_diary(&food, g, w, food.is_restaurant).await;
                                                                                     invalidate();
                                                                                     sync::push_background();
                                                                                 }
@@ -647,10 +773,19 @@ pub fn DiaryPage() -> impl IntoView {
                                     </div>
                             }
                         }).collect::<Vec<_>>()}
+
+                        // Daily AI summary + weekly report — past days only.
+                        {move || (!is_today()).then(|| view! {
+                            <SummaryBlock date=Signal::derive(move || date.get()) />
+                        })}
                     </div>
 
-                    // Floating green + button (only when entries exist)
-                    <Show when=move || !show_add.get()>
+                    // Floating green "+" FAB. MUST be drawn STRICTLY for "today":
+                    // you can only log food into the current day. On past days we
+                    // show only the day assessment (the SummaryBlock above) and NO
+                    // add button — `is_today()` gates it here. (Bug fixed: this used
+                    // to render on every day with entries, not just today.)
+                    <Show when=move || is_today() && !show_add.get()>
                         <button
                             attr:data-testid="diary-btn-add"
                             class="button is-success is-rounded"
@@ -660,6 +795,12 @@ pub fn DiaryPage() -> impl IntoView {
                     </Show>
                 }.into_view()
             }}
+        // Close the fixed app-shell HERE. The dialogs below are rendered as
+        // SIBLINGS of the shell, NOT inside it: the shell is `position:fixed`
+        // (its own stacking context), so a modal inside it can't rise above the
+        // root-level nav bar (z-40) no matter its z-index. As siblings they live
+        // in the root stacking context, where their z-index (50) wins.
+        </div>
 
             <Show when=move || show_add.get()>
                 <DiaryAddModal
@@ -679,19 +820,21 @@ pub fn DiaryPage() -> impl IntoView {
             </Show>
 
             {move || {
-                editing.get().map(|(entry_id, food, current_grams)| {
+                editing.get().map(|(entry_id, food, current_grams, current_waste, current_restaurant)| {
                     view! {
                         <FoodWeightModal
                             food=food
                             goals=Signal::derive(goals)
                             initial_grams=current_grams
+                            initial_waste=current_waste
+                            initial_restaurant=current_restaurant
                             submit_label=t("weight.save")
                             on_save=Callback::new({
                                 let eid = entry_id.clone();
-                                move |new_grams: f64| {
+                                move |(new_grams, new_waste, new_restaurant): (f64, f64, bool)| {
                                     let eid = eid.clone();
                                     spawn_local(async move {
-                                        let _ = local::update_diary_entry(&eid, new_grams).await;
+                                        let _ = local::update_diary_entry(&eid, new_grams, new_waste, new_restaurant).await;
                                         invalidate();
                                         sync::push_background();
                                     });
@@ -703,6 +846,18 @@ pub fn DiaryPage() -> impl IntoView {
                     }
                 })
             }}
-        </div>
+
+            // "Изменить" from the row long-press: edit the product's КБЖУ + name
+            // (copy-on-write on save).
+            {move || {
+                edit_food.get().map(|(entry_id, food)| view! {
+                    <FoodEditModal
+                        food=food
+                        entry_id=entry_id
+                        on_saved=Callback::new(move |_| { invalidate(); sync::push_background(); })
+                        on_close=Callback::new(move |_| edit_food.set(None))
+                    />
+                })
+            }}
     }
 }

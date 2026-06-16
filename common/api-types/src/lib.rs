@@ -46,8 +46,20 @@ pub struct Food {
     pub is_recipe: bool,
     pub recipe_id: Option<String>,
     pub archived: bool,
+    /// Restaurant / eaten-out food: excluded from recipe ingredients, carries a
+    /// +20% calorie surcharge, and is shown with a dashed marker in lists.
+    #[serde(default)]
+    pub is_restaurant: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl Food {
+    /// Calories accounted for this food. Restaurant meals carry a +20% surcharge
+    /// (kitchens add hidden fats/oils to almost any dish).
+    pub fn effective_kcal(&self) -> f64 {
+        if self.is_restaurant { self.kcal * 1.2 } else { self.kcal }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +92,9 @@ pub struct DiaryEntry {
     pub date: String,
     pub time: Option<String>,
     pub grams: f64,
+    /// Inedible waste (bones, pits, …) in grams. Calories count `grams - waste_grams`.
+    #[serde(default)]
+    pub waste_grams: f64,
     pub meal_label: Option<String>,
     #[serde(default)]
     pub deleted: bool,
@@ -118,6 +133,7 @@ impl FoodDraft {
             is_recipe: false,
             recipe_id: None,
             archived: false,
+            is_restaurant: false,
             created_at: self.created_at.clone(),
             updated_at: String::new(),
         }
@@ -406,6 +422,17 @@ pub struct WeightEntry {
     pub no_wash: bool,
     pub used_toilet: bool,
     pub morning: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+// --- Step tracking ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepEntry {
+    pub id: String,
+    pub date: String,
+    pub steps: u32,
     pub created_at: String,
     pub updated_at: String,
 }

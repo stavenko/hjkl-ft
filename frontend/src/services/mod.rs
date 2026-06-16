@@ -1,10 +1,15 @@
 pub mod ai;
 pub mod api;
+pub mod chat;
 pub mod auth;
 pub mod config;
 pub mod db;
 pub mod i18n;
 pub mod local;
 pub mod platform;
+pub mod profile;
 pub mod push;
+pub mod story;
+pub mod subscription;
+pub mod summary;
 pub mod sync;

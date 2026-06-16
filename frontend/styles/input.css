@@ -40,6 +40,14 @@
   --bulma-body-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+html {
+  /* iOS auto-inflates text based on viewport width ("text autosizing"). On a
+     rotate to landscape and back, the list fonts ballooned and stayed huge until
+     a reflow. Pinning the adjust to 100% disables that inflation. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   overscroll-behavior: none;

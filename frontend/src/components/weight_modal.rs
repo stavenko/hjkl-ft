@@ -11,7 +11,7 @@ pub fn WeightModal(
 ) -> impl IntoView {
     let grams = create_rw_signal(format!("{}", current_grams));
 
-    let current_val = move || -> f64 { grams.get().parse().unwrap_or(0.0) };
+    let current_val = move || -> f64 { grams.get().replace(',', ".").parse().unwrap_or(0.0) };
 
     let adjust = move |delta: f64| {
         let new = (current_val() + delta).max(0.0);

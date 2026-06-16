@@ -1,6 +1,10 @@
 use leptos::*;
 use api_types::*;
 
+/// Thin blue dashed frame marking restaurant / eaten-out food in lists.
+pub const RESTAURANT_NAME_STYLE: &str =
+    "border: 1px dashed var(--bulma-link); border-radius: 4px; padding: 0 0.25rem;";
+
 /// Universal food list row.
 /// Shows: name | nutrient badges | right-side action slot.
 /// `grams`: if Some — scale nutrients by grams/100, else show per 100g.
@@ -17,12 +21,13 @@ pub fn FoodListItem(
 ) -> impl IntoView {
     let factor = grams.unwrap_or(100.0) / 100.0;
     let food_c = food.clone();
+    let name_style = if food.is_restaurant { RESTAURANT_NAME_STYLE } else { "" };
 
     view! {
         <div attr:data-testid="food-list-item" attr:data-food-name=food.name.clone() style="display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--bulma-border-weak);">
             <div style="flex: 1; min-width: 0; overflow-wrap: break-word;">
                 {icon.map(|i| view! { <span attr:data-testid="food-item-icon" style="margin-right: 4px; font-size: 14px;">{i}</span> })}
-                <span class="is-size-6 has-text-weight-medium">{&food.name}</span>
+                <span class="is-size-6 has-text-weight-medium" style=name_style>{&food.name}</span>
                 <div style="display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem;">
                     {move || {
                         let gs = goals.get();
@@ -38,7 +43,7 @@ pub fn FoodListItem(
                             }.into_view()
                         };
                         let mut badges: Vec<View> = vec![
-                            badge(i18n::nutrient_badge("Calories"), f.kcal * factor, i18n::unit_label("kcal")),
+                            badge(i18n::nutrient_badge("Calories"), f.effective_kcal() * factor, i18n::unit_label("kcal")),
                             badge(i18n::nutrient_badge("Protein"), f.protein * factor, i18n::unit_label("g")),
                             badge(i18n::nutrient_badge("Fat"), f.fat * factor, i18n::unit_label("g")),
                             badge(i18n::nutrient_badge("Carbs"), f.carbs * factor, i18n::unit_label("g")),

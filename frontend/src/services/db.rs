@@ -31,7 +31,7 @@ fn bump(store_name: &str) {
 // gets their own IndexedDB. After login, reinitialize DB with the user's ID.
 pub async fn init() {
     let rexie = Rexie::builder("hjkl-ft")
-        .version(3)
+        .version(8)
         .add_object_store(
             ObjectStore::new("foods")
                 .key_path("id")
@@ -77,6 +77,27 @@ pub async fn init() {
                 .add_index(rexie::Index::new("date", "date"))
                 .add_index(rexie::Index::new("updated_at", "updated_at")),
         )
+        .add_object_store(
+            ObjectStore::new("step_entries")
+                .key_path("id")
+                .add_index(rexie::Index::new("date", "date"))
+                .add_index(rexie::Index::new("updated_at", "updated_at")),
+        )
+        .add_object_store(
+            ObjectStore::new("progress_photos")
+                .key_path("id")
+                .add_index(rexie::Index::new("pose", "pose"))
+                .add_index(rexie::Index::new("created_at", "created_at")),
+        )
+        // Daily / weekly AI summaries, keyed "day:YYYY-MM-DD" / "week:YYYY-MM-DD".
+        .add_object_store(ObjectStore::new("summaries").key_path("id"))
+        // Support-chat messages, one record per message, keyed by uuid v7 "id".
+        .add_object_store(
+            ObjectStore::new("chat")
+                .key_path("id")
+                .add_index(rexie::Index::new("created_at", "created_at")),
+        )
+        .add_object_store(ObjectStore::new("story").key_path("key"))
         .add_object_store(ObjectStore::new("_sync_meta").key_path("key"))
         .build()
         .await
@@ -86,7 +107,8 @@ pub async fn init() {
 
     const STORES: &[&str] = &[
         "foods", "diary", "recipes", "recipe_ingredients",
-        "goals", "food_drafts", "weight_entries", "_sync_meta",
+        "goals", "food_drafts", "weight_entries", "step_entries",
+        "progress_photos", "summaries", "chat", "story", "_sync_meta",
     ];
     STORE_VERSIONS.with(|cell| {
         let mut map = cell.borrow_mut();
@@ -188,7 +210,7 @@ pub async fn count(store_name: &str) -> u32 {
 }
 
 pub async fn wipe_all() {
-    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "_sync_meta"];
+    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "step_entries", "chat", "story", "_sync_meta"];
     for store in stores {
         clear(store).await;
     }

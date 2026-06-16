@@ -161,6 +161,61 @@ pub async fn unsubscribe() -> Result<(), String> {
     Ok(())
 }
 
+/// Ask the server to send a test push notification to the current user's
+/// devices. The caller decides the body and the deep-link `url` (where tapping
+/// the notification should take the user) based on story progress.
+pub async fn send_test(body: &str, url: &str) -> Result<(), String> {
+    let push_base = {
+        let cfg = crate::services::config::get();
+        if cfg.push_base_url.is_empty() {
+            if cfg.auth_base_url.is_empty() {
+                cfg.api_base_url.clone()
+            } else {
+                cfg.auth_base_url.clone()
+            }
+        } else {
+            cfg.push_base_url.clone()
+        }
+    };
+
+    let token = crate::services::auth::get_token()
+        .ok_or_else(|| "not authenticated".to_string())?;
+
+    let endpoint = format!("{}/push/test", push_base);
+    let body_str = serde_json::json!({ "body": body, "url": url }).to_string();
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    opts.set_body(&JsValue::from_str(&body_str));
+
+    let headers = web_sys::Headers::new().map_err(|e| format!("{:?}", e))?;
+    headers
+        .set("Content-Type", "application/json")
+        .map_err(|e| format!("{:?}", e))?;
+    headers
+        .set("Authorization", &format!("Bearer {}", token))
+        .map_err(|e| format!("{:?}", e))?;
+    opts.set_headers(&headers);
+
+    let request = web_sys::Request::new_with_str_and_init(&endpoint, &opts)
+        .map_err(|e| format!("{:?}", e))?;
+
+    let resp_val = JsFuture::from(window().fetch_with_request(&request))
+        .await
+        .map_err(|e| format!("{:?}", e))?;
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
+
+    if !resp.ok() {
+        let text = JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
+            .await
+            .map_err(|e| format!("{:?}", e))?;
+        let text = text.as_string().unwrap_or_default();
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+
+    Ok(())
+}
+
 pub async fn sync_notification_schedule(schedule: serde_json::Value) -> Result<(), String> {
     let push_base = {
         let cfg = crate::services::config::get();

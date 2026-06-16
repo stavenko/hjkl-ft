@@ -2,39 +2,76 @@ use leptos::*;
 use leptos_router::*;
 use serde::Serialize;
 
-use crate::services::{push, db, i18n::t};
+use crate::services::{push, db, story, profile, local, sync, i18n::t};
+use crate::services::profile::Sex;
 
 const IOS_BG: &str = "background: var(--bulma-background); min-height: 100vh; padding: 16px; margin: -0.75rem;";
 const IOS_CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden;";
 const IOS_SECTION_LABEL: &str = "text-transform: uppercase; letter-spacing: 0.02em; padding: 24px 0 8px 16px; margin: 0;";
 const IOS_SEPARATOR: &str = "border-bottom: 0.5px solid var(--bulma-border-weak); margin-left: 16px;";
 
+// TODO: Показывать цели после того, как пользователь освоится с программой и
+// выполнит некоторые задания из «Истории».
+const SHOW_GOALS: bool = false;
+
 #[component]
 pub fn SettingsPage() -> impl IntoView {
     let navigate = use_navigate();
+
+    // Расписание уведомлений показываем после того, как пройдена секция
+    // «Настроим приложение» (язык + проверка уведомлений) — её задание ведёт
+    // сюда настраивать напоминания.
+    let story_ver = db::version("story");
+    let show_schedule = create_rw_signal(false);
+    // The meal/steps reminders are unlocked later, in the "first food entries"
+    // section; until then only the weigh-in reminder is shown.
+    let show_meal_reminders = create_rw_signal(false);
+    // Danger zone: the "delete diary data" row expands into its two options.
+    let show_diary_delete = create_rw_signal(false);
+    create_effect(move |_| {
+        story_ver.get();
+        spawn_local(async move {
+            show_schedule.set(
+                story::get_flag(story::LANGUAGE_CONFIGURED).await
+                    && story::get_flag(story::NOTIFICATION_RECEIVED).await,
+            );
+            show_meal_reminders.set(story::get_flag(story::MEAL_REMINDERS_UNLOCKED).await);
+        });
+    });
+
+    // Biological sex (localStorage). Picking it also marks the setup-section
+    // story task. Reactive signal so the ✓ updates immediately.
+    let sex = create_rw_signal(profile::get_sex());
+    let pick_sex = move |s: Sex| {
+        profile::set_sex(s);
+        sex.set(Some(s));
+        spawn_local(async { story::set_flag(story::SEX_SELECTED, true).await; });
+    };
 
     view! {
         <div style=IOS_BG>
             <h1 class="is-size-1 has-text-weight-bold" style="margin: 0 0 8px 0;">{move || t("settings.title")}</h1>
 
             // ---- Goals row ----
-            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.goals")}</p>
-            <div style=IOS_CARD>
-                <button
-                    attr:data-testid="settings-btn-goals"
-                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
-                    on:click={
-                        let nav = navigate.clone();
-                        move |_| {
-                            let nav = nav.clone();
-                            nav("/settings/goals", Default::default());
-                        }
-                    }
-                >
-                    <span class="is-size-6">{move || t("settings.goals")}</span>
-                    <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
-                </button>
-            </div>
+            {SHOW_GOALS.then(|| {
+                let nav = navigate.clone();
+                view! {
+                    <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.goals")}</p>
+                    <div style=IOS_CARD>
+                        <button
+                            attr:data-testid="settings-btn-goals"
+                            style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                            on:click=move |_| {
+                                let nav = nav.clone();
+                                nav("/settings/goals", Default::default());
+                            }
+                        >
+                            <span class="is-size-6">{move || t("settings.goals")}</span>
+                            <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
+                        </button>
+                    </div>
+                }
+            })}
 
             // ---- Language section ----
             <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.language")}</p>
@@ -70,6 +107,31 @@ pub fn SettingsPage() -> impl IntoView {
                 </button>
             </div>
 
+            // ---- Sex section ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.sex")}</p>
+            <div style=IOS_CARD>
+                <button
+                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                    attr:data-testid="settings-btn-sex-female"
+                    on:click=move |_| pick_sex(Sex::Female)
+                >
+                    <span class="is-size-6">{move || t("settings.sex_female")}</span>
+                    {move || (sex.get() == Some(Sex::Female)).then(|| view! { <span class="has-text-link is-size-5">"✓"</span> })}
+                </button>
+                <div style=IOS_SEPARATOR></div>
+                <button
+                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                    attr:data-testid="settings-btn-sex-male"
+                    on:click=move |_| pick_sex(Sex::Male)
+                >
+                    <span class="is-size-6">{move || t("settings.sex_male")}</span>
+                    {move || (sex.get() == Some(Sex::Male)).then(|| view! { <span class="has-text-link is-size-5">"✓"</span> })}
+                </button>
+            </div>
+            <p class="is-size-7 has-text-grey" style="padding: 8px 16px 0 16px; margin: 0; line-height: 1.45;">
+                {move || t("settings.sex_why")}
+            </p>
+
             // ---- Privacy row ----
             <div style="margin-top: 24px;">
                 <div style=IOS_CARD>
@@ -95,62 +157,77 @@ pub fn SettingsPage() -> impl IntoView {
             <div style=IOS_CARD>
                 {
                     let push_ver = create_rw_signal(0u32);
-                    let push_subscribed = move || { push_ver.get(); push::is_subscribed() };
-                    let push_loading = create_rw_signal(false);
+                    let subscribed = move || { push_ver.get(); push::is_subscribed() };
+                    let loading = create_rw_signal(false);
+                    let error = create_rw_signal(None::<String>);
                     let push_supported = push::is_supported();
-                    view! {
-                        <div style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
-                            <span class="is-size-6">{move || t("settings.notifications")}</span>
-                            {if !push_supported {
-                                view! {
-                                    <span class="is-size-7 has-text-grey-light">{move || t("settings.push_not_supported")}</span>
-                                }.into_view()
-                            } else {
-                                view! {
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <button
-                                            class=move || if push_subscribed() {
-                                                "button is-danger is-size-7"
-                                            } else {
-                                                "button is-link is-size-7"
+                    if !push_supported {
+                        view! {
+                            <div style="padding: 12px 16px;">
+                                <span class="is-size-7 has-text-grey-light">{move || t("settings.push_not_supported")}</span>
+                            </div>
+                        }.into_view()
+                    } else {
+                        view! {
+                            <div style="padding: 12px 16px;">
+                                <button
+                                    attr:data-testid="settings-btn-notifications"
+                                    class="button is-link is-fullwidth"
+                                    prop:disabled=move || loading.get()
+                                    on:click=move |_| {
+                                        loading.set(true);
+                                        error.set(None);
+                                        spawn_local(async move {
+                                            let result = async {
+                                                // Always (re)subscribe before testing. The local
+                                                // `push_subscribed` flag can go stale (Chrome rotates
+                                                // or drops subscriptions), leaving the server with a
+                                                // dead endpoint. Re-subscribing is idempotent and
+                                                // refreshes the server's record; it also surfaces a
+                                                // real "permission denied" instead of silently no-op.
+                                                push::subscribe().await?;
+                                                // The client picks the deep-link based on story
+                                                // progress: while the setup section's check task
+                                                // is pending, tapping the notification opens that
+                                                // section and completes the task; once it's done,
+                                                // the notification just confirms it works.
+                                                let setup_done = story::get_flag(story::LANGUAGE_CONFIGURED).await
+                                                    && story::get_flag(story::NOTIFICATION_RECEIVED).await;
+                                                let (body, url) = if setup_done {
+                                                    (t("settings.notif_push_plain"), "/")
+                                                } else {
+                                                    (t("settings.notif_push_task"), "/story/setup?notif=1")
+                                                };
+                                                push::send_test(body, url).await
+                                            }.await;
+                                            if let Err(e) = result {
+                                                leptos::logging::error!("notifications: {}", e);
+                                                error.set(Some(e));
                                             }
-                                            style="border-radius: 16px; padding: 6px 14px;"
-                                            prop:disabled=move || push_loading.get()
-                                            on:click=move |_| {
-                                                push_loading.set(true);
-                                                let is_on = push_subscribed();
-                                                spawn_local(async move {
-                                                    if is_on {
-                                                        match push::unsubscribe().await {
-                                                            Ok(()) => {},
-                                                            Err(e) => leptos::logging::error!("push unsubscribe: {}", e),
-                                                        }
-                                                    } else {
-                                                        match push::subscribe().await {
-                                                            Ok(()) => {},
-                                                            Err(e) => leptos::logging::error!("push subscribe: {}", e),
-                                                        }
-                                                    }
-                                                    push_ver.update(|v| *v += 1);
-                                                    push_loading.set(false);
-                                                });
-                                            }
-                                        >
-                                            {move || if push_subscribed() {
-                                                t("settings.push_disable")
-                                            } else {
-                                                t("settings.push_enable")
-                                            }}
-                                        </button>
-                                    </div>
-                                }.into_view()
-                            }}
-                        </div>
+                                            push_ver.update(|v| *v += 1);
+                                            loading.set(false);
+                                        });
+                                    }
+                                >
+                                    {move || if loading.get() {
+                                        t("settings.sending")
+                                    } else if subscribed() {
+                                        t("settings.notif_check")
+                                    } else {
+                                        t("settings.notif_enable_check")
+                                    }}
+                                </button>
+                                {move || error.get().map(|e| view! {
+                                    <p class="is-size-7 has-text-danger" style="margin-top: 8px;">{e}</p>
+                                })}
+                            </div>
+                        }.into_view()
                     }
                 }
             </div>
 
             // ---- Notification schedule section ----
+            {move || show_schedule.get().then(|| view! {
             <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.schedule")}</p>
             <div style=IOS_CARD>
                 {
@@ -162,6 +239,8 @@ pub fn SettingsPage() -> impl IntoView {
                     let lu_time = create_rw_signal("13:00".to_string());
                     let di_on = create_rw_signal(false);
                     let di_time = create_rw_signal("19:00".to_string());
+                    let st_on = create_rw_signal(false);
+                    let st_time = create_rw_signal("22:00".to_string());
 
                     spawn_local(async move {
                         if let Some(val) = db::get::<serde_json::Value>("_sync_meta", "notification_schedule").await {
@@ -181,42 +260,103 @@ pub fn SettingsPage() -> impl IntoView {
                                 if let Some(v) = s.get("enabled").and_then(|v| v.as_bool()) { di_on.set(v); }
                                 if let Some(v) = s.get("time").and_then(|v| v.as_str()) { di_time.set(v.to_string()); }
                             }
+                            if let Some(s) = val.get("steps") {
+                                if let Some(v) = s.get("enabled").and_then(|v| v.as_bool()) { st_on.set(v); }
+                                if let Some(v) = s.get("time").and_then(|v| v.as_str()) { st_time.set(v.to_string()); }
+                            }
                         }
                     });
 
                     view! {
                         <ScheduleRow label="settings.weigh_in" slot_id="weigh_in" enabled=wi_on time=wi_time
-                            wi_on bf_on lu_on di_on wi_time bf_time lu_time di_time />
-                        <div style=IOS_SEPARATOR></div>
-                        <ScheduleRow label="settings.breakfast" slot_id="breakfast" enabled=bf_on time=bf_time
-                            wi_on bf_on lu_on di_on wi_time bf_time lu_time di_time />
-                        <div style=IOS_SEPARATOR></div>
-                        <ScheduleRow label="settings.lunch" slot_id="lunch" enabled=lu_on time=lu_time
-                            wi_on bf_on lu_on di_on wi_time bf_time lu_time di_time />
-                        <div style=IOS_SEPARATOR></div>
-                        <ScheduleRow label="settings.dinner" slot_id="dinner" enabled=di_on time=di_time
-                            wi_on bf_on lu_on di_on wi_time bf_time lu_time di_time />
+                            wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                        {move || show_meal_reminders.get().then(|| view! {
+                            <div style=IOS_SEPARATOR></div>
+                            <ScheduleRow label="settings.breakfast" slot_id="breakfast" enabled=bf_on time=bf_time
+                                wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                            <div style=IOS_SEPARATOR></div>
+                            <ScheduleRow label="settings.lunch" slot_id="lunch" enabled=lu_on time=lu_time
+                                wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                            <div style=IOS_SEPARATOR></div>
+                            <ScheduleRow label="settings.dinner" slot_id="dinner" enabled=di_on time=di_time
+                                wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                            <div style=IOS_SEPARATOR></div>
+                            <ScheduleRow label="settings.steps" slot_id="steps" enabled=st_on time=st_time
+                                wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                        })}
                     }
                 }
             </div>
+            })}
 
-            // ---- Data section ----
-            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.data")}</p>
+            // ---- Danger zone ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.danger_zone")}</p>
             <div style=IOS_CARD>
+                // 1. Reset story progress (local-only; story isn't synced).
                 <button
-                    attr:data-testid="settings-btn-wipe-all"
+                    attr:data-testid="settings-btn-reset-story"
                     style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
                     on:click=move |_| {
                         let win = web_sys::window().unwrap();
-                        if win.confirm_with_message(&t("settings.wipe_confirm")).unwrap_or(false) {
-                            spawn_local(async move {
-                                crate::services::db::wipe_all().await;
-                            });
+                        if win.confirm_with_message(&t("settings.danger_confirm_story")).unwrap_or(false) {
+                            spawn_local(async move { local::delete_story_progress().await; });
                         }
                     }
                 >
-                    <span class="is-size-6 has-text-danger">{move || t("settings.wipe_all")}</span>
+                    <span class="is-size-6 has-text-danger">{move || t("settings.danger_reset_story")}</span>
                 </button>
+
+                <div style=IOS_SEPARATOR></div>
+
+                // 2. Delete diary data — expands into two options.
+                <button
+                    attr:data-testid="settings-btn-delete-diary"
+                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                    on:click=move |_| show_diary_delete.update(|v| *v = !*v)
+                >
+                    <span class="is-size-6 has-text-danger">{move || t("settings.danger_delete_diary")}</span>
+                    <span style="color: var(--bulma-text-weak); font-size: 18px;">
+                        {move || if show_diary_delete.get() { "⌄" } else { "›" }}
+                    </span>
+                </button>
+
+                {move || show_diary_delete.get().then(|| view! {
+                    <div style=IOS_SEPARATOR></div>
+                    <button
+                        attr:data-testid="settings-btn-delete-diary-old"
+                        style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px 12px 32px; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                        on:click=move |_| {
+                            let win = web_sys::window().unwrap();
+                            if win.confirm_with_message(&t("settings.danger_confirm_old")).unwrap_or(false) {
+                                let cutoff = (chrono::Local::now().date_naive() - chrono::Duration::days(365))
+                                    .format("%Y-%m-%d").to_string();
+                                spawn_local(async move {
+                                    local::delete_diary_data(Some(&cutoff)).await;
+                                    sync::push_background();
+                                });
+                            }
+                        }
+                    >
+                        <span class="is-size-6 has-text-danger">{move || t("settings.danger_delete_old")}</span>
+                    </button>
+
+                    <div style=IOS_SEPARATOR></div>
+                    <button
+                        attr:data-testid="settings-btn-delete-diary-all"
+                        style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px 12px 32px; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
+                        on:click=move |_| {
+                            let win = web_sys::window().unwrap();
+                            if win.confirm_with_message(&t("settings.danger_confirm_all")).unwrap_or(false) {
+                                spawn_local(async move {
+                                    local::delete_diary_data(None).await;
+                                    sync::push_background();
+                                });
+                            }
+                        }
+                    >
+                        <span class="is-size-6 has-text-danger">{move || t("settings.danger_delete_all")}</span>
+                    </button>
+                })}
             </div>
 
             <div style="height: 40px;"></div>
@@ -237,13 +377,15 @@ fn ScheduleRow(
     bf_on: RwSignal<bool>,
     lu_on: RwSignal<bool>,
     di_on: RwSignal<bool>,
+    st_on: RwSignal<bool>,
     wi_time: RwSignal<String>,
     bf_time: RwSignal<String>,
     lu_time: RwSignal<String>,
     di_time: RwSignal<String>,
+    st_time: RwSignal<String>,
 ) -> impl IntoView {
     let save = move || {
-        save_notification_schedule(wi_on, bf_on, lu_on, di_on, wi_time, bf_time, lu_time, di_time);
+        save_notification_schedule(wi_on, bf_on, lu_on, di_on, st_on, wi_time, bf_time, lu_time, di_time, st_time);
     };
 
     view! {
@@ -270,6 +412,21 @@ fn ScheduleRow(
                 on:click=move |_| {
                     enabled.update(|v| *v = !*v);
                     save();
+                    // The act of enabling a reminder is a story milestone: record
+                    // it in the story DB (an event), independent of the schedule's
+                    // later on/off state.
+                    if enabled.get_untracked() {
+                        let flag = match slot_id {
+                            "weigh_in" => Some(story::WEIGH_IN_REMINDER),
+                            "steps" => Some(story::STEPS_REMINDER),
+                            _ => None,
+                        };
+                        if let Some(flag) = flag {
+                            spawn_local(async move {
+                                story::set_flag(flag, true).await;
+                            });
+                        }
+                    }
                 }
             >
                 <div style=move || format!(
@@ -295,6 +452,7 @@ struct ScheduleRecord {
     breakfast: SlotData,
     lunch: SlotData,
     dinner: SlotData,
+    steps: SlotData,
 }
 
 fn save_notification_schedule(
@@ -302,10 +460,12 @@ fn save_notification_schedule(
     bf_on: RwSignal<bool>,
     lu_on: RwSignal<bool>,
     di_on: RwSignal<bool>,
+    st_on: RwSignal<bool>,
     wi_time: RwSignal<String>,
     bf_time: RwSignal<String>,
     lu_time: RwSignal<String>,
     di_time: RwSignal<String>,
+    st_time: RwSignal<String>,
 ) {
     let record = ScheduleRecord {
         key: "notification_schedule".to_string(),
@@ -313,6 +473,7 @@ fn save_notification_schedule(
         breakfast: SlotData { enabled: bf_on.get_untracked(), time: bf_time.get_untracked() },
         lunch: SlotData { enabled: lu_on.get_untracked(), time: lu_time.get_untracked() },
         dinner: SlotData { enabled: di_on.get_untracked(), time: di_time.get_untracked() },
+        steps: SlotData { enabled: st_on.get_untracked(), time: st_time.get_untracked() },
     };
     spawn_local(async move {
         db::put("_sync_meta", &record).await;
@@ -323,9 +484,11 @@ fn save_notification_schedule(
             "breakfast": {"enabled": record.breakfast.enabled, "time": record.breakfast.time},
             "lunch": {"enabled": record.lunch.enabled, "time": record.lunch.time},
             "dinner": {"enabled": record.dinner.enabled, "time": record.dinner.time},
+            "steps": {"enabled": record.steps.enabled, "time": record.steps.time},
         });
         if let Err(e) = push::sync_notification_schedule(payload).await {
             leptos::logging::error!("sync schedule: {}", e);
         }
     });
 }
+

@@ -1,7 +1,7 @@
 use leptos::*;
 use leptos_router::*;
 
-use crate::services::{local, i18n::{t, weight_unit_signal, WeightUnit}};
+use crate::services::{local, push, story, i18n::{t, weight_unit_signal, WeightUnit}};
 
 const PAGE_BG: &str = "background: var(--bulma-background); min-height: 100vh; padding: 0; margin: -0.75rem;";
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden;";
@@ -18,6 +18,20 @@ pub fn WeightPage() -> impl IntoView {
     let used_toilet = create_rw_signal(false);
     let morning = create_rw_signal(false);
 
+    // Pre-fill with today's existing measurement so it can be corrected/edited
+    // (re-saving upserts today's entry).
+    spawn_local(async move {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        if let Some(e) = local::get_weight_for_date(&today).await {
+            weight_str.set(format!("{:.1}", unit.get_untracked().from_kg(e.weight_kg)));
+            no_water.set(e.no_water);
+            no_food.set(e.no_food);
+            no_wash.set(e.no_wash);
+            used_toilet.set(e.used_toilet);
+            morning.set(e.morning);
+        }
+    });
+
 
     let nav_save = navigate.clone();
     let on_save = move |_| {
@@ -29,6 +43,7 @@ pub fn WeightPage() -> impl IntoView {
         let kg = unit.get_untracked().to_kg(val);
         let nav = nav_save.clone();
         leptos::spawn_local(async move {
+            let was_first = local::list_weight_entries().await.is_empty();
             local::save_weight(
                 kg,
                 no_water.get_untracked(),
@@ -37,7 +52,17 @@ pub fn WeightPage() -> impl IntoView {
                 used_toilet.get_untracked(),
                 morning.get_untracked(),
             ).await;
-            nav("/", Default::default());
+            // Making a measurement is the milestone event for accounting task 2 —
+            // record it in the story DB (idempotent), not derived from entries.
+            story::set_flag(story::FIRST_WEIGH, true).await;
+            // First-ever measurement: send a congratulatory push (task 2 of the
+            // accounting section) confirming it's done.
+            if was_first {
+                if let Err(e) = push::send_test(t("story.acc.push_first_weigh"), "/story/accounting").await {
+                    leptos::logging::error!("first-weigh push: {}", e);
+                }
+            }
+            nav("/diary", Default::default());
         });
     };
 
@@ -73,7 +98,7 @@ pub fn WeightPage() -> impl IntoView {
                     class="is-size-5"
                     on:click={
                         let nav = navigate.clone();
-                        move |_| nav("/", Default::default())
+                        move |_| nav("/diary", Default::default())
                     }
                 >
                     <span class="has-text-link">{move || t("common.back")}</span>
@@ -86,9 +111,12 @@ pub fn WeightPage() -> impl IntoView {
             <div style="padding: 0 16px; margin-bottom: 16px;">
                 <div style=CARD>
                     <div style="display: flex; align-items: center; padding: 12px 16px;">
-                        <input type="number"
+                        // type="text" (not "number"): a "number" input wipes its
+                        // value to "" the moment a comma is typed, erasing the
+                        // user's input. We accept the raw string and normalise the
+                        // decimal separator (',' → '.') at parse time.
+                        <input type="text"
                             inputmode="decimal"
-                            step="0.1"
                             placeholder=move || t("weight.input_placeholder")
                             class="is-size-4 has-text-weight-semibold"
                             style="flex: 1; border: none; background: none; outline: none; color: var(--bulma-text); padding: 4px 0;"

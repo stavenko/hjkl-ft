@@ -106,6 +106,28 @@ async fn test_alarm(mut req: Request, ctx: RouteContext<()>) -> Result<Response>
     stub.fetch_with_request(internal_req).await
 }
 
+async fn test_push(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let user_id = validate_token(&req, &ctx)?;
+    // The client owns routing: it decides body + deep-link url based on the
+    // user's story progress and passes them here. The worker just relays.
+    let body_json: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let body = body_json.get("body").and_then(|v| v.as_str())
+        .unwrap_or("\u{2705} Уведомления работают!");
+    let url = body_json.get("url").and_then(|v| v.as_str()).unwrap_or("/");
+    let payload = serde_json::json!({
+        "title": "Food Tracker",
+        "body": body,
+        "icon": "/icon-192.png",
+        "tag": "test",
+        "renotify": true,
+        "requireInteraction": true,
+        "url": url,
+        "actions": [{"action": "open", "title": "Открыть"}],
+    }).to_string();
+    send_push_to_user(&ctx.env, &user_id, &payload).await?;
+    Response::from_json(&serde_json::json!({"ok": true}))
+}
+
 async fn get_schedule(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let user_id = validate_token(&req, &ctx)?;
     let stub = schedule_do_stub(&ctx.env, &user_id)?;
@@ -197,16 +219,20 @@ pub async fn send_push_to_user(env: &Env, user_id: &str, payload: &str) -> Resul
     let subs: Vec<PushSubscription> = resp.json().await
         .map_err(|e| Error::RustError(format!("parse subscriptions: {e}")))?;
 
+    console_log!("send_push_to_user: {} subscription(s) for user {}", subs.len(), user_id);
+
     for sub in &subs {
+        let ep: String = sub.endpoint.chars().take(48).collect();
         match push_send::send_push(sub, payload, &vapid_private, &vapid_public, &vapid_subject).await {
             Ok(true) => {}
             Ok(false) => {
+                console_log!("send_push_to_user: subscription gone (410/404), removing ({}…)", ep);
                 let remove_stub = push_do_stub(env)?;
                 let remove_req = do_request("/unsubscribe-by-endpoint", &serde_json::json!({"endpoint": sub.endpoint}))?;
                 let _ = remove_stub.fetch_with_request(remove_req).await;
             }
             Err(e) => {
-                console_log!("Push to user {} failed: {}", user_id, e);
+                console_log!("send_push_to_user: send FAILED ({}…): {}", ep, e);
             }
         }
     }
@@ -303,6 +329,7 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/push/subscribe", subscribe)
         .post_async("/push/unsubscribe", unsubscribe)
         .post_async("/push/broadcast", broadcast)
+        .post_async("/push/test", test_push)
         .post_async("/schedule", update_schedule)
         .get_async("/schedule", get_schedule)
         .post_async("/test-alarm", test_alarm)

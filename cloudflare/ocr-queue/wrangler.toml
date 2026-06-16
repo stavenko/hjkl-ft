@@ -1,0 +1,29 @@
+name = "ocr-queue"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Job queue, status AND the image blob (chunked) live in a single Durable Object,
+# pinned to Western Europe (closest region CF offers to Italy, where the poller's
+# VPN egresses).
+[[durable_objects.bindings]]
+name = "QUEUE_DO"
+class_name = "QueueDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["QueueDO"]
+
+# Cross-script binding to the subscription DO owned by payment-worker, so we can
+# refuse to enqueue jobs for users without an active Trial/Paid plan.
+[[durable_objects.bindings]]
+name = "SUBSCRIPTION_DO"
+class_name = "SubscriptionDO"
+script_name = "payment-worker"
+
+[vars]
+# Client requests are authenticated with the shared app JWT.
+JWT_SECRET = "dev-secret-change-in-production"
+# The on-prem poller authenticates with this bearer secret.
+POLLER_SECRET = "dev-poller-secret-change-in-production"
+# Region hint for the queue DO.
+QUEUE_REGION = "weur"

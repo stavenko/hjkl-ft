@@ -1,20 +1,32 @@
 use leptos::*;
 use api_types::*;
 use crate::services::i18n::t;
+use super::waste_field::WasteField;
+use super::restaurant_field::RestaurantField;
 
 #[component]
 pub fn FoodWeightModal(
     food: Food,
     goals: Signal<Vec<Goal>>,
     initial_grams: f64,
+    #[prop(default = 0.0)]
+    initial_waste: f64,
+    #[prop(default = false)]
+    initial_restaurant: bool,
     submit_label: &'static str,
-    on_save: Callback<f64>,
+    on_save: Callback<(f64, f64, bool)>,
     on_close: Callback<()>,
 ) -> impl IntoView {
     let grams = create_rw_signal(format!("{}", initial_grams));
+    let waste = create_rw_signal(if initial_waste > 0.0 { format!("{:.0}", initial_waste) } else { String::new() });
+    let restaurant = create_rw_signal(initial_restaurant);
     let show_details = create_rw_signal(false);
 
-    let current_val = move || -> f64 { grams.get().parse().unwrap_or(0.0) };
+    // Normalise ',' → '.' : mobile keyboards emit a comma decimal separator.
+    let current_val = move || -> f64 { grams.get().replace(',', ".").parse().unwrap_or(0.0) };
+    let waste_val = move || -> f64 { waste.get().replace(',', ".").parse().unwrap_or(0.0) };
+    // Restaurant food carries a +20% calorie surcharge (mirrors Food::effective_kcal).
+    let kcal_mult = move || -> f64 { if restaurant.get() { 1.2 } else { 1.0 } };
 
     let adjust = move |delta: f64| {
         let new = (current_val() + delta).max(0.0);
@@ -27,7 +39,7 @@ pub fn FoodWeightModal(
         ev.prevent_default();
         let v = current_val();
         if v > 0.0 {
-            on_save.call(v);
+            on_save.call((v, waste_val(), restaurant.get()));
         }
     };
 
@@ -78,13 +90,13 @@ pub fn FoodWeightModal(
                     <div class="tags mb-3">
                         {move || {
                             let gs = goals.get();
-                            let factor = current_val() / 100.0;
+                            let factor = (current_val() - waste_val()).max(0.0) / 100.0;
                             let f = &food_for_nutrients;
                             gs.iter()
                                 .filter(|g| g.period == GoalPeriod::Day)
                                 .map(|goal| {
                                     let val = match goal.nutrient.as_str() {
-                                        "Calories" => f.kcal * factor,
+                                        "Calories" => f.kcal * factor * kcal_mult(),
                                         "Protein" => f.protein * factor,
                                         "Fat" => f.fat * factor,
                                         "Carbs" => f.carbs * factor,
@@ -146,6 +158,10 @@ pub fn FoodWeightModal(
                                 </div>
                             }
                         })}
+
+                        <WasteField grams=Signal::derive(current_val) waste=waste />
+
+                        <RestaurantField value=restaurant />
 
                         <div class="field is-grouped is-grouped-right mt-4">
                             <div class="control">

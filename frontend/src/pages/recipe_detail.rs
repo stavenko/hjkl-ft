@@ -60,36 +60,24 @@ pub fn RecipeDetailPage() -> impl IntoView {
         });
     };
 
-    let add_food_to_recipe_by_id = move |food_id: String| {
+    // Add a food (existing or just-created) as an ingredient with the chosen grams.
+    let add_ingredient = move |food: Food, grams: f64| {
         let r = recipe.get_untracked();
         let r = match r { Some(r) => r, None => return };
         let recipe_id = r.id.clone();
-        added_food_ids.update(|ids| ids.push(food_id.clone()));
+        added_food_ids.update(|ids| if !ids.contains(&food.id) { ids.push(food.id.clone()); });
         spawn_local(async move {
-            let food: Option<Food> = crate::services::db::get("foods", &food_id).await;
-            if let Some(food) = food {
-                let ing = local::add_ingredient_to_recipe(&food, 100.0, &recipe_id).await;
-                recipe.update(|r| {
-                    if let Some(r) = r { r.ingredients.push(ing); }
-                });
-                sync::push_background();
-            }
-        });
-    };
-
-    let add_food_to_recipe = move |food: Food| {
-        let r = recipe.get_untracked();
-        let r = match r { Some(r) => r, None => return };
-        let recipe_id = r.id.clone();
-        let fid = food.id.clone();
-        added_food_ids.update(|ids| ids.push(fid));
-        spawn_local(async move {
-            let ing = local::add_ingredient_to_recipe(&food, 100.0, &recipe_id).await;
+            let ing = local::add_ingredient_to_recipe(&food, grams, &recipe_id).await;
             recipe.update(|r| {
                 if let Some(r) = r { r.ingredients.push(ing); }
             });
+            foods.set(local::list_foods().await);
             sync::push_background();
         });
+    };
+
+    let refresh_foods = move || {
+        spawn_local(async move { foods.set(local::list_foods().await); });
     };
 
     let update_grams = move |ing_id: String, new_val: String| {
@@ -374,14 +362,13 @@ pub fn RecipeDetailPage() -> impl IntoView {
                             <AddIngredientModal
                                 foods=foods.into()
                                 goals=goals.into()
-                                today_entries=Signal::derive(move || Vec::<DiaryEntry>::new())
                                 custom_nutrients=custom_nutrients.into()
                                 added_food_ids=added_food_ids
-                                on_add=Callback::new(move |food_id: String| {
-                                    add_food_to_recipe_by_id(food_id);
+                                on_add=Callback::new(move |(food, grams): (Food, f64)| {
+                                    add_ingredient(food, grams);
                                 })
-                                on_food_created=Callback::new(move |food: Food| {
-                                    add_food_to_recipe(food);
+                                on_food_created=Callback::new(move |_food: Food| {
+                                    refresh_foods();
                                 })
                                 on_close=Callback::new(move |_| show_add_modal.set(false))
                             />

@@ -44,6 +44,10 @@ pub fn main() {
         }
 
         leptos::mount_to_body(app::App);
+
+        // If the day rolled over since last open, pre-generate yesterday's
+        // summary in the background (best-effort; gated by subscription).
+        leptos::spawn_local(services::summary::pregen_on_day_change());
     });
 }
 

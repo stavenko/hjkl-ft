@@ -21,12 +21,43 @@
     <link data-trunk rel="copy-file" href="_redirects" />
     <link data-trunk rel="copy-file" href="_headers" />
     <link rel="apple-touch-icon" href="icon-192.png" />
+    <style>
+        /* Portrait-only. iOS ignores the manifest's "orientation": "portrait"
+           and has no JS lock API, so block landscape on phones with an overlay.
+           Gated by max-height so desktop/tablet landscape isn't affected. */
+        #rotate-overlay { display: none; }
+        @media (orientation: landscape) and (max-height: 600px) {
+            #rotate-overlay {
+                display: flex;
+                position: fixed;
+                inset: 0;
+                z-index: 99999;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+                padding: 24px;
+                text-align: center;
+                background: var(--bulma-background, #f3f4f6);
+                color: #374151;
+                font: 600 1.1rem/1.4 -apple-system, system-ui, sans-serif;
+            }
+        }
+    </style>
 </head>
 <body>
+<div id="rotate-overlay">
+    <div style="font-size: 2.5rem;">&#x1F4F1;&#x21BB;</div>
+    <div>Поверните телефон вертикально</div>
+</div>
 <div id="splash" style="display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--bulma-background, #fafafa);">
     <span style="font-size: 2rem; opacity: 0.5;">FT</span>
 </div>
 <script>
+// Best-effort orientation lock (Android/installed PWA). iOS Safari throws
+// (no support / needs fullscreen) — caught; the CSS overlay handles iOS.
+try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(function(){}); } catch (e) {}
+
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').then(function(reg) {
         reg.addEventListener('updatefound', function() {
@@ -43,6 +74,40 @@ window.addEventListener('appinstalled', function() {
     // Force reload after PWA install so the new window gets fresh content
     window.location.reload();
 });
+
+// iOS WebKit bug: an `overflow-y:auto` scroll area INSIDE a `position:fixed`
+// shell stops accepting touch-scroll after the PWA is backgrounded and resumed
+// (taps still work — only the pan gesture dies). Re-arm it by forcing a reflow
+// on the marked containers whenever the page becomes visible again. Cheap, runs
+// only on resume. Containers opt in with `data-ios-scroll`.
+function kickIosScroll() {
+    document.querySelectorAll('[data-ios-scroll]').forEach(function(el) {
+        el.style.overflowY = 'hidden';
+        void el.offsetHeight; // force synchronous reflow
+        el.style.overflowY = 'auto';
+    });
+}
+window.addEventListener('pageshow', kickIosScroll);
+document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) kickIosScroll();
+});
+
+// Expose the on-screen keyboard height as `--kb-inset`. iOS doesn't shrink the
+// layout viewport for the keyboard, so a scroll list's tail ends up UNDER the
+// keyboard and can't be scrolled into view. Scroll containers add
+// `padding-bottom: var(--kb-inset)` to gain exactly that much extra scroll room
+// (0 when the keyboard is closed → no wasted space).
+function updateKbInset() {
+    var vv = window.visualViewport;
+    if (!vv) return;
+    var inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.documentElement.style.setProperty('--kb-inset', inset + 'px');
+}
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', updateKbInset);
+    window.visualViewport.addEventListener('scroll', updateKbInset);
+    updateKbInset();
+}
 
 </script>
 </body>

@@ -1,0 +1,14 @@
+name = "payment-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[[durable_objects.bindings]]
+name = "SUBSCRIPTION_DO"
+class_name = "SubscriptionDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SubscriptionDO"]
+
+[vars]
+JWT_SECRET = "dev-secret-change-in-production"

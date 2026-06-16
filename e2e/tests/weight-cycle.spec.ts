@@ -70,6 +70,27 @@ test('female with a clear cycle: modal shows detection + de-cycled weight', asyn
   await expect(modal).toContainText('дн'); // "~28 дн · ±1.0 кг"
 });
 
+test('female cycle: de-cycled weight equals the trend baseline, not the raw value', async ({ page }) => {
+  // Seed: weight = 75 − 0.03·day + 1.0·sin(2π·day/28), 90 days. Latest day = 89,
+  // so the trend baseline today is 75 − 0.03·89 = 72.33; the raw weight carries
+  // the cyclic offset on top. The "Вес без месячных" line must show ~72.3.
+  await openWeightModal(page, 'female', 1.0);
+  const modal = page.locator('.modal.is-active');
+  const text = (await modal.textContent()) ?? '';
+
+  const m = text.match(/Вес без месячных:\s*([\d.]+)/);
+  expect(m, `de-cycled value not found in modal: ${text}`).not.toBeNull();
+  const decycled = parseFloat(m![1]);
+  expect(decycled, `de-cycled ${decycled} should be ~72.3 (trend baseline)`).toBeGreaterThan(71.8);
+  expect(decycled).toBeLessThan(72.9);
+
+  // And it must differ from the raw current weight (which includes the cycle).
+  const rawText = (await page.getByTestId('weight-widget-value').textContent()) ?? '';
+  const raw = parseFloat(rawText.match(/([\d.]+)/)![1]);
+  expect(Math.abs(raw - decycled), `correction should be non-trivial (raw ${raw}, decycled ${decycled})`)
+    .toBeGreaterThan(0.4);
+});
+
 test('male profile: no menstrual block shown', async ({ page }) => {
   await openWeightModal(page, 'male', 1.0);
   await expect(page.locator('.modal.is-active')).not.toContainText('Месячные');

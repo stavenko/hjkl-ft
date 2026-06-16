@@ -316,6 +316,66 @@ mod tests {
     }
 
     #[test]
+    fn detects_cycle_with_irregular_sampling() {
+        // Real data is gappy. Drop ~1/3 of days; the cycle must still surface.
+        let start = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let v: Vec<WeightEntry> = (0..90)
+            .filter(|i| i % 3 != 0) // keep ~60 of 90 days
+            .map(|i| {
+                let d = start + chrono::Duration::days(i as i64);
+                let cyc = 1.0 * (TAU * i as f64 / 28.0).sin();
+                entry(&d.format("%Y-%m-%d").to_string(), 75.0 - 0.04 * i as f64 + cyc + noise(i, 0.2))
+            })
+            .collect();
+        match weight_cycle(&v, CYCLE_WINDOW_DAYS) {
+            CycleResult::Detected(f) => {
+                assert!((25.0..31.0).contains(&f.period_days), "period {}", f.period_days);
+                assert!((0.6..1.4).contains(&f.amplitude_kg), "amplitude {}", f.amplitude_kg);
+            }
+            other => panic!("expected Detected with gaps, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detects_period_at_band_edges() {
+        for period in [22.0, 34.0] {
+            let v = series(90, 78.0, -0.02, 1.0, period, 0.15);
+            match weight_cycle(&v, CYCLE_WINDOW_DAYS) {
+                CycleResult::Detected(f) => {
+                    assert!((f.period_days - period).abs() < 3.0, "period {} for true {}", f.period_days, period);
+                }
+                other => panic!("expected Detected for P={period}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn borderline_amplitude_below_floor_is_not_detected() {
+        // A real-but-tiny 0.2 kg swing (< MIN_AMPLITUDE_KG) buried in noise must
+        // not be claimed — honest "no cycle" rather than a fragile detection.
+        let v = series(90, 80.0, -0.03, 0.2, 28.0, 0.4);
+        match weight_cycle(&v, CYCLE_WINDOW_DAYS) {
+            CycleResult::NotDetected { .. } => {}
+            other => panic!("expected NotDetected for sub-floor amplitude, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decycled_weight_recovers_baseline() {
+        // Flat trend + strong 30-day cycle: removing the cyclic offset from the
+        // latest weight should land back on the ~80 kg baseline.
+        let base = 80.0;
+        let v = series(90, base, 0.0, 1.5, 30.0, 0.1);
+        if let CycleResult::Detected(f) = weight_cycle(&v, CYCLE_WINDOW_DAYS) {
+            let latest_kg = v.last().unwrap().weight_kg;
+            let decycled = latest_kg - f.current_deviation_kg;
+            assert!((decycled - base).abs() < 0.3, "decycled {decycled}, base {base}");
+        } else {
+            panic!("expected Detected");
+        }
+    }
+
+    #[test]
     fn detected_trend_is_cycle_free() {
         // Strong cycle around a flat trend: the reported trend must be ~0, not
         // dragged by the cyclic phase.

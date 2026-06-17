@@ -30,6 +30,10 @@ const ID_COLLECTIONS = [
   "goals",
   "weight_entries",
   "step_entries",
+  // Explicit deletion records (tombstones). Append-only by id; the worker never
+  // hard-deletes entities — it just accumulates these and re-serves them so every
+  // device removes the targets locally.
+  "deletions",
 ] as const;
 
 interface DumpShape {
@@ -41,6 +45,7 @@ interface DumpShape {
   story: any[];
   weight_entries: any[];
   step_entries: any[];
+  deletions: any[];
 }
 
 /** `true` when `incoming` should overwrite `current` (newer, or current absent). */

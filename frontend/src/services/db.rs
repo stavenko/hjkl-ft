@@ -31,7 +31,7 @@ fn bump(store_name: &str) {
 // gets their own IndexedDB. After login, reinitialize DB with the user's ID.
 pub async fn init() {
     let rexie = Rexie::builder("hjkl-ft")
-        .version(8)
+        .version(9)
         .add_object_store(
             ObjectStore::new("foods")
                 .key_path("id")
@@ -98,6 +98,8 @@ pub async fn init() {
                 .add_index(rexie::Index::new("created_at", "created_at")),
         )
         .add_object_store(ObjectStore::new("story").key_path("key"))
+        // Explicit deletion records (tombstones), synced and applied on every device.
+        .add_object_store(ObjectStore::new("deletions").key_path("id"))
         .add_object_store(ObjectStore::new("_sync_meta").key_path("key"))
         .build()
         .await
@@ -108,7 +110,7 @@ pub async fn init() {
     const STORES: &[&str] = &[
         "foods", "diary", "recipes", "recipe_ingredients",
         "goals", "food_drafts", "weight_entries", "step_entries",
-        "progress_photos", "summaries", "chat", "story", "_sync_meta",
+        "progress_photos", "summaries", "chat", "story", "deletions", "_sync_meta",
     ];
     STORE_VERSIONS.with(|cell| {
         let mut map = cell.borrow_mut();
@@ -210,7 +212,7 @@ pub async fn count(store_name: &str) -> u32 {
 }
 
 pub async fn wipe_all() {
-    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "step_entries", "chat", "story", "_sync_meta"];
+    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "step_entries", "chat", "story", "deletions", "_sync_meta"];
     for store in stores {
         clear(store).await;
     }

@@ -3,7 +3,7 @@ use serde::de::DeserializeOwned;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
-use super::{auth, config, db};
+use super::{auth, config, db, local};
 
 /// POST `body` (JSON) to `{sync_base_url}{path}` with the bearer token and parse
 /// the JSON response into `O`. Fails loudly — sync is not allowed to swallow errors.
@@ -52,31 +52,31 @@ async fn post_json<O: DeserializeOwned>(path: &str, body: &str) -> Result<O, Str
 pub async fn pull_full_dump() -> Result<(), String> {
     let dump: SyncDumpResponse = post_json("/sync/dump", "{}").await?;
 
-    // Safety: NEVER wipe a local store from an empty server snapshot. The pull is
-    // clear-and-replace (so deletions propagate), but if the server returns zero
-    // rows for a store we leave local untouched — an empty/zero dump (fresh DO,
-    // wrong account, transient backend) must not destroy the user's data.
-    replace_store("foods", &dump.foods).await;
-    replace_store("diary", &dump.diary_entries).await;
-    replace_store("recipes", &dump.recipes).await;
-    replace_store("recipe_ingredients", &dump.recipe_ingredients).await;
-    replace_store("goals", &dump.goals).await;
-    replace_store("story", &dump.story).await;
-    replace_store("weight_entries", &dump.weight_entries).await;
-    replace_store("step_entries", &dump.step_entries).await;
+    // MERGE, never clear-and-replace: upsert server rows and KEEP local rows the
+    // server didn't return. A wholesale clear could wipe local data on an empty or
+    // partial dump. Deletions are not inferred from absence — they are explicit
+    // records (below) applied on every device.
+    merge_store("foods", &dump.foods).await;
+    merge_store("diary", &dump.diary_entries).await;
+    merge_store("recipes", &dump.recipes).await;
+    merge_store("recipe_ingredients", &dump.recipe_ingredients).await;
+    merge_store("goals", &dump.goals).await;
+    merge_store("story", &dump.story).await;
+    merge_store("weight_entries", &dump.weight_entries).await;
+    merge_store("step_entries", &dump.step_entries).await;
+
+    // Deletion log: persist the records, then apply them — removing the targets
+    // locally even though the server still re-sends the (un-deleted) entities.
+    merge_store("deletions", &dump.deletions).await;
+    local::apply_deletions().await;
 
     set_meta("last_pull_at", &chrono::Utc::now().to_rfc3339()).await;
     Ok(())
 }
 
-/// Replace a local store with the server rows — but only when the server actually
-/// returned rows. An empty server snapshot leaves the local store as-is, so a
-/// dump that's empty for any reason can never wipe local data.
-async fn replace_store<T: serde::Serialize>(store: &str, rows: &[T]) {
-    if rows.is_empty() {
-        return;
-    }
-    db::clear(store).await;
+/// Upsert the server rows into a local store (put each by its key). Local rows
+/// absent from the dump are left intact — removals go through the deletion log.
+async fn merge_store<T: serde::Serialize>(store: &str, rows: &[T]) {
     for row in rows {
         db::put(store, row).await;
     }
@@ -92,6 +92,7 @@ pub async fn push_to_server() -> Result<(), String> {
         story: db::list_all("story").await,
         weight_entries: db::list_all("weight_entries").await,
         step_entries: db::list_all("step_entries").await,
+        deletions: db::list_all("deletions").await,
     };
     let body = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
 

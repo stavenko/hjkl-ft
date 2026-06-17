@@ -170,6 +170,36 @@ pub async fn update_diary_entry(
     Some(entry)
 }
 
+/// Stores whose rows can be deleted via the deletion log (kind == store name).
+const DELETABLE_STORES: &[&str] = &[
+    "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries", "step_entries",
+];
+
+/// Record an explicit deletion (tombstone) for `target_id` in store `kind`. The
+/// record is synced and re-applied on every device; the local row is removed by
+/// the caller (and re-removed by [`apply_deletions`] after each pull, since the
+/// server never hard-deletes the entity — it only accumulates these records).
+pub async fn record_deletion(kind: &str, target_id: &str) {
+    let rec = api_types::DeletionRecord {
+        id: new_id(),
+        kind: kind.to_string(),
+        target_id: target_id.to_string(),
+        created_at: now(),
+    };
+    db::put("deletions", &rec).await;
+}
+
+/// Apply every known deletion record: remove the target row from its store. Run
+/// after each pull so deletions made on other devices take effect locally.
+pub async fn apply_deletions() {
+    let dels: Vec<api_types::DeletionRecord> = db::list_all("deletions").await;
+    for d in dels {
+        if DELETABLE_STORES.contains(&d.kind.as_str()) {
+            db::delete(&d.kind, &d.target_id).await;
+        }
+    }
+}
+
 pub async fn remove_food_diary(entry_id: &str) -> Result<(), String> {
     let entry: DiaryEntry = db::get("diary", entry_id)
         .await
@@ -177,10 +207,8 @@ pub async fn remove_food_diary(entry_id: &str) -> Result<(), String> {
     if entry.date != today() {
         return Err("can only delete today's entries".to_string());
     }
-    let mut entry = entry;
-    entry.deleted = true;
-    entry.updated_at = now();
-    db::put("diary", &entry).await;
+    record_deletion("diary", entry_id).await;
+    db::delete("diary", entry_id).await;
     Ok(())
 }
 
@@ -207,14 +235,13 @@ pub async fn delete_story_progress() {
 /// cache, so they're hard-deleted (keeping the `meta:` markers).
 pub async fn delete_diary_data(cutoff: Option<&str>) {
     let entries: Vec<DiaryEntry> = db::list_all("diary").await;
-    for mut e in entries {
+    for e in entries {
         if e.deleted {
             continue;
         }
         if cutoff.map_or(true, |c| e.date.as_str() < c) {
-            e.deleted = true;
-            e.updated_at = now();
-            db::put("diary", &e).await;
+            record_deletion("diary", &e.id).await;
+            db::delete("diary", &e.id).await;
         }
     }
     let summaries: Vec<crate::services::summary::Summary> = db::list_all("summaries").await;
@@ -531,6 +558,7 @@ pub async fn update_ingredient(id: &str, grams: f64) -> Option<RecipeIngredient>
 }
 
 pub async fn remove_ingredient(id: &str) {
+    record_deletion("recipe_ingredients", id).await;
     db::delete("recipe_ingredients", id).await;
 }
 
@@ -624,6 +652,7 @@ pub async fn update_goal(goal: &Goal) {
 }
 
 pub async fn delete_goal(id: &str) {
+    record_deletion("goals", id).await;
     db::delete("goals", id).await;
 }
 

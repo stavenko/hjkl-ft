@@ -448,6 +448,22 @@ pub struct StoryFlag {
     pub updated_at: String,
 }
 
+/// An explicit deletion record (tombstone). Deleting an entity on the client
+/// produces one of these; it is synced like any other row and APPLIED on every
+/// device (remove the target locally). The backend never hard-deletes entities —
+/// it only accumulates these records — so a deletion always propagates and can't
+/// be undone by a stale copy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeletionRecord {
+    /// Unique id of this deletion record.
+    pub id: String,
+    /// Store/entity kind of the deleted target (e.g. "diary", "goals").
+    pub kind: String,
+    /// Id of the deleted entity.
+    pub target_id: String,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncDumpResponse {
     pub foods: Vec<Food>,
@@ -461,6 +477,8 @@ pub struct SyncDumpResponse {
     pub weight_entries: Vec<WeightEntry>,
     #[serde(default)]
     pub step_entries: Vec<StepEntry>,
+    #[serde(default)]
+    pub deletions: Vec<DeletionRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -476,6 +494,8 @@ pub struct SyncPushPayload {
     pub weight_entries: Vec<WeightEntry>,
     #[serde(default)]
     pub step_entries: Vec<StepEntry>,
+    #[serde(default)]
+    pub deletions: Vec<DeletionRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

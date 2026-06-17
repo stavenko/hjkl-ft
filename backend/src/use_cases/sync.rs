@@ -90,7 +90,12 @@ pub fn dump(db: &Database) -> Result<SyncDumpResponse, ApiError> {
         }).map_err(|_| ApiError::InternalError)?
         .collect::<Result<Vec<_>, _>>().map_err(|_| ApiError::InternalError)?;
 
-        Ok(SyncDumpResponse { foods, diary_entries, recipes, recipe_ingredients, goals, story })
+        // weight/steps/deletions are handled only by the live sync-worker; this
+        // deprecated backend doesn't track them.
+        Ok(SyncDumpResponse {
+            foods, diary_entries, recipes, recipe_ingredients, goals, story,
+            weight_entries: Vec::new(), step_entries: Vec::new(), deletions: Vec::new(),
+        })
     })
 }
 

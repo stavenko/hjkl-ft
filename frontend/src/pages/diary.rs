@@ -327,9 +327,10 @@ pub fn DiaryPage() -> impl IntoView {
             <div style="position: fixed; inset: 0; z-index: 9;"
                 on:pointerdown=move |_| menu_open.set(None)></div>
         })}
-        // Header block (date row + goal gauges + widgets). Flows in the document;
-        // only the date row inside is sticky-pinned.
-        <div>
+        // Date row + goal gauges + widgets flow DIRECTLY in the page container (no
+        // wrapper): a sticky element pins only within its parent's box, so the date
+        // row must be a child of the full-height page — otherwise it detaches at the
+        // bottom of a short header wrapper.
             // Date navigation: [←] [Вчера] [→]
             // - Label shows relative date: Сегодня / Вчера / Позавчера / day-of-week (3-7 days) / "4 июня 2026"
             // - Tap on label opens native date picker via hidden <input type="date"> + showPicker()
@@ -539,7 +540,6 @@ pub fn DiaryPage() -> impl IntoView {
                 />
             })}
 
-        </div>
             {move || if entries().is_empty() {
                 if is_today() {
                     // Today empty: invitation to add first entry

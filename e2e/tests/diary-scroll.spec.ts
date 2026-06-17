@@ -52,14 +52,16 @@ test('diary scrolls the document and the date row is sticky', async ({ page }) =
 
   const dateTopBefore = await page.getByTestId('diary-btn-date').evaluate((el) => el.getBoundingClientRect().top);
 
-  await page.evaluate(() => window.scrollTo(0, 600));
+  // Scroll DEEP into the list — past where a short header wrapper would have
+  // released the sticky row (regression guard for "sticky detaches mid-scroll").
+  await page.evaluate(() => window.scrollTo(0, Math.floor(document.documentElement.scrollHeight * 0.7)));
   await page.waitForTimeout(300);
 
   // The document actually scrolled (a fixed shell would have kept scrollY at 0).
   const scrollY = await page.evaluate(() => window.scrollY);
-  expect(scrollY, 'window should scroll').toBeGreaterThan(100);
+  expect(scrollY, 'window should scroll').toBeGreaterThan(300);
 
-  // The sticky date row stayed pinned near the top (didn't scroll away).
+  // The sticky date row is STILL pinned near the top deep into the scroll.
   const dateTopAfter = await page.getByTestId('diary-btn-date').evaluate((el) => el.getBoundingClientRect().top);
-  expect(dateTopAfter, `date row should stay pinned (before ${dateTopBefore}, after ${dateTopAfter})`).toBeLessThan(80);
+  expect(dateTopAfter, `date row should stay pinned deep in the scroll (before ${dateTopBefore}, after ${dateTopAfter})`).toBeLessThan(80);
 });

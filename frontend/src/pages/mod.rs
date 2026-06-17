@@ -1,6 +1,7 @@
 pub mod auth_page;
 pub mod chat;
 pub mod diary;
+pub mod diary_add;
 pub mod foods;
 pub mod goals;
 pub mod pair_page;

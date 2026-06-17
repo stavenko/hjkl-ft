@@ -38,7 +38,9 @@ async function seedFood(page: Page, name = 'Курица') {
 /** Log the first food in the diary via the real UI, which fires sync::push_background(). */
 async function logFoodInDiary(page: Page) {
   await page.getByTestId('nav-diary').click();
+  // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
   await page.getByTestId('diary-btn-add').click({ timeout: 10_000 });
+  await page.waitForURL('**/diary/add', { timeout: 10_000 });
   await page.getByTestId('diary-add-btn-pick-food').first().click({ timeout: 10_000 });
   await page.getByTestId('diary-add-weight-btn-confirm').click({ timeout: 10_000 });
 }

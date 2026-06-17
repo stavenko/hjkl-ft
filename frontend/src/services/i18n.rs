@@ -272,6 +272,7 @@ fn en(key: &str) -> &'static str {
         "diary_add.more" => "Show",
         "diary_add.products" => "more",
         "diary_add.add_new_food" => "Add new food",
+        "diary_add.back" => "Diary",
 
         // Foods page
         "foods.title" => "Foods",
@@ -1009,6 +1010,7 @@ fn ru(key: &str) -> &'static str {
         "diary_add.more" => "Ещё",
         "diary_add.products" => "продуктов",
         "diary_add.add_new_food" => "Добавить новый продукт",
+        "diary_add.back" => "Дневник",
 
         // Продукты
         "foods.title" => "Продукты",

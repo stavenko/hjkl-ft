@@ -33,7 +33,11 @@ async function seedAndReload(page: Page, data: {
   }, data);
 
   await page.reload();
-  await page.getByTestId('nav-diary').waitFor({ state: 'visible', timeout: 10_000 });
+  // Home is the Story page; navigate to the diary so diary-btn-add exists.
+  const navDiary = page.getByTestId('nav-diary');
+  await navDiary.waitFor({ state: 'visible', timeout: 10_000 });
+  await navDiary.click();
+  await page.getByTestId('diary-btn-add').waitFor({ state: 'visible', timeout: 10_000 });
 }
 
 function makeFood(overrides: Partial<{
@@ -114,6 +118,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     const item = page.locator('[data-food-name="AI Chicken"]');
@@ -132,6 +138,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     const item = page.locator('[data-food-name="Borsch"]');
@@ -150,6 +158,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     const item = page.locator('[data-food-name="Banana"]');
@@ -172,6 +182,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     // Should show "Linked Food" exactly once (as food, not as draft)
@@ -198,6 +210,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     const names = await page.locator('[data-testid="food-list-item"]')
@@ -225,6 +239,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     const names = await page.locator('[data-testid="food-list-item"]')
@@ -249,6 +265,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     const names = await page.locator('[data-testid="food-list-item"]')
@@ -267,6 +285,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     const item = page.locator('[data-food-name="Badge Food"]');
@@ -296,6 +316,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     // "Already Added" should have disabled add button
@@ -323,6 +345,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     // All 3 items visible initially
@@ -350,6 +374,8 @@ test.describe('Diary search list', () => {
     });
 
     await page.getByTestId('diary-btn-add').click();
+    // The "+" FAB now routes to the dedicated /diary/add page (no longer a modal).
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
     // Click the add button on the food
@@ -364,7 +390,8 @@ test.describe('Diary search list', () => {
     // Default is 100g, confirm
     await page.getByTestId('diary-add-weight-btn-confirm').click();
 
-    // Weight dialog should close
+    // Confirming now saves and navigates back to the diary (the add page unmounts).
+    await page.waitForURL((url) => url.pathname.endsWith('/diary'), { timeout: 5_000 });
     await expect(weightInput).not.toBeVisible({ timeout: 3_000 });
   });
 });

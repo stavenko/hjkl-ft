@@ -99,6 +99,7 @@ pub fn App() -> impl IntoView {
                         <Route path="/paywall" view=pages::paywall::PaywallPage />
                         <Route path="/progress" view=pages::progress::ProgressPage />
                         <Route path="/diary" view=pages::diary::DiaryPage />
+                        <Route path="/diary/add" view=pages::diary_add::DiaryAddPage />
                         <Route path="/foods" view=pages::foods::FoodsPage />
                         <Route path="/recipes" view=pages::recipes::RecipesPage />
                         <Route path="/recipes/:id" view=pages::recipe_detail::RecipeDetailPage />

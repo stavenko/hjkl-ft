@@ -1,9 +1,7 @@
 use leptos::*;
+use leptos_router::*;
 use api_types::*;
 
-use api_types::NutrientSpec;
-
-use crate::components::diary_add_modal::DiaryAddModal;
 use crate::components::food_weight_modal::FoodWeightModal;
 use crate::components::weight_widget::WeightWidget;
 use crate::components::weight_chart_modal::WeightChartModal;
@@ -158,11 +156,13 @@ pub fn DiaryPage() -> impl IntoView {
     let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
     let today_max = today_str.clone();
     let date = create_rw_signal(today_str);
+    // Stored so the FAB click handlers (both inside the same `Fn` render closure)
+    // can each clone it without moving the single handle out of the environment.
+    let navigate = store_value(use_navigate());
 
     // Version counter: bump after any write → all resources re-read from IndexedDB
     let version = create_rw_signal(0u32);
 
-    let show_add = create_rw_signal(false);
     let editing = create_rw_signal(None::<(String, Food, f64, f64, bool)>);
     let menu_open = create_rw_signal(None::<String>);
     // The diary entry whose product is being edited (КБЖУ + name, CoW on save).
@@ -238,18 +238,6 @@ pub fn DiaryPage() -> impl IntoView {
     let today_entries = move || today_entries_res.get().unwrap_or_default();
     let week_entries = move || week_entries_res.get().unwrap_or_default();
     let weight_entries = move || weight_res.get().unwrap_or_default();
-
-    let custom_nutrients = move || -> Vec<NutrientSpec> {
-        goals()
-            .into_iter()
-            .filter(|g| !matches!(g.nutrient.as_str(), "Calories" | "Protein" | "Fat" | "Carbs"))
-            .map(|g| NutrientSpec {
-                key: g.key,
-                unit_label: g.unit.label().to_string(),
-                name: g.nutrient,
-            })
-            .collect()
-    };
 
     let food_name = move |food_id: &str| -> String {
         foods()
@@ -551,14 +539,12 @@ pub fn DiaryPage() -> impl IntoView {
                             <p style="font-size: 17px; color: var(--bulma-text-weak); margin: 0 0 24px 0; text-align: center; line-height: 1.5;">
                                 {move || t("diary.empty_today_2")}
                             </p>
-                            <Show when=move || !show_add.get()>
-                                <button
-                                    attr:data-testid="diary-btn-add"
-                                    class="button is-success is-rounded"
-                                    style="width: 3.5rem; height: 3.5rem; font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); border: none;"
-                                    on:click=move |_| show_add.set(true)
-                                >"+"</button>
-                            </Show>
+                            <button
+                                attr:data-testid="diary-btn-add"
+                                class="button is-success is-rounded"
+                                style="width: 3.5rem; height: 3.5rem; font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); border: none;"
+                                on:click=move |_| navigate.get_value()("/diary/add", Default::default())
+                            >"+"</button>
                         </div>
                     }.into_view()
                 } else {
@@ -832,12 +818,12 @@ pub fn DiaryPage() -> impl IntoView {
                     // show only the day assessment (the SummaryBlock above) and NO
                     // add button — `is_today()` gates it here. (Bug fixed: this used
                     // to render on every day with entries, not just today.)
-                    <Show when=move || is_today() && !show_add.get()>
+                    <Show when=move || is_today()>
                         <button
                             attr:data-testid="diary-btn-add"
                             class="button is-success is-rounded"
                             style="position: fixed; bottom: 5.5rem; right: 1.5rem; z-index: 41; width: 3.5rem; height: 3.5rem; font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); border: none;"
-                            on:click=move |_| show_add.set(true)
+                            on:click=move |_| navigate.get_value()("/diary/add", Default::default())
                         >"+"</button>
                     </Show>
                 }.into_view()
@@ -846,23 +832,6 @@ pub fn DiaryPage() -> impl IntoView {
         // their z-index (50) sits in the root stacking context and beats the nav
         // bar (z-40) — kept as-is from when the shell was position:fixed.
         </div>
-
-            <Show when=move || show_add.get()>
-                <DiaryAddModal
-                    foods=Signal::derive(foods)
-                    goals=Signal::derive(goals)
-                    today_entries=Signal::derive(today_entries)
-                    custom_nutrients=Signal::derive(custom_nutrients)
-                    date=date.get_untracked()
-                    on_added=Callback::new(move |_entry: DiaryEntry| {
-                        invalidate();
-                    })
-                    on_food_created=Callback::new(move |_food: Food| {
-                        invalidate();
-                    })
-                    on_close=Callback::new(move |_| show_add.set(false))
-                />
-            </Show>
 
             {move || {
                 editing.get().map(|(entry_id, food, current_grams, current_waste, current_restaurant)| {

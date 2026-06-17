@@ -98,17 +98,34 @@ document.addEventListener('visibilitychange', function() {
 // container at the very start of a gesture: a synchronous reflow (throttled,
 // scrollTop preserved) makes the container re-arm before the pan (touchmove) runs.
 var _lastScrollKick = 0;
-document.addEventListener('touchstart', function(e) {
-    var now = Date.now();
-    if (now - _lastScrollKick < 400) return;
-    var el = e.target && e.target.closest ? e.target.closest('[data-ios-scroll]') : null;
-    if (!el) return;
-    _lastScrollKick = now;
+function _reflowKick(el) {
     var top = el.scrollTop;
     el.style.overflowY = 'hidden';
     void el.offsetHeight; // force synchronous reflow
     el.style.overflowY = 'auto';
-    el.scrollTop = top;   // overflow toggle can clamp; restore position
+    el.scrollTop = top;   // the overflow toggle can clamp; restore position
+}
+// Walk up from the touched node to the nearest ACTUALLY-SCROLLABLE ancestor and
+// re-arm it. Covers every overflow container — Bulma `.modal-card-body` (which
+// carries -webkit-overflow-scrolling:touch), chat, food picker, and any future
+// dialog — without needing a per-element data-ios-scroll marker. Form controls
+// are skipped (their native scroll must not be toggled).
+document.addEventListener('touchstart', function(e) {
+    var now = Date.now();
+    if (now - _lastScrollKick < 400) return;
+    var el = e.target;
+    while (el && el.nodeType === 1 && el !== document.body) {
+        var tag = el.tagName;
+        if (tag !== 'TEXTAREA' && tag !== 'INPUT' && tag !== 'SELECT') {
+            var oy = getComputedStyle(el).overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) {
+                _lastScrollKick = now;
+                _reflowKick(el);
+                return;
+            }
+        }
+        el = el.parentElement;
+    }
 }, { passive: true });
 
 // Expose the on-screen keyboard height as `--kb-inset`. iOS doesn't shrink the

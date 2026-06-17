@@ -92,6 +92,25 @@ document.addEventListener('visibilitychange', function() {
     if (!document.hidden) kickIosScroll();
 });
 
+// A floating SYSTEM overlay moving over the PWA (e.g. the Plex picture-in-picture
+// player) disrupts the compositor and freezes inner touch-scroll WITHOUT firing
+// pageshow/visibilitychange — the app never backgrounds. Re-arm the touched
+// container at the very start of a gesture: a synchronous reflow (throttled,
+// scrollTop preserved) makes the container re-arm before the pan (touchmove) runs.
+var _lastScrollKick = 0;
+document.addEventListener('touchstart', function(e) {
+    var now = Date.now();
+    if (now - _lastScrollKick < 400) return;
+    var el = e.target && e.target.closest ? e.target.closest('[data-ios-scroll]') : null;
+    if (!el) return;
+    _lastScrollKick = now;
+    var top = el.scrollTop;
+    el.style.overflowY = 'hidden';
+    void el.offsetHeight; // force synchronous reflow
+    el.style.overflowY = 'auto';
+    el.scrollTop = top;   // overflow toggle can clamp; restore position
+}, { passive: true });
+
 // Expose the on-screen keyboard height as `--kb-inset`. iOS doesn't shrink the
 // layout viewport for the keyboard, so a scroll list's tail ends up UNDER the
 // keyboard and can't be scrolled into view. Scroll containers add

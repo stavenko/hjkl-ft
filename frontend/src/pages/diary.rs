@@ -314,11 +314,12 @@ pub fn DiaryPage() -> impl IntoView {
     };
 
     view! {
-        // Pinned app-shell: position: fixed makes the page immune to document
-        // scroll/overscroll (so the date header never slides up under the status
-        // bar), and padding-top: safe-area-inset keeps it below the notch. The
-        // header block is flex-shrink: 0; only the entries list scrolls.
-        <div style="position: fixed; inset: 0; padding: env(safe-area-inset-top) 0.75rem 0; display: flex; flex-direction: column; background: var(--bulma-background);">
+        // Document-scroll page (NOT a fixed shell + inner overflow): on iOS the
+        // inner accelerated overflow layer loses its touch-scroll region when the
+        // compositor is disrupted (resume, rotate, a Plex PiP overlay), freezing
+        // the pan. Scrolling the document itself is robust. Only the date row is
+        // `position: sticky` (below); the FAB stays `position: fixed`.
+        <div style="background: var(--bulma-background); min-height: 100dvh;">
         // Tap-away backdrop: closes the open row menu when tapping outside it.
         // pointerdown, not click: iOS Safari doesn't fire `click` on a bare <div>
         // on tap, so the tap-away close never worked on iPhone.
@@ -326,15 +327,16 @@ pub fn DiaryPage() -> impl IntoView {
             <div style="position: fixed; inset: 0; z-index: 9;"
                 on:pointerdown=move |_| menu_open.set(None)></div>
         })}
-        // Sticky header: date + goals
-        <div style="flex-shrink: 0;">
+        // Header block (date row + goal gauges + widgets). Flows in the document;
+        // only the date row inside is sticky-pinned.
+        <div>
             // Date navigation: [←] [Вчера] [→]
             // - Label shows relative date: Сегодня / Вчера / Позавчера / day-of-week (3-7 days) / "4 июня 2026"
             // - Tap on label opens native date picker via hidden <input type="date"> + showPicker()
             // - Hidden input must stay in DOM and in viewport (1x1px, opacity 0) — otherwise showPicker() fails
             // - Forward button disabled when date == today (no future dates)
             // - max on date input also prevents selecting future dates in the picker
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+            <div style="position: sticky; top: 0; z-index: 8; background: var(--bulma-background); padding-top: env(safe-area-inset-top); display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
                 <button
                     attr:data-testid="diary-btn-prev-date"
                     class="button is-rounded"
@@ -542,7 +544,7 @@ pub fn DiaryPage() -> impl IntoView {
                 if is_today() {
                     // Today empty: invitation to add first entry
                     view! {
-                        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 24px;">
+                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4rem 24px;">
                             <p style="font-size: 17px; color: var(--bulma-text-weak); margin: 0 0 8px 0; text-align: center; line-height: 1.5;">
                                 {move || t("diary.empty_today_1")}
                             </p>
@@ -563,7 +565,7 @@ pub fn DiaryPage() -> impl IntoView {
                     // Past day empty: no add button, but the weekly report is
                     // still available (the day summary renders nothing if empty).
                     view! {
-                        <div attr:data-ios-scroll="1" style="flex: 1; overflow-y: auto; padding: 0 16px 5rem 16px;">
+                        <div style="padding: 0 16px 5rem 16px;">
                             <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 8px 0 8px;">
                                 <p style="font-size: 17px; color: var(--bulma-text-weak); margin: 0; text-align: center; line-height: 1.5;">
                                     {move || format!("{} {}", format_date_past_prefix(&date.get()), t("diary.empty_past"))}
@@ -581,7 +583,7 @@ pub fn DiaryPage() -> impl IntoView {
                 // 10rem = FAB top (9rem) + ~1rem gap. Keep in sync with the FAB
                 // position below if it ever changes.
                 view! {
-                    <div attr:data-ios-scroll="1" style="flex: 1; overflow-y: auto; padding-bottom: 10rem;">
+                    <div style="padding-bottom: 10rem;">
                         {move || {
                           // Single diary row. Identical regardless of grouping:
                           // the meal-split path interleaves headers between calls
@@ -840,11 +842,9 @@ pub fn DiaryPage() -> impl IntoView {
                     </Show>
                 }.into_view()
             }}
-        // Close the fixed app-shell HERE. The dialogs below are rendered as
-        // SIBLINGS of the shell, NOT inside it: the shell is `position:fixed`
-        // (its own stacking context), so a modal inside it can't rise above the
-        // root-level nav bar (z-40) no matter its z-index. As siblings they live
-        // in the root stacking context, where their z-index (50) wins.
+        // Close the page container. Dialogs below stay SIBLINGS (not nested) so
+        // their z-index (50) sits in the root stacking context and beats the nav
+        // bar (z-40) — kept as-is from when the shell was position:fixed.
         </div>
 
             <Show when=move || show_add.get()>

@@ -51,8 +51,11 @@ pub fn main() {
         leptos::mount_to_body(app::App);
 
         // Re-reconcile with the server when the app regains focus, so a device
-        // that was backgrounded picks up changes made on other devices.
+        // that was backgrounded picks up changes made on other devices; and
+        // reload if a newer build was deployed (covers iOS PWA resumed from
+        // memory, which never re-navigates).
         install_foreground_sync();
+        services::update::check_background();
 
         // If the day rolled over since last open, pre-generate yesterday's
         // summary in the background (best-effort; gated by subscription).
@@ -73,8 +76,12 @@ fn install_foreground_sync() {
             .and_then(|d| js_sys::Reflect::get(d.as_ref(), &"hidden".into()).ok())
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        if !hidden && services::auth::get_token().is_some() {
-            services::sync::sync_now_background();
+        if !hidden {
+            // Reload first if a new build shipped; otherwise reconcile with the server.
+            services::update::check_background();
+            if services::auth::get_token().is_some() {
+                services::sync::sync_now_background();
+            }
         }
     });
     let _ = document

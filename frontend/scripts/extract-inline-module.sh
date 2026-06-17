@@ -74,3 +74,20 @@ open('$DIST/_headers', 'w').write(headers)
 "
   echo "extract-inline-module: updated _headers with hash $FIRST_HASH"
 fi
+
+# --- Build-version stamp for in-app auto-update ---
+# init.js changes every build (it references the new hashed wasm/js), so its
+# hash is a stable per-build id. We expose it to the running app as
+# `globalThis.__APP_VERSION__` and publish the same id at /version.json, which
+# the app polls (on resume) to detect a new deploy and reload itself.
+VERSION=$(python3 -c "
+import hashlib
+print(hashlib.sha256(open('$DIST/init.js','rb').read()).hexdigest()[:12])
+")
+python3 -c "
+p = '$DIST/init.js'
+src = open(p).read()
+open(p, 'w').write('globalThis.__APP_VERSION__=\"$VERSION\";\n' + src)
+"
+echo "{\"v\":\"$VERSION\"}" > "$DIST/version.json"
+echo "extract-inline-module: build version $VERSION (version.json + __APP_VERSION__)"

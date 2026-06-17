@@ -13,5 +13,6 @@ pub mod story;
 pub mod subscription;
 pub mod summary;
 pub mod sync;
+pub mod update;
 pub mod weight_cycle;
 pub mod weight_trend;

@@ -1,4 +1,4 @@
-var CACHE_NAME = 'ft-v4';
+var CACHE_NAME = 'ft-v5';
 
 // Fixed-name shell: precached on install so an offline launch works even after
 // only a brief online session (iOS is finicky about lazy runtime caching). The
@@ -47,6 +47,11 @@ self.addEventListener('fetch', function(event) {
         return;
     }
     if (url.pathname.startsWith('/api/')) {
+        return;
+    }
+    // Version probe must always hit the network — caching it stale would defeat
+    // the in-app update check.
+    if (url.pathname === '/version.json') {
         return;
     }
 

@@ -52,48 +52,34 @@ async fn post_json<O: DeserializeOwned>(path: &str, body: &str) -> Result<O, Str
 pub async fn pull_full_dump() -> Result<(), String> {
     let dump: SyncDumpResponse = post_json("/sync/dump", "{}").await?;
 
-    db::clear("foods").await;
-    for food in &dump.foods {
-        db::put("foods", food).await;
-    }
-
-    db::clear("diary").await;
-    for entry in &dump.diary_entries {
-        db::put("diary", entry).await;
-    }
-
-    db::clear("recipes").await;
-    for recipe in &dump.recipes {
-        db::put("recipes", recipe).await;
-    }
-
-    db::clear("recipe_ingredients").await;
-    for ing in &dump.recipe_ingredients {
-        db::put("recipe_ingredients", ing).await;
-    }
-
-    db::clear("goals").await;
-    for goal in &dump.goals {
-        db::put("goals", goal).await;
-    }
-
-    db::clear("story").await;
-    for flag in &dump.story {
-        db::put("story", flag).await;
-    }
-
-    db::clear("weight_entries").await;
-    for w in &dump.weight_entries {
-        db::put("weight_entries", w).await;
-    }
-
-    db::clear("step_entries").await;
-    for s in &dump.step_entries {
-        db::put("step_entries", s).await;
-    }
+    // Safety: NEVER wipe a local store from an empty server snapshot. The pull is
+    // clear-and-replace (so deletions propagate), but if the server returns zero
+    // rows for a store we leave local untouched — an empty/zero dump (fresh DO,
+    // wrong account, transient backend) must not destroy the user's data.
+    replace_store("foods", &dump.foods).await;
+    replace_store("diary", &dump.diary_entries).await;
+    replace_store("recipes", &dump.recipes).await;
+    replace_store("recipe_ingredients", &dump.recipe_ingredients).await;
+    replace_store("goals", &dump.goals).await;
+    replace_store("story", &dump.story).await;
+    replace_store("weight_entries", &dump.weight_entries).await;
+    replace_store("step_entries", &dump.step_entries).await;
 
     set_meta("last_pull_at", &chrono::Utc::now().to_rfc3339()).await;
     Ok(())
+}
+
+/// Replace a local store with the server rows — but only when the server actually
+/// returned rows. An empty server snapshot leaves the local store as-is, so a
+/// dump that's empty for any reason can never wipe local data.
+async fn replace_store<T: serde::Serialize>(store: &str, rows: &[T]) {
+    if rows.is_empty() {
+        return;
+    }
+    db::clear(store).await;
+    for row in rows {
+        db::put(store, row).await;
+    }
 }
 
 pub async fn push_to_server() -> Result<(), String> {

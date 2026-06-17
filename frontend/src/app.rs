@@ -84,6 +84,13 @@ pub fn App() -> impl IntoView {
                         <Route path="/story/bones" view=pages::story_bones::StoryBonesPage />
                         <Route path="/story/restaurant" view=pages::story_restaurant::StoryRestaurantPage />
                         <Route path="/story/next" view=pages::story_next::StoryNextPage />
+                        <Route path="/story/ch2-mistake" view=pages::story_ch2_mistake::StoryCh2MistakePage />
+                        <Route path="/story/ch2-veg" view=pages::story_ch2_veg::StoryCh2VegPage />
+                        <Route path="/story/ch2-protein" view=pages::story_ch2_protein::StoryCh2ProteinPage />
+                        <Route path="/story/ch2-snack" view=pages::story_ch2_snack::StoryCh2SnackPage />
+                        <Route path="/story/ch2-drinks" view=pages::story_ch2_drinks::StoryCh2DrinksPage />
+                        <Route path="/story/ch2-meals" view=pages::story_ch2_meals::StoryCh2MealsPage />
+                        <Route path="/story/ch2-night" view=pages::story_ch2_night::StoryCh2NightPage />
                         <Route path="/paywall" view=pages::paywall::PaywallPage />
                         <Route path="/progress" view=pages::progress::ProgressPage />
                         <Route path="/diary" view=pages::diary::DiaryPage />

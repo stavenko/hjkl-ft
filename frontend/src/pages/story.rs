@@ -22,12 +22,14 @@ const CH1_SECTIONS: [(&str, &str, Option<&str>); 9] = [
 
 /// Sections of chapter 2 «Appetite». Content/tasks added per-section as written;
 /// routes are None until each page exists.
-const CH2_SECTIONS: [(&str, &str, Option<&str>); 5] = [
-    ("\u{26a0}\u{fe0f}", "story.ch2.s1", None),
-    ("\u{1f966}", "story.ch2.s2", None),
-    ("\u{1f963}", "story.ch2.s3", None),
-    ("\u{1f357}", "story.ch2.s4", None),
-    ("\u{1f6ab}", "story.ch2.s5", None),
+const CH2_SECTIONS: [(&str, &str, Option<&str>); 7] = [
+    ("\u{26a0}\u{fe0f}", "story.ch2.s1", Some("/story/ch2-mistake")),
+    ("\u{1f966}", "story.ch2.s2", Some("/story/ch2-veg")),
+    ("\u{1f357}", "story.ch2.s3", Some("/story/ch2-protein")),
+    ("\u{1f37f}", "story.ch2.s4", Some("/story/ch2-snack")),
+    ("\u{1f964}", "story.ch2.s5", Some("/story/ch2-drinks")),
+    ("\u{1f37d}\u{fe0f}", "story.ch2.s6", Some("/story/ch2-meals")),
+    ("\u{1f319}", "story.ch2.s7", Some("/story/ch2-night")),
 ];
 
 #[component]
@@ -91,6 +93,17 @@ pub fn StoryPage() -> impl IntoView {
         });
     });
 
+    // Chapter 2 / section 1: consecutive-day food-diary streak.
+    let diary_ver = db::version("diary");
+    let diary_streak = create_rw_signal(0u32);
+    create_effect(move |_| {
+        diary_ver.get();
+        spawn_local(async move {
+            let dates = local::list_diary_dates().await;
+            diary_streak.set(story::consecutive_day_streak(&dates));
+        });
+    });
+
     // Subscription status (gates chapter 2). Seed from cache, refresh live.
     let sub_active = create_rw_signal(subscription::cached().map(|s| s.active).unwrap_or(false));
     let sub_paid = create_rw_signal(subscription::cached().map(|s| s.is_paid()).unwrap_or(false));
@@ -123,18 +136,29 @@ pub fn StoryPage() -> impl IntoView {
     // active subscription (Trial not expired, or Paid).
     let chapter2_unlocked = move || streak.get() >= 7 && sub_active.get();
 
+    // Chapter 2 section completion. Only s1 has a completion gate (the 7-day
+    // food-diary streak); s2 is post-factum and s3 sets a goal, neither of which
+    // gate the chain, so later sections open as soon as s1 is complete.
+    let ch2_completed = move |i: usize| match i {
+        0 => diary_streak.get() >= 7,
+        _ => true,
+    };
+    // Cumulative chain inside chapter 2, gated by the chapter being unlocked.
+    let ch2_is_unlocked =
+        move |i: usize| chapter2_unlocked() && (0..i).all(ch2_completed);
+
     let sections_total = CH1_SECTIONS.len();
     let sections_open = move || (0..sections_total).filter(|&i| is_unlocked(i)).count();
     // Chapter 1 tasks: want a new body, language, test notification, weigh-in
     // reminder, first measurement, 7-day weigh-in streak, first food entry,
     // steps reminder, first steps, 7-day steps streak, dish created, dish in diary.
-    let tasks_total = 16;
+    let tasks_total = 17;
     let tasks_done = move || {
         [progress_photos.get(), sex_done.get(), lang_done.get(), notif_done.get(), weigh_in_on.get(),
          first_weigh.get(), streak.get() >= 7, first_food_done.get(),
          steps_reminder_on.get(), first_steps.get(), steps_streak.get() >= 7,
          dish_created.get(), dish_in_diary.get(), bones_waste.get(), restaurant_food.get(),
-         sub_paid.get()]
+         sub_paid.get(), diary_streak.get() >= 7]
             .iter().filter(|&&v| v).count()
     };
 
@@ -202,16 +226,39 @@ pub fn StoryPage() -> impl IntoView {
                 {move || format!("{} 2 \u{00b7} {} {}", t("story.chapter"), t("story.ch2.title"), if chapter2_unlocked() { "" } else { "\u{1f512}" })}
             </p>
             <div style=IOS_CARD>
-                {CH2_SECTIONS.iter().enumerate().map(|(i, (icon, label, _))| {
+                {CH2_SECTIONS.iter().enumerate().map(|(i, (icon, label, route))| {
+                    let route = *route;
                     let icon = *icon;
                     let label = *label;
                     view! {
                         {(i > 0).then(|| view! { <div style=IOS_SEPARATOR></div> })}
-                        <div style=format!("{}opacity: 0.5;", ROW_STYLE)>
-                            <span style="font-size: 22px; width: 28px; text-align: center;">{icon}</span>
-                            <span class="is-size-6" style="flex: 1;">{move || t(label)}</span>
-                            <span class="is-size-7 has-text-grey-light">{move || t("story.ch2.soon")}</span>
-                        </div>
+                        {move || {
+                            let unlocked = ch2_is_unlocked(i);
+                            let icon_span = view! { <span style="font-size: 22px; width: 28px; text-align: center;">{icon}</span> };
+                            let label_span = view! { <span class="is-size-6" style="flex: 1;">{t(label)}</span> };
+                            match (unlocked, route) {
+                                (true, Some(r)) => view! {
+                                    <a href=r style=format!("{}cursor: pointer;", ROW_STYLE)>
+                                        {icon_span}
+                                        {label_span}
+                                        <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
+                                    </a>
+                                }.into_view(),
+                                (true, None) => view! {
+                                    <div style=ROW_STYLE>
+                                        {icon_span}
+                                        {label_span}
+                                    </div>
+                                }.into_view(),
+                                (false, _) => view! {
+                                    <div style=format!("{}opacity: 0.45;", ROW_STYLE)>
+                                        {icon_span}
+                                        {label_span}
+                                        <span style="font-size: 15px;">"\u{1f512}"</span>
+                                    </div>
+                                }.into_view(),
+                            }
+                        }}
                     }
                 }).collect_view()}
             </div>

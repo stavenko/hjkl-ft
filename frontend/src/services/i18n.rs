@@ -589,10 +589,56 @@ fn en(key: &str) -> &'static str {
         "story.ch2.title" => "Appetite",
         "story.ch2.soon" => "soon",
         "story.ch2.s1" => "The biggest mistake of dieters",
-        "story.ch2.s2" => "The role of vegetables and fruits",
-        "story.ch2.s3" => "Filling the stomach",
-        "story.ch2.s4" => "Feasting on protein",
-        "story.ch2.s5" => "Forbidden food",
+        "story.ch2.s2" => "Vegetables and fruit",
+        "story.ch2.s3" => "Protein — your best helper",
+        "story.ch2.s4" => "Low-calorie snacks",
+        "story.ch2.s5" => "Juices and drinks",
+        "story.ch2.s6" => "How many meals a day",
+        "story.ch2.s7" => "Eating at night",
+
+        // Story — chapter 2 «Appetite», section 1: the biggest mistake
+        "story.ch2.mistake.p1" => "When someone decides to lose weight, the first thing they do almost on autopilot is start eating less. Smaller portions, a smaller plate, fewer trips to the fridge. The logic seems ironclad: less food — fewer calories — less weight. And for the first few days it even works.",
+        "story.ch2.mistake.p2" => "The problem is that the stomach doesn't count calories. It counts volume. An empty stomach sends the brain a «I'm hungry» signal regardless of how much energy it held — and sooner or later that signal beats any willpower. That's why «small portion» diets almost always end in a binge: not because the person is weak, but because they're fighting physiology.",
+        "story.ch2.mistake.p3" => "The way out sounds paradoxical: you need not less food, but more — enough to keep the stomach full and content. The whole trick is to sharply cut the calorie density of what you eat. A full plate of low-calorie food satisfies just as well as a dense one, and leaves no hunger behind — and everything else is built on that.",
+        "story.ch2.mistake.task_label" => "Chapter task",
+        "story.ch2.mistake.task" => "Keep the food diary 7 days in a row",
+        "story.ch2.mistake.streak_label" => "Streak",
+        "story.ch2.mistake.next_unlocked" => "Great — the next section is open.",
+        "story.ch2.mistake.open_diary" => "Open the diary",
+        "story.ch2.mistake.no_data" => "No diary data yet — start logging your food.",
+
+        // Story — chapter 2, section 2: vegetables and fruit
+        "story.ch2.veg.p1" => "Vegetables and fruit are the main tool for filling your plate without filling it with calories. They contain a lot of water and fibre — that is, volume that takes up space in the stomach and gives a feeling of fullness, while carrying very little energy. Plus vitamins and everything they're recommended for.",
+        "story.ch2.veg.p2" => "The guideline is simple: 600–800 grams of vegetables and fruit a day. A man — closer to the upper bound, a woman — to the lower one, then adjust to yourself. This is not a «healthy add-on» to your diet but its foundation: it's precisely this volume that lets you eat your fill while staying in a deficit.",
+        "story.ch2.veg.target_label" => "Yesterday's vegetables and fruit",
+        "story.ch2.veg.no_data" => "No data for yesterday yet.",
+
+        // Story — chapter 2, section 3: protein
+        "story.ch2.protein.p1" => "If vegetables give you volume, protein gives a different kind of fullness — the kind that lasts for hours. Of all the macronutrients it satisfies the most: after a protein meal you get hungry noticeably later, and crave snacks less.",
+        "story.ch2.protein.p2" => "That's why on a diet you don't cut protein — on the contrary, you make it a priority. A working guideline is from 1 gram per kilogram of body weight a day, and in most cases it makes sense to go higher. This is that rare case where «maximise» is the right strategy: protein won't be excessive here, while a shortfall almost guarantees hunger and muscle loss.",
+        "story.ch2.protein.goal_label" => "Protein goal",
+        "story.ch2.protein.goal_set" => "Your protein goal is set — see it in the diary header.",
+        "story.ch2.protein.need_weight" => "Weigh in first so we can set your protein goal.",
+        "story.ch2.protein.open_weight" => "Weigh in",
+
+        // Story — chapter 2, section 4: low-calorie snacks
+        "story.ch2.snack.p1" => "Hunger rarely comes on time. It hits between tasks, in the evening before a show, at a moment when a proper meal is still far off — and that's where it's decided whether you break or not. So it's worth keeping something on hand to snack on with almost no consequences.",
+        "story.ch2.snack.p2" => "Unbuttered popcorn, cucumbers, tomatoes, apples — they have few calories and a lot of water; you can crunch on them almost to bursting and barely shift your daily balance. This is not «forbidden food in reverse» but normal food that closes the urge to chew on something.",
+        "story.ch2.snack.p3" => "The only rule is to still log it in the diary. «It's just a cucumber, what's there to count» — and that's how the stuff you later can't explain on the scale quietly adds up. Everything counts, even the little things.",
+
+        // Story — chapter 2, section 5: juices and drinks
+        "story.ch2.drinks.p1" => "The most invisible way to drink your daily calorie quota is exactly that — to drink it. Sweet soda, packaged juice, a latte with syrup — these are calories that give almost no fullness. The body seems not to notice them: you've taken the equivalent of a full meal, and half an hour later you're hungry again.",
+        "story.ch2.drinks.p2" => "So first of all we remove the calories from drinks. Swap regular soda for the sugar-free version — yes, sweeteners aren't the enemy here, no need to fear them; just find a couple of flavours you genuinely like. Replace juice with the fruit itself — that way you also get fibre and fullness. Water, coffee, tea — drink as much as you want, just remove or minimise what adds calories: sugar and cream.",
+
+        // Story — chapter 2, section 6: how many meals a day
+        "story.ch2.meals.p1" => "There's no sacred number here. Three meals, six, two — it all works if in total you stay in a deficit. So the first principle is to make the day as convenient as possible for you personally. Love snacking often and getting distracted by food — split it up. Don't like fussing five times — don't split it.",
+        "story.ch2.meals.p2" => "The basic recommendation is still one: try not to let yourself get very hungry. Rising appetite is easily knocked down with sweet calorie-free water between meals, while toughing it out to the point of near-fainting is a direct path to a binge. And be sure to satisfy hunger at the end of the day: going to bed hungry is a bad idea — that's exactly where night raids on the fridge come from.",
+        "story.ch2.meals.p3" => "And if you ask what works best — it's three meals. Breakfast, lunch, dinner — perhaps the best thing humanity invented for the rhythm of the day, and for losing weight it's an excellent framework.",
+
+        // Story — chapter 2, section 7: eating at night
+        "story.ch2.night.p1" => "Let's start with the main and unexpected point: eating at night isn't harmful. You can eat right before bed, you can not eat at all — it has no effect whatsoever on weight loss. Fat is stored not «because it's late» but because more calories came in over the day than went out. «Nothing after six» is a myth.",
+        "story.ch2.night.p2" => "But there are a couple of honest caveats. The first is about binges: many people simply can't resist and eat up at night. If that's you, the best insurance is a hearty, protein-rich last meal: fullness lasts longer, and the pull to the fridge will be weaker.",
+        "story.ch2.night.p3" => "The second is medical. With a number of conditions (reflux, for example) doctors advise not lying down sooner than three hours after dinner. This is no longer about weight loss but about health and a calm sleep — and that recommendation is worth following.",
 
         // Story — chapter 1, introduction
         "story.intro.p1" => "Hi. This is the «Slimming Story» app. It is made specifically for people who can't lose weight and have a bit of a problem with extra pounds.",
@@ -1201,11 +1247,57 @@ fn ru(key: &str) -> &'static str {
         "story.ch2.unlocked" => "Глава 2 открыта! Секции скоро.",
         "story.ch2.title" => "Аппетит",
         "story.ch2.soon" => "скоро",
-        "story.ch2.s1" => "Самая главная ошибка худеющих",
-        "story.ch2.s2" => "Роль овощей и фруктов",
-        "story.ch2.s3" => "Наполняем желудок",
-        "story.ch2.s4" => "Объедаемся белком",
-        "story.ch2.s5" => "Запрещённая еда",
+        "story.ch2.s1" => "Основная ошибка худеющих",
+        "story.ch2.s2" => "Фрукты и овощи",
+        "story.ch2.s3" => "Белок — лучший помощник",
+        "story.ch2.s4" => "Низкокалорийная закусь",
+        "story.ch2.s5" => "Соки и питьё",
+        "story.ch2.s6" => "Сколько раз в день надо есть",
+        "story.ch2.s7" => "Еда на ночь",
+
+        // История — глава 2 «Аппетит», секция 1: основная ошибка
+        "story.ch2.mistake.p1" => "Когда человек решает похудеть, первое, что он делает почти на автомате, — начинает есть меньше. Меньше порция, меньше тарелка, реже подходы к холодильнику. Логика кажется железной: меньше еды — меньше калорий — меньше вес. И первые дни это даже работает.",
+        "story.ch2.mistake.p2" => "Проблема в том, что желудок не считает калории. Он считает объём. Пустой желудок шлёт в мозг сигнал «я голоден» независимо от того, сколько в нём было энергии, — и рано или поздно этот сигнал побеждает любую силу воли. Поэтому диеты «на маленьких порциях» почти всегда заканчиваются срывом: не потому что человек слабый, а потому что он воюет с физиологией.",
+        "story.ch2.mistake.p3" => "Выход звучит парадоксально: еды нужно не меньше, а больше — столько, чтобы желудок был полным и довольным. Весь фокус в том, чтобы при этом резко снизить калорийность того, что вы едите. Полная тарелка низкокалорийной еды насыщает не хуже плотной, а голода не оставляет — и на этом строится всё остальное.",
+        "story.ch2.mistake.task_label" => "Задание на главу",
+        "story.ch2.mistake.task" => "Вести дневник еды 7 дней подряд",
+        "story.ch2.mistake.streak_label" => "Серия",
+        "story.ch2.mistake.next_unlocked" => "Отлично — следующая секция открыта.",
+        "story.ch2.mistake.open_diary" => "Открыть дневник",
+        "story.ch2.mistake.no_data" => "Пока нет записей в дневнике — начните записывать еду.",
+
+        // История — глава 2, секция 2: фрукты и овощи
+        "story.ch2.veg.p1" => "Овощи и фрукты — это главный инструмент, чтобы наполнить тарелку, не наполнив её калориями. В них много воды и клетчатки, то есть объёма, который занимает место в желудке и даёт сытость, и при этом совсем немного энергии. Плюс витамины и всё то, ради чего их и советуют есть.",
+        "story.ch2.veg.p2" => "Ориентир простой: 600–800 граммов овощей и фруктов в день. Мужчине — ближе к верхней границе, женщине — к нижней, дальше подстраивайте под себя. Это не «полезная добавка» к рациону, а его основа: именно за счёт этого объёма получается есть досыта и при этом оставаться в дефиците.",
+        "story.ch2.veg.target_label" => "Вчера овощей и фруктов",
+        "story.ch2.veg.no_data" => "Пока нет данных за вчера.",
+
+        // История — глава 2, секция 3: белок
+        "story.ch2.protein.p1" => "Если овощи дают объём, то белок даёт сытость другого рода — ту, что держится часами. Из всех макронутриентов он насыщает сильнее всего: после белковой еды есть хочется заметно позже, и тянет на перекусы меньше.",
+        "story.ch2.protein.p2" => "Поэтому на похудении белок не урезают, а наоборот — выводят в приоритет. Рабочий ориентир — от 1 грамма на килограмм веса в день, и в большинстве случаев имеет смысл идти выше. Это тот редкий случай, когда «максимизировать» — верная стратегия: лишним белок здесь не будет, а вот недобор почти гарантированно обернётся голодом и потерей мышц.",
+        "story.ch2.protein.goal_label" => "Цель по белку",
+        "story.ch2.protein.goal_set" => "Цель по белку установлена — смотрите её в шапке дневника.",
+        "story.ch2.protein.need_weight" => "Сначала взвесьтесь, чтобы мы могли установить цель по белку.",
+        "story.ch2.protein.open_weight" => "Взвеситься",
+
+        // История — глава 2, секция 4: низкокалорийная закусь
+        "story.ch2.snack.p1" => "Голод редко приходит вовремя. Он накрывает между делами, вечером перед сериалом, в момент, когда до нормального приёма пищи ещё далеко, — и вот тут решается, сорвётесь вы или нет. Поэтому стоит заранее держать под рукой то, чем можно перекусить почти без последствий.",
+        "story.ch2.snack.p2" => "Попкорн без масла, огурцы, помидоры, яблоки — в них мало калорий и много воды, ими можно хрустеть почти до отвала и почти не сдвинуть свой дневной баланс. Это не «запрещёнка наоборот», а нормальная еда, которая закрывает порыв что-нибудь сжевать.",
+        "story.ch2.snack.p3" => "Единственное правило — всё равно вносить это в дневник. «Это же огурчик, что там считать» — и так незаметно набегает то, что вы потом не можете объяснить на весах. Считается всё, даже мелочь.",
+
+        // История — глава 2, секция 5: соки и питьё
+        "story.ch2.drinks.p1" => "Самый незаметный способ выпить дневную норму калорий — это именно выпить. Сладкая газировка, пакетированный сок, латте с сиропом — это калории, которые не дают почти никакой сытости. Организм их будто не замечает: вы приняли эквивалент полноценного приёма пищи, а через полчаса снова голодны.",
+        "story.ch2.drinks.p2" => "Поэтому первым делом убираем из питья калории. Обычную газировку меняем на версию без сахара — да, сахзамы тут не враг, бояться их не нужно; достаточно найти пару вкусов, которые вам реально нравятся. Сок заменяем на сам фрукт — так вы получите ещё и клетчатку, и сытость. Вода, кофе, чай — пейте сколько хотите, просто уберите или сведите к минимуму то, что добавляет калории: сахар и сливки.",
+
+        // История — глава 2, секция 6: сколько раз в день есть
+        "story.ch2.meals.p1" => "Здесь нет священного числа. Три приёма пищи, шесть, два — всё работает, если в сумме вы остаётесь в дефиците. Поэтому первый принцип — сделать день максимально удобным лично вам. Любите перекусывать часто и отвлекаться на еду — дробите. Не любите возиться по пять раз — не дробите.",
+        "story.ch2.meals.p2" => "Базовая рекомендация всё же одна: старайтесь не доводить себя до сильного голода. Подступающий аппетит легко сбить сладкой некалорийной водичкой между приёмами, а вот терпеть до полуобморока — прямой путь к срыву. И обязательно утоляйте голод в конце дня: ложиться спать голодным — плохая идея, именно отсюда растут ночные набеги на холодильник.",
+        "story.ch2.meals.p3" => "А если спросить, что работает лучше всего, — это три приёма пищи. Завтрак, обед, ужин — пожалуй, лучшее, что человечество придумало для ритма дня, и для похудения это отличный каркас.",
+
+        // История — глава 2, секция 7: еда на ночь
+        "story.ch2.night.p1" => "Начнём с главного и неожиданного: есть на ночь не вредно. Можно поесть прямо перед сном, можно не есть вовсе — на похудение это не влияет никак. Жир откладывается не «оттого что поздно», а оттого, что калорий за день пришло больше, чем ушло. «После шести нельзя» — миф.",
+        "story.ch2.night.p2" => "Но есть пара честных оговорок. Первая — про срывы: многие просто не могут устоять и доедают ночью. Если это про вас, лучшая страховка — плотный, богатый белком последний приём пищи: сытость продержится дольше, и тянуть к холодильнику будет меньше.",
+        "story.ch2.night.p3" => "Вторая — медицинская. При ряде проблем (например, рефлюксе) врачи советуют не ложиться раньше чем через три часа после ужина. Это уже не про похудение, а про здоровье и спокойный сон — и этой рекомендации стоит придерживаться.",
 
         // История — глава 1, введение
         "story.intro.p1" => "Привет. Это приложение «Худеющая история». Оно сделано специально для тех, кто не может похудеть и у кого есть небольшие проблемы с лишним весом.",

@@ -64,6 +64,16 @@ pub async fn list_diary(date: &str) -> Vec<DiaryEntry> {
     entries.into_iter().filter(|e| !e.deleted).collect()
 }
 
+/// All distinct dates with at least one non-deleted diary entry.
+pub async fn list_diary_dates() -> Vec<String> {
+    let entries: Vec<DiaryEntry> = db::list_all("diary").await;
+    entries
+        .into_iter()
+        .filter(|e| !e.deleted)
+        .map(|e| e.date)
+        .collect()
+}
+
 /// Resolve a food whose `is_restaurant` flag matches `want`. If `food` already
 /// matches it's stored and returned as-is. Otherwise we Copy-on-Write: reuse an
 /// existing identical variant carrying the wanted flag, or create a fresh Food —

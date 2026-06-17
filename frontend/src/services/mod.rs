@@ -6,6 +6,7 @@ pub mod config;
 pub mod db;
 pub mod i18n;
 pub mod local;
+pub mod meal_split;
 pub mod platform;
 pub mod profile;
 pub mod push;

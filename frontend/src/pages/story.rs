@@ -51,10 +51,15 @@ pub fn StoryPage() -> impl IntoView {
     let restaurant_food = create_rw_signal(false);
     let progress_photos = create_rw_signal(false);
     let sex_done = create_rw_signal(false);
+    // Chapter 2 / s6 & s7 flags (s6: meal-split opened; s7: night feedback viewed).
+    let meal_split_unlocked = create_rw_signal(false);
+    let night_feedback_viewed = create_rw_signal(false);
     create_effect(move |_| {
         story_ver.get();
         spawn_local(async move {
             sex_done.set(story::get_flag(story::SEX_SELECTED).await);
+            meal_split_unlocked.set(story::get_flag(story::MEAL_SPLIT_UNLOCKED).await);
+            night_feedback_viewed.set(story::get_flag(story::NIGHT_FEEDBACK_VIEWED).await);
             lang_done.set(story::get_flag(story::LANGUAGE_CONFIGURED).await);
             notif_done.set(story::get_flag(story::NOTIFICATION_RECEIVED).await);
             weigh_in_on.set(story::get_flag(story::WEIGH_IN_REMINDER).await);
@@ -104,6 +109,23 @@ pub fn StoryPage() -> impl IntoView {
         });
     });
 
+    // Chapter 2 / s4 & s5: yesterday's report-grounded checks. Both require the
+    // report for yesterday to be ready; s4 also needs a snack logged yesterday,
+    // s5 needs NO high-cal drink yesterday. Keyed on diary + summaries versions.
+    let summaries_ver = db::version("summaries");
+    let s4_done = create_rw_signal(false);
+    let s5_done = create_rw_signal(false);
+    create_effect(move |_| {
+        diary_ver.get();
+        summaries_ver.get();
+        spawn_local(async move {
+            let y = local::yesterday();
+            let ready = local::report_ready_on(&y).await;
+            s4_done.set(ready && local::snack_logged_on(&y).await);
+            s5_done.set(ready && !local::high_cal_drink_on(&y).await);
+        });
+    });
+
     // Subscription status (gates chapter 2). Seed from cache, refresh live.
     let sub_active = create_rw_signal(subscription::cached().map(|s| s.active).unwrap_or(false));
     let sub_paid = create_rw_signal(subscription::cached().map(|s| s.is_paid()).unwrap_or(false));
@@ -140,8 +162,12 @@ pub fn StoryPage() -> impl IntoView {
     // food-diary streak); s2 is post-factum and s3 sets a goal, neither of which
     // gate the chain, so later sections open as soon as s1 is complete.
     let ch2_completed = move |i: usize| match i {
-        0 => diary_streak.get() >= 7,
-        _ => true,
+        0 => diary_streak.get() >= 7,        // s1: 7-day food-diary streak
+        3 => s4_done.get(),                  // s4: report-ready(yesterday) + snack yesterday
+        4 => s5_done.get(),                  // s5: report-ready(yesterday) + no high-cal drink
+        5 => meal_split_unlocked.get(),      // s6: meal-split section opened
+        6 => night_feedback_viewed.get(),    // s7: night feedback viewed
+        _ => true,                           // s2(1), s3(2): post-factum / goal — no gate
     };
     // Cumulative chain inside chapter 2, gated by the chapter being unlocked.
     let ch2_is_unlocked =
@@ -152,13 +178,14 @@ pub fn StoryPage() -> impl IntoView {
     // Chapter 1 tasks: want a new body, language, test notification, weigh-in
     // reminder, first measurement, 7-day weigh-in streak, first food entry,
     // steps reminder, first steps, 7-day steps streak, dish created, dish in diary.
-    let tasks_total = 17;
+    let tasks_total = 20;
     let tasks_done = move || {
         [progress_photos.get(), sex_done.get(), lang_done.get(), notif_done.get(), weigh_in_on.get(),
          first_weigh.get(), streak.get() >= 7, first_food_done.get(),
          steps_reminder_on.get(), first_steps.get(), steps_streak.get() >= 7,
          dish_created.get(), dish_in_diary.get(), bones_waste.get(), restaurant_food.get(),
-         sub_paid.get(), diary_streak.get() >= 7]
+         sub_paid.get(), diary_streak.get() >= 7,
+         s4_done.get(), s5_done.get(), night_feedback_viewed.get()]
             .iter().filter(|&&v| v).count()
     };
 

@@ -216,6 +216,15 @@ pub fn DiaryPage() -> impl IntoView {
     let setup_done = move || setup_done_res.get().unwrap_or(false);
     let show_weight_modal = create_rw_signal(false);
 
+    // Chapter 2 / s6: once the meal-split section has been opened, the day's
+    // diary entries are grouped into derived meals. Until then, keep the flat
+    // list unchanged (no regression).
+    let meal_split_res = create_resource(
+        move || story_ver.get(),
+        |_| async { story::get_flag(story::MEAL_SPLIT_UNLOCKED).await },
+    );
+    let meal_split_on = move || meal_split_res.get().unwrap_or(false);
+
     let steps_res = create_resource(
         move || version.get(),
         |_| async { local::list_step_entries().await },
@@ -573,7 +582,11 @@ pub fn DiaryPage() -> impl IntoView {
                 // position below if it ever changes.
                 view! {
                     <div attr:data-ios-scroll="1" style="flex: 1; overflow-y: auto; padding-bottom: 10rem;">
-                        {move || entries().into_iter().map(|entry| {
+                        {move || {
+                          // Single diary row. Identical regardless of grouping:
+                          // the meal-split path interleaves headers between calls
+                          // to this, the flat path just maps over it directly.
+                          let render_row = move |entry: DiaryEntry| -> View {
                             let entry_id = entry.id.clone();
                             let entry_id2 = entry.id.clone();
                             let fid = entry.food_id.clone();
@@ -771,8 +784,40 @@ pub fn DiaryPage() -> impl IntoView {
                                             }}
                                         </div>
                                     </div>
-                            }
-                        }).collect::<Vec<_>>()}
+                            }.into_view()
+                          };
+
+                          if meal_split_on() {
+                              // Grouped by derived meal. A header per non-empty
+                              // group (name + playful subtitle for the 3 mains),
+                              // followed by that group's rows.
+                              use crate::services::meal_split::{group_by_meal, MealType};
+                              let es = entries();
+                              group_by_meal(&es).into_iter().map(|grp| {
+                                  let name_key = grp.meal.i18n_key();
+                                  let sub_key = match grp.meal {
+                                      MealType::Breakfast => Some("meal.breakfast_sub"),
+                                      MealType::Lunch => Some("meal.lunch_sub"),
+                                      MealType::Dinner => Some("meal.dinner_sub"),
+                                      _ => None,
+                                  };
+                                  let rows = grp.entries.into_iter().map(render_row).collect::<Vec<_>>();
+                                  view! {
+                                      <div style="padding: 1rem 0 0.25rem 0;">
+                                          <span class="is-size-6 has-text-weight-bold">{move || t(name_key)}</span>
+                                          {sub_key.map(|sk| view! {
+                                              <span class="is-size-7 has-text-grey-light" style="margin-left: 0.5rem;">
+                                                  "« " {move || t(sk)} " »"
+                                              </span>
+                                          })}
+                                      </div>
+                                      {rows}
+                                  }.into_view()
+                              }).collect::<Vec<_>>()
+                          } else {
+                              entries().into_iter().map(render_row).collect::<Vec<_>>()
+                          }
+                        }}
 
                         // Daily AI summary + weekly report — past days only.
                         {move || (!is_today()).then(|| view! {

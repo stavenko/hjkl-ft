@@ -74,6 +74,113 @@ pub async fn list_diary_dates() -> Vec<String> {
         .collect()
 }
 
+// --- Chapter 2 detection helpers ---
+//
+// Case-insensitive substring name-matching on `food.name.to_lowercase()`. These
+// back the chapter-2 section tasks and the daily report's per-day facts.
+
+/// Substrings that mark a low-calorie SNACK food (chapter 2 / s4).
+const SNACK_SUBSTRINGS: &[&str] = &[
+    "огурец", "помидор", "томат", "попкорн", "яблок", "морков", "редис",
+    "сельдере", "капуст", "болгарск",
+];
+
+/// Substrings that mark a DRINK food (chapter 2 / s5).
+const DRINK_SUBSTRINGS: &[&str] = &[
+    "сок", "газиров", "кола", "лимонад", "морс", "квас", "компот", "нектар",
+    "энергетик", "пепси", "фанта", "спрайт", "cola", "pepsi", "sprite", "fanta",
+];
+
+fn name_matches(name: &str, needles: &[&str]) -> bool {
+    let lower = name.to_lowercase();
+    needles.iter().any(|n| lower.contains(n))
+}
+
+/// True if `food` is a low-calorie snack by name.
+pub fn is_snack_food(food: &Food) -> bool {
+    name_matches(&food.name, SNACK_SUBSTRINGS)
+}
+
+/// True if `food` is a drink by name.
+pub fn is_drink_food(food: &Food) -> bool {
+    name_matches(&food.name, DRINK_SUBSTRINGS)
+}
+
+/// A drink is HIGH-CAL if its per-100g kcal > 30.
+pub fn is_high_cal_drink(food: &Food) -> bool {
+    is_drink_food(food) && food.kcal > 30.0
+}
+
+/// A drink is ZERO-CAL if its per-100g kcal <= 5.
+pub fn is_zero_cal_drink(food: &Food) -> bool {
+    is_drink_food(food) && food.kcal <= 5.0
+}
+
+/// Build a food-id → Food lookup over all stored foods.
+async fn food_map() -> BTreeMap<String, Food> {
+    list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect()
+}
+
+/// True if the diary for `date` contains at least one SNACK food.
+pub async fn snack_logged_on(date: &str) -> bool {
+    let foods = food_map().await;
+    list_diary(date).await.iter().any(|e| {
+        foods.get(&e.food_id).map_or(false, is_snack_food)
+    })
+}
+
+/// True if the diary for `date` contains at least one HIGH-CAL drink.
+pub async fn high_cal_drink_on(date: &str) -> bool {
+    let foods = food_map().await;
+    list_diary(date).await.iter().any(|e| {
+        foods.get(&e.food_id).map_or(false, is_high_cal_drink)
+    })
+}
+
+/// True if the diary for `date` contains at least one ZERO-CAL drink.
+pub async fn zero_cal_drink_on(date: &str) -> bool {
+    let foods = food_map().await;
+    list_diary(date).await.iter().any(|e| {
+        foods.get(&e.food_id).map_or(false, is_zero_cal_drink)
+    })
+}
+
+/// Evening protein (grams) on `date`: sum of `protein * eaten_grams / 100`
+/// (honouring waste, like the diary) over entries whose derived meal bucket is
+/// Dinner or NightSnack.
+pub async fn evening_protein_on(date: &str) -> f64 {
+    let foods = food_map().await;
+    let diary = list_diary(date).await;
+    let groups = crate::services::meal_split::group_by_meal(&diary);
+    use crate::services::meal_split::MealType;
+    let mut total = 0.0;
+    for g in groups {
+        if g.meal != MealType::Dinner && g.meal != MealType::NightSnack {
+            continue;
+        }
+        for e in &g.entries {
+            if let Some(food) = foods.get(&e.food_id) {
+                let eaten = (e.grams - e.waste_grams).max(0.0);
+                total += food.protein * eaten / 100.0;
+            }
+        }
+    }
+    total
+}
+
+/// True once a daily report has been generated for `date` (a `summaries`
+/// record with id `day:<date>` exists).
+pub async fn report_ready_on(date: &str) -> bool {
+    crate::services::summary::get_day(date).await.is_some()
+}
+
+/// Local "yesterday" (today - 1 day) as "YYYY-MM-DD".
+pub fn yesterday() -> String {
+    (chrono::Local::now().date_naive() - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
 /// Resolve a food whose `is_restaurant` flag matches `want`. If `food` already
 /// matches it's stored and returned as-is. Otherwise we Copy-on-Write: reuse an
 /// existing identical variant carrying the wanted flag, or create a fresh Food —

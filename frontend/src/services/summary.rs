@@ -46,6 +46,19 @@ pub struct DayFacts {
     /// diary.
     #[serde(default)]
     pub veg_fruit_grams: f64,
+    /// A low-calorie snack food was logged today (name-matched in Rust).
+    #[serde(default)]
+    pub snack_logged: bool,
+    /// A high-calorie drink was logged today (name-matched, >30 kcal/100g).
+    #[serde(default)]
+    pub high_cal_drink: bool,
+    /// Protein (g) eaten in the evening (Dinner + NightSnack meal buckets).
+    #[serde(default)]
+    pub evening_protein_g: f64,
+    /// Per-meal entry-count distribution, one entry per non-empty derived meal:
+    /// (meal i18n key, count), in meal sort order.
+    #[serde(default)]
+    pub meal_distribution: Vec<(String, u32)>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -83,12 +96,16 @@ const GOOD_ITEMS: &[(&str, &str)] = &[
     ("weight_steps", "summary.good_weight_steps"),
     ("diary", "summary.good_diary"),
     ("restaurant", "summary.good_restaurant"),
+    ("snack", "summary.good_snack"),
+    ("no_cal_drink", "summary.good_no_cal_drink"),
+    ("evening_protein", "summary.good_evening_protein"),
 ];
 
 /// Catalog of IMPROVE item keys → i18n text key.
 const IMPROVE_ITEMS: &[(&str, &str)] = &[
     ("weighing", "summary.improve_weighing"),
     ("steps", "summary.improve_steps"),
+    ("drink", "summary.improve_drink"),
 ];
 
 /// Parse a stored day summary. Tolerates ```json fences; returns None for legacy
@@ -212,6 +229,11 @@ struct DayCtx {
     text: String,
     totals: Option<(f64, f64, f64, f64)>,
     food_grams: Vec<f64>,
+    /// Deterministic chapter-2 facts, computed in Rust from the day's diary.
+    snack_logged: bool,
+    high_cal_drink: bool,
+    evening_protein_g: f64,
+    meal_distribution: Vec<(String, u32)>,
 }
 
 async fn day_context(date: &str) -> Option<DayCtx> {
@@ -227,6 +249,10 @@ async fn day_context(date: &str) -> Option<DayCtx> {
 
     let mut totals = None;
     let mut food_grams = Vec::new();
+    let mut snack_logged = false;
+    let mut high_cal_drink = false;
+    let mut evening_protein_g = 0.0_f64;
+    let mut meal_distribution: Vec<(String, u32)> = Vec::new();
     if diary.is_empty() {
         ctx.push_str("- Food logged: nothing was logged today.\n");
     } else {
@@ -247,15 +273,52 @@ async fn day_context(date: &str) -> Option<DayCtx> {
                 if food.is_restaurant {
                     restaurant += 1;
                 }
+                if local::is_snack_food(food) {
+                    snack_logged = true;
+                }
+                if local::is_high_cal_drink(food) {
+                    high_cal_drink = true;
+                }
                 // Index in the prompt list == index in food_grams.
                 lines.push(format!("  [{}] {} {:.0}g (~{:.0} kcal)", food_grams.len(), food.name, eaten, ek));
                 food_grams.push(eaten);
             }
         }
+
+        // Evening protein + per-meal distribution from the derived meal split.
+        use crate::services::meal_split::{self, MealType};
+        let groups = meal_split::group_by_meal(&diary);
+        for grp in &groups {
+            meal_distribution.push((grp.meal.i18n_key().to_string(), grp.entries.len() as u32));
+            if grp.meal == MealType::Dinner || grp.meal == MealType::NightSnack {
+                for e in &grp.entries {
+                    if let Some(food) = fmap.get(&e.food_id) {
+                        let eaten = (e.grams - e.waste_grams).max(0.0);
+                        evening_protein_g += food.protein * eaten / 100.0;
+                    }
+                }
+            }
+        }
+
         ctx.push_str(&format!(
             "- Totals: {kc:.0} kcal, protein {p:.0}g, fat {f:.0}g, carbs {c:.0}g\n\
-             - Restaurant-flagged items: {restaurant}\n- Foods (index, name, eaten grams):\n{}\n",
-            lines.join("\n"),
+             - Restaurant-flagged items: {restaurant}\n\
+             - Low-calorie snack logged: {snack}\n\
+             - High-calorie drink logged: {drink}\n\
+             - Evening protein (dinner + night): {ep:.0}g\n\
+             - Meals (derived): {meals}\n\
+             - Foods (index, name, eaten grams):\n{lines}\n",
+            snack = if snack_logged { "yes" } else { "no" },
+            drink = if high_cal_drink { "yes" } else { "no" },
+            ep = evening_protein_g,
+            meals = if meal_distribution.is_empty() {
+                "none".to_string()
+            } else {
+                meal_distribution.iter()
+                    .map(|(k, n)| format!("{k}={n}"))
+                    .collect::<Vec<_>>().join(", ")
+            },
+            lines = lines.join("\n"),
         ));
         totals = Some((kc, p, f, c));
     }
@@ -275,7 +338,15 @@ async fn day_context(date: &str) -> Option<DayCtx> {
         Some(s) => ctx.push_str(&format!("- Steps logged: yes, {} steps.\n", s.steps)),
         None => ctx.push_str("- Steps logged: no.\n"),
     }
-    Some(DayCtx { text: ctx, totals, food_grams })
+    Some(DayCtx {
+        text: ctx,
+        totals,
+        food_grams,
+        snack_logged,
+        high_cal_drink,
+        evening_protein_g,
+        meal_distribution,
+    })
 }
 
 // ---- Generation (AI, cached) ----
@@ -319,10 +390,14 @@ pub async fn ensure_day(
          GOOD items:\n\
          - \"weight_steps\": the user logged BOTH weight AND steps today.\n\
          - \"diary\": the user logged at least one food diary entry today.\n\
-         - \"restaurant\": at least one logged food is flagged as restaurant food.\n\n\
+         - \"restaurant\": at least one logged food is flagged as restaurant food.\n\
+         - \"snack\": the FACTS say a low-calorie snack was logged (yes).\n\
+         - \"no_cal_drink\": food was logged AND the FACTS say NO high-calorie drink was logged (no).\n\
+         - \"evening_protein\": the FACTS say evening protein is at least 30g.\n\n\
          IMPROVE items:\n\
          - \"weighing\": weight WAS logged AND weighing quality is below 5/5.\n\
-         - \"steps\": steps were NOT logged, OR fewer than 7000 steps.\n\n\
+         - \"steps\": steps were NOT logged, OR fewer than 7000 steps.\n\
+         - \"drink\": the FACTS say a high-calorie drink was logged (yes).\n\n\
          \"vegetable_fruit_indices\": from the numbered Foods list, the indices ([N]) of items that \
          are vegetables or fruits (fresh, cooked, or an obvious vegetable/fruit dish). Empty array \
          if none / no food. Do NOT include cereals, grains, meat, fish, dairy, sweets, or drinks.\n\n\
@@ -360,6 +435,10 @@ pub async fn ensure_day(
         fat,
         carbs,
         veg_fruit_grams,
+        snack_logged: dctx.snack_logged,
+        high_cal_drink: dctx.high_cal_drink,
+        evening_protein_g: dctx.evening_protein_g,
+        meal_distribution: dctx.meal_distribution.clone(),
     });
     let ds = DaySummary {
         facts,

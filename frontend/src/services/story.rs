@@ -37,6 +37,12 @@ pub const RESTAURANT_FOOD_ENTERED: &str = "restaurant_food_entered";
 pub const PROGRESS_PHOTOS_TAKEN: &str = "progress_photos_taken";
 /// Set once the user picks their sex in settings (setup section task).
 pub const SEX_SELECTED: &str = "sex_selected";
+/// Chapter 2 / s6: set when the meal-split section is opened. While set, the
+/// diary page groups the day's entries by derived meal instead of a flat list.
+pub const MEAL_SPLIT_UNLOCKED: &str = "meal_split_unlocked";
+/// Chapter 2 / s7: set when the "eating at night" section is opened and the
+/// user views today's evening feedback. Completes that section's task.
+pub const NIGHT_FEEDBACK_VIEWED: &str = "night_feedback_viewed";
 
 #[derive(Serialize, Deserialize)]
 struct Flag {

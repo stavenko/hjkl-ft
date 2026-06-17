@@ -199,6 +199,17 @@ fn en(key: &str) -> &'static str {
         "diary.month.11" => "November",
         "diary.month.12" => "December",
 
+        // Meal-split section headers
+        "meal.breakfast" => "Breakfast",
+        "meal.snack_morning" => "Morning snack",
+        "meal.lunch" => "Lunch",
+        "meal.snack_afternoon" => "Afternoon snack",
+        "meal.dinner" => "Dinner",
+        "meal.snack_night" => "Night snack",
+        "meal.breakfast_sub" => "the morning binge",
+        "meal.lunch_sub" => "the daytime binge",
+        "meal.dinner_sub" => "the nighttime binge",
+
         // Diary: weekday prepositional (for "On Monday there were no entries")
         "diary.weekday_prep.mon" => "On Monday",
         "diary.weekday_prep.tue" => "On Tuesday",
@@ -234,8 +245,12 @@ fn en(key: &str) -> &'static str {
         "summary.good_weight_steps" => "You logged your weight and steps — awesome.",
         "summary.good_diary" => "You're keeping a food diary.",
         "summary.good_restaurant" => "You log your food even at a restaurant.",
+        "summary.good_snack" => "You reached for a low-calorie snack — a great way to close the urge to chew without wrecking the day.",
+        "summary.good_no_cal_drink" => "No calorie drinks today — those are the easiest calories to drink without noticing.",
+        "summary.good_evening_protein" => "Strong evening protein — fullness lasts longer and there are fewer night raids on the fridge.",
         "summary.improve_weighing" => "Improve your weighing quality: the higher it is, the clearer it is whether you're in a surplus or a deficit.",
         "summary.improve_steps" => "Going over 7000 steps a day brings a substantial health improvement.",
+        "summary.improve_drink" => "A calorie drink slipped in: swap it for a sugar-free version or the fruit itself — those calories give almost no fullness.",
         "summary.week_button" => "Weekly report",
         "summary.week_title" => "Weekly report",
         "summary.week_pending" => "The weekly report will be ready on",
@@ -625,20 +640,31 @@ fn en(key: &str) -> &'static str {
         "story.ch2.snack.p1" => "Hunger rarely comes on time. It hits between tasks, in the evening before a show, at a moment when a proper meal is still far off — and that's where it's decided whether you break or not. So it's worth keeping something on hand to snack on with almost no consequences.",
         "story.ch2.snack.p2" => "Unbuttered popcorn, cucumbers, tomatoes, apples — they have few calories and a lot of water; you can crunch on them almost to bursting and barely shift your daily balance. This is not «forbidden food in reverse» but normal food that closes the urge to chew on something.",
         "story.ch2.snack.p3" => "The only rule is to still log it in the diary. «It's just a cucumber, what's there to count» — and that's how the stuff you later can't explain on the scale quietly adds up. Everything counts, even the little things.",
+        "story.ch2.snack.task_label" => "Chapter task",
+        "story.ch2.snack.task" => "Log a low-calorie snack — and check it in tomorrow's report",
+        "story.ch2.snack.no_report" => "The report for yesterday isn't ready yet — it appears once the day is over.",
 
         // Story — chapter 2, section 5: juices and drinks
         "story.ch2.drinks.p1" => "The most invisible way to drink your daily calorie quota is exactly that — to drink it. Sweet soda, packaged juice, a latte with syrup — these are calories that give almost no fullness. The body seems not to notice them: you've taken the equivalent of a full meal, and half an hour later you're hungry again.",
         "story.ch2.drinks.p2" => "So first of all we remove the calories from drinks. Swap regular soda for the sugar-free version — yes, sweeteners aren't the enemy here, no need to fear them; just find a couple of flavours you genuinely like. Replace juice with the fruit itself — that way you also get fibre and fullness. Water, coffee, tea — drink as much as you want, just remove or minimise what adds calories: sugar and cream.",
+        "story.ch2.drinks.task_label" => "Chapter task",
+        "story.ch2.drinks.task" => "Skip the calorie drinks — none in yesterday's report",
+        "story.ch2.drinks.effort" => "We see the effort — a calorie-free drink. Logging it is optional.",
 
         // Story — chapter 2, section 6: how many meals a day
         "story.ch2.meals.p1" => "There's no sacred number here. Three meals, six, two — it all works if in total you stay in a deficit. So the first principle is to make the day as convenient as possible for you personally. Love snacking often and getting distracted by food — split it up. Don't like fussing five times — don't split it.",
         "story.ch2.meals.p2" => "The basic recommendation is still one: try not to let yourself get very hungry. Rising appetite is easily knocked down with sweet calorie-free water between meals, while toughing it out to the point of near-fainting is a direct path to a binge. And be sure to satisfy hunger at the end of the day: going to bed hungry is a bad idea — that's exactly where night raids on the fridge come from.",
         "story.ch2.meals.p3" => "And if you ask what works best — it's three meals. Breakfast, lunch, dinner — perhaps the best thing humanity invented for the rhythm of the day, and for losing weight it's an excellent framework.",
+        "story.ch2.meals.advice" => "And a practical rule: cut down on snacking, and when the urge to chew hits — reach for a drink instead. Now your diary will group entries into meals, so you can see the picture of your day at a glance.",
+        "story.ch2.meals.unlocked" => "Done — your diary now splits the day into meals.",
 
         // Story — chapter 2, section 7: eating at night
         "story.ch2.night.p1" => "Let's start with the main and unexpected point: eating at night isn't harmful. You can eat right before bed, you can not eat at all — it has no effect whatsoever on weight loss. Fat is stored not «because it's late» but because more calories came in over the day than went out. «Nothing after six» is a myth.",
         "story.ch2.night.p2" => "But there are a couple of honest caveats. The first is about binges: many people simply can't resist and eat up at night. If that's you, the best insurance is a hearty, protein-rich last meal: fullness lasts longer, and the pull to the fridge will be weaker.",
         "story.ch2.night.p3" => "The second is medical. With a number of conditions (reflux, for example) doctors advise not lying down sooner than three hours after dinner. This is no longer about weight loss but about health and a calm sleep — and that recommendation is worth following.",
+        "story.ch2.night.feedback_label" => "Today's evening",
+        "story.ch2.night.feedback_good" => "Lots of protein in the evening — excellent: fullness lasts longer, fewer night raids.",
+        "story.ch2.night.feedback_hint" => "Try to make your last meal protein-rich — it keeps you full longer and softens the evening pull to the fridge.",
 
         // Story — chapter 1, introduction
         "story.intro.p1" => "Hi. This is the «Slimming Story» app. It is made specifically for people who can't lose weight and have a bit of a problem with extra pounds.",
@@ -868,6 +894,17 @@ fn ru(key: &str) -> &'static str {
         "diary.month.11" => "ноября",
         "diary.month.12" => "декабря",
 
+        // Meal-split section headers
+        "meal.breakfast" => "Завтрак",
+        "meal.snack_morning" => "Утренний перекус",
+        "meal.lunch" => "Обед",
+        "meal.snack_afternoon" => "Дневной перекус",
+        "meal.dinner" => "Ужин",
+        "meal.snack_night" => "Ночной перекус",
+        "meal.breakfast_sub" => "утренний жор",
+        "meal.lunch_sub" => "дневной жор",
+        "meal.dinner_sub" => "ночной жор",
+
         // Дневник: дни недели с предлогом
         "diary.weekday_prep.mon" => "В понедельник",
         "diary.weekday_prep.tue" => "Во вторник",
@@ -903,8 +940,12 @@ fn ru(key: &str) -> &'static str {
         "summary.good_weight_steps" => "Вы записали вес и шаги — это круто.",
         "summary.good_diary" => "Вы ведёте дневник питания.",
         "summary.good_restaurant" => "Вы записываете еду даже в ресторане.",
+        "summary.good_snack" => "Вы выбрали низкокалорийную закусь — отличный способ закрыть порыв пожевать, не сорвав день.",
+        "summary.good_no_cal_drink" => "Сегодня без калорийных напитков — а это самые незаметные калории, которые легко выпить.",
+        "summary.good_evening_protein" => "Вечером много белка — сытость держится дольше, и меньше ночных набегов на холодильник.",
         "summary.improve_weighing" => "Улучшайте качество взвешивания: чем оно выше, тем точнее понятно, в профиците вы или в дефиците.",
         "summary.improve_steps" => "Свыше 7000 шагов в день дают существенное улучшение здоровья.",
+        "summary.improve_drink" => "Затесался калорийный напиток: замените его на версию без сахара или на сам фрукт — такие калории почти не дают сытости.",
         "summary.week_button" => "Отчёт недели",
         "summary.week_title" => "Отчёт недели",
         "summary.week_pending" => "Отчёт недели будет посчитан",
@@ -1284,20 +1325,31 @@ fn ru(key: &str) -> &'static str {
         "story.ch2.snack.p1" => "Голод редко приходит вовремя. Он накрывает между делами, вечером перед сериалом, в момент, когда до нормального приёма пищи ещё далеко, — и вот тут решается, сорвётесь вы или нет. Поэтому стоит заранее держать под рукой то, чем можно перекусить почти без последствий.",
         "story.ch2.snack.p2" => "Попкорн без масла, огурцы, помидоры, яблоки — в них мало калорий и много воды, ими можно хрустеть почти до отвала и почти не сдвинуть свой дневной баланс. Это не «запрещёнка наоборот», а нормальная еда, которая закрывает порыв что-нибудь сжевать.",
         "story.ch2.snack.p3" => "Единственное правило — всё равно вносить это в дневник. «Это же огурчик, что там считать» — и так незаметно набегает то, что вы потом не можете объяснить на весах. Считается всё, даже мелочь.",
+        "story.ch2.snack.task_label" => "Задание на главу",
+        "story.ch2.snack.task" => "Записать низкокалорийную закусь — и увидеть её в завтрашней оценке",
+        "story.ch2.snack.no_report" => "Оценка за вчера ещё не готова — она появляется, когда день закончился.",
 
         // История — глава 2, секция 5: соки и питьё
         "story.ch2.drinks.p1" => "Самый незаметный способ выпить дневную норму калорий — это именно выпить. Сладкая газировка, пакетированный сок, латте с сиропом — это калории, которые не дают почти никакой сытости. Организм их будто не замечает: вы приняли эквивалент полноценного приёма пищи, а через полчаса снова голодны.",
         "story.ch2.drinks.p2" => "Поэтому первым делом убираем из питья калории. Обычную газировку меняем на версию без сахара — да, сахзамы тут не враг, бояться их не нужно; достаточно найти пару вкусов, которые вам реально нравятся. Сок заменяем на сам фрукт — так вы получите ещё и клетчатку, и сытость. Вода, кофе, чай — пейте сколько хотите, просто уберите или сведите к минимуму то, что добавляет калории: сахар и сливки.",
+        "story.ch2.drinks.task_label" => "Задание на главу",
+        "story.ch2.drinks.task" => "Обойтись без калорийных напитков — чтобы их не было во вчерашней оценке",
+        "story.ch2.drinks.effort" => "Видим старание — некалорийный напиток. Вписывать его необязательно.",
 
         // История — глава 2, секция 6: сколько раз в день есть
         "story.ch2.meals.p1" => "Здесь нет священного числа. Три приёма пищи, шесть, два — всё работает, если в сумме вы остаётесь в дефиците. Поэтому первый принцип — сделать день максимально удобным лично вам. Любите перекусывать часто и отвлекаться на еду — дробите. Не любите возиться по пять раз — не дробите.",
         "story.ch2.meals.p2" => "Базовая рекомендация всё же одна: старайтесь не доводить себя до сильного голода. Подступающий аппетит легко сбить сладкой некалорийной водичкой между приёмами, а вот терпеть до полуобморока — прямой путь к срыву. И обязательно утоляйте голод в конце дня: ложиться спать голодным — плохая идея, именно отсюда растут ночные набеги на холодильник.",
         "story.ch2.meals.p3" => "А если спросить, что работает лучше всего, — это три приёма пищи. Завтрак, обед, ужин — пожалуй, лучшее, что человечество придумало для ритма дня, и для похудения это отличный каркас.",
+        "story.ch2.meals.advice" => "И практическое правило: сокращайте перекусы, а когда тянет что-нибудь сжевать — потянитесь к напитку. Теперь дневник будет группировать записи по приёмам пищи, чтобы вы видели картину дня сразу.",
+        "story.ch2.meals.unlocked" => "Готово — дневник теперь разбивает день на приёмы пищи.",
 
         // История — глава 2, секция 7: еда на ночь
         "story.ch2.night.p1" => "Начнём с главного и неожиданного: есть на ночь не вредно. Можно поесть прямо перед сном, можно не есть вовсе — на похудение это не влияет никак. Жир откладывается не «оттого что поздно», а оттого, что калорий за день пришло больше, чем ушло. «После шести нельзя» — миф.",
         "story.ch2.night.p2" => "Но есть пара честных оговорок. Первая — про срывы: многие просто не могут устоять и доедают ночью. Если это про вас, лучшая страховка — плотный, богатый белком последний приём пищи: сытость продержится дольше, и тянуть к холодильнику будет меньше.",
         "story.ch2.night.p3" => "Вторая — медицинская. При ряде проблем (например, рефлюксе) врачи советуют не ложиться раньше чем через три часа после ужина. Это уже не про похудение, а про здоровье и спокойный сон — и этой рекомендации стоит придерживаться.",
+        "story.ch2.night.feedback_label" => "Сегодня вечером",
+        "story.ch2.night.feedback_good" => "Вечером много белка — отлично: дольше сытость, меньше ночных набегов.",
+        "story.ch2.night.feedback_hint" => "Старайтесь делать последний приём пищи богатым белком — он дольше держит сытость и смягчает вечернюю тягу к холодильнику.",
 
         // История — глава 1, введение
         "story.intro.p1" => "Привет. Это приложение «Худеющая история». Оно сделано специально для тех, кто не может похудеть и у кого есть небольшие проблемы с лишним весом.",

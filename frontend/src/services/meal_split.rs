@@ -266,6 +266,21 @@ mod tests {
     }
 
     #[test]
+    fn only_dinner_first_entry_is_one_dinner_group() {
+        // Brand-new user logs a single evening meal — exactly one Dinner group.
+        let g = group_by_meal(&solo("19:30"));
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].meal, MealType::Dinner);
+        assert_eq!(g[0].entries.len(), 1);
+        // A second dinner-time entry within the hour stays in the same Dinner group.
+        let two = vec![entry("a", Some("19:00"), &ts("19:00")), entry("b", Some("19:40"), &ts("19:40"))];
+        let g2 = group_by_meal(&two);
+        assert_eq!(g2.len(), 1);
+        assert_eq!(g2[0].meal, MealType::Dinner);
+        assert_eq!(g2[0].entries.len(), 2);
+    }
+
+    #[test]
     fn window_edges_pure_clock() {
         assert_eq!(classify_solo("05:00"), MealType::Breakfast);
         assert_eq!(classify_solo("10:59"), MealType::Breakfast);

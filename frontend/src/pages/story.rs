@@ -32,6 +32,16 @@ const CH2_SECTIONS: [(&str, &str, Option<&str>); 7] = [
     ("\u{1f319}", "story.ch2.s7", Some("/story/ch2-night")),
 ];
 
+/// Sections of chapter 3 «Why lose weight?». s1 carries the calorie-planka
+/// mechanic; s2..s5 are read-only prose.
+const CH3_SECTIONS: [(&str, &str, Option<&str>); 5] = [
+    ("\u{1f525}", "story.ch3.s1", Some("/story/ch3-fat")),
+    ("\u{1fa9e}", "story.ch3.s2", Some("/story/ch3-beauty")),
+    ("\u{1f4c9}", "story.ch3.s3", Some("/story/ch3-minimum")),
+    ("\u{2696}\u{fe0f}", "story.ch3.s4", Some("/story/ch3-lean")),
+    ("\u{1f331}", "story.ch3.s5", Some("/story/ch3-lifestyle")),
+];
+
 #[component]
 pub fn StoryPage() -> impl IntoView {
     // Story progress is driven by the IndexedDB `story` store. Reload whenever
@@ -98,14 +108,36 @@ pub fn StoryPage() -> impl IntoView {
         });
     });
 
-    // Chapter 2 / section 1: consecutive-day food-diary streak.
+    // Chapter 3 / section 1: the hidden calorie planka has been set (an AtMost
+    // "Calories" goal with amount > 0). Opening the s1 page sets it; that both
+    // completes s1 and gates the rest of chapter 3.
+    let goals_ver = db::version("goals");
+    let calorie_planka_set = create_rw_signal(false);
+    create_effect(move |_| {
+        goals_ver.get();
+        spawn_local(async move {
+            let set = local::list_goals().await.into_iter().any(|g| {
+                g.nutrient == "Calories"
+                    && g.direction == api_types::GoalDirection::AtMost
+                    && g.amount > 0.0
+            });
+            calorie_planka_set.set(set);
+        });
+    });
+
+    // Chapter 2 / section 1: consecutive-day food-diary streak; and the count of
+    // DISTINCT tracked days (drives the chapter-3 unlock — "учёт ведётся несколько дней").
     let diary_ver = db::version("diary");
     let diary_streak = create_rw_signal(0u32);
+    let diary_days = create_rw_signal(0u32);
     create_effect(move |_| {
         diary_ver.get();
         spawn_local(async move {
-            let dates = local::list_diary_dates().await;
+            let mut dates = local::list_diary_dates().await;
             diary_streak.set(story::consecutive_day_streak(&dates));
+            dates.sort();
+            dates.dedup();
+            diary_days.set(dates.len() as u32);
         });
     });
 
@@ -172,6 +204,22 @@ pub fn StoryPage() -> impl IntoView {
     // Cumulative chain inside chapter 2, gated by the chapter being unlocked.
     let ch2_is_unlocked =
         move |i: usize| chapter2_unlocked() && (0..i).all(ch2_completed);
+
+    // Chapter 3 opens once the user has been tracking the food diary for a few
+    // days (≥ 7 distinct days) — it sets a calorie planka from that history, so
+    // it gates on accumulated tracking rather than on finishing chapter 2.
+    const CH3_MIN_DIARY_DAYS: u32 = 7;
+    let chapter3_unlocked = move || diary_days.get() >= CH3_MIN_DIARY_DAYS;
+
+    // Chapter 3 section completion. Only s1 has a gate (the calorie planka set on
+    // open); s2..s5 are read-only and auto-complete.
+    let ch3_completed = move |i: usize| match i {
+        0 => calorie_planka_set.get(), // s1: opening it sets the hidden planka
+        _ => true,                     // s2..s5: read-only prose
+    };
+    // Cumulative chain inside chapter 3, gated by the chapter being unlocked.
+    let ch3_is_unlocked =
+        move |i: usize| chapter3_unlocked() && (0..i).all(ch3_completed);
 
     let sections_total = CH1_SECTIONS.len();
     let sections_open = move || (0..sections_total).filter(|&i| is_unlocked(i)).count();
@@ -303,6 +351,59 @@ pub fn StoryPage() -> impl IntoView {
                                 <li class="is-size-7">{move || t("story.ch2.task_subscription")}</li>
                             })}
                         </ul>
+                    }.into_view()
+                }}
+            </div>
+
+            // ---- Chapter 3 · Why lose weight? ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>
+                {move || format!("{} 3 \u{00b7} {} {}", t("story.chapter"), t("story.ch3.title"), if chapter3_unlocked() { "" } else { "\u{1f512}" })}
+            </p>
+            <div style=IOS_CARD>
+                {CH3_SECTIONS.iter().enumerate().map(|(i, (icon, label, route))| {
+                    let route = *route;
+                    let icon = *icon;
+                    let label = *label;
+                    view! {
+                        {(i > 0).then(|| view! { <div style=IOS_SEPARATOR></div> })}
+                        {move || {
+                            let unlocked = ch3_is_unlocked(i);
+                            let icon_span = view! { <span style="font-size: 22px; width: 28px; text-align: center;">{icon}</span> };
+                            let label_span = view! { <span class="is-size-6" style="flex: 1;">{t(label)}</span> };
+                            match (unlocked, route) {
+                                (true, Some(r)) => view! {
+                                    <a href=r style=format!("{}cursor: pointer;", ROW_STYLE)>
+                                        {icon_span}
+                                        {label_span}
+                                        <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
+                                    </a>
+                                }.into_view(),
+                                (true, None) => view! {
+                                    <div style=ROW_STYLE>
+                                        {icon_span}
+                                        {label_span}
+                                    </div>
+                                }.into_view(),
+                                (false, _) => view! {
+                                    <div style=format!("{}opacity: 0.45;", ROW_STYLE)>
+                                        {icon_span}
+                                        {label_span}
+                                        <span style="font-size: 15px;">"\u{1f512}"</span>
+                                    </div>
+                                }.into_view(),
+                            }
+                        }}
+                    }
+                }).collect_view()}
+            </div>
+            <div style="padding: 12px 16px 0 16px;">
+                {move || if chapter3_unlocked() {
+                    view! {
+                        <p class="is-size-7 has-text-success" style="margin: 0;">{move || t("story.ch3.unlocked")}</p>
+                    }.into_view()
+                } else {
+                    view! {
+                        <p class="is-size-7 has-text-grey" style="margin: 0;">{move || t("story.ch3.locked_hint")}</p>
                     }.into_view()
                 }}
             </div>

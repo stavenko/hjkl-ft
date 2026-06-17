@@ -74,6 +74,51 @@ pub async fn list_diary_dates() -> Vec<String> {
         .collect()
 }
 
+/// Average daily effective kcal over the last `window_days` calendar days,
+/// counting ONLY days that have diary entries. Per-day kcal is the sum of each
+/// entry's `effective_kcal() * (grams - waste_grams).max(0) / 100` — exactly how
+/// the diary/summary computes calories (honouring waste and the restaurant
+/// surcharge). Returns `None` when no day in the window has any diary entry.
+pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
+    let foods = food_map().await;
+    let today = chrono::Local::now().date_naive();
+    let dates: Vec<String> = (0..window_days)
+        .map(|i| (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string())
+        .collect();
+
+    let mut day_totals: Vec<f64> = Vec::new();
+    for d in &dates {
+        let diary = list_diary(d).await;
+        if diary.is_empty() {
+            continue;
+        }
+        let mut kc = 0.0;
+        for e in &diary {
+            if let Some(food) = foods.get(&e.food_id) {
+                let eaten = (e.grams - e.waste_grams).max(0.0);
+                kc += food.effective_kcal() * eaten / 100.0;
+            }
+        }
+        day_totals.push(kc);
+    }
+
+    if day_totals.is_empty() {
+        return None;
+    }
+    let sum: f64 = day_totals.iter().sum();
+    Some(sum / day_totals.len() as f64)
+}
+
+/// Compute the daily calorie planka from the average daily kcal and the weight
+/// balance. In a deficit the planka is the average itself; for maintenance or a
+/// surplus it is 5% below the average. The result is rounded to the nearest
+/// 10 kcal. Pure (no I/O) so it is unit-testable.
+pub fn calorie_planka(avg_kcal: f64, balance: crate::services::weight_trend::BalanceState) -> f64 {
+    use crate::services::weight_trend::BalanceState;
+    let raw = if balance == BalanceState::Deficit { avg_kcal } else { avg_kcal * 0.95 };
+    (raw / 10.0).round() * 10.0
+}
+
 // --- Chapter 2 detection helpers ---
 //
 // Case-insensitive substring name-matching on `food.name.to_lowercase()`. These
@@ -877,4 +922,30 @@ pub async fn list_progress_photos() -> Vec<ProgressPhoto> {
     let mut photos: Vec<ProgressPhoto> = db::list_all("progress_photos").await;
     photos.sort_by(|a, b| b.created_at.cmp(&a.created_at)); // newest first
     photos
+}
+
+#[cfg(test)]
+mod tests {
+    use super::calorie_planka;
+    use crate::services::weight_trend::BalanceState;
+
+    #[test]
+    fn calorie_planka_deficit_is_avg_rounded_to_10() {
+        // Deficit -> avg itself, rounded to nearest 10.
+        assert_eq!(calorie_planka(2000.0, BalanceState::Deficit), 2000.0);
+        assert_eq!(calorie_planka(1994.0, BalanceState::Deficit), 1990.0);
+        assert_eq!(calorie_planka(1996.0, BalanceState::Deficit), 2000.0);
+    }
+
+    #[test]
+    fn calorie_planka_non_deficit_is_minus_5pct_rounded_to_10() {
+        // Maintenance / Surplus -> avg * 0.95, rounded to nearest 10.
+        // 2000 * 0.95 = 1900.0
+        assert_eq!(calorie_planka(2000.0, BalanceState::Maintenance), 1900.0);
+        assert_eq!(calorie_planka(2000.0, BalanceState::Surplus), 1900.0);
+        // 2100 * 0.95 = 1995.0 -> rounds to 2000.
+        assert_eq!(calorie_planka(2100.0, BalanceState::Maintenance), 2000.0);
+        // 2050 * 0.95 = 1947.5 -> rounds to 1950.
+        assert_eq!(calorie_planka(2050.0, BalanceState::Surplus), 1950.0);
+    }
 }

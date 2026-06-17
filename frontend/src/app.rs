@@ -91,6 +91,11 @@ pub fn App() -> impl IntoView {
                         <Route path="/story/ch2-drinks" view=pages::story_ch2_drinks::StoryCh2DrinksPage />
                         <Route path="/story/ch2-meals" view=pages::story_ch2_meals::StoryCh2MealsPage />
                         <Route path="/story/ch2-night" view=pages::story_ch2_night::StoryCh2NightPage />
+                        <Route path="/story/ch3-fat" view=pages::story_ch3_fat::StoryCh3FatPage />
+                        <Route path="/story/ch3-beauty" view=pages::story_ch3_beauty::StoryCh3BeautyPage />
+                        <Route path="/story/ch3-minimum" view=pages::story_ch3_minimum::StoryCh3MinimumPage />
+                        <Route path="/story/ch3-lean" view=pages::story_ch3_lean::StoryCh3LeanPage />
+                        <Route path="/story/ch3-lifestyle" view=pages::story_ch3_lifestyle::StoryCh3LifestylePage />
                         <Route path="/paywall" view=pages::paywall::PaywallPage />
                         <Route path="/progress" view=pages::progress::ProgressPage />
                         <Route path="/diary" view=pages::diary::DiaryPage />

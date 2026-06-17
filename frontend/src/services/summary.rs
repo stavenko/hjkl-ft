@@ -59,6 +59,12 @@ pub struct DayFacts {
     /// (meal i18n key, count), in meal sort order.
     #[serde(default)]
     pub meal_distribution: Vec<(String, u32)>,
+    /// The hidden daily calorie planka in effect when this day was assessed
+    /// (chapter 3 / s1). 0.0 when no planka goal exists, in which case no
+    /// planka facts/bands are emitted. > 0.0 means the day's kcal was compared
+    /// against it.
+    #[serde(default)]
+    pub calorie_planka: f64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -99,6 +105,7 @@ const GOOD_ITEMS: &[(&str, &str)] = &[
     ("snack", "summary.good_snack"),
     ("no_cal_drink", "summary.good_no_cal_drink"),
     ("evening_protein", "summary.good_evening_protein"),
+    ("under_planka", "summary.good_under_planka"),
 ];
 
 /// Catalog of IMPROVE item keys → i18n text key.
@@ -106,6 +113,7 @@ const IMPROVE_ITEMS: &[(&str, &str)] = &[
     ("weighing", "summary.improve_weighing"),
     ("steps", "summary.improve_steps"),
     ("drink", "summary.improve_drink"),
+    ("over_planka", "summary.improve_over_planka"),
 ];
 
 /// Parse a stored day summary. Tolerates ```json fences; returns None for legacy
@@ -234,6 +242,8 @@ struct DayCtx {
     high_cal_drink: bool,
     evening_protein_g: f64,
     meal_distribution: Vec<(String, u32)>,
+    /// Calorie planka in effect (0.0 = none); see DayFacts::calorie_planka.
+    calorie_planka: f64,
 }
 
 async fn day_context(date: &str) -> Option<DayCtx> {
@@ -253,6 +263,7 @@ async fn day_context(date: &str) -> Option<DayCtx> {
     let mut high_cal_drink = false;
     let mut evening_protein_g = 0.0_f64;
     let mut meal_distribution: Vec<(String, u32)> = Vec::new();
+    let mut calorie_planka = 0.0_f64;
     if diary.is_empty() {
         ctx.push_str("- Food logged: nothing was logged today.\n");
     } else {
@@ -321,6 +332,30 @@ async fn day_context(date: &str) -> Option<DayCtx> {
             lines = lines.join("\n"),
         ));
         totals = Some((kc, p, f, c));
+
+        // Calorie planka (chapter 3 / s1): a hidden AtMost "Calories" goal with
+        // amount > 0. Compare the day's effective kcal to the planka P and emit a
+        // grounded verdict so the model can select the right band. Never invent a
+        // number — if there's no planka, add nothing.
+        if let Some(p_goal) = local::list_goals().await.into_iter().find(|g| {
+            g.nutrient == "Calories"
+                && g.direction == api_types::GoalDirection::AtMost
+                && g.amount > 0.0
+        }) {
+            calorie_planka = p_goal.amount;
+            let p = calorie_planka;
+            // > P: overate; < P-50: undereating too much; in [P-50, P]: good.
+            let verdict = if kc > p {
+                "OVER (ate above the planka — overate)"
+            } else if kc < p - 50.0 {
+                "UNDER (ate well below the planka — undereating too much)"
+            } else {
+                "GOOD (within the planka, did not exceed it)"
+            };
+            ctx.push_str(&format!(
+                "- Calorie planka: {p:.0} kcal. Today's intake vs planka: {verdict}.\n"
+            ));
+        }
     }
 
     match &weight {
@@ -346,6 +381,7 @@ async fn day_context(date: &str) -> Option<DayCtx> {
         high_cal_drink,
         evening_protein_g,
         meal_distribution,
+        calorie_planka,
     })
 }
 
@@ -393,11 +429,13 @@ pub async fn ensure_day(
          - \"restaurant\": at least one logged food is flagged as restaurant food.\n\
          - \"snack\": the FACTS say a low-calorie snack was logged (yes).\n\
          - \"no_cal_drink\": food was logged AND the FACTS say NO high-calorie drink was logged (no).\n\
-         - \"evening_protein\": the FACTS say evening protein is at least 30g.\n\n\
+         - \"evening_protein\": the FACTS say evening protein is at least 30g.\n\
+         - \"under_planka\": the FACTS contain a Calorie planka line AND the verdict is GOOD (within the planka).\n\n\
          IMPROVE items:\n\
          - \"weighing\": weight WAS logged AND weighing quality is below 5/5.\n\
          - \"steps\": steps were NOT logged, OR fewer than 7000 steps.\n\
-         - \"drink\": the FACTS say a high-calorie drink was logged (yes).\n\n\
+         - \"drink\": the FACTS say a high-calorie drink was logged (yes).\n\
+         - \"over_planka\": the FACTS contain a Calorie planka line AND the verdict is OVER or UNDER (not GOOD).\n\n\
          \"vegetable_fruit_indices\": from the numbered Foods list, the indices ([N]) of items that \
          are vegetables or fruits (fresh, cooked, or an obvious vegetable/fruit dish). Empty array \
          if none / no food. Do NOT include cereals, grains, meat, fish, dairy, sweets, or drinks.\n\n\
@@ -439,6 +477,7 @@ pub async fn ensure_day(
         high_cal_drink: dctx.high_cal_drink,
         evening_protein_g: dctx.evening_protein_g,
         meal_distribution: dctx.meal_distribution.clone(),
+        calorie_planka: dctx.calorie_planka,
     });
     let ds = DaySummary {
         facts,

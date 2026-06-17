@@ -251,6 +251,8 @@ fn en(key: &str) -> &'static str {
         "summary.improve_weighing" => "Improve your weighing quality: the higher it is, the clearer it is whether you're in a surplus or a deficit.",
         "summary.improve_steps" => "Going over 7000 steps a day brings a substantial health improvement.",
         "summary.improve_drink" => "A calorie drink slipped in: swap it for a sugar-free version or the fruit itself — those calories give almost no fullness.",
+        "summary.good_under_planka" => "You stayed within your calorie planka today — that's exactly the pace that lets fat go while muscle stays.",
+        "summary.improve_over_planka" => "Watch your calorie planka — especially if you went above it: that's where the deficit quietly slips away. Eating far too little isn't good either, but going over is the main thing to fix.",
         "summary.week_button" => "Weekly report",
         "summary.week_title" => "Weekly report",
         "summary.week_pending" => "The weekly report will be ready on",
@@ -666,6 +668,46 @@ fn en(key: &str) -> &'static str {
         "story.ch2.night.feedback_good" => "Lots of protein in the evening — excellent: fullness lasts longer, fewer night raids.",
         "story.ch2.night.feedback_hint" => "Try to make your last meal protein-rich — it keeps you full longer and softens the evening pull to the fridge.",
 
+        // Story — chapter 3 «Why lose weight?»
+        "story.ch3.title" => "Why lose weight?",
+        "story.ch3.unlocked" => "Chapter 3 is open.",
+        "story.ch3.locked_hint" => "Complete every section of chapter 2 to unlock.",
+        "story.ch3.s1" => "Why do we have fat at all?",
+        "story.ch3.s2" => "What does a «beautiful person» look like?",
+        "story.ch3.s3" => "What is the physiological fat minimum?",
+        "story.ch3.s4" => "The difference between «lean» and «fat-stripped»",
+        "story.ch3.s5" => "Life without fat",
+
+        // Story — chapter 3, section 1: why do we have fat at all
+        "story.ch3.fat.p1" => "Fat is not a flaw in the body and not a punishment for weakness. It's the most ancient survival system there is. For hundreds of thousands of years food was unstable — feast then famine — and the ones who survived were those who could store energy in reserve to make it through a hungry winter or a failed harvest. The ability to stockpile fat was a superpower, and evolution honed it to perfection.",
+        "story.ch3.fat.p2" => "It all broke down in the last few decades. Food became not just sufficient — it became abundant, cheap, calorie-dense and available every minute. The hungry winter never comes anymore, yet the storage system runs as if nothing has changed. The mechanism that saved our ancestors turned into a problem in a world of plenty.",
+        "story.ch3.fat.p3" => "And the problem isn't only about how it looks. Fat tissue is not a passive warehouse but a full-fledged endocrine organ: it produces hormones and signalling substances. When there's too much fat, those signals go haywire — and one of the key consequences is insulin resistance: cells stop hearing insulin properly. From there a long trail of health problems follows. So it's worth losing weight not for the picture, but because excess fat actively interferes with how the body works.",
+        "story.ch3.fat.goal_label" => "Daily calorie planka",
+        "story.ch3.fat.kcal_unit" => "kcal",
+        "story.ch3.fat.goal_set" => "Your daily calorie planka is set — see it in the diary header.",
+        "story.ch3.fat.need_diary" => "Keep logging your food for a few days so we can set your calorie planka.",
+        "story.ch3.fat.open_diary" => "Open the diary",
+
+        // Story — chapter 3, section 2: what a beautiful person looks like
+        "story.ch3.beauty.p1" => "People have argued about beauty for millennia, but if you look closely, it almost always comes down to two fairly simple things. The first is the bones. If the facial skeleton developed normally, the features come out harmonious — and that is largely given by nature.",
+        "story.ch3.beauty.p2" => "The second thing, though, is entirely in our hands. Take a person with normal facial features and remove the excess fat, leaving a healthy physiological minimum — and they will almost certainly look beautiful. Not because they «lost weight», but because what fat usually hides starts to show: the lines of the face, the contours of the body, the muscular frame.",
+        "story.ch3.beauty.p3" => "In essence, the beauty of a body is made of two terms: the absence of excess fat and the presence of muscle under the skin. This is an important idea we'll return to: the goal is not to «become smaller» but to reveal the structure that is already there. And it's achieved not by starving but by combining moderate fat with normally developed muscle.",
+
+        // Story — chapter 3, section 3: the physiological fat minimum
+        "story.ch3.minimum.p1" => "Fat has a lower bound below which you must not go — the so-called physiological, essential fat. It's not a reserve but a working part of the body: it's needed for hormones, the nervous system, organ protection. Going below that line isn't «getting extra-lean» — it's harming yourself.",
+        "story.ch3.minimum.p2" => "It's important to understand: this minimum differs for men and women, and for women it's noticeably higher. That's not a shortcoming but the norm — female physiology, including reproduction, simply requires more fat, and trying to force yourself into «male» numbers ends in a breakdown of hormones and the cycle. A woman should aim for a healthy fat level, not the lowest possible one.",
+        "story.ch3.minimum.p3" => "And here lies a common trap. A healthy minimum on a woman without muscle may look nothing like she wants — not toned, but rather «empty». And the conclusion is not «lose more» but exactly the opposite: it's not about excess fat but a lack of muscle. The fix isn't a diet — it's the gym.",
+
+        // Story — chapter 3, section 4: lean vs fat-stripped
+        "story.ch3.lean.p1" => "The scale shows one number, but very different things stand behind it. When a person loses weight fast and hard, they lose not only fat. Muscle goes with it — and muscle is exactly what keeps the body toned and the metabolism alive. The result: weight drops, but the mirror and how you feel are disappointing.",
+        "story.ch3.lean.p2" => "From this come two principles worth accepting right away. First: lose weight gradually. The gentler the pace, the better the odds that it's fat that leaves while muscle stays. Second: one «weight-loss course» isn't enough — you have to change the lifestyle itself.",
+        "story.ch3.lean.p3" => "Otherwise the sad arithmetic kicks in. You drop weight on a harsh diet, losing both fat and muscle; you go back to old habits — the weight returns. But it comes back mostly as fat, and the lost muscle isn't so easy to get back. You end up at the same weight as before the diet, only with a worse body composition and no health reserve. So the goal isn't to «lose weight» but to rebuild your life so the new weight holds on its own.",
+
+        // Story — chapter 3, section 5: life without fat
+        "story.ch3.lifestyle.p1" => "The main idea of the whole chapter is simple: a normal fat percentage is not a destination but a by-product. You don't «reach» it in one heroic push only to grimly hold on afterwards. It comes about by itself for someone who lives that way: eats normally, moves, sleeps, carries muscle.",
+        "story.ch3.lifestyle.p2" => "It works in reverse too. Obesity is almost always not an accident or a verdict of genetics, but a reflection of how life is arranged day to day. What's in the fridge, how much a person moves, how they sleep, what they soothe stress with — the number on the scale is built from these little things.",
+        "story.ch3.lifestyle.p3" => "It sounds harsh, but it's actually good news. If weight is a derivative of lifestyle, then it's manageable. No feat is required and no eternal willpower diet: it's enough to change the habits themselves — and then a normal weight becomes not a goal you battle for, but simply something that is, because that's how you live.",
+
         // Story — chapter 1, introduction
         "story.intro.p1" => "Hi. This is the «Slimming Story» app. It is made specifically for people who can't lose weight and have a bit of a problem with extra pounds.",
         "story.intro.p2" => "Having a low body-fat percentage is very important. So you need to be able not just to «get slim for the summer», but also to keep your weight steady.",
@@ -946,6 +988,8 @@ fn ru(key: &str) -> &'static str {
         "summary.improve_weighing" => "Улучшайте качество взвешивания: чем оно выше, тем точнее понятно, в профиците вы или в дефиците.",
         "summary.improve_steps" => "Свыше 7000 шагов в день дают существенное улучшение здоровья.",
         "summary.improve_drink" => "Затесался калорийный напиток: замените его на версию без сахара или на сам фрукт — такие калории почти не дают сытости.",
+        "summary.good_under_planka" => "Сегодня вы уложились в свою планку калорий — это и есть тот темп, при котором уходит жир, а мышцы остаются.",
+        "summary.improve_over_planka" => "Следите за планкой калорий — особенно если вышли выше: именно так незаметно теряется дефицит. Есть сильно меньше тоже плохо, но перебор — главное, что стоит поправить.",
         "summary.week_button" => "Отчёт недели",
         "summary.week_title" => "Отчёт недели",
         "summary.week_pending" => "Отчёт недели будет посчитан",
@@ -1350,6 +1394,46 @@ fn ru(key: &str) -> &'static str {
         "story.ch2.night.feedback_label" => "Сегодня вечером",
         "story.ch2.night.feedback_good" => "Вечером много белка — отлично: дольше сытость, меньше ночных набегов.",
         "story.ch2.night.feedback_hint" => "Старайтесь делать последний приём пищи богатым белком — он дольше держит сытость и смягчает вечернюю тягу к холодильнику.",
+
+        // История — глава 3 «Зачем надо худеть?»
+        "story.ch3.title" => "Зачем надо худеть?",
+        "story.ch3.unlocked" => "Глава 3 открыта.",
+        "story.ch3.locked_hint" => "Для открытия пройдите все секции главы 2.",
+        "story.ch3.s1" => "Зачем нам вообще жир?",
+        "story.ch3.s2" => "Как выглядит «красивый человек»?",
+        "story.ch3.s3" => "Что такое физиологический минимум жира?",
+        "story.ch3.s4" => "Разница между «худым» и «обезжиренным»",
+        "story.ch3.s5" => "Жизнь без жира",
+
+        // История — глава 3, секция 1: зачем нам вообще жир
+        "story.ch3.fat.p1" => "Жир — это не ошибка организма и не наказание за слабость. Это древнейшая система выживания. Сотни тысяч лет еда была нестабильной: то густо, то пусто, — и выживали те, кто умел запасать энергию впрок, чтобы протянуть голодную зиму или неурожай. Способность копить жир была суперспособностью, и эволюция отточила её до совершенства.",
+        "story.ch3.fat.p2" => "Сломалось всё в последние несколько десятилетий. Еды стало не просто достаточно — её стало в избытке, она дешёвая, калорийная и доступна в любую минуту. Голодная зима больше не наступает, а система запасания работает как ни в чём не бывало. Механизм, спасавший наших предков, в мире изобилия превратился в проблему.",
+        "story.ch3.fat.p3" => "И проблема не только в том, как это выглядит. Жировая ткань — не пассивный склад, а полноценный эндокринный орган: она вырабатывает гормоны и сигнальные вещества. Когда жира становится слишком много, эти сигналы сбиваются, и одно из ключевых последствий — инсулинорезистентность: клетки перестают нормально слышать инсулин. Отсюда тянется длинный шлейф проблем со здоровьем. То есть худеть стоит не ради картинки, а потому что лишний жир активно вмешивается в работу тела.",
+        "story.ch3.fat.goal_label" => "Дневная планка калорий",
+        "story.ch3.fat.kcal_unit" => "ккал",
+        "story.ch3.fat.goal_set" => "Дневная планка калорий установлена — смотрите её в шапке дневника.",
+        "story.ch3.fat.need_diary" => "Поведите дневник еды несколько дней, чтобы мы могли установить планку калорий.",
+        "story.ch3.fat.open_diary" => "Открыть дневник",
+
+        // История — глава 3, секция 2: как выглядит красивый человек
+        "story.ch3.beauty.p1" => "О красоте спорят тысячелетиями, но если присмотреться, в основе почти всегда лежат две довольно простые вещи. Первая — кости. Если лицевой скелет развился нормально, черты получаются гармоничными, и это во многом дано от природы.",
+        "story.ch3.beauty.p2" => "А вот вторая вещь полностью в наших руках. Возьмите человека с нормальными чертами лица и уберите лишний жир, оставив здоровый физиологический минимум, — и он почти наверняка будет выглядеть красиво. Не потому что «похудел», а потому что проступает то, что жир обычно скрывает: линии лица, очертания тела, мышечный каркас.",
+        "story.ch3.beauty.p3" => "По сути красота тела складывается из двух слагаемых: отсутствие лишнего жира и наличие мышц под кожей. Это важная мысль, к которой мы ещё вернёмся: цель — не «стать меньше», а проявить структуру, которая уже есть. И достигается это не голоданием, а сочетанием умеренного жира и нормально развитой мускулатуры.",
+
+        // История — глава 3, секция 3: физиологический минимум жира
+        "story.ch3.minimum.p1" => "У жира есть нижняя граница, ниже которой опускаться нельзя, — так называемый физиологический, незаменимый жир. Это не запас, а рабочая часть организма: он нужен для гормонов, нервной системы, защиты органов. Уйти ниже этой черты — значит не «досушиться», а навредить себе.",
+        "story.ch3.minimum.p2" => "Важно понимать: у мужчин и женщин этот минимум разный, и у женщин он заметно выше. Это не недостаток, а норма — женская физиология, в том числе репродуктивная, просто требует больше жира, и попытки загнать себя в «мужские» цифры заканчиваются сбоем гормонов и цикла. Женщине стоит стремиться к здоровому уровню жира, а не к самому низкому возможному.",
+        "story.ch3.minimum.p3" => "Тут и кроется частая ловушка. Здоровый минимум у девушки без мускулатуры может выглядеть совсем не так, как ей хочется, — не подтянуто, а скорее «пусто». И вывод из этого не «сбросить ещё», а ровно противоположный: дело не в избытке жира, а в нехватке мышц. Решается это не диетой, а залом.",
+
+        // История — глава 3, секция 4: худой против обезжиренного
+        "story.ch3.lean.p1" => "Весы показывают одну цифру, но за ней стоят очень разные вещи. Когда человек худеет резко и жёстко, он теряет не только жир. Вместе с ним уходит и мышца — а это именно то, что держит тело подтянутым, а обмен — живым. В итоге вес падает, но результат в зеркале и по самочувствию разочаровывает.",
+        "story.ch3.lean.p2" => "Отсюда два принципа, которые лучше принять сразу. Первый: худеть стоит постепенно. Чем мягче темп, тем больше шансов, что уходит именно жир, а мышцы остаются на месте. Второй: одного «курса похудения» мало — надо менять сам образ жизни.",
+        "story.ch3.lean.p3" => "Потому что иначе включается грустная арифметика. Сбросили на жёсткой диете, потеряв и жир, и мышцы; вернулись к старым привычкам — вес вернулся. Но возвращается он преимущественно жиром, а потерянную мышцу так просто не вернуть. Человек оказывается на том же весе, что и до диеты, только с худшим составом тела и без запаса по здоровью. Поэтому цель — не «похудеть», а перестроить жизнь так, чтобы новый вес держался сам.",
+
+        // История — глава 3, секция 5: жизнь без жира
+        "story.ch3.lifestyle.p1" => "Главная мысль всей главы простая: нормальный процент жира — это не пункт назначения, а побочный продукт. Его не «достигают» рывком, чтобы потом героически удерживать. Он сам собой получается у того, кто так живёт: нормально ест, двигается, спит, носит на себе мышцы.",
+        "story.ch3.lifestyle.p2" => "Работает это и в обратную сторону. Ожирение почти всегда не случайность и не приговор генетики, а отражение того, как устроена жизнь изо дня в день. Что лежит в холодильнике, сколько человек двигается, как спит, чем заедает стресс — из этих мелочей и складывается цифра на весах.",
+        "story.ch3.lifestyle.p3" => "Звучит сурово, но на самом деле это хорошая новость. Если вес — производная образа жизни, значит, он управляем. Не нужен подвиг и не нужна вечная диета на силе воли: достаточно поменять сами привычки — и тогда нормальный вес станет не целью, за которую вы бьётесь, а тем, что просто есть, потому что вы так живёте.",
 
         // История — глава 1, введение
         "story.intro.p1" => "Привет. Это приложение «Худеющая история». Оно сделано специально для тех, кто не может похудеть и у кого есть небольшие проблемы с лишним весом.",

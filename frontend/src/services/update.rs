@@ -1,18 +1,45 @@
-//! In-app auto-update: detect a new deploy and reload to it.
+//! In-app update detection (manual update, not auto-reload).
 //!
 //! `init.js` stamps the build id into `globalThis.__APP_VERSION__`, and the same
-//! id is published at `/version.json`. On resume we poll that endpoint (cache-
-//! busted; the service worker also bypasses caching it) and reload when it
-//! differs. This covers the iOS-PWA-resumed-from-background case, where the app
-//! is restored from memory without a navigation, so a stale build keeps running
-//! even though navigations are network-first.
+//! id is published at `/version.json`. We POLL that endpoint (cache-busted; the
+//! service worker bypasses caching it) on launch + resume and, when it differs
+//! from the running build, raise the reactive [`available`] flag. We do NOT
+//! reload automatically — the user updates via Settings → «Версия» → Обновить
+//! (which calls [`reload`]). The flag drives the red highlight on the Settings
+//! nav icon and the Version row.
 
+use std::cell::RefCell;
+
+use leptos::*;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
-/// Decide whether to reload: only when both versions are known, non-empty, and
-/// differ. Never reload blind (unknown running build) — that would risk loops.
-fn needs_reload(running: Option<&str>, deployed: Option<&str>) -> bool {
+thread_local! {
+    // Reactive "a newer build is deployed" flag, shared by the nav badge and the
+    // Settings Version row. MUST be created at the ROOT (via init() in main, like
+    // db::version) — never lazily inside a reactive closure, or it'd be owned by
+    // that node and disposed on re-render, so set() from check() would hit a dead
+    // handle and the nav wouldn't update.
+    static UPDATE_AVAILABLE: RefCell<Option<RwSignal<bool>>> = const { RefCell::new(None) };
+}
+
+/// Create the shared flag in the root reactive scope. Call once from main()
+/// before mounting, alongside db::init().
+pub fn init() {
+    UPDATE_AVAILABLE.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some(create_rw_signal(false));
+        }
+    });
+}
+
+/// Reactive flag: true when a newer build than the running one is deployed.
+pub fn available() -> RwSignal<bool> {
+    UPDATE_AVAILABLE.with(|c| c.borrow().expect("update::init() must run before available()"))
+}
+
+/// True when both build ids are known, non-empty, and differ.
+fn is_newer(running: Option<&str>, deployed: Option<&str>) -> bool {
     matches!(
         (running, deployed),
         (Some(r), Some(d)) if !r.is_empty() && !d.is_empty() && r != d
@@ -27,16 +54,22 @@ fn running_version() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// If the deployed build differs from the running one, reload to pick it up.
-/// No-op when the running version is unknown (never reload blind) or offline.
-pub async fn check_and_reload() {
+/// The running build id for display ("—" when unknown).
+pub fn current_version() -> String {
+    running_version().unwrap_or_else(|| "—".to_string())
+}
+
+/// Poll `/version.json` and set the [`available`] flag accordingly. Does NOT
+/// reload. No-op (leaves the flag untouched) when offline / the running version
+/// is unknown, so a transient failure never clears a real "update available".
+pub async fn check() {
     let Some(running) = running_version() else { return };
     let Some(window) = web_sys::window() else { return };
 
     // Cache-bust so neither the browser HTTP cache nor a proxy serves a stale id.
     let url = format!("/version.json?t={}", js_sys::Date::now() as u64);
     let Ok(resp_val) = JsFuture::from(window.fetch_with_str(&url)).await else {
-        return; // offline / transient — retry on the next resume
+        return; // offline / transient — retry on the next activation
     };
     let Ok(resp) = resp_val.dyn_into::<web_sys::Response>() else { return };
     if !resp.ok() {
@@ -54,30 +87,33 @@ pub async fn check_and_reload() {
         return;
     };
 
-    if needs_reload(Some(&running), Some(&deployed)) {
-        leptos::logging::log!("update: new build {deployed} (running {running}) — reloading");
-        if let Some(loc) = web_sys::window().map(|w| w.location()) {
-            let _ = loc.reload();
-        }
-    }
+    available().set(is_newer(Some(&running), Some(&deployed)));
 }
 
 /// Fire-and-forget version check (used at launch and on resume).
 pub fn check_background() {
-    leptos::spawn_local(check_and_reload());
+    leptos::spawn_local(check());
+}
+
+/// Reload to the deployed build — the manual "Обновить" action. Navigations are
+/// network-first, so the reload pulls the new index.html/init.js/wasm.
+pub fn reload() {
+    if let Some(loc) = web_sys::window().map(|w| w.location()) {
+        let _ = loc.reload();
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::needs_reload;
+    use super::is_newer;
 
     #[test]
-    fn reloads_only_on_a_known_difference() {
-        assert!(needs_reload(Some("a"), Some("b")));        // differ -> reload
-        assert!(!needs_reload(Some("a"), Some("a")));       // same -> no
-        assert!(!needs_reload(None, Some("b")));            // unknown running -> no
-        assert!(!needs_reload(Some("a"), None));            // unknown deployed -> no
-        assert!(!needs_reload(Some(""), Some("b")));        // empty running -> no
-        assert!(!needs_reload(Some("a"), Some("")));        // empty deployed -> no
+    fn flags_only_a_known_difference() {
+        assert!(is_newer(Some("a"), Some("b"))); // differ -> available
+        assert!(!is_newer(Some("a"), Some("a"))); // same -> no
+        assert!(!is_newer(None, Some("b"))); // unknown running -> no
+        assert!(!is_newer(Some("a"), None)); // unknown deployed -> no
+        assert!(!is_newer(Some(""), Some("b"))); // empty running -> no
+        assert!(!is_newer(Some("a"), Some(""))); // empty deployed -> no
     }
 }

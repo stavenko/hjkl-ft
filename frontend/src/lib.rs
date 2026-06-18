@@ -31,6 +31,7 @@ pub fn main() {
         services::db::init().await;
         services::i18n::init_lang();
         services::i18n::init_weight_unit();
+        services::update::init(); // create the update-available signal at the root
 
         // Reconcile with the server on launch when signed in: push local changes,
         // then pull the merged result (so changes — incl. deletions — made on other

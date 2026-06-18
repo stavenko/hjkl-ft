@@ -2,7 +2,7 @@ use leptos::*;
 use leptos_router::*;
 use serde::Serialize;
 
-use crate::services::{push, db, story, profile, local, sync, i18n::t};
+use crate::services::{push, db, story, profile, local, sync, update, i18n::t};
 use crate::services::profile::Sex;
 
 const IOS_BG: &str = "background: var(--bulma-background); min-height: 100vh; padding: 16px; margin: -0.75rem;";
@@ -288,6 +288,36 @@ pub fn SettingsPage() -> impl IntoView {
                 }
             </div>
             })}
+
+            // ---- Version (manual update) ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.version")}</p>
+            <div style=IOS_CARD>
+                <div style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                    <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                        {move || update::available().get().then(|| view! {
+                            <span style="width: 9px; height: 9px; border-radius: 50%; background: var(--bulma-danger); flex-shrink: 0;"></span>
+                        })}
+                        <div style="min-width: 0;">
+                            <span class="is-size-6">
+                                {move || if update::available().get() { t("settings.version_available") } else { t("settings.version_up_to_date") }}
+                            </span>
+                            <p class="is-size-7 has-text-grey-light" style="margin: 2px 0 0 0;">
+                                {move || format!("{} {}", t("settings.version_current"), update::current_version())}
+                            </p>
+                        </div>
+                    </div>
+                    {move || update::available().get().then(|| view! {
+                        <button
+                            attr:data-testid="settings-btn-update"
+                            class="button is-link is-small"
+                            style="flex-shrink: 0;"
+                            on:click=move |_| update::reload()
+                        >
+                            {move || t("settings.version_update")}
+                        </button>
+                    })}
+                </div>
+            </div>
 
             // ---- Danger zone ----
             <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.danger_zone")}</p>

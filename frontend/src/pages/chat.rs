@@ -157,18 +157,25 @@ pub fn ChatPage() -> impl IntoView {
                     }
                     streaming_text.update(|s| s.push_str(chunk));
                 }
-                ai::ChatEvent::ToolCall(name) => {
-                    ai_tool.set(Some(name.to_string()));
+                ai::ChatEvent::ToolCall(name, params) => {
+                    ai_tool.set(Some(format!("{name} {params}")));
                     ai_phase.set(3);
                 }
                 ai::ChatEvent::ToolDone(_) => {}
             };
 
             match ai::chat_agent(system, transcript, snapshot, on_event).await {
-                Ok(ai::ChatOutcome { answer, escalated }) => {
+                Ok(ai::ChatOutcome { answer, escalated, tools }) => {
                     stop_timer();
                     ai_loading.set(false);
                     streaming_text.set(String::new());
+                    // Persist each tool call (shown inline as "Assistant requested
+                    // tool: …" and gathered into the Context section) BEFORE the
+                    // final answer, so the chat reads call → answer in order.
+                    for inv in tools {
+                        let tm = chat::append_tool_call(inv.name, inv.params, inv.result).await;
+                        messages.update(|v| v.push(tm));
+                    }
                     let am = chat::append_assistant(answer, escalated).await;
                     messages.update(|v| v.push(am));
                 }
@@ -190,6 +197,15 @@ pub fn ChatPage() -> impl IntoView {
         });
     };
 
+    // The "Context" section: the last ≤7 tool calls (with results) across the
+    // whole chat — the same bounded tool context the model is fed.
+    let context_tools = move || {
+        let all: Vec<ChatMessage> =
+            messages.get().into_iter().filter(|m| m.role == "tool_call").collect();
+        let from = all.len().saturating_sub(7);
+        all[from..].to_vec()
+    };
+
     view! {
         // Pinned app-shell: position: fixed makes the page immune to document
         // scroll/overscroll (so the title never slides up under the status bar),
@@ -198,6 +214,36 @@ pub fn ChatPage() -> impl IntoView {
         // grey background fills the whole viewport (no grey/white split).
         <div style="position: fixed; inset: 0; padding: env(safe-area-inset-top) 0.75rem 0; display: flex; flex-direction: column; background: var(--bulma-background);">
             <h1 class="title is-5" style="margin: 0 auto 0.75rem; max-width: 30rem; width: 100%; flex-shrink: 0;">{move || t("nav.support")}</h1>
+
+            <Show when=move || !context_tools().is_empty()>
+                <details attr:data-testid="chat-context"
+                    style="flex-shrink: 0; max-width: 30rem; width: 100%; margin: 0 auto 0.5rem;">
+                    <summary class="is-size-7 has-text-grey" style="cursor: pointer;">
+                        {move || format!("{} ({})", t("chat.context"), context_tools().len())}
+                    </summary>
+                    <div style="max-height: 30vh; overflow-y: auto; background: var(--bulma-scheme-main-bis); border-radius: 8px; padding: 8px 10px; margin-top: 4px;">
+                        <For
+                            each=move || context_tools()
+                            key=|m| m.id.clone()
+                            children=move |m| {
+                                let name = m.tool_name.clone().unwrap_or_default();
+                                let params = m.tool_params.clone().unwrap_or_default();
+                                let result = m.tool_result.clone().unwrap_or_default();
+                                view! {
+                                    <div style="margin-bottom: 8px;">
+                                        <p class="is-size-7" style="margin: 0; font-family: monospace; word-break: break-word;">
+                                            <strong>{name}</strong>" "{params}
+                                        </p>
+                                        <p class="is-size-7 has-text-grey" style="margin: 2px 0 0; font-family: monospace; word-break: break-word; white-space: pre-wrap;">
+                                            {format!("\u{2192} {result}")}
+                                        </p>
+                                    </div>
+                                }
+                            }
+                        />
+                    </div>
+                </details>
+            </Show>
 
             <div attr:data-testid="chat-messages" attr:data-ios-scroll="1" style="flex: 1; overflow-y: auto; overscroll-behavior: contain; max-width: 30rem; width: 100%; margin: 0 auto; padding-bottom: 9rem;">
                 <Show

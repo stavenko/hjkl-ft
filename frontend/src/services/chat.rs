@@ -10,12 +10,21 @@ use super::db;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,                 // uuid::Uuid::now_v7().to_string() — also the IndexedDB key
-    pub role: String,               // "user" | "assistant"
+    pub role: String,               // "user" | "assistant" | "tool_call"
     pub text: String,               // user-typed text OR streamed assistant answer (final). May be "".
     pub image: Option<String>,      // image data URL "data:<mime>;base64,..." (user msgs only)
     pub audio: Option<String>,      // audio data URL "data:audio/webm;base64,..." (user msgs only)
     pub duration_secs: Option<f64>, // voice clip wall-clock seconds (user voice msgs only)
     pub escalated: bool,            // assistant msg flag set when escalate_to_human tool fired
+    // tool_call messages: which tool the assistant invoked, its compact-JSON
+    // params, and the compact-JSON result. `#[serde(default)]` so messages
+    // stored before these fields existed still deserialize.
+    #[serde(default)]
+    pub tool_name: Option<String>,
+    #[serde(default)]
+    pub tool_params: Option<String>,
+    #[serde(default)]
+    pub tool_result: Option<String>,
     pub created_at: String,         // chrono::Utc::now().to_rfc3339() — ordering key (ascending)
 }
 
@@ -50,6 +59,9 @@ pub async fn append_user(
         audio,
         duration_secs,
         escalated: false,
+        tool_name: None,
+        tool_params: None,
+        tool_result: None,
         created_at: now(),
     };
     db::put("chat", &m).await;
@@ -66,6 +78,29 @@ pub async fn append_assistant(text: String, escalated: bool) -> ChatMessage {
         audio: None,
         duration_secs: None,
         escalated,
+        tool_name: None,
+        tool_params: None,
+        tool_result: None,
+        created_at: now(),
+    };
+    db::put("chat", &m).await;
+    m
+}
+
+/// Persist a tool-call record (shown in the chat as "Assistant requested tool:
+/// …" and gathered into the "Context" section with its result).
+pub async fn append_tool_call(name: String, params: String, result: String) -> ChatMessage {
+    let m = ChatMessage {
+        id: new_id(),
+        role: "tool_call".to_string(),
+        text: String::new(),
+        image: None,
+        audio: None,
+        duration_secs: None,
+        escalated: false,
+        tool_name: Some(name),
+        tool_params: Some(params),
+        tool_result: Some(result),
         created_at: now(),
     };
     db::put("chat", &m).await;

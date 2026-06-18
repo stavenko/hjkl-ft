@@ -14,6 +14,23 @@ fn fmt_duration(secs: f64) -> String {
 /// escalated, a warning banner under the bubble.
 #[component]
 pub fn ChatMessage(msg: ChatMessage) -> impl IntoView {
+    // Tool-call notice: a compact, left-aligned line that tells the user which
+    // tool the assistant invoked and with what params (the result lives in the
+    // "Context" section, not here).
+    if msg.role == "tool_call" {
+        let name = msg.tool_name.clone().unwrap_or_default();
+        let params = msg.tool_params.clone().unwrap_or_default();
+        return view! {
+            <div attr:data-testid="chat-tool-call"
+                style="margin: 2px 0 8px; max-width: 80%; margin-right: auto;">
+                <p class="is-size-7 has-text-grey" style="margin: 0; font-family: monospace; word-break: break-word;">
+                    {format!("Assistant requested tool: {name} {params}")}
+                </p>
+            </div>
+        }
+        .into_view();
+    }
+
     let is_user = msg.role == "user";
 
     // User: link-tinted bubble pushed right. Assistant: neutral card pushed left.
@@ -60,4 +77,5 @@ pub fn ChatMessage(msg: ChatMessage) -> impl IntoView {
             </Show>
         </div>
     }
+    .into_view()
 }

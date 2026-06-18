@@ -831,23 +831,37 @@ pub enum ChatEvent<'a> {
     Thinking,
     /// A visible answer chunk (already stripped of control markers).
     Answer(&'a str),
-    /// A tool is about to run.
-    ToolCall(&'a str),
+    /// A tool is about to run — `(name, compact-json-params)`.
+    ToolCall(&'a str, &'a str),
     /// A tool finished.
     ToolDone(&'a str),
 }
 
-/// Outcome of the chat loop: the final user-facing answer and whether the
-/// `escalate_to_human` tool fired during it.
+/// One tool call made during a chat turn: the tool name, the compact-JSON params
+/// it was called with, and the compact-JSON result it returned. Surfaced in the
+/// UI ("Assistant requested tool: …") and kept as the model's bounded tool
+/// context (the last [`MAX_CONTEXT_TOOLS`]), instead of bloating the transcript.
+#[derive(Clone)]
+pub struct ToolInvocation {
+    pub name: String,
+    pub params: String,
+    pub result: String,
+}
+
+/// Outcome of the chat loop: the final user-facing answer, whether the
+/// `escalate_to_human` tool fired, and the tool calls made this turn (for the UI).
 pub struct ChatOutcome {
     pub answer: String,
     pub escalated: bool,
+    pub tools: Vec<ToolInvocation>,
 }
 
 /// Hard cap on LLM↔tool round-trips, so a misbehaving model cannot loop forever.
 const MAX_TOOL_ITERS: usize = 6;
-/// Only the most recent N turns (user + assistant + tool) are sent to the model.
+/// Only the most recent N conversation turns (user + assistant) are sent.
 const CONTEXT_WINDOW: usize = 20;
+/// Most recent tool calls (with results) kept in the model's "Context" section.
+const MAX_CONTEXT_TOOLS: usize = 7;
 
 /// Run the support-chat agentic loop. Each iteration renders the last
 /// `CONTEXT_WINDOW` turns into a prompt, streams the model's output (filtered of
@@ -865,17 +879,20 @@ const CONTEXT_WINDOW: usize = 20;
 /// `Err("HTTP 402: …")`); it may later need an ungated path.
 pub async fn chat_agent(
     system: String,
-    mut transcript: Vec<ChatTurn>,
+    transcript: Vec<ChatTurn>,
     snapshot: ProgressSnapshot,
     on_event: impl Fn(ChatEvent) + Clone + 'static,
 ) -> Result<ChatOutcome, String> {
     let registry = chat_registry(snapshot);
     let mut escalated = false;
+    // Tool calls made this turn. They do NOT enter the conversation transcript;
+    // the last MAX_CONTEXT_TOOLS are rendered into a bounded "Context" section.
+    let mut tools: Vec<ToolInvocation> = Vec::new();
 
     for _ in 0..MAX_TOOL_ITERS {
         on_event(ChatEvent::Requesting);
 
-        let prompt = render_prompt(&system, &transcript);
+        let prompt = render_prompt(&system, &transcript, &tools);
         let executor = build_executor()?;
         let result = executor
             .execute_raw(prompt)
@@ -915,7 +932,8 @@ pub async fn chat_agent(
         // 1) Explicit tool call? Dispatch through the registry and loop.
         if let Some(call) = parse_tool_call(&raw) {
             let name = call.name.clone();
-            on_event(ChatEvent::ToolCall(&name));
+            let params = serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".to_string());
+            on_event(ChatEvent::ToolCall(&name, &params));
             if name == "escalate_to_human" {
                 escalated = true;
             }
@@ -938,13 +956,10 @@ pub async fn chat_agent(
                     };
                 }
             }
-            // Record the model's request + the tool's result so the next turn can
-            // read them.
-            transcript.push(ChatTurn { role: ChatRole::Assistant, text: raw });
-            transcript.push(ChatTurn {
-                role: ChatRole::Tool,
-                text: format!("{name} -> {result_json}"),
-            });
+            // Record the call + result as bounded tool context (NOT in the
+            // conversation transcript). render_prompt feeds the model the last
+            // MAX_CONTEXT_TOOLS of these.
+            tools.push(ToolInvocation { name: name.clone(), params, result: result_json });
             on_event(ChatEvent::ToolDone(&name));
             continue;
         }
@@ -952,16 +967,17 @@ pub async fn chat_agent(
         // 2) Explicit `[[final]]` marker (clean end signal) or no marker at all
         //    (graceful fallback) → this is the answer. End the loop.
         let answer = strip_final_marker(&raw);
-        return Ok(ChatOutcome { answer, escalated });
+        return Ok(ChatOutcome { answer, escalated, tools });
     }
 
     // Hit the iteration cap with the model still asking for tools.
     Err(format!("chat loop did not finish within {MAX_TOOL_ITERS} tool steps"))
 }
 
-/// Render the system preamble + the last `CONTEXT_WINDOW` turns into a single
-/// prompt string ending with `Assistant:` for the next completion.
-fn render_prompt(system: &str, transcript: &[ChatTurn]) -> String {
+/// Render the system preamble, the last `CONTEXT_WINDOW` conversation turns, and
+/// a bounded "Context" section with the last `MAX_CONTEXT_TOOLS` tool calls and
+/// their results, into a single prompt ending with `Assistant:`.
+fn render_prompt(system: &str, transcript: &[ChatTurn], tools: &[ToolInvocation]) -> String {
     let start = transcript.len().saturating_sub(CONTEXT_WINDOW);
     let mut p = String::from(system);
     p.push_str("\n\nConversation:\n");
@@ -972,6 +988,16 @@ fn render_prompt(system: &str, transcript: &[ChatTurn]) -> String {
             ChatRole::Tool => "Tool result",
         };
         p.push_str(&format!("{speaker}: {}\n", turn.text));
+    }
+    if !tools.is_empty() {
+        let from = tools.len().saturating_sub(MAX_CONTEXT_TOOLS);
+        p.push_str(
+            "\nContext — recent tool calls and their results (newest last). \
+             Use these results; do not repeat a call you already made:\n",
+        );
+        for inv in &tools[from..] {
+            p.push_str(&format!("{} {} -> {}\n", inv.name, inv.params, inv.result));
+        }
     }
     p.push_str("Assistant:");
     p

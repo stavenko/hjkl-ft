@@ -197,6 +197,12 @@ pub fn ChatPage() -> impl IntoView {
         });
     };
 
+    // Messages shown in the stream: everything except tool_call records (those
+    // live only in the "Context" section and the model's context).
+    let stream_messages = move || {
+        messages.get().into_iter().filter(|m| m.role != "tool_call").collect::<Vec<_>>()
+    };
+
     // The "Context" section: the last ≤7 tool calls (with results) across the
     // whole chat — the same bounded tool context the model is fed.
     let context_tools = move || {
@@ -255,7 +261,10 @@ pub fn ChatPage() -> impl IntoView {
                     }
                 >
                     <For
-                        each=move || messages.get()
+                        // tool_call messages are NOT drawn in the stream; they live
+                        // only in the collapsible "Context" section (and the model's
+                        // context). Only user / assistant bubbles render here.
+                        each=move || stream_messages()
                         key=|m| m.id.clone()
                         children=move |m| view! { <ChatMessageBubble msg=m /> }
                     />

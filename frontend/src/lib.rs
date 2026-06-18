@@ -57,9 +57,9 @@ pub fn main() {
         install_foreground_sync();
         services::update::check_background();
 
-        // If the day rolled over since last open, pre-generate yesterday's
-        // summary in the background (best-effort; gated by subscription).
-        leptos::spawn_local(services::summary::pregen_on_day_change());
+        // On activation, prepare yesterday's assessment if there's none yet —
+        // so it's ready before the user opens the day, not generated on open.
+        leptos::spawn_local(services::summary::ensure_yesterday());
     });
 }
 
@@ -82,6 +82,8 @@ fn install_foreground_sync() {
             if services::auth::get_token().is_some() {
                 services::sync::sync_now_background();
             }
+            // Prepare yesterday's assessment on resume too (no-op if it exists).
+            leptos::spawn_local(services::summary::ensure_yesterday());
         }
     });
     let _ = document

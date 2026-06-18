@@ -510,17 +510,13 @@ pub async fn ensure_week(week_start: &str) -> Option<Summary> {
     Some(store(format!("week:{week_start}"), week_start.to_string(), text).await)
 }
 
-/// On app open: if the day changed since last seen, pre-generate yesterday's
-/// summary in the background (best-effort). Tracks the last-seen date in the DB.
-pub async fn pregen_on_day_change() {
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let last: Option<Summary> = db::get("summaries", "meta:last_seen").await;
-    let last_date = last.as_ref().map(|s| s.text.clone());
-    if last_date.as_deref() == Some(today.as_str()) {
-        return;
-    }
-    db::put("summaries", &Summary { id: "meta:last_seen".into(), date: today.clone(), text: today.clone(), created_at: now() }).await;
-    let yesterday = (chrono::Local::now().date_naive() - Duration::days(1)).format("%Y-%m-%d").to_string();
-    // Best-effort background pre-generation; no UI to drive, so a no-op token sink.
+/// Ensure YESTERDAY's assessment exists. Called on every app ACTIVATION (launch +
+/// foreground), so the report is prepared BEFORE the user opens the day rather
+/// than generated on open. Best-effort, no UI; `ensure_day` no-ops when a report
+/// already exists, so this only generates when there's none yet.
+pub async fn ensure_yesterday() {
+    let yesterday = (chrono::Local::now().date_naive() - Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
     let _ = ensure_day(&yesterday, |_| {}).await;
 }

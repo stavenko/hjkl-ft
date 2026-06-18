@@ -7,6 +7,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::services::ai::AiPhase;
+use crate::services::db;
 use crate::services::i18n::t;
 use crate::services::summary;
 
@@ -264,12 +265,18 @@ pub fn SummaryBlock(#[prop(into)] date: Signal<String>) -> impl IntoView {
         });
     });
 
-    // (Re)load whenever the selected day changes.
+    // Load the existing assessment for the selected day — DISPLAY only, NO
+    // generation. The report is produced on app activation (lib.rs), not when a
+    // day is opened. Reactive to summaries writes, so an activation-time
+    // generation appears here live; the "Переделать" button below regenerates.
+    let sum_ver = db::version("summaries");
     create_effect(move |_| {
-        let _ = date.get();
-        day_text.set(None);
+        let d = date.get();
+        sum_ver.get();
         ai_error.set(None);
-        run.call(false);
+        spawn_local(async move {
+            day_text.set(summary::get_day(&d).await.map(|s| s.text));
+        });
     });
 
     // Weekly report state. `week_start` is the Monday of the selected day's week.

@@ -3,7 +3,7 @@ use leptos_router::*;
 
 use crate::pages;
 use crate::services::i18n::t;
-use crate::services::{auth, platform, push, update};
+use crate::services::{auth, db, platform, push, story, update};
 
 #[derive(Clone, Copy, PartialEq)]
 enum AppState {
@@ -25,9 +25,41 @@ fn initial_state() -> AppState {
     }
 }
 
+/// Invisible component mounted inside `<Router>`: when the user opens a story
+/// section page it marks that section seen (clearing its "new" dot) and refreshes
+/// the nav-icon attention marker. Lives inside the router so `use_location` works.
+#[component]
+fn RouteWatcher() -> impl IntoView {
+    let location = use_location();
+    create_effect(move |_| {
+        let path = location.pathname.get();
+        if story::is_section_route(&path) {
+            spawn_local(async move {
+                story::mark_section_seen(&path).await;
+                story::refresh_attention();
+            });
+        }
+    });
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     let state = create_rw_signal(initial_state());
+
+    // Keep the nav-icon story marker live: recompute attention whenever data
+    // that feeds a section/task unlock changes — so completing a task lights the
+    // dot immediately, even when the user is on another page.
+    create_effect(move |_| {
+        db::version("story").get();
+        db::version("weight_entries").get();
+        db::version("step_entries").get();
+        db::version("diary").get();
+        db::version("goals").get();
+        db::version("summaries").get();
+        db::version("progress_photos").get();
+        db::version("recipes").get();
+        story::refresh_attention();
+    });
 
     let after_auth = move || {
         if push::needs_push_onboarding() {
@@ -71,6 +103,7 @@ pub fn App() -> impl IntoView {
 
         // Router always mounted
         <Router>
+            <RouteWatcher/>
             <div style="padding-bottom: 4.5rem;">
                 <div style="padding: 0.75rem;">
                     <Routes>
@@ -115,11 +148,17 @@ pub fn App() -> impl IntoView {
 
             <nav style="position: fixed; bottom: 0.75rem; left: 50%; transform: translateX(-50%); z-index: 40; background: var(--bulma-scheme-main); display: flex; justify-content: space-around; align-items: center; height: 3.5rem; width: min(26rem, calc(100% - 2rem)); border-radius: 1rem; box-shadow: 0 4px 24px rgba(0,0,0,0.15);">
                 <a attr:data-testid="nav-story" href="/" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
+                    <span style="position: relative; display: inline-flex;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
                         <path d="M9 7h6" />
                         <path d="M9 11h4" />
                     </svg>
+                    {move || story::attention_signal().get().then(|| view! {
+                        <span attr:data-testid="nav-story-attention-dot"
+                            style="position: absolute; top: -1px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--bulma-danger); border: 1.5px solid var(--bulma-scheme-main);"></span>
+                    })}
+                    </span>
                     <span style="font-size: 0.6rem; margin-top: 2px;">{move || t("nav.story")}</span>
                 </a>
                 <a attr:data-testid="nav-diary" href="/diary" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">

@@ -7,43 +7,16 @@ const IOS_CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12p
 const IOS_SECTION_LABEL: &str = "text-transform: uppercase; letter-spacing: 0.02em; padding: 24px 0 8px 16px; margin: 0;";
 const IOS_SEPARATOR: &str = "border-bottom: 0.5px solid var(--bulma-border-weak); margin-left: 52px;";
 
-/// Sections of chapter 1: (emoji icon, i18n label key, route once unlocked).
-const CH1_SECTIONS: [(&str, &str, Option<&str>); 9] = [
-    ("\u{27a1}\u{fe0f}", "story.ch1.intro", Some("/story/intro")),
-    ("\u{2699}\u{fe0f}", "story.ch1.setup", Some("/story/setup")),
-    ("\u{1f4b0}", "story.ch1.accounting", Some("/story/accounting")),
-    ("\u{1f37d}\u{fe0f}", "story.ch1.first_food", Some("/story/first-food")),
-    ("\u{1f6b6}", "story.ch1.activity", Some("/story/activity")),
-    ("\u{1f468}\u{200d}\u{1f373}", "story.ch1.cooking", Some("/story/cooking")),
-    ("\u{1f9b4}", "story.ch1.bones", Some("/story/bones")),
-    ("\u{1f389}", "story.ch1.restaurant", Some("/story/restaurant")),
-    ("\u{1f513}", "story.ch1.next", Some("/story/next")),
-];
-
-/// Sections of chapter 2 «Appetite». Content/tasks added per-section as written;
-/// routes are None until each page exists.
-const CH2_SECTIONS: [(&str, &str, Option<&str>); 7] = [
-    ("\u{26a0}\u{fe0f}", "story.ch2.s1", Some("/story/ch2-mistake")),
-    ("\u{1f966}", "story.ch2.s2", Some("/story/ch2-veg")),
-    ("\u{1f357}", "story.ch2.s3", Some("/story/ch2-protein")),
-    ("\u{1f37f}", "story.ch2.s4", Some("/story/ch2-snack")),
-    ("\u{1f964}", "story.ch2.s5", Some("/story/ch2-drinks")),
-    ("\u{1f37d}\u{fe0f}", "story.ch2.s6", Some("/story/ch2-meals")),
-    ("\u{1f319}", "story.ch2.s7", Some("/story/ch2-night")),
-];
-
-/// Sections of chapter 3 «Why lose weight?». s1 carries the calorie-planka
-/// mechanic; s2..s5 are read-only prose.
-const CH3_SECTIONS: [(&str, &str, Option<&str>); 5] = [
-    ("\u{1f525}", "story.ch3.s1", Some("/story/ch3-fat")),
-    ("\u{1fa9e}", "story.ch3.s2", Some("/story/ch3-beauty")),
-    ("\u{1f4c9}", "story.ch3.s3", Some("/story/ch3-minimum")),
-    ("\u{2696}\u{fe0f}", "story.ch3.s4", Some("/story/ch3-lean")),
-    ("\u{1f331}", "story.ch3.s5", Some("/story/ch3-lifestyle")),
-];
+use story::{CH1_SECTIONS, CH2_SECTIONS, CH3_SECTIONS};
 
 #[component]
 pub fn StoryPage() -> impl IntoView {
+    // Opening the Story page acknowledges every completed task (clears the
+    // "task done" attention marker) and refreshes the nav-icon dot.
+    spawn_local(async move {
+        story::ack_done_tasks().await;
+        story::refresh_attention();
+    });
     // Story progress is driven by the IndexedDB `story` store. Reload whenever
     // that store is written to (the `want_new_body` flag toggled on the intro page).
     let story_ver = db::version("story");
@@ -168,74 +141,62 @@ pub fn StoryPage() -> impl IntoView {
         }
     });
 
-    // A section's *completion* — the task(s) that open the next section.
-    let completed = move |i: usize| match i {
-        0 => progress_photos.get(),               // intro: front/side/back photos taken
-        1 => lang_done.get() && notif_done.get(), // setup: language + notification
-        2 => weigh_in_on.get(),                   // accounting: weigh-in reminder enabled
-        3 => first_food_done.get(),               // first food: a food was entered
-        4 => first_steps.get(),                   // activity: steps recorded at least once
-        5 => dish_created.get() && dish_in_diary.get(), // cooking: dish created + added to diary
-        6 => bones_waste.get(),                    // bones: a waste value was entered
-        7 => restaurant_food.get(),                // restaurant: restaurant food logged
-        8 => sub_paid.get(),                        // next: subscribed (paid) via the paywall
-        _ => false,
+    // The section routes the user has already opened — drives the per-row "new"
+    // dot (an unlocked-but-unread section). Reloaded whenever the story DB writes.
+    let seen_routes = create_rw_signal(std::collections::HashSet::<String>::new());
+    create_effect(move |_| {
+        story_ver.get();
+        spawn_local(async move {
+            seen_routes.set(story::seen_routes().await);
+        });
+    });
+
+    // Single source of truth: assemble the current progress snapshot from the
+    // signals above and let the shared rules (story::Progress) decide what's
+    // unlocked / completed — the nav-icon attention marker reads the same rules.
+    let progress = move || story::Progress {
+        progress_photos: progress_photos.get(),
+        sex_done: sex_done.get(),
+        lang_done: lang_done.get(),
+        notif_done: notif_done.get(),
+        weigh_in_on: weigh_in_on.get(),
+        first_weigh: first_weigh.get(),
+        first_food_done: first_food_done.get(),
+        steps_reminder_on: steps_reminder_on.get(),
+        first_steps: first_steps.get(),
+        dish_created: dish_created.get(),
+        dish_in_diary: dish_in_diary.get(),
+        bones_waste: bones_waste.get(),
+        restaurant_food: restaurant_food.get(),
+        meal_split_unlocked: meal_split_unlocked.get(),
+        night_feedback_viewed: night_feedback_viewed.get(),
+        weight_streak: streak.get(),
+        steps_streak: steps_streak.get(),
+        diary_streak: diary_streak.get(),
+        diary_days: diary_days.get(),
+        calorie_planka_set: calorie_planka_set.get(),
+        s4_done: s4_done.get(),
+        s5_done: s5_done.get(),
+        sub_active: sub_active.get(),
+        sub_paid: sub_paid.get(),
     };
-    // Unlocking is cumulative: a section is open only if every earlier section
-    // is completed. This keeps the chain strictly sequential — there can never
-    // be a locked section sitting before an unlocked one.
-    let is_unlocked = move |i: usize| (0..i).all(completed);
 
-    // Chapter 2 opens once the user has weighed in 7 days in a row AND has an
-    // active subscription (Trial not expired, or Paid).
-    let chapter2_unlocked = move || streak.get() >= 7 && sub_active.get();
+    let is_unlocked = move |i: usize| progress().ch1_unlocked(i);
+    let chapter2_unlocked = move || progress().chapter2_unlocked();
+    let ch2_is_unlocked = move |i: usize| progress().ch2_unlocked(i);
+    let chapter3_unlocked = move || progress().chapter3_unlocked();
+    let ch3_is_unlocked = move |i: usize| progress().ch3_unlocked(i);
 
-    // Chapter 2 section completion. Only s1 has a completion gate (the 7-day
-    // food-diary streak); s2 is post-factum and s3 sets a goal, neither of which
-    // gate the chain, so later sections open as soon as s1 is complete.
-    let ch2_completed = move |i: usize| match i {
-        0 => diary_streak.get() >= 7,        // s1: 7-day food-diary streak
-        3 => s4_done.get(),                  // s4: report-ready(yesterday) + snack yesterday
-        4 => s5_done.get(),                  // s5: report-ready(yesterday) + no high-cal drink
-        5 => meal_split_unlocked.get(),      // s6: meal-split section opened
-        6 => night_feedback_viewed.get(),    // s7: night feedback viewed
-        _ => true,                           // s2(1), s3(2): post-factum / goal — no gate
+    // A section row shows a "new" dot when it's unlocked, has a page, and the
+    // user hasn't opened it yet.
+    let is_new = move |unlocked: bool, route: Option<&str>| {
+        unlocked && matches!(route, Some(r) if !seen_routes.get().contains(r))
     };
-    // Cumulative chain inside chapter 2, gated by the chapter being unlocked.
-    let ch2_is_unlocked =
-        move |i: usize| chapter2_unlocked() && (0..i).all(ch2_completed);
-
-    // Chapter 3 opens once the user has been tracking the food diary for a few
-    // days (≥ 7 distinct days) — it sets a calorie planka from that history, so
-    // it gates on accumulated tracking rather than on finishing chapter 2.
-    const CH3_MIN_DIARY_DAYS: u32 = 7;
-    let chapter3_unlocked = move || diary_days.get() >= CH3_MIN_DIARY_DAYS;
-
-    // Chapter 3 section completion. Only s1 has a gate (the calorie planka set on
-    // open); s2..s5 are read-only and auto-complete.
-    let ch3_completed = move |i: usize| match i {
-        0 => calorie_planka_set.get(), // s1: opening it sets the hidden planka
-        _ => true,                     // s2..s5: read-only prose
-    };
-    // Cumulative chain inside chapter 3, gated by the chapter being unlocked.
-    let ch3_is_unlocked =
-        move |i: usize| chapter3_unlocked() && (0..i).all(ch3_completed);
 
     let sections_total = CH1_SECTIONS.len();
     let sections_open = move || (0..sections_total).filter(|&i| is_unlocked(i)).count();
-    // Chapter 1 tasks: want a new body, language, test notification, weigh-in
-    // reminder, first measurement, 7-day weigh-in streak, first food entry,
-    // steps reminder, first steps, 7-day steps streak, dish created, dish in diary.
-    let tasks_total = 20;
-    let tasks_done = move || {
-        [progress_photos.get(), sex_done.get(), lang_done.get(), notif_done.get(), weigh_in_on.get(),
-         first_weigh.get(), streak.get() >= 7, first_food_done.get(),
-         steps_reminder_on.get(), first_steps.get(), steps_streak.get() >= 7,
-         dish_created.get(), dish_in_diary.get(), bones_waste.get(), restaurant_food.get(),
-         sub_paid.get(), diary_streak.get() >= 7,
-         s4_done.get(), s5_done.get(), night_feedback_viewed.get()]
-            .iter().filter(|&&v| v).count()
-    };
+    let tasks_total = story::TASK_KEYS.len();
+    let tasks_done = move || progress().tasks().iter().filter(|&&v| v).count();
 
     const ROW_STYLE: &str = "padding: 12px 16px; display: flex; align-items: center; gap: 12px; color: inherit; text-decoration: none;";
 
@@ -254,6 +215,10 @@ pub fn StoryPage() -> impl IntoView {
                         <a href=r style=format!("{}cursor: pointer;", ROW_STYLE)>
                             {icon_span}
                             {label_span}
+                            {is_new(unlocked, route).then(|| view! {
+                                <span attr:data-testid="story-section-new-dot"
+                                    style="width: 8px; height: 8px; border-radius: 50%; background: var(--bulma-danger); flex: none;"></span>
+                            })}
                             <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
                         </a>
                     }.into_view(),

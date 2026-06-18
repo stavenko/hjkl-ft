@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod api;
+pub mod bug_report;
 pub mod chat;
 pub mod auth;
 pub mod config;

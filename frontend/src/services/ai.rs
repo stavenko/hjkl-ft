@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use api_types::*;
@@ -10,7 +11,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
-use super::{auth, config, local};
+use super::{auth, bug_report, config, local, update};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct NutritionResponse {
@@ -599,13 +600,194 @@ impl arti_pipes::tool::Tool for ReadProgress {
     }
 }
 
-/// The tool registry exposed to support chat: `escalate_to_human` (stub) and
-/// `read_progress` (reads the pre-built snapshot). Descriptors come from these
-/// real registrations, and calls are dispatched via `ToolRegistry::execute`.
+// ── read_documentation tool: short in-app help docs for usage advice ──
+//
+// A tiny built-in documentation index. The model is told the available doc ids
+// (see `doc_index`, embedded in the system prompt) and fetches the one it needs
+// before explaining how a feature works, so its advice matches the real app.
+
+const DIARY_DOC: &str = "Дневник питания (вкладка «Дневник»).\n\
+- Вверху — выбранный день и сводка КБЖУ за день (калории, белки, жиры, углеводы) относительно целей; день переключается выбором даты сверху.\n\
+- Добавить съеденное: кнопка «+» внизу → страница добавления → найди продукт по названию в поиске → выбери его → укажи вес в граммах → сохрани. Запись попадёт в текущий день.\n\
+- Нет нужного продукта — его можно создать, указав КБЖУ (ИИ может подсказать значения по названию).\n\
+- Долгое нажатие на строку записи за сегодня открывает меню: Дублировать, Изменить (вес/название/КБЖУ), Удалить.\n\
+- Несъедобные части (кости, косточки) указываются как «отход» — их вес вычитается из съеденного.";
+
+const WEIGHT_DOC: &str = "Дневник веса (вкладка «Вес»).\n\
+- Записать измерение: введи вес в кг за день и сохрани. На одну дату — одно значение (повторная запись перезаписывает).\n\
+- График показывает динамику веса; в карточке есть тренд (снижается/растёт) с оценкой уверенности примерно за последние 2 недели.\n\
+- Текущий вес на виджете подсвечивается цветом: зелёный — снижение/дефицит, розовый — рост/профицит, чёрный — удержание.\n\
+- Полезно взвешиваться регулярно, утром натощак; 7 дней подряд открывают дополнительные задания в «Истории».\n\
+- Для женщин приложение умеет выделять колебания из-за менструального цикла и показывать «очищенный» от цикла вес.";
+
+const STEPS_DOC: &str = "Дневник активности — шаги (вкладка «Шаги»).\n\
+- Записывай число шагов за день вручную; на одну дату — одно значение (повторная запись перезаписывает).\n\
+- Шаги учитываются в оценке активности и в ежедневной сводке.\n\
+- Регулярная запись (серия дней подряд) открывает задания в «Истории».";
+
+/// The documentation index: (doc_id, short human title). Embedded in the system
+/// prompt so the model knows which docs it can fetch via `read_documentation`.
+pub const DOC_INDEX: [(&str, &str); 3] = [
+    ("diary", "Дневник питания — как добавлять и редактировать еду"),
+    ("weight", "Дневник веса — как записывать вес и читать тренд"),
+    ("steps", "Дневник активности — как записывать шаги"),
+];
+
+fn doc_content(id: &str) -> Option<&'static str> {
+    match id {
+        "diary" => Some(DIARY_DOC),
+        "weight" => Some(WEIGHT_DOC),
+        "steps" => Some(STEPS_DOC),
+        _ => None,
+    }
+}
+
+/// The documentation index rendered for the system prompt.
+pub fn doc_index() -> String {
+    DOC_INDEX
+        .iter()
+        .map(|(id, title)| format!("- {id}: {title}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReadDocInput {
+    /// Documentation page id to fetch. One of: "diary", "weight", "steps".
+    pub doc_id: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ReadDocOutput {
+    pub doc_id: String,
+    pub found: bool,
+    /// The document text (empty when `found` is false).
+    pub content: String,
+    /// Valid doc ids, returned when the requested one is unknown.
+    pub available: Vec<String>,
+}
+
+pub struct ReadDocumentation;
+
+#[async_trait::async_trait]
+impl arti_pipes::tool::Tool for ReadDocumentation {
+    type Input = ReadDocInput;
+    type Output = ReadDocOutput;
+
+    fn name(&self) -> &str {
+        "read_documentation"
+    }
+
+    fn description(&self) -> &str {
+        "Fetch a short in-app help document so you can give accurate usage advice. \
+         Valid doc_id values: diary (food diary), weight (weight diary), steps \
+         (activity/steps). Call it before explaining how a feature works."
+    }
+
+    async fn call(
+        &self,
+        input: Self::Input,
+    ) -> Result<Self::Output, arti_pipes::error::ExecutionError> {
+        match doc_content(&input.doc_id) {
+            Some(c) => Ok(ReadDocOutput {
+                doc_id: input.doc_id,
+                found: true,
+                content: c.to_string(),
+                available: vec![],
+            }),
+            None => Ok(ReadDocOutput {
+                doc_id: input.doc_id,
+                found: false,
+                content: String::new(),
+                available: DOC_INDEX.iter().map(|(id, _)| id.to_string()).collect(),
+            }),
+        }
+    }
+}
+
+// ── file_bug_report tool: compose + submit a bug report to the developers ──
+//
+// `Tool::call` futures must be `Send`, so this tool can't POST itself (web_sys
+// fetch isn't Send). It captures the validated report into a thread-local slot;
+// `chat_agent` (a non-Send wasm-local future) drains it and submits via
+// `bug_report::submit`, feeding the real outcome back to the model.
+
+thread_local! {
+    static CAPTURED_BUG_REPORT: RefCell<Option<bug_report::BugReport>> = const { RefCell::new(None) };
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BugReportInput {
+    /// Short one-line title summarising the bug.
+    pub title: String,
+    /// Which part of the app: "diary" | "weight" | "steps" | "chat" | "settings" | "story" | "other".
+    pub area: String,
+    /// Step-by-step description of what the user did that led to the problem.
+    pub steps_to_reproduce: String,
+    /// What the user expected to happen.
+    pub expected: String,
+    /// What actually happened instead.
+    pub actual: String,
+    /// How badly it blocks the user: "low" | "medium" | "high". Optional.
+    #[serde(default)]
+    pub severity: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BugReportAck {
+    pub status: String,
+}
+
+pub struct FileBugReport;
+
+#[async_trait::async_trait]
+impl arti_pipes::tool::Tool for FileBugReport {
+    type Input = BugReportInput;
+    type Output = BugReportAck;
+
+    fn name(&self) -> &str {
+        "file_bug_report"
+    }
+
+    fn description(&self) -> &str {
+        "File a bug report to the developers. First gather ALL of these from the \
+         user: a short title; the area (diary/weight/steps/chat/settings/story/other); \
+         step-by-step reproduction; what they expected; and what actually happened \
+         (severity low/medium/high is optional). Only call once you have title, area, \
+         steps_to_reproduce, expected and actual."
+    }
+
+    async fn call(
+        &self,
+        input: Self::Input,
+    ) -> Result<Self::Output, arti_pipes::error::ExecutionError> {
+        // Capture the report; chat_agent submits it (this future must stay Send).
+        CAPTURED_BUG_REPORT.with(|c| {
+            *c.borrow_mut() = Some(bug_report::BugReport {
+                title: input.title,
+                area: input.area,
+                steps_to_reproduce: input.steps_to_reproduce,
+                expected: input.expected,
+                actual: input.actual,
+                severity: input.severity.unwrap_or_else(|| "medium".to_string()),
+                app_version: String::new(), // filled in by chat_agent before POST
+            });
+        });
+        Ok(BugReportAck { status: "captured".to_string() })
+    }
+}
+
+/// The tool registry exposed to support chat: `escalate_to_human` (stub),
+/// `read_progress` (reads the pre-built snapshot), `read_documentation` (built-in
+/// help docs), and `file_bug_report` (captures a report; `chat_agent` submits).
+/// Descriptors come from these real registrations, and calls are dispatched via
+/// `ToolRegistry::execute`.
 pub fn chat_registry(snapshot: ProgressSnapshot) -> arti_pipes::tool_registry::ToolRegistry {
     arti_pipes::tool_registry::ToolRegistry::new()
         .register(EscalateToHuman)
         .register(ReadProgress { snapshot })
+        .register(ReadDocumentation)
+        .register(FileBugReport)
 }
 
 /// A one-line, model-facing description of the registered tools, derived from
@@ -741,8 +923,21 @@ pub async fn chat_agent(
                 .execute(&call)
                 .await
                 .map_err(|e| format!("tool {name} failed: {e:?}"))?;
-            let result_json =
+            let mut result_json =
                 serde_json::to_string(&res.output).unwrap_or_else(|_| "{}".to_string());
+
+            // file_bug_report only CAPTURED the report (its call must be Send and
+            // can't fetch). Submit it here and feed the real outcome back so the
+            // model confirms success (with the ticket id) or relays the error.
+            if name == "file_bug_report" {
+                if let Some(mut report) = CAPTURED_BUG_REPORT.with(|c| c.borrow_mut().take()) {
+                    report.app_version = update::current_version();
+                    result_json = match bug_report::submit(&report).await {
+                        Ok(id) => serde_json::json!({ "status": "submitted", "report_id": id }).to_string(),
+                        Err(e) => serde_json::json!({ "status": "error", "error": e }).to_string(),
+                    };
+                }
+            }
             // Record the model's request + the tool's result so the next turn can
             // read them.
             transcript.push(ChatTurn { role: ChatRole::Assistant, text: raw });

@@ -159,7 +159,7 @@ fn en(key: &str) -> &'static str {
         "chat.escalated_banner" => "Transferring you to a live operator…",
         "chat.attached_image" => "[attached: image]",
         "chat.attached_voice" => "[attached: voice]",
-        "chat.empty" => "No messages yet",
+        "chat.empty" => "No messages yet. Ask how to use the app, or describe a problem — I can help you file a bug report.",
         "chat.mic_denied" => "Microphone access denied",
 
         // Diary: relative dates
@@ -902,7 +902,7 @@ fn ru(key: &str) -> &'static str {
         "chat.escalated_banner" => "Перевожу на живого оператора…",
         "chat.attached_image" => "[вложение: изображение]",
         "chat.attached_voice" => "[вложение: голос]",
-        "chat.empty" => "Сообщений пока нет",
+        "chat.empty" => "Сообщений пока нет. Спросите, как пользоваться приложением, или опишите проблему — помогу оформить баг-репорт.",
         "chat.mic_denied" => "Доступ к микрофону запрещён",
 
         // Дневник: относительные даты

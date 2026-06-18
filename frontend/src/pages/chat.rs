@@ -111,7 +111,7 @@ pub fn ChatPage() -> impl IntoView {
             // model-facing tool descriptions, and the system preamble.
             let snapshot = ai::build_progress_snapshot().await;
             let tools = ai::tool_descriptions(&ai::chat_registry(snapshot.clone()));
-            let system = build_system(&tools);
+            let system = build_system(&tools, &ai::doc_index());
 
             // Transcript = persisted history as turns. The last (just-added) user
             // message uses the model-facing `note` (attachment note), not display.
@@ -247,7 +247,7 @@ fn lang_name() -> &'static str {
 /// tool-use protocol (`[[tool]]` to call, `[[final]]` to finish), and the
 /// attachment-note convention. The conversation itself is appended by
 /// `ai::chat_agent` from the transcript; this is just the preamble.
-fn build_system(tools: &str) -> String {
+fn build_system(tools: &str, docs: &str) -> String {
     format!(
         "You are a friendly in-app support assistant for a weight-loss tracker. \
          Help the user navigate the tracker and articles, and answer their questions. \
@@ -262,13 +262,19 @@ fn build_system(tools: &str) -> String {
          {final_prefix} (the rest of the line and below is the answer), e.g.:\n\
          {final_prefix} Your weight is trending down — keep it up!\n\
          ALWAYS finish with a {final_prefix} answer. Never mention these tools or markers to the user.\n\n\
-         Use read_progress before giving progress feedback so you cite real numbers. \
+         Use read_progress before giving progress feedback so you cite real numbers.\n\
+         Use read_documentation to fetch a how-to doc BEFORE explaining how a feature works, \
+         so your advice matches the real app. Available docs (doc_id: topic):\n{docs}\n\
+         When the user reports something broken or wrong, help them file it: gather a short \
+         title, the area, steps to reproduce, what they expected and what actually happened, \
+         then call file_bug_report. Confirm to the user once it is submitted.\n\
          Use escalate_to_human only when a real operator is needed (billing, account issues, \
          anything you cannot resolve).\n\n\
          Attachments are referenced in the user's text as notes like \"{img_tag}\" \
          or \"{voice_tag} 0:07\"; you cannot see their contents, only that they exist.",
         lang = lang_name(),
         tools = tools,
+        docs = docs,
         tool_prefix = ai::TOOL_PREFIX,
         final_prefix = ai::FINAL_PREFIX,
         img_tag = t("chat.attached_image"),

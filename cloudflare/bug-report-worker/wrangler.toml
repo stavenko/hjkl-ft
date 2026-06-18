@@ -1,0 +1,14 @@
+name = "bug-report-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[[durable_objects.bindings]]
+name = "BUG_REPORT_DO"
+class_name = "BugReportDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["BugReportDO"]
+
+[vars]
+JWT_SECRET = "dev-secret-change-in-production"

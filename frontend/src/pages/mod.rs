@@ -20,6 +20,7 @@ pub mod story_ch2_night;
 pub mod story_ch2_protein;
 pub mod story_ch2_snack;
 pub mod story_ch2_veg;
+pub mod story_ch3_aesthetics;
 pub mod story_ch3_beauty;
 pub mod story_ch3_fat;
 pub mod story_ch3_lean;

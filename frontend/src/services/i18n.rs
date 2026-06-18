@@ -684,6 +684,7 @@ fn en(key: &str) -> &'static str {
         "story.ch3.s3" => "What is the physiological fat minimum?",
         "story.ch3.s4" => "The difference between «lean» and «fat-stripped»",
         "story.ch3.s5" => "Life without fat",
+        "story.ch3.aesthetics" => "Aesthetics vs health",
 
         // Story — chapter 3, section 1: why do we have fat at all
         "story.ch3.fat.p1" => "Fat is not a flaw in the body and not a punishment for weakness. It's the most ancient survival system there is. For hundreds of thousands of years food was unstable — feast then famine — and the ones who survived were those who could store energy in reserve to make it through a hungry winter or a failed harvest. The ability to stockpile fat was a superpower, and evolution honed it to perfection.",
@@ -699,6 +700,10 @@ fn en(key: &str) -> &'static str {
         "story.ch3.beauty.p1" => "People have argued about beauty for millennia, but if you look closely, it almost always comes down to two fairly simple things. The first is the bones. If the facial skeleton developed normally, the features come out harmonious — and that is largely given by nature.",
         "story.ch3.beauty.p2" => "The second thing, though, is entirely in our hands. Take a person with normal facial features and remove the excess fat, leaving a healthy physiological minimum — and they will almost certainly look beautiful. Not because they «lost weight», but because what fat usually hides starts to show: the lines of the face, the contours of the body, the muscular frame.",
         "story.ch3.beauty.p3" => "In essence, the beauty of a body is made of two terms: the absence of excess fat and the presence of muscle under the skin. This is an important idea we'll return to: the goal is not to «become smaller» but to reveal the structure that is already there. And it's achieved not by starving but by combining moderate fat with normally developed muscle.",
+
+        "story.ch3.aesthetics.p1" => "People have many reasons to lose weight, and everyone's are their own. One wants to like what they see in the mirror, another to fit into old clothes, a third to simply feel lighter. Any of them is valid, and there's no point arguing with someone else's motivation.",
+        "story.ch3.aesthetics.p2" => "But here is a sobering thought. If a person with a clear excess of weight isn't troubled at all by their own health, there are essentially two options. Either they are that rare, almost exceptional lucky one whose body still takes the hit without consequences. Or the cumulative effect of carrying excess fat for years simply hasn't shown up yet — and it almost always does, just not immediately and not loudly.",
+        "story.ch3.aesthetics.p3" => "The thing is, fat isn't neutral ballast but active tissue that quietly wears down metabolism, blood vessels and hormones over the years. So whatever your personal reason, underneath it almost always lies one shared one: health is better in those who carry little fat. Aesthetics is a pleasant bonus, but the real stake is health.",
 
         // Story — chapter 3, section 3: the physiological fat minimum
         "story.ch3.minimum.p1" => "Fat has a lower bound below which you must not go — the so-called physiological, essential fat. It's not a reserve but a working part of the body: it's needed for hormones, the nervous system, organ protection. Going below that line isn't «getting extra-lean» — it's harming yourself.",
@@ -1418,6 +1423,7 @@ fn ru(key: &str) -> &'static str {
         "story.ch3.s3" => "Что такое физиологический минимум жира?",
         "story.ch3.s4" => "Разница между «худым» и «обезжиренным»",
         "story.ch3.s5" => "Жизнь без жира",
+        "story.ch3.aesthetics" => "Эстетика vs здоровье",
 
         // История — глава 3, секция 1: зачем нам вообще жир
         "story.ch3.fat.p1" => "Жир — это не ошибка организма и не наказание за слабость. Это древнейшая система выживания. Сотни тысяч лет еда была нестабильной: то густо, то пусто, — и выживали те, кто умел запасать энергию впрок, чтобы протянуть голодную зиму или неурожай. Способность копить жир была суперспособностью, и эволюция отточила её до совершенства.",
@@ -1433,6 +1439,10 @@ fn ru(key: &str) -> &'static str {
         "story.ch3.beauty.p1" => "О красоте спорят тысячелетиями, но если присмотреться, в основе почти всегда лежат две довольно простые вещи. Первая — кости. Если лицевой скелет развился нормально, черты получаются гармоничными, и это во многом дано от природы.",
         "story.ch3.beauty.p2" => "А вот вторая вещь полностью в наших руках. Возьмите человека с нормальными чертами лица и уберите лишний жир, оставив здоровый физиологический минимум, — и он почти наверняка будет выглядеть красиво. Не потому что «похудел», а потому что проступает то, что жир обычно скрывает: линии лица, очертания тела, мышечный каркас.",
         "story.ch3.beauty.p3" => "По сути красота тела складывается из двух слагаемых: отсутствие лишнего жира и наличие мышц под кожей. Это важная мысль, к которой мы ещё вернёмся: цель — не «стать меньше», а проявить структуру, которая уже есть. И достигается это не голоданием, а сочетанием умеренного жира и нормально развитой мускулатуры.",
+
+        "story.ch3.aesthetics.p1" => "Причин похудеть у людей много, и у каждого они свои. Кто-то хочет нравиться себе в зеркале, кто-то — влезть в старую одежду, кто-то — просто чувствовать себя легче. Любая из них имеет право быть, и спорить с чужой мотивацией бессмысленно.",
+        "story.ch3.aesthetics.p2" => "Но есть одна отрезвляющая мысль. Если человека при явном избытке веса совершенно не беспокоит собственное здоровье, то вариантов, по сути, два. Либо он тот самый редкий, почти исключительный счастливчик, чей организм пока держит удар без последствий. Либо накопительный эффект от долгого присутствия лишнего жира просто ещё не успел сказаться — а сказывается он почти всегда, только не сразу и не громко.",
+        "story.ch3.aesthetics.p3" => "Дело в том, что жир — не нейтральный балласт, а активная ткань, которая годами тихо расшатывает обмен веществ, сосуды и гормоны. Поэтому, какой бы ни была ваша личная причина, под ней почти всегда лежит одна общая: здоровье лучше у тех, у кого мало жира. Эстетика — приятный бонус, но главная ставка — это здоровье.",
 
         // История — глава 3, секция 3: физиологический минимум жира
         "story.ch3.minimum.p1" => "У жира есть нижняя граница, ниже которой опускаться нельзя, — так называемый физиологический, незаменимый жир. Это не запас, а рабочая часть организма: он нужен для гормонов, нервной системы, защиты органов. Уйти ниже этой черты — значит не «досушиться», а навредить себе.",

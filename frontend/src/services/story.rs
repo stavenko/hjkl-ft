@@ -30,9 +30,11 @@ pub const CH2_SECTIONS: [(&str, &str, Option<&str>); 7] = [
     ("\u{1f319}", "story.ch2.s7", Some("/story/ch2-night")),
 ];
 
-/// Sections of chapter 3 «Why lose weight?».
-pub const CH3_SECTIONS: [(&str, &str, Option<&str>); 5] = [
+/// Sections of chapter 3 «Why lose weight?». s1 carries the calorie-planka
+/// mechanic; the rest are read-only prose.
+pub const CH3_SECTIONS: [(&str, &str, Option<&str>); 6] = [
     ("\u{1f525}", "story.ch3.s1", Some("/story/ch3-fat")),
+    ("\u{1fa7a}", "story.ch3.aesthetics", Some("/story/ch3-aesthetics")),
     ("\u{1fa9e}", "story.ch3.s2", Some("/story/ch3-beauty")),
     ("\u{1f4c9}", "story.ch3.s3", Some("/story/ch3-minimum")),
     ("\u{2696}\u{fe0f}", "story.ch3.s4", Some("/story/ch3-lean")),

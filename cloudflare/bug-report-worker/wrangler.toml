@@ -12,3 +12,5 @@ new_sqlite_classes = ["BugReportDO"]
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+# Admin key for the read endpoint (GET /reports). Dev placeholder — harden later.
+ADMIN_KEY = "dev-admin-key-change-in-production"

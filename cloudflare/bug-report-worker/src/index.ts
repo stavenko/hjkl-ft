@@ -10,12 +10,13 @@
 interface Env {
   BUG_REPORT_DO: DurableObjectNamespace;
   JWT_SECRET: string;
+  ADMIN_KEY: string;
 }
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Key",
 };
 
 // The report fields the client (assistant tool) sends. The worker adds `user`
@@ -61,9 +62,20 @@ export class BugReportDO {
         severity: body.severity ?? "medium",
         app_version: body.app_version ?? "",
       };
-      // Time-sortable key so a future admin read lists newest reports easily.
+      // Time-sortable key so the admin read lists newest reports first.
       await this.storage.put(`report:${rec.received_at}:${id}`, rec);
       return Response.json({ id });
+    }
+
+    if (request.method === "GET" && url.pathname === "/reports") {
+      // `reverse: true` walks keys descending; keys are `report:<ts>:<id>`, so
+      // newest reports come first.
+      const map = await this.storage.list<StoredReport>({
+        prefix: "report:",
+        reverse: true,
+        limit: 500,
+      });
+      return Response.json({ reports: [...map.values()] });
     }
 
     return new Response("Not found", { status: 404 });
@@ -124,6 +136,20 @@ export default {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
+    const url = new URL(request.url);
+    const stub = env.BUG_REPORT_DO.get(env.BUG_REPORT_DO.idFromName("global"));
+
+    // Admin read: gather the collected reports. Gated by ADMIN_KEY (a developer
+    // tool), NOT a user JWT — so one signed-in user can't read others' reports.
+    if (request.method === "GET" && url.pathname === "/reports") {
+      const adminKey = request.headers.get("X-Admin-Key") ?? "";
+      if (!env.ADMIN_KEY || adminKey !== env.ADMIN_KEY) {
+        return errorResponse("Unauthorized", 401);
+      }
+      const res = await stub.fetch("https://do/reports");
+      return corsJson(await res.text(), res.status);
+    }
+
     const authHeader = request.headers.get("Authorization") ?? "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
     if (!token || !(await verifyJwt(token, env.JWT_SECRET))) {
@@ -133,9 +159,6 @@ export default {
     if (!userId) {
       return errorResponse("Unauthorized", 401);
     }
-
-    const url = new URL(request.url);
-    const stub = env.BUG_REPORT_DO.get(env.BUG_REPORT_DO.idFromName("global"));
 
     if (request.method === "POST" && url.pathname === "/report") {
       const body = (await request.json()) as Record<string, unknown>;

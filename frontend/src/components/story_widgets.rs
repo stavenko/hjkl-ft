@@ -62,11 +62,18 @@ pub fn StoryTaskList(section_id: String) -> impl IntoView {
                     let done = e.task_closed(tid);
                     let title = e.task(tid).map(|t| tr(&t.title)).unwrap_or_default();
                     let icon = if done { "\u{2705}" } else { "\u{23f3}" };
+                    // Counter tasks (7-day streaks etc.) show a "current/target" sub-line.
+                    let counter = e.task_counter(tid).map(|(cur, target)| view! {
+                        <div style="padding: 0 16px 10px 50px;">
+                            <span class="is-size-7 has-text-grey-light">{format!("{cur}/{target}")}</span>
+                        </div>
+                    });
                     view! {
                         <div style="display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px;">
                             <span style="font-size: 22px; width: 22px; text-align: center;">{icon}</span>
                             <span class="is-size-6" style="flex: 1; line-height: 1.4;">{title}</span>
                         </div>
+                        {counter}
                     }
                 }).collect_view();
                 let complete = e.section_complete(sec);

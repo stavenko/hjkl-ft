@@ -89,6 +89,10 @@ pub struct Block {
     /// Ordered list, each item an i18n key.
     #[serde(default)]
     pub list: Option<Vec<String>>,
+    /// Bulleted list, each item an i18n key. Items shaped "Name — rest" render
+    /// the name in bold.
+    #[serde(default)]
+    pub bullets: Option<Vec<String>>,
     /// Render the section's task rows (+ a "section complete" line).
     #[serde(default)]
     pub tasks: bool,
@@ -264,6 +268,17 @@ impl<'a> Engine<'a> {
         match &t.close {
             Cond::Event { .. } => self.snap.evt_closed.contains(id),
             other => self.eval(other),
+        }
+    }
+
+    /// For a counter-close task (`close: {sensor, gte}`), its `(current, target)`
+    /// for a progress display; None for non-counter tasks.
+    pub fn task_counter(&self, id: &str) -> Option<(u32, u32)> {
+        let t = self.task(id)?;
+        if let Cond::Sensor { sensor: name, gte: Some(n) } = &t.close {
+            Some((sensor(name, &self.snap.progress).as_num(), *n))
+        } else {
+            None
         }
     }
 

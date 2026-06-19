@@ -94,6 +94,20 @@ fn render_block(b: &Block, sec: &'static Section) -> View {
             .collect_view();
         return view! { <ol style="margin: 0 0 14px 0; padding-left: 22px;">{lis}</ol> }.into_view();
     }
+    if let Some(items) = &b.bullets {
+        let lis = items
+            .iter()
+            .map(|k| {
+                // "Name — rest" → bold the name (matches the old section lists).
+                let item = match t(k).split_once(" \u{2014} ") {
+                    Some((name, rest)) => view! { <strong>{name}</strong>" \u{2014} "{rest} }.into_view(),
+                    None => view! { {t(k)} }.into_view(),
+                };
+                view! { <li class="is-size-6" style="margin-bottom: 6px; line-height: 1.5;">{item}</li> }
+            })
+            .collect_view();
+        return view! { <ul style="margin: 0 0 14px 0; padding-left: 22px; list-style: disc;">{lis}</ul> }.into_view();
+    }
     if b.tasks {
         return view! { <StoryTaskList section_id=sec.id.to_string() /> }.into_view();
     }
@@ -113,6 +127,11 @@ fn render_widget(w: &WidgetRef) -> View {
             view! { <Cta route=route label=label /> }.into_view()
         }
         "progress_photos" => view! { <ProgressPhotos /> }.into_view(),
+        "fab" => view! {
+            <div style="display: flex; justify-content: center; margin: 0 0 14px 0;">
+                <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--bulma-success); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 34px; line-height: 1; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">"+"</div>
+            </div>
+        }.into_view(),
         other => {
             leptos::logging::warn!("story: unknown widget '{other}'");
             ().into_view()

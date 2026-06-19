@@ -109,10 +109,6 @@ pub fn App() -> impl IntoView {
                     <Routes>
                         <Route path="/" view=pages::story::StoryPage />
                         <Route path="/story/setup" view=pages::story_setup::StorySetupPage />
-                        <Route path="/story/accounting" view=pages::story_accounting::StoryAccountingPage />
-                        <Route path="/story/first-food" view=pages::story_first_food::StoryFirstFoodPage />
-                        <Route path="/story/activity" view=pages::story_activity::StoryActivityPage />
-                        <Route path="/story/cooking" view=pages::story_cooking::StoryCookingPage />
                         <Route path="/story/ch2-mistake" view=pages::story_ch2_mistake::StoryCh2MistakePage />
                         <Route path="/story/ch2-veg" view=pages::story_ch2_veg::StoryCh2VegPage />
                         <Route path="/story/ch2-protein" view=pages::story_ch2_protein::StoryCh2ProteinPage />

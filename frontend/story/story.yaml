@@ -118,21 +118,61 @@ chapters:
         title: {en: "The accounting of weight loss", ru: "Бухгалтерия похудения"}
         tasks: [weigh_in, first_weigh, weight_streak]
         complete: {task: weigh_in}
-        legacy_route: /story/accounting
+        blocks:
+          - {text_key: story.acc.p1}
+          - {text_key: story.acc.p2}
+          - {text_key: story.acc.p3}
+          - {text_key: story.acc.p4}
+          - {text_key: story.acc.p5}
+          - {bullets: [story.acc.li_weight, story.acc.li_calories]}
+          - {text_key: story.acc.p6}
+          - {text_key: story.acc.p7}
+          - {heading: story.acc.howto_title}
+          - {text_key: story.acc.howto}
+          - {tasks: true}
+          - {widget: {id: cta, route: /settings, label: story.setup.open_settings}}
       - id: first-food
         title: {en: "My first food entries", ru: "Мои первые записи еды"}
         tasks: [first_food]
         on_open: [arm_first_food]
-        legacy_route: /story/first-food
+        blocks:
+          - {text_key: story.ff.p1}
+          - {text_key: story.ff.p2}
+          - {text_key: story.ff.p3}
+          - {text_key: story.ff.ways_intro}
+          - {bullets: [story.ff.way1, story.ff.way2, story.ff.way3]}
+          - {text_key: story.ff.howto_open}
+          - {widget: {id: fab}}
+          - {list: [story.ff.step_new, story.ff.step_name, story.ff.step_add, story.ff.step_more]}
+          - {tasks: true}
+          - {widget: {id: cta, route: /diary, label: story.ff.open_diary}}
       - id: activity
         title: {en: "Activity and weight", ru: "Активность и вес"}
         tasks: [steps_reminder, first_steps, steps_streak]
         complete: {task: first_steps}
-        legacy_route: /story/activity
+        blocks:
+          - {text_key: story.act.p1}
+          - {text_key: story.act.p2}
+          - {text_key: story.act.p3}
+          - {text_key: story.act.p4}
+          - {text_key: story.act.p5}
+          - {text_key: story.act.p6}
+          - {text_key: story.act.p7}
+          - {text_key: story.act.p8}
+          - {heading: story.act.howto_title}
+          - {text_key: story.act.howto}
+          - {tasks: true}
+          - {widget: {id: cta, route: /steps, label: story.act.record_steps}}
       - id: cooking
         title: {en: "I'm cooking", ru: "Я готовлю"}
         tasks: [dish_created, dish_in_diary]
-        legacy_route: /story/cooking
+        blocks:
+          - {text_key: story.cook.p1}
+          - {text_key: story.cook.p2}
+          - {text_key: story.cook.p3}
+          - {list: [story.cook.step1, story.cook.step2]}
+          - {tasks: true}
+          - {widget: {id: cta, route: /recipes, label: story.cook.open_recipes}}
       - id: bones
         title: {en: "My food with bones", ru: "Моя еда с костями"}
         tasks: [bones]

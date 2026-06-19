@@ -402,6 +402,41 @@ pub async fn regenerate_day(
 /// anything not stated — this is the guard against the earlier hallucination
 /// ("you logged restaurant food" when none was). Returns Ok(None) when the day
 /// is empty (nothing to assess).
+/// Background tagging step: classify + cache snack tags for THIS day's foods that
+/// aren't classified yet (a separate AI request), so `day_context`'s low-calorie
+/// snack fact is language-independent. No-op when every food is already tagged.
+/// FAIL LOUDLY: a classification error propagates and aborts report generation
+/// (retried on the next activation) rather than silently mis-tagging.
+async fn tag_day_snacks(date: &str) -> Result<(), String> {
+    let diary = local::list_diary(date).await;
+    if diary.is_empty() {
+        return Ok(());
+    }
+    let fmap: std::collections::BTreeMap<String, api_types::Food> =
+        local::list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect();
+
+    // Distinct foods used today with no cached snack verdict yet.
+    let mut seen = std::collections::HashSet::new();
+    let mut pending: Vec<(String, String)> = Vec::new(); // (id, name)
+    for e in &diary {
+        if let Some(food) = fmap.get(&e.food_id) {
+            if food.is_snack.is_none() && seen.insert(food.id.clone()) {
+                pending.push((food.id.clone(), food.name.clone()));
+            }
+        }
+    }
+    if pending.is_empty() {
+        return Ok(());
+    }
+
+    let names: Vec<String> = pending.iter().map(|(_, n)| n.clone()).collect();
+    let verdicts = ai::classify_snacks(&names).await?; // guards count == names.len()
+    let tags: Vec<(String, bool)> =
+        pending.into_iter().map(|(id, _)| id).zip(verdicts).collect();
+    local::cache_snack_tags(&tags).await;
+    Ok(())
+}
+
 pub async fn ensure_day(
     date: &str,
     on_token: impl Fn(AiPhase) + Clone + 'static,
@@ -409,6 +444,10 @@ pub async fn ensure_day(
     if let Some(s) = get_day(date).await {
         return Ok(Some(s));
     }
+    // Tag this day's foods (snack classification) in the background and cache the
+    // verdicts BEFORE building the report, so the "low-calorie snack" fact is
+    // language-independent rather than a Russian name match.
+    tag_day_snacks(date).await?;
     let Some(dctx) = day_context(date).await else {
         return Ok(None);
     };

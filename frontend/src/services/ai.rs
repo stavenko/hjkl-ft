@@ -294,6 +294,55 @@ where
     Err(last_err)
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SnackVerdicts {
+    /// One boolean per input food, in the SAME order as given.
+    snacks: Vec<bool>,
+}
+
+/// Classify each food NAME as a low-calorie snack (a light raw vegetable/fruit to
+/// nibble between meals) or not. Language-independent: the model judges meaning,
+/// guided by an English reference list — so it works regardless of the language
+/// the food was entered in. Returns one bool per input, in order.
+///
+/// Used to tag foods in the background while preparing the daily summary. FAIL
+/// LOUDLY: a model / parse error, or a count that doesn't match the input, is an
+/// `Err` (the caller surfaces it; the report won't silently mis-tag).
+pub async fn classify_snacks(names: &[String]) -> Result<Vec<bool>, String> {
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let list = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| format!("{i}. {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = format!(
+        "Classify each food below as a low-calorie snack or not.\n\
+         A \"low-calorie snack\" is a light, low-calorie raw vegetable or fruit you'd nibble \
+         between meals. Reference examples (English): cucumber, tomato, cherry tomato, bell \
+         pepper, carrot, celery, radish, cabbage, lettuce, leafy greens, apple, pear, berries \
+         (strawberry, blueberry, raspberry), orange, kiwi, grapefruit.\n\
+         Mark as NOT a snack: full meals and cooked dishes, bread/cereal/pasta, meat, fish, \
+         dairy, sweets, nuts, calorie-dense or processed snacks (popcorn, chips, crackers, \
+         chocolate, cookies, granola bars), and any drink.\n\
+         Food names may be in ANY language — judge by meaning, not by wording.\n\n\
+         Foods (index. name):\n{list}\n\n\
+         Respond with ONLY a single minified JSON object: a \"snacks\" array of booleans, exactly \
+         one per food, in the SAME order. Example for 3 foods: {{\"snacks\":[true,false,false]}}",
+    );
+    let verdicts: SnackVerdicts = generate(prompt, |_| {}).await?;
+    if verdicts.snacks.len() != names.len() {
+        return Err(format!(
+            "snack classification returned {} verdicts for {} foods",
+            verdicts.snacks.len(),
+            names.len()
+        ));
+    }
+    Ok(verdicts.snacks)
+}
+
 // ── Support-chat: tools + agentic tool-use loop ──
 //
 // The chat is a real tool-use loop. The model can either call a registered

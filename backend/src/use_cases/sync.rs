@@ -18,6 +18,7 @@ pub fn dump(db: &Database) -> Result<SyncDumpResponse, ApiError> {
                 is_recipe: row.get::<_, i32>(8)? != 0, recipe_id: row.get(9)?,
                 archived: row.get::<_, i32>(10)? != 0,
                 is_restaurant: row.get::<_, i32>(11)? != 0,
+                is_snack: None, // deprecated backend has no snack column
                 created_at: row.get(12)?, updated_at: row.get(13)?,
             })
         }).map_err(|_| ApiError::InternalError)?

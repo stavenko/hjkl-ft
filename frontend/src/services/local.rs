@@ -124,12 +124,6 @@ pub fn calorie_planka(avg_kcal: f64, balance: crate::services::weight_trend::Bal
 // Case-insensitive substring name-matching on `food.name.to_lowercase()`. These
 // back the chapter-2 section tasks and the daily report's per-day facts.
 
-/// Substrings that mark a low-calorie SNACK food (chapter 2 / s4).
-const SNACK_SUBSTRINGS: &[&str] = &[
-    "огурец", "помидор", "томат", "попкорн", "яблок", "морков", "редис",
-    "сельдере", "капуст", "болгарск",
-];
-
 /// Substrings that mark a DRINK food (chapter 2 / s5).
 const DRINK_SUBSTRINGS: &[&str] = &[
     "сок", "газиров", "кола", "лимонад", "морс", "квас", "компот", "нектар",
@@ -141,9 +135,28 @@ fn name_matches(name: &str, needles: &[&str]) -> bool {
     needles.iter().any(|n| lower.contains(n))
 }
 
-/// True if `food` is a low-calorie snack by name.
+/// True if `food` is a low-calorie snack — by the cached AI tag (language-
+/// independent). `None` (not yet classified) counts as not-a-snack until tagged
+/// in the background while preparing the daily summary. See [`cache_snack_tags`].
 pub fn is_snack_food(food: &Food) -> bool {
-    name_matches(&food.name, SNACK_SUBSTRINGS)
+    food.is_snack == Some(true)
+}
+
+/// Persist AI snack verdicts onto foods by id (`(food_id, is_snack)`), then push
+/// once so the tags propagate across devices. Used by the summary's background
+/// tagging step; foods not found are skipped.
+pub async fn cache_snack_tags(verdicts: &[(String, bool)]) {
+    if verdicts.is_empty() {
+        return;
+    }
+    for (id, is_snack) in verdicts {
+        if let Some(mut food) = db::get::<Food>("foods", id).await {
+            food.is_snack = Some(*is_snack);
+            food.updated_at = now();
+            db::put("foods", &food).await;
+        }
+    }
+    crate::services::sync::push_background();
 }
 
 /// True if `food` is a drink by name.
@@ -580,6 +593,7 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
             recipe_id: None,
             archived: false,
             is_restaurant: false,
+            is_snack: None,
             created_at: now(),
             updated_at: now(),
         };
@@ -758,6 +772,7 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         recipe_id: Some(recipe_id.to_string()),
         archived: false,
         is_restaurant: false,
+        is_snack: None,
         created_at: now(),
         updated_at: now(),
     };

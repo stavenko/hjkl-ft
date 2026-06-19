@@ -126,6 +126,7 @@ pub fn FoodEditor(
             recipe_id: None,
             archived: false,
             is_restaurant: false,
+            is_snack: None, // classified later, in the background, at summary time
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
         }

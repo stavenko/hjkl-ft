@@ -50,6 +50,14 @@ pub struct Food {
     /// +20% calorie surcharge, and is shown with a dashed marker in lists.
     #[serde(default)]
     pub is_restaurant: bool,
+    /// AI-assigned tag: low-calorie snack (raw vegetable/fruit to nibble between
+    /// meals). `None` = not yet classified; `Some(_)` = cached AI verdict. Tagged
+    /// lazily in the background while preparing the daily summary (NOT at food
+    /// creation), then cached here. Drives the chapter-2 snack mechanic and the
+    /// summary's "snack logged" fact. Language-independent (replaces the old
+    /// Russian name-substring match).
+    #[serde(default)]
+    pub is_snack: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -134,6 +142,7 @@ impl FoodDraft {
             recipe_id: None,
             archived: false,
             is_restaurant: false,
+            is_snack: None,
             created_at: self.created_at.clone(),
             updated_at: String::new(),
         }

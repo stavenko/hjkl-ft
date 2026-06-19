@@ -66,29 +66,12 @@
   .lead{color:var(--muted);font-size:19px;max-width:640px}
 
   /* hero */
-  .hero{background:linear-gradient(180deg,#fff, #EEF2F6);border-radius:var(--radius-lg);margin-top:24px;padding:54px 40px}
-  .hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
-  .hero h1{font-size:clamp(34px,5.2vw,58px);letter-spacing:-.02em}
-  .hero .lead{margin:22px 0 30px}
-  @media(max-width:860px){.hero{padding:36px 22px}.hero-grid{grid-template-columns:1fr;gap:30px}}
-
-  /* phone mock */
-  .phone{justify-self:center;width:248px;height:510px;border-radius:38px;background:var(--ink);
-    padding:12px;box-shadow:0 30px 60px rgba(14,27,42,.28)}
-  .screen{height:100%;border-radius:28px;background:#fff;overflow:hidden;display:flex;flex-direction:column}
-  .screen .top{padding:18px 16px 10px}
-  .screen .day{font-size:13px;color:var(--muted);font-weight:700}
-  .ring{margin:8px auto 4px;width:118px;height:118px;border-radius:50%;
-    background:conic-gradient(var(--accent) 73%, #E7ECF1 0);display:flex;align-items:center;justify-content:center}
-  .ring .hole{width:90px;height:90px;border-radius:50%;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center}
-  .ring b{font-size:20px}
-  .ring span{font-size:11px;color:var(--muted)}
-  .macros{display:flex;justify-content:space-around;padding:6px 10px 12px;border-bottom:1px solid var(--line)}
-  .macros div{text-align:center}.macros b{font-size:14px}.macros span{display:block;font-size:10px;color:var(--muted)}
-  .food{display:flex;gap:10px;align-items:center;padding:12px 14px}
-  .food .pic{width:42px;height:42px;border-radius:10px;background:linear-gradient(135deg,#F6C453,#FB7156)}
-  .food .t{font-size:12px;font-weight:700}.food .s{font-size:11px;color:var(--muted)}
-  .assess{margin:6px 14px;padding:10px 12px;background:var(--accent-soft);border-radius:12px;font-size:11px;color:var(--accent-700);font-weight:700}
+  .hero{background:linear-gradient(180deg,#fff, #EEF2F6);border-radius:var(--radius-lg);margin-top:24px;padding:72px 40px;text-align:center}
+  .hero-inner{max-width:760px;margin:0 auto}
+  .hero h1{font-size:clamp(34px,5.6vw,60px);letter-spacing:-.02em}
+  .hero .lead{margin:22px auto 30px}
+  .hero-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  @media(max-width:860px){.hero{padding:44px 22px}}
 
   /* cards grid */
   .grid{display:grid;gap:18px}
@@ -164,28 +147,13 @@
 
   <!-- HERO -->
   <section class="hero">
-    <div class="hero-grid">
-      <div>
-        <span class="eyebrow">Автономный инструмент</span>
-        <h1 class="mt12">Верни себе <span class="accent">норму</span> — без диет и кураторов</h1>
-        <p class="lead">Renorma сама считает калории и нутриенты, выставляет твою персональную норму и каждую неделю подстраивает её под результат. Тебе остаётся только записывать еду — остальное делает прибор.</p>
+    <div class="hero-inner">
+      <span class="eyebrow">Автономный инструмент</span>
+      <h1 class="mt12">Верни себе <span class="accent">норму</span><br>— без диет и кураторов</h1>
+      <p class="lead">Renorma сама считает калории и нутриенты, выставляет твою персональную норму и каждую неделю подстраивает её под результат. Тебе остаётся только записывать еду — остальное делает прибор.</p>
+      <div class="hero-cta">
         <a class="btn" href="#start">Начать бесплатно</a>
-        <a class="btn btn-ghost" href="#what" style="margin-left:10px">Как это работает</a>
-      </div>
-      <div class="phone" aria-hidden="true">
-        <div class="screen">
-          <div class="top">
-            <div class="day">Сегодня · оценка дня</div>
-            <div class="ring"><div class="hole"><b>1490</b><span>/ 1900 ккал</span></div></div>
-          </div>
-          <div class="macros">
-            <div><b>92</b><span>белки</span></div>
-            <div><b>54</b><span>жиры</span></div>
-            <div><b>180</b><span>углев.</span></div>
-          </div>
-          <div class="food"><div class="pic"></div><div><div class="t">Лосось с овощами</div><div class="s">320 г · ~410 ккал</div></div></div>
-          <div class="assess">✓ Сегодня без калорийных напитков — отличный день</div>
-        </div>
+        <a class="btn btn-ghost" href="#what">Как это работает</a>
       </div>
     </div>
   </section>
@@ -255,7 +223,20 @@
       <h2 class="mt12">Открой Renorma прямо сейчас</h2>
       <p class="lead center" style="color:#E6FFFB;margin:14px auto 0">Работает в браузере и устанавливается как приложение на телефон. Данные хранятся на твоём устройстве.</p>
       <a class="btn" href="https://hjkl-ft.pages.dev" target="_blank" rel="noopener">Открыть приложение →</a>
-      <div class="fine">Подписка с автопродлением · отмена в один клик</div>
+      <div class="fine">Подписка ежемесячная и продлевается автоматически</div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:18px">
+      <div class="card">
+        <div class="ico">✓</div>
+        <h3>Отмена в один клик</h3>
+        <p>Отказаться от подписки можно в любой момент — без звонков, удержаний и «поговорите с менеджером».</p>
+      </div>
+      <div class="card">
+        <div class="ico">↩︎</div>
+        <h3>Возврат средств</h3>
+        <p>Если нужна пауза или планы изменились — напиши на <a class="accent" href="mailto:info@renorma.app" style="text-decoration:none">info@renorma.app</a>. Мы рассчитаем сумму возврата за вычетом дней пользования и вернём деньги на карту в течение 10 рабочих дней.</p>
+      </div>
     </div>
   </section>
 
@@ -268,7 +249,7 @@
       <details><summary>Чем вы лучше бесплатного ChatGPT?</summary><p>Renorma — не разовый совет, а система: точная база нутриентов, учёт твоей динамики, еженедельная корректировка нормы и история привычек. Расчёт стабильный и воспроизводимый, а не «как сегодня ответит чат».</p></details>
       <details><summary>Сколько времени это занимает?</summary><p>Запись еды — секунды (можно по фото). Никаких длинных отчётов и созвонов: всё в телефоне, в твоём ритме.</p></details>
       <details><summary>Нужны ли тренировки, чтобы увидеть результат?</summary><p>Нет. Снижение веса определяется энергетическим балансом. Активность и силовые помогают сохранить мышцы и здоровье, но не обязательны для старта.</p></details>
-      <details><summary>Что с оплатой и возвратом?</summary><p>Доступ по подписке с автопродлением, отмена в один клик. Если планы изменились — можно оформить возврат по правилам, указанным в оферте.</p></details>
+      <details><summary>Что если я захочу отменить подписку и вернуть деньги?</summary><p>Отказаться от подписки можно в любой момент. Просто напиши нам на почту info@renorma.app — мы рассчитаем сумму возврата за вычетом дней, в которые ты пользовался Renorma, и переведём деньги обратно на карту в течение 10 рабочих дней.</p></details>
     </div>
   </section>
 

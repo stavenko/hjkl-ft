@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Renorma — автономный инструмент для похудения и контроля веса</title>
+<meta name="description" content="Renorma — полностью автономный фудтрекер: КБЖУ и микронутриенты, AI-распознавание еды, индивидуальная норма калорий с еженедельным пересчётом. Никаких кураторов — прибор думает за вас." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* 60-30-10 + complementary */
+    --bg:#F7F9FB;            /* base neutral (60%) */
+    --surface:#FFFFFF;
+    --muted:#5B6675;
+    --ink:#0E1B2A;           /* secondary / brand-dark (30%) */
+    --ink-soft:#1B2A3D;
+    --accent:#14B8A6;        /* accent teal (10%) */
+    --accent-700:#0F766E;    /* teal for filled buttons on white text */
+    --accent-soft:#E6F7F4;
+    --spark:#FB7156;         /* complementary coral (<5%) */
+    --line:rgba(14,27,42,.10);
+    --radius:16px;
+    --radius-lg:28px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:Mulish,-apple-system,system-ui,sans-serif;
+    font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+  h1,h2,h3{line-height:1.1;font-weight:800;margin:0}
+  h2{font-size:clamp(28px,4.5vw,42px);letter-spacing:-.01em}
+  p{margin:0}
+  a{color:inherit}
+  .accent{color:var(--accent)}
+  .muted{color:var(--muted)}
+
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    background:var(--ink);color:#fff;text-decoration:none;font-weight:700;
+    padding:16px 26px;border-radius:var(--radius);transition:transform .12s ease,background .12s ease;border:none;cursor:pointer;font-size:17px}
+  .btn:hover{transform:translateY(-1px);background:var(--ink-soft)}
+  .btn-ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+  .btn-ghost:hover{background:#fff}
+
+  /* header */
+  header{position:sticky;top:0;z-index:50;background:rgba(247,249,251,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:68px;gap:16px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px}
+  .logo .mark{width:30px;height:30px;border-radius:9px;background:var(--ink);position:relative}
+  .logo .mark::after{content:"";position:absolute;inset:8px;border:2.5px solid var(--accent);border-radius:4px}
+  .nav-links{display:flex;gap:26px}
+  .nav-links a{color:var(--muted);text-decoration:none;font-weight:600;font-size:15px}
+  .nav-links a:hover{color:var(--ink)}
+  .nav .btn{padding:11px 18px;font-size:15px}
+  @media(max-width:780px){.nav-links{display:none}.nav .btn{padding:10px 14px;font-size:14px}}
+
+  /* section scaffolding */
+  section{padding:64px 0}
+  .eyebrow{display:inline-block;background:var(--accent-soft);color:var(--accent-700);font-weight:700;
+    font-size:13px;letter-spacing:.04em;text-transform:uppercase;padding:6px 12px;border-radius:999px}
+  .lead{color:var(--muted);font-size:19px;max-width:640px}
+
+  /* hero */
+  .hero{background:linear-gradient(180deg,#fff, #EEF2F6);border-radius:var(--radius-lg);margin-top:24px;padding:54px 40px}
+  .hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
+  .hero h1{font-size:clamp(34px,5.2vw,58px);letter-spacing:-.02em}
+  .hero .lead{margin:22px 0 30px}
+  @media(max-width:860px){.hero{padding:36px 22px}.hero-grid{grid-template-columns:1fr;gap:30px}}
+
+  /* phone mock */
+  .phone{justify-self:center;width:248px;height:510px;border-radius:38px;background:var(--ink);
+    padding:12px;box-shadow:0 30px 60px rgba(14,27,42,.28)}
+  .screen{height:100%;border-radius:28px;background:#fff;overflow:hidden;display:flex;flex-direction:column}
+  .screen .top{padding:18px 16px 10px}
+  .screen .day{font-size:13px;color:var(--muted);font-weight:700}
+  .ring{margin:8px auto 4px;width:118px;height:118px;border-radius:50%;
+    background:conic-gradient(var(--accent) 73%, #E7ECF1 0);display:flex;align-items:center;justify-content:center}
+  .ring .hole{width:90px;height:90px;border-radius:50%;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .ring b{font-size:20px}
+  .ring span{font-size:11px;color:var(--muted)}
+  .macros{display:flex;justify-content:space-around;padding:6px 10px 12px;border-bottom:1px solid var(--line)}
+  .macros div{text-align:center}.macros b{font-size:14px}.macros span{display:block;font-size:10px;color:var(--muted)}
+  .food{display:flex;gap:10px;align-items:center;padding:12px 14px}
+  .food .pic{width:42px;height:42px;border-radius:10px;background:linear-gradient(135deg,#F6C453,#FB7156)}
+  .food .t{font-size:12px;font-weight:700}.food .s{font-size:11px;color:var(--muted)}
+  .assess{margin:6px 14px;padding:10px 12px;background:var(--accent-soft);border-radius:12px;font-size:11px;color:var(--accent-700);font-weight:700}
+
+  /* cards grid */
+  .grid{display:grid;gap:18px}
+  .cols-2{grid-template-columns:repeat(2,1fr)}
+  .cols-3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:860px){.cols-2,.cols-3{grid-template-columns:1fr}}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
+  .card h3{font-size:19px;margin-bottom:8px}
+  .card p{color:var(--muted);font-size:15.5px}
+  .ico{width:42px;height:42px;border-radius:11px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:14px}
+  .pain{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px;font-size:16px}
+  .pain::before{content:"“";color:var(--accent);font-size:40px;line-height:0;font-weight:800;display:block;height:18px}
+
+  /* why-it-works / science */
+  .science{background:var(--ink);color:#fff;border-radius:var(--radius-lg);padding:54px 40px}
+  .science h2{color:#fff}
+  .science .lead{color:#AEB8C6}
+  .sci-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:30px}
+  @media(max-width:860px){.sci-grid{grid-template-columns:1fr}.science{padding:36px 22px}}
+  .sci{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:var(--radius);padding:22px}
+  .sci h3{font-size:18px;margin-bottom:8px}
+  .sci p{color:#AEB8C6;font-size:15px}
+  .cite{margin-top:18px;color:#7E8BA0;font-size:13px;font-style:italic}
+
+  /* numbers */
+  .nums{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;text-align:center}
+  @media(max-width:860px){.nums{grid-template-columns:1fr}}
+  .num b{display:block;font-size:46px;font-weight:800;letter-spacing:-.02em}
+  .num .sp{color:var(--spark)}
+  .num span{color:var(--muted);font-size:15px}
+
+  /* pricing / CTA band */
+  .cta{background:linear-gradient(135deg,var(--accent),#0FA697);border-radius:var(--radius-lg);padding:48px 40px;text-align:center;color:#fff}
+  .cta h2{color:#fff}
+  .cta .btn{background:#fff;color:var(--ink);margin-top:22px}
+  .cta .btn:hover{background:#F0FFFD}
+  .cta .fine{color:#E6FFFB;font-size:14px;margin-top:14px}
+  @media(max-width:860px){.cta{padding:34px 22px}}
+
+  /* faq */
+  details{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:0 20px;margin-bottom:12px}
+  summary{cursor:pointer;list-style:none;padding:18px 0;font-weight:700;font-size:17px;display:flex;justify-content:space-between;align-items:center;gap:14px}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";color:var(--accent);font-size:24px;font-weight:700;line-height:1}
+  details[open] summary::after{content:"–"}
+  details p{color:var(--muted);padding:0 0 18px;font-size:15.5px}
+
+  footer{padding:40px 0;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+  .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px;align-items:center}
+  .foot a{color:var(--muted);text-decoration:none;margin-right:18px}
+  .foot a:hover{color:var(--ink)}
+
+  .center{text-align:center}
+  .mt12{margin-top:12px}.mt28{margin-top:28px}
+  .sec-head{max-width:680px;margin:0 auto 8px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <div class="logo"><span class="mark"></span>Renorma</div>
+    <nav class="nav-links">
+      <a href="#what">Что внутри</a>
+      <a href="#why">Почему работает</a>
+      <a href="#faq">Вопросы</a>
+    </nav>
+    <a class="btn" href="#start">Открыть приложение</a>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-grid">
+      <div>
+        <span class="eyebrow">Автономный инструмент</span>
+        <h1 class="mt12">Верни себе <span class="accent">норму</span> — без диет и кураторов</h1>
+        <p class="lead">Renorma сама считает калории и нутриенты, выставляет твою персональную норму и каждую неделю подстраивает её под результат. Тебе остаётся только записывать еду — остальное делает прибор.</p>
+        <a class="btn" href="#start">Начать бесплатно</a>
+        <a class="btn btn-ghost" href="#what" style="margin-left:10px">Как это работает</a>
+      </div>
+      <div class="phone" aria-hidden="true">
+        <div class="screen">
+          <div class="top">
+            <div class="day">Сегодня · оценка дня</div>
+            <div class="ring"><div class="hole"><b>1490</b><span>/ 1900 ккал</span></div></div>
+          </div>
+          <div class="macros">
+            <div><b>92</b><span>белки</span></div>
+            <div><b>54</b><span>жиры</span></div>
+            <div><b>180</b><span>углев.</span></div>
+          </div>
+          <div class="food"><div class="pic"></div><div><div class="t">Лосось с овощами</div><div class="s">320 г · ~410 ккал</div></div></div>
+          <div class="assess">✓ Сегодня без калорийных напитков — отличный день</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PAIN -->
+  <section>
+    <div class="sec-head center">
+      <span class="eyebrow">Для кого</span>
+      <h2 class="mt12">Если это про тебя</h2>
+    </div>
+    <div class="grid cols-2 mt28">
+      <div class="pain">Надоело разбираться в диетах и каждый раз высчитывать, можно ли мне этот йогурт. Хочу, чтобы за меня посчитали, а я просто делал и видел результат.</div>
+      <div class="pain">Опять откатил после паузы. Хочу не «начинать с понедельника», а закрепить вес и удерживать его.</div>
+      <div class="pain">Мне не нужны кураторы, чаты и ежедневные отчёты. Нужен точный, удобный инструмент, чтобы держать себя в рамках самому.</div>
+      <div class="pain">Считаю калории «на глаз» и не понимаю, почему вес стоит. Хочу цифрам верить и не перепроверять.</div>
+    </div>
+  </section>
+
+  <!-- WHAT'S INSIDE -->
+  <section id="what">
+    <div class="sec-head center">
+      <span class="eyebrow">Что внутри</span>
+      <h2 class="mt12">Один прибор закрывает весь учёт</h2>
+      <p class="lead center" style="margin:14px auto 0">9 лет методики уместили в инструмент, который думает за тебя.</p>
+    </div>
+    <div class="grid cols-3 mt28">
+      <div class="card"><div class="ico">🍽️</div><h3>КБЖУ и микронутриенты</h3><p>Не только калории и БЖУ, но и клетчатка, витамины, минералы, омега-3. Видно сразу в карточке продукта.</p></div>
+      <div class="card"><div class="ico">📷</div><h3>AI-распознавание еды</h3><p>Сфотографируй или опиши блюдо — Renorma сама определит состав и калорийность. Подсчёт за секунды.</p></div>
+      <div class="card"><div class="ico">🎯</div><h3>Персональная норма</h3><p>Система сама выставляет норму калорий и белка на старте и пересчитывает её каждую неделю по твоему результату.</p></div>
+      <div class="card"><div class="ico">⚖️</div><h3>Дневник веса и шагов</h3><p>Тренд веса с оценкой уверенности, учёт активности — всё в одном месте, без сторонних приложений.</p></div>
+      <div class="card"><div class="ico">🧭</div><h3>Ежедневная оценка</h3><p>Каждый день — короткий разбор: что сделано хорошо и что улучшить. Без воды и обвинений.</p></div>
+      <div class="card"><div class="ico">📖</div><h3>История-онбординг</h3><p>Пошаговые задания вводят в привычку учёта в игровой форме — от первой записи до устойчивого ритма.</p></div>
+    </div>
+    <div class="center mt28"><a class="btn" href="#start">Открыть приложение</a></div>
+  </section>
+
+  <!-- WHY IT WORKS (science / math) -->
+  <section id="why">
+    <div class="science">
+      <div class="sec-head" style="margin-bottom:6px">
+        <span class="eyebrow" style="background:rgba(20,184,166,.18);color:#5EE6D5">Почему это работает</span>
+        <h2 class="mt12">Не мотивация, а математика</h2>
+        <p class="lead mt12">В основе Renorma — энергетический баланс и доказательная нутрициология. Никакой эзотерики: только данные и расчёт, который подстраивается под тебя.</p>
+      </div>
+      <div class="sci-grid">
+        <div class="sci"><h3>Точка отсчёта по факту</h3><p>Первая планка калорий считается из твоего реального среднего за 14 дней и баланса тренда веса — а не из «формул для среднего человека».</p></div>
+        <div class="sci"><h3>Еженедельная адаптация</h3><p>Метаболизм адаптируется — и норма тоже. Каждую неделю система обновляет планку по фактической динамике веса.</p></div>
+        <div class="sci"><h3>Доказательные нормы</h3><p>Белок ≥1.2 г/кг для сохранения мышц, цели по овощам и шагам — из мета-анализов, а не из трендов.</p></div>
+      </div>
+      <p class="cite">Дозозависимый эффект шагов — мета-анализ The Lancet Public Health (2025); влияние белка на сохранение мышечной массы при дефиците — доказательная нутрициология.</p>
+    </div>
+  </section>
+
+  <!-- NUMBERS -->
+  <section>
+    <div class="nums">
+      <div class="num"><b>5 <span class="sp">лет</span></b><span>методика, проверенная на практике</span></div>
+      <div class="num"><b>30+</b><span>параметров учитывает алгоритм нормы</span></div>
+      <div class="num"><b>100%</b><span>автономно — без кураторов и чатов</span></div>
+    </div>
+  </section>
+
+  <!-- CTA / start -->
+  <section id="start">
+    <div class="cta">
+      <span class="eyebrow" style="background:rgba(255,255,255,.18);color:#fff">Начать</span>
+      <h2 class="mt12">Открой Renorma прямо сейчас</h2>
+      <p class="lead center" style="color:#E6FFFB;margin:14px auto 0">Работает в браузере и устанавливается как приложение на телефон. Данные хранятся на твоём устройстве.</p>
+      <a class="btn" href="https://hjkl-ft.pages.dev" target="_blank" rel="noopener">Открыть приложение →</a>
+      <div class="fine">Подписка с автопродлением · отмена в один клик</div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq">
+    <div class="sec-head center"><span class="eyebrow">Вопросы</span><h2 class="mt12">Частые вопросы</h2></div>
+    <div class="mt28">
+      <details><summary>Это просто очередное приложение с калориями?</summary><p>Нет. Renorma не «считалка», а автономная система: сама выставляет твою норму и пересчитывает её каждую неделю по фактическому результату, считает микронутриенты и даёт ежедневную оценку рациона.</p></details>
+      <details><summary>Я справлюсь без куратора?</summary><p>Именно для этого Renorma и сделана. Прибор берёт на себя расчёты и решения — тебе остаётся записывать еду и следовать понятным шагам.</p></details>
+      <details><summary>Чем вы лучше бесплатного ChatGPT?</summary><p>Renorma — не разовый совет, а система: точная база нутриентов, учёт твоей динамики, еженедельная корректировка нормы и история привычек. Расчёт стабильный и воспроизводимый, а не «как сегодня ответит чат».</p></details>
+      <details><summary>Сколько времени это занимает?</summary><p>Запись еды — секунды (можно по фото). Никаких длинных отчётов и созвонов: всё в телефоне, в твоём ритме.</p></details>
+      <details><summary>Нужны ли тренировки, чтобы увидеть результат?</summary><p>Нет. Снижение веса определяется энергетическим балансом. Активность и силовые помогают сохранить мышцы и здоровье, но не обязательны для старта.</p></details>
+      <details><summary>Что с оплатой и возвратом?</summary><p>Доступ по подписке с автопродлением, отмена в один клик. Если планы изменились — можно оформить возврат по правилам, указанным в оферте.</p></details>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <div class="logo"><span class="mark"></span>Renorma</div>
+    <div>
+      <a href="#">Оферта</a>
+      <a href="#">Политика конфиденциальности</a>
+    </div>
+    <div>© Renorma</div>
+  </div>
+</footer>
+
+</body>
+</html>

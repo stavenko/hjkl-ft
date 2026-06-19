@@ -4,55 +4,8 @@ use std::collections::HashSet;
 use leptos::*;
 use serde::{Deserialize, Serialize};
 
+use crate::services::story_dsl::{self, Engine};
 use crate::services::{db, local, subscription, sync};
-
-/// Sections of chapter 1: (emoji icon, i18n label key, route once unlocked).
-pub const CH1_SECTIONS: [(&str, &str, Option<&str>); 9] = [
-    ("\u{27a1}\u{fe0f}", "story.ch1.intro", Some("/story/intro")),
-    ("\u{2699}\u{fe0f}", "story.ch1.setup", Some("/story/setup")),
-    ("\u{1f4b0}", "story.ch1.accounting", Some("/story/accounting")),
-    ("\u{1f37d}\u{fe0f}", "story.ch1.first_food", Some("/story/first-food")),
-    ("\u{1f6b6}", "story.ch1.activity", Some("/story/activity")),
-    ("\u{1f468}\u{200d}\u{1f373}", "story.ch1.cooking", Some("/story/cooking")),
-    ("\u{1f9b4}", "story.ch1.bones", Some("/story/bones")),
-    ("\u{1f389}", "story.ch1.restaurant", Some("/story/restaurant")),
-    ("\u{1f513}", "story.ch1.next", Some("/story/next")),
-];
-
-/// Sections of chapter 2 «Appetite».
-pub const CH2_SECTIONS: [(&str, &str, Option<&str>); 7] = [
-    ("\u{26a0}\u{fe0f}", "story.ch2.s1", Some("/story/ch2-mistake")),
-    ("\u{1f966}", "story.ch2.s2", Some("/story/ch2-veg")),
-    ("\u{1f357}", "story.ch2.s3", Some("/story/ch2-protein")),
-    ("\u{1f37f}", "story.ch2.s4", Some("/story/ch2-snack")),
-    ("\u{1f964}", "story.ch2.s5", Some("/story/ch2-drinks")),
-    ("\u{1f37d}\u{fe0f}", "story.ch2.s6", Some("/story/ch2-meals")),
-    ("\u{1f319}", "story.ch2.s7", Some("/story/ch2-night")),
-];
-
-/// Sections of chapter 3 «Why lose weight?». s1 carries the calorie-planka
-/// mechanic; the rest are read-only prose.
-pub const CH3_SECTIONS: [(&str, &str, Option<&str>); 6] = [
-    ("\u{1f525}", "story.ch3.s1", Some("/story/ch3-fat")),
-    ("\u{1fa7a}", "story.ch3.aesthetics", Some("/story/ch3-aesthetics")),
-    ("\u{1fa9e}", "story.ch3.s2", Some("/story/ch3-beauty")),
-    ("\u{1f4c9}", "story.ch3.s3", Some("/story/ch3-minimum")),
-    ("\u{2696}\u{fe0f}", "story.ch3.s4", Some("/story/ch3-lean")),
-    ("\u{1f331}", "story.ch3.s5", Some("/story/ch3-lifestyle")),
-];
-
-/// Chapter 3 opens once the user has tracked the food diary for this many days.
-pub const CH3_MIN_DIARY_DAYS: u32 = 7;
-
-/// Stable keys for the chapter progress tasks, aligned 1:1 (same order) with
-/// [`Progress::tasks`]. Used to persist per-task "acknowledged" flags.
-pub const TASK_KEYS: [&str; 20] = [
-    "progress_photos", "sex", "lang", "notif", "weigh_in",
-    "first_weigh", "weight_streak", "first_food",
-    "steps_reminder", "first_steps", "steps_streak",
-    "dish_created", "dish_in_diary", "bones", "restaurant",
-    "sub_paid", "diary_streak", "s4", "s5", "night",
-];
 
 /// Task flag: the user committed to wanting a new body (chapter 1, intro).
 pub const WANT_NEW_BODY: &str = "want_new_body";
@@ -332,70 +285,6 @@ pub struct Progress {
     pub sub_paid: bool,
 }
 
-impl Progress {
-    /// Chapter 1: the task(s) that open the next section are done.
-    pub fn ch1_completed(&self, i: usize) -> bool {
-        match i {
-            0 => self.progress_photos,
-            1 => self.lang_done && self.notif_done,
-            2 => self.weigh_in_on,
-            3 => self.first_food_done,
-            4 => self.first_steps,
-            5 => self.dish_created && self.dish_in_diary,
-            6 => self.bones_waste,
-            7 => self.restaurant_food,
-            8 => self.sub_paid,
-            _ => false,
-        }
-    }
-    /// Chapter 1 unlocking is cumulative: open only if every earlier section is done.
-    pub fn ch1_unlocked(&self, i: usize) -> bool {
-        (0..i).all(|j| self.ch1_completed(j))
-    }
-
-    /// Chapter 2 opens after a 7-day weigh-in streak AND an active subscription.
-    pub fn chapter2_unlocked(&self) -> bool {
-        self.weight_streak >= 7 && self.sub_active
-    }
-    pub fn ch2_completed(&self, i: usize) -> bool {
-        match i {
-            0 => self.diary_streak >= 7,
-            3 => self.s4_done,
-            4 => self.s5_done,
-            5 => self.meal_split_unlocked,
-            6 => self.night_feedback_viewed,
-            _ => true, // s2 / s3: post-factum / goal — no gate
-        }
-    }
-    pub fn ch2_unlocked(&self, i: usize) -> bool {
-        self.chapter2_unlocked() && (0..i).all(|j| self.ch2_completed(j))
-    }
-
-    /// Chapter 3 opens once the diary has been tracked for several distinct days.
-    pub fn chapter3_unlocked(&self) -> bool {
-        self.diary_days >= CH3_MIN_DIARY_DAYS
-    }
-    pub fn ch3_completed(&self, i: usize) -> bool {
-        match i {
-            0 => self.calorie_planka_set,
-            _ => true, // s2..s5: read-only prose
-        }
-    }
-    pub fn ch3_unlocked(&self, i: usize) -> bool {
-        self.chapter3_unlocked() && (0..i).all(|j| self.ch3_completed(j))
-    }
-
-    /// All chapter progress tasks, in the same order as [`TASK_KEYS`].
-    pub fn tasks(&self) -> [bool; 20] {
-        [
-            self.progress_photos, self.sex_done, self.lang_done, self.notif_done, self.weigh_in_on,
-            self.first_weigh, self.weight_streak >= 7, self.first_food_done,
-            self.steps_reminder_on, self.first_steps, self.steps_streak >= 7,
-            self.dish_created, self.dish_in_diary, self.bones_waste, self.restaurant_food,
-            self.sub_paid, self.diary_streak >= 7, self.s4_done, self.s5_done, self.night_feedback_viewed,
-        ]
-    }
-}
 
 /// Collect the current [`Progress`] from the DB (flags + derived streaks +
 /// cached subscription). Mirrors the per-signal effects on the Story page.
@@ -465,27 +354,29 @@ fn ack_key(task: &str) -> String {
     format!("ack:{task}")
 }
 
-/// Every section route across all chapters, for "unread section" detection.
-pub fn all_section_routes() -> Vec<&'static str> {
-    CH1_SECTIONS
+/// Every section route (`/story/<id>`) across all chapters, from the DSL.
+pub fn all_section_routes() -> Vec<String> {
+    story_dsl::story()
+        .chapters
         .iter()
-        .chain(CH2_SECTIONS.iter())
-        .chain(CH3_SECTIONS.iter())
-        .filter_map(|(_, _, r)| *r)
+        .flat_map(|c| c.sections.iter())
+        .map(|s| format!("/story/{}", s.id))
         .collect()
 }
 
-/// True if `path` is a known story-section route.
+/// True if `path` is a known story-section route (`/story/<known id>`).
 pub fn is_section_route(path: &str) -> bool {
-    all_section_routes().contains(&path)
+    path.strip_prefix("/story/").is_some_and(|id| {
+        story_dsl::story().chapters.iter().flat_map(|c| &c.sections).any(|s| s.id == id)
+    })
 }
 
 /// The set of section routes the user has already opened.
 pub async fn seen_routes() -> HashSet<String> {
     let mut set = HashSet::new();
     for route in all_section_routes() {
-        if get_flag(&seen_key(route)).await {
-            set.insert(route.to_string());
+        if get_flag(&seen_key(&route)).await {
+            set.insert(route);
         }
     }
     set
@@ -512,12 +403,13 @@ async fn put_flag(key: &str, value: bool) {
 /// Acknowledge every currently-completed task — clears the "task done" marker.
 /// Called when the user opens the Story page. Writes in one batch, pushes once.
 pub async fn ack_done_tasks() {
-    let p = gather().await;
-    let tasks = p.tasks();
+    let snap = engine_snapshot().await;
+    let story = story_dsl::story();
+    let e = Engine::new(story, &snap);
     let mut wrote = false;
-    for (i, done) in tasks.iter().enumerate() {
-        if *done {
-            let k = ack_key(TASK_KEYS[i]);
+    for t in &story.tasks {
+        if e.task_closed(&t.id) {
+            let k = ack_key(&t.id);
             if !get_flag(&k).await {
                 put_flag(&k, true).await;
                 wrote = true;
@@ -546,22 +438,28 @@ impl Attention {
 
 /// Compute the current attention state from the DB.
 pub async fn attention() -> Attention {
-    let p = gather().await;
+    let snap = engine_snapshot().await;
+    let story = story_dsl::story();
+    let e = Engine::new(story, &snap);
     let seen = seen_routes().await;
 
-    let unread_in = |sections: &[(&str, &str, Option<&str>)], unlocked: &dyn Fn(usize) -> bool| {
-        sections.iter().enumerate().any(|(i, (_, _, route))| {
-            matches!(route, Some(r) if unlocked(i) && !seen.contains(*r))
-        })
-    };
-    let unread_section = unread_in(&CH1_SECTIONS, &|i| p.ch1_unlocked(i))
-        || unread_in(&CH2_SECTIONS, &|i| p.ch2_unlocked(i))
-        || unread_in(&CH3_SECTIONS, &|i| p.ch3_unlocked(i));
+    // A section is "unread" when it's unlocked but its page hasn't been opened.
+    let mut unread_section = false;
+    for ch in &story.chapters {
+        if !e.chapter_open(ch) {
+            continue;
+        }
+        for (i, sec) in ch.sections.iter().enumerate() {
+            if e.section_unlocked(ch, i) && !seen.contains(&format!("/story/{}", sec.id)) {
+                unread_section = true;
+            }
+        }
+    }
 
-    let tasks = p.tasks();
+    // A task is "unacked" when it's closed but the user hasn't opened the Story since.
     let mut unacked_task = false;
-    for (i, done) in tasks.iter().enumerate() {
-        if *done && !get_flag(&ack_key(TASK_KEYS[i])).await {
+    for t in &story.tasks {
+        if e.task_closed(&t.id) && !get_flag(&ack_key(&t.id)).await {
             unacked_task = true;
             break;
         }
@@ -602,55 +500,9 @@ pub fn refresh_attention() {
 mod tests {
     use super::*;
 
-    fn full() -> Progress {
-        Progress {
-            progress_photos: true, sex_done: true, lang_done: true, notif_done: true,
-            weigh_in_on: true, first_weigh: true, first_food_done: true,
-            steps_reminder_on: true, first_steps: true, dish_created: true, dish_in_diary: true,
-            bones_waste: true, restaurant_food: true, meal_split_unlocked: true,
-            night_feedback_viewed: true, weight_streak: 7, steps_streak: 7,
-            diary_streak: 7, diary_days: 7, calorie_planka_set: true, s4_done: true, s5_done: true,
-            sub_active: true, sub_paid: true,
-        }
-    }
-
-    #[test]
-    fn ch1_chain_is_cumulative() {
-        let mut p = Progress::default();
-        assert!(p.ch1_unlocked(0)); // first is always open
-        assert!(!p.ch1_unlocked(1)); // locked until section 0 done
-        p.progress_photos = true;
-        assert!(p.ch1_unlocked(1));
-        assert!(!p.ch1_unlocked(2)); // needs lang+notif
-    }
-
-    #[test]
-    fn chapter2_needs_streak_and_subscription() {
-        let mut p = Progress::default();
-        p.weight_streak = 7;
-        assert!(!p.chapter2_unlocked()); // no subscription
-        p.sub_active = true;
-        assert!(p.chapter2_unlocked());
-    }
-
-    #[test]
-    fn chapter3_gates_on_diary_days() {
-        let mut p = Progress::default();
-        p.diary_days = 6;
-        assert!(!p.chapter3_unlocked());
-        p.diary_days = 7;
-        assert!(p.chapter3_unlocked());
-    }
-
-    #[test]
-    fn tasks_count_matches_keys_len() {
-        assert_eq!(full().tasks().len(), TASK_KEYS.len());
-        assert!(full().tasks().iter().all(|&d| d));
-        assert_eq!(Progress::default().tasks().iter().filter(|&&d| d).count(), 0);
-    }
-
     #[test]
     fn section_routes_are_recognised() {
+        // Engine/unlock logic is tested in story_dsl; here just the route mapping.
         assert!(is_section_route("/story/intro"));
         assert!(is_section_route("/story/ch3-lifestyle"));
         assert!(!is_section_route("/diary"));

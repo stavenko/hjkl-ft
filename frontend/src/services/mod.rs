@@ -12,6 +12,7 @@ pub mod platform;
 pub mod profile;
 pub mod push;
 pub mod story;
+pub mod story_dsl;
 pub mod subscription;
 pub mod summary;
 pub mod sync;

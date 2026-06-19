@@ -111,6 +111,72 @@ pub async fn get_flag(key: &str) -> bool {
     db::get::<Flag>("story", key).await.map(|f| f.value).unwrap_or(false)
 }
 
+/// All story flag keys currently set to `true`. Backs the DSL engine snapshot
+/// (the `opened:` / `evt_closed:` / `chapter_opened:` flag sets).
+pub(crate) async fn true_flags() -> HashSet<String> {
+    db::list_all::<Flag>("story")
+        .await
+        .into_iter()
+        .filter(|f| f.value)
+        .map(|f| f.key)
+        .collect()
+}
+
+/// Build the DSL engine snapshot from IndexedDB: the `Progress` sensor backend
+/// plus the engine's `opened`/`evt_closed` sets.
+///
+/// MIGRATION BRIDGE: the engine reads the EXISTING milestone flags by mapping
+/// each DSL id to its legacy flag, so the current trigger sites (`set_flag`) and
+/// bespoke pages keep working unchanged. The `set_flag`→`emit(event)` cleanup and
+/// native `opened:`/`evt_closed:` keys come in the final phase, when the bespoke
+/// pages are deleted.
+pub async fn engine_snapshot() -> crate::services::story_dsl::EngineSnapshot {
+    let progress = gather().await;
+    let f = true_flags().await;
+    let has = |k: &str| f.contains(k);
+
+    // Event/section-close DSL tasks → closed when their legacy milestone flag is set.
+    const TASK_FLAG: &[(&str, &str)] = &[
+        ("photos", PROGRESS_PHOTOS_TAKEN),
+        ("sex", SEX_SELECTED),
+        ("lang", LANGUAGE_CONFIGURED),
+        ("notif", NOTIFICATION_RECEIVED),
+        ("weigh_in", WEIGH_IN_REMINDER),
+        ("first_weigh", FIRST_WEIGH),
+        ("first_food", FIRST_FOOD_DONE),
+        ("steps_reminder", STEPS_REMINDER),
+        ("first_steps", FIRST_STEPS),
+        ("dish_created", COOKING_DISH_CREATED),
+        ("dish_in_diary", COOKING_DISH_IN_DIARY),
+        ("bones", BONES_WASTE_ENTERED),
+        ("restaurant", RESTAURANT_FOOD_ENTERED),
+    ];
+    let evt_closed: HashSet<String> = TASK_FLAG
+        .iter()
+        .filter(|(_, flag)| has(flag))
+        .map(|(id, _)| id.to_string())
+        .collect();
+
+    // `{section_opened: id}` conditions (armed first-food; meals/night complete-on-open).
+    const SECTION_FLAG: &[(&str, &str)] = &[
+        ("first-food", FIRST_FOOD_ARMED),
+        ("ch2-meals", MEAL_SPLIT_UNLOCKED),
+        ("ch2-night", NIGHT_FEEDBACK_VIEWED),
+    ];
+    let opened: HashSet<String> = SECTION_FLAG
+        .iter()
+        .filter(|(_, flag)| has(flag))
+        .map(|(id, _)| id.to_string())
+        .collect();
+
+    crate::services::story_dsl::EngineSnapshot {
+        progress,
+        opened,
+        evt_closed,
+        chapter_opened: HashSet::new(), // live-evaluated during the bridge
+    }
+}
+
 /// Persist a story progress flag in the IndexedDB `story` store, stamp it for
 /// cross-device sync, and push in the background so progress propagates.
 pub async fn set_flag(key: &str, value: bool) {
@@ -158,7 +224,7 @@ pub fn consecutive_day_streak(dates: &[String]) -> u32 {
 /// from signals (the Story page) or from the DB (`gather`), then fed into the
 /// pure rules below — so the page and the nav-icon attention marker can never
 /// disagree about what's unlocked or done.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct Progress {
     pub progress_photos: bool,
     pub sex_done: bool,

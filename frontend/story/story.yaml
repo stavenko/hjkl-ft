@@ -1,0 +1,203 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Story DSL — the whole onboarding story as data.
+#
+# Authored in YAML; build.rs converts it to JSON in OUT_DIR, the crate embeds the
+# JSON and parses it with serde_json (no YAML in the wasm bundle).
+#
+# Condition grammar (`Cond`):
+#   always
+#   {event: <name>}                 a task closes when this event fires while enabled
+#   {sensor: <name>}                boolean sensor is true
+#   {sensor: <name>, gte: <n>}      numeric sensor >= n   (counter-based close)
+#   {section_opened: <section-id>}  the user has opened that section's page
+#   {task: <task-id>}               that task is closed
+#   {all: [<cond>, ...]} / {any: [<cond>, ...]}
+#
+# `sensors`/`events` below are documentation of the closed Rust vocabularies the
+# engine implements (sensors read from Progress/gather(); events are emitted from
+# feature code via story::emit). Actions (`on_open`) and `widget`s are likewise a
+# closed Rust registry referenced by name.
+# ─────────────────────────────────────────────────────────────────────────────
+
+sensors: [weight_streak, steps_streak, diary_streak, diary_days,
+          calorie_planka_set, sub_active, sub_paid,
+          snack_yesterday, no_high_cal_drink_yesterday]
+events:  [weight_saved, steps_saved, food_logged, recipe_finalized, recipe_in_diary,
+          waste_entered, restaurant_logged, photos_done, sex_selected,
+          weigh_in_reminder_on, steps_reminder_on, lang_configured, notif_received]
+
+# ── Tasks (the single pool; "active" = enabled & not closed) ─────────────────
+tasks:
+  - id: photos
+    title: {en: "Take your progress photos", ru: "Сделайте фото прогресса"}
+    close: {event: photos_done}
+  - id: sex
+    title: {en: "Pick your sex in settings", ru: "Укажите пол в настройках"}
+    close: {event: sex_selected}
+  - id: lang
+    title: {en: "Confirm the app language", ru: "Подтвердите язык приложения"}
+    close: {event: lang_configured}
+  - id: notif
+    title: {en: "Receive the test notification", ru: "Получите тестовое уведомление"}
+    close: {event: notif_received}
+  - id: weigh_in
+    title: {en: "Enable the weigh-in reminder", ru: "Включите напоминание о взвешивании"}
+    close: {event: weigh_in_reminder_on}
+  - id: first_weigh
+    title: {en: "Record your first weight", ru: "Запишите первый вес"}
+    close: {event: weight_saved}
+  - id: weight_streak
+    title: {en: "Weigh in 7 days in a row", ru: "Взвешивайтесь 7 дней подряд"}
+    close: {sensor: weight_streak, gte: 7}
+  - id: first_food
+    title: {en: "Log your first food", ru: "Внесите первую еду"}
+    enable: {section_opened: first-food}   # armed when the section is opened
+    close:  {event: food_logged}            # fired only while enabled
+  - id: steps_reminder
+    title: {en: "Enable the steps reminder", ru: "Включите напоминание о шагах"}
+    close: {event: steps_reminder_on}
+  - id: first_steps
+    title: {en: "Record your first steps", ru: "Запишите первые шаги"}
+    close: {event: steps_saved}
+  - id: steps_streak
+    title: {en: "Log steps 7 days in a row", ru: "Записывайте шаги 7 дней подряд"}
+    close: {sensor: steps_streak, gte: 7}
+  - id: dish_created
+    title: {en: "Create a cooked dish", ru: "Создайте готовое блюдо"}
+    close: {event: recipe_finalized}
+  - id: dish_in_diary
+    title: {en: "Add the dish to the diary", ru: "Добавьте блюдо в дневник"}
+    close: {event: recipe_in_diary}
+  - id: bones
+    title: {en: "Log food with inedible waste", ru: "Внесите еду с несъедобной частью"}
+    close: {event: waste_entered}
+  - id: restaurant
+    title: {en: "Log a restaurant meal", ru: "Внесите еду из ресторана"}
+    close: {event: restaurant_logged}
+  - id: sub_paid
+    title: {en: "Support the project", ru: "Поддержите проект"}
+    close: {sensor: sub_paid}
+  - id: diary_streak
+    title: {en: "Keep the food diary 7 days in a row", ru: "Ведите дневник еды 7 дней подряд"}
+    close: {sensor: diary_streak, gte: 7}
+  - id: snack
+    title: {en: "Log a low-calorie snack", ru: "Внесите низкокалорийную закусь"}
+    close: {sensor: snack_yesterday}
+  - id: drinks
+    title: {en: "A day with no high-calorie drinks", ru: "День без калорийных напитков"}
+    close: {sensor: no_high_cal_drink_yesterday}
+  - id: night
+    title: {en: "Check your evening feedback", ru: "Посмотрите вечернюю обратную связь"}
+    close: {section_opened: ch2-night}
+
+# ── Chapters ─────────────────────────────────────────────────────────────────
+chapters:
+  - id: ch1
+    title: {en: "Nice to meet you", ru: "Приятно познакомиться"}
+    open: always
+    sections:
+      - id: intro
+        title: {en: "Introduction", ru: "Введение"}
+        tasks: [photos]
+        legacy_route: /story/intro
+      - id: setup
+        title: {en: "Let's set up the app", ru: "Для начала настроим приложение"}
+        tasks: [sex, lang, notif]
+        complete: {all: [{task: lang}, {task: notif}]}   # sex is surfaced but not gating
+        legacy_route: /story/setup
+      - id: accounting
+        title: {en: "The accounting of weight loss", ru: "Бухгалтерия похудения"}
+        tasks: [weigh_in, first_weigh, weight_streak]
+        complete: {task: weigh_in}
+        legacy_route: /story/accounting
+      - id: first-food
+        title: {en: "My first food entries", ru: "Мои первые записи еды"}
+        tasks: [first_food]
+        on_open: [arm_first_food]
+        legacy_route: /story/first-food
+      - id: activity
+        title: {en: "Activity and weight", ru: "Активность и вес"}
+        tasks: [steps_reminder, first_steps, steps_streak]
+        complete: {task: first_steps}
+        legacy_route: /story/activity
+      - id: cooking
+        title: {en: "I'm cooking", ru: "Я готовлю"}
+        tasks: [dish_created, dish_in_diary]
+        legacy_route: /story/cooking
+      - id: bones
+        title: {en: "My food with bones", ru: "Моя еда с костями"}
+        tasks: [bones]
+        legacy_route: /story/bones
+      - id: restaurant
+        title: {en: "A party or a restaurant", ru: "Праздник или ресторан"}
+        tasks: [restaurant]
+        legacy_route: /story/restaurant
+      - id: next
+        title: {en: "What's next", ru: "Что дальше"}
+        tasks: [sub_paid]
+        legacy_route: /story/next
+
+  - id: ch2
+    title: {en: "Appetite", ru: "Аппетит"}
+    open: {all: [{sensor: weight_streak, gte: 7}, {sensor: sub_active}]}
+    sections:
+      - id: ch2-mistake
+        title: {en: "The biggest mistake of dieters", ru: "Основная ошибка худеющих"}
+        tasks: [diary_streak]
+        legacy_route: /story/ch2-mistake
+      - id: ch2-veg
+        title: {en: "Vegetables and fruit", ru: "Фрукты и овощи"}
+        complete: always
+        legacy_route: /story/ch2-veg
+      - id: ch2-protein
+        title: {en: "Protein — your best helper", ru: "Белок — лучший помощник"}
+        complete: always
+        on_open: [set_protein_goal]
+        legacy_route: /story/ch2-protein
+      - id: ch2-snack
+        title: {en: "Low-calorie snacks", ru: "Низкокалорийная закусь"}
+        tasks: [snack]
+        legacy_route: /story/ch2-snack
+      - id: ch2-drinks
+        title: {en: "Juices and drinks", ru: "Соки и питьё"}
+        tasks: [drinks]
+        legacy_route: /story/ch2-drinks
+      - id: ch2-meals
+        title: {en: "How many meals a day", ru: "Сколько раз в день надо есть"}
+        complete: {section_opened: ch2-meals}
+        on_open: [unlock_meal_split]
+        legacy_route: /story/ch2-meals
+      - id: ch2-night
+        title: {en: "Eating at night", ru: "Еда на ночь"}
+        tasks: [night]
+        legacy_route: /story/ch2-night
+
+  - id: ch3
+    title: {en: "Why lose weight?", ru: "Зачем надо худеть?"}
+    open: {sensor: diary_days, gte: 7}
+    sections:
+      - id: ch3-fat
+        title: {en: "Why do we have fat at all?", ru: "Зачем нам вообще жир?"}
+        complete: {sensor: calorie_planka_set}
+        on_open: [set_calorie_planka]
+        legacy_route: /story/ch3-fat
+      - id: ch3-aesthetics
+        title: {en: "Aesthetics vs health", ru: "Эстетика vs здоровье"}
+        complete: always
+        legacy_route: /story/ch3-aesthetics
+      - id: ch3-beauty
+        title: {en: "What does a «beautiful person» look like?", ru: "Как выглядит «красивый человек»?"}
+        complete: always
+        legacy_route: /story/ch3-beauty
+      - id: ch3-minimum
+        title: {en: "What is the physiological fat minimum?", ru: "Что такое физиологический минимум жира?"}
+        complete: always
+        legacy_route: /story/ch3-minimum
+      - id: ch3-lean
+        title: {en: "The difference between «lean» and «fat-stripped»", ru: "Разница между «худым» и «обезжиренным»"}
+        complete: always
+        legacy_route: /story/ch3-lean
+      - id: ch3-lifestyle
+        title: {en: "Life without fat", ru: "Жизнь без жира"}
+        complete: always
+        legacy_route: /story/ch3-lifestyle

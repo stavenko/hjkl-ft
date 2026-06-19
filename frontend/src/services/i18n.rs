@@ -724,7 +724,7 @@ fn en(key: &str) -> &'static str {
         "story.ch3.lifestyle.p3" => "It sounds harsh, but it's actually good news. If weight is a derivative of lifestyle, then it's manageable. No feat is required and no eternal willpower diet: it's enough to change the habits themselves — and then a normal weight becomes not a goal you battle for, but simply something that is, because that's how you live.",
 
         // Story — chapter 1, introduction
-        "story.intro.p1" => "Hi. This is the «Slimming Story» app. It is made specifically for people who can't lose weight and have a bit of a problem with extra pounds.",
+        "story.intro.p1" => "Hi. This is the «Renorma» app. It is made specifically for people who can't lose weight and have a bit of a problem with extra pounds.",
         "story.intro.p2" => "Having a low body-fat percentage is very important. So you need to be able not just to «get slim for the summer», but also to keep your weight steady.",
         "story.intro.p3" => "It's not hard.",
         "story.intro.p4" => "But it does take some habit.",
@@ -1466,7 +1466,7 @@ fn ru(key: &str) -> &'static str {
         "story.ch3.lifestyle.p3" => "Звучит сурово, но на самом деле это хорошая новость. Если вес — производная образа жизни, значит, он управляем. Не нужен подвиг и не нужна вечная диета на силе воли: достаточно поменять сами привычки — и тогда нормальный вес станет не целью, за которую вы бьётесь, а тем, что просто есть, потому что вы так живёте.",
 
         // История — глава 1, введение
-        "story.intro.p1" => "Привет. Это приложение «Худеющая история». Оно сделано специально для тех, кто не может похудеть и у кого есть небольшие проблемы с лишним весом.",
+        "story.intro.p1" => "Привет. Это приложение «Renorma». Оно сделано специально для тех, кто не может похудеть и у кого есть небольшие проблемы с лишним весом.",
         "story.intro.p2" => "Иметь низкий процент жира — это очень важно. Поэтому надо не просто уметь «худеть к лету», но и уметь держать свой вес в норме.",
         "story.intro.p3" => "Это не сложно.",
         "story.intro.p4" => "Но это требует некоторой привычки.",

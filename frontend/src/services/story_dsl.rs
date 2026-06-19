@@ -330,8 +330,10 @@ impl<'a> Engine<'a> {
         chapter_open && self.eval(&t.enable) && !self.task_closed(&t.id)
     }
 
-    /// The single list of tasks that are active right now (enabled, not closed,
-    /// in an open chapter), in chapter→section→task order, deduped.
+    /// The single list of tasks active right now: only tasks of sections the user
+    /// has ALREADY OPENED (the act of opening introduces the task), in an open
+    /// chapter, enabled and not yet closed. So the list starts empty and grows as
+    /// the user advances — it never dumps every future task at once.
     pub fn active_tasks(&self) -> Vec<&'a Task> {
         let mut out: Vec<&Task> = Vec::new();
         for ch in &self.story.chapters {
@@ -339,6 +341,9 @@ impl<'a> Engine<'a> {
                 continue;
             }
             for sec in &ch.sections {
+                if !self.section_opened(sec) {
+                    continue;
+                }
                 for tid in &sec.tasks {
                     if out.iter().any(|t| &t.id == tid) {
                         continue;
@@ -475,12 +480,16 @@ mod tests {
     }
 
     #[test]
-    fn active_list_grows_with_open_chapters() {
-        // Fresh user: only ch1 open → its tasks are active (minus armed first_food).
+    fn active_list_only_for_opened_sections() {
+        // Fresh user (nothing opened) → no active tasks; the list grows only as
+        // the user opens the sections that introduce each task.
         let s = snap();
-        let active = eng(&s).active_tasks();
-        assert!(active.iter().any(|t| t.id == "photos"));
-        assert!(active.iter().all(|t| t.id != "first_food")); // armed
-        assert!(active.iter().all(|t| t.id != "diary_streak")); // ch2 closed
+        assert!(eng(&s).active_tasks().is_empty());
+
+        let mut s2 = snap();
+        s2.opened.insert("intro".to_string());
+        let active = eng(&s2).active_tasks();
+        assert!(active.iter().any(|t| t.id == "photos")); // intro's task is now active
+        assert!(active.iter().all(|t| t.id != "diary_streak")); // ch2 section not opened
     }
 }

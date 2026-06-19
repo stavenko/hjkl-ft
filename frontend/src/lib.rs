@@ -33,6 +33,7 @@ pub fn main() {
         services::i18n::init_weight_unit();
         services::update::init(); // create the update-available signal at the root
         services::story::init_attention(); // create the story-attention signal at the root
+        services::summary::init_gen(); // create the summary-generator status signal at the root
 
         // Reconcile with the server on launch when signed in: push local changes,
         // then pull the merged result (so changes — incl. deletions — made on other
@@ -62,7 +63,8 @@ pub fn main() {
 
         // On activation, prepare yesterday's assessment if there's none yet —
         // so it's ready before the user opens the day, not generated on open.
-        leptos::spawn_local(services::summary::ensure_yesterday());
+        // (Runs as an app-scoped background generator; no-op if a record exists.)
+        services::summary::ensure_yesterday();
     });
 }
 
@@ -87,7 +89,7 @@ fn install_foreground_sync() {
                 services::sync::sync_now_background();
             }
             // Prepare yesterday's assessment on resume too (no-op if it exists).
-            leptos::spawn_local(services::summary::ensure_yesterday());
+            services::summary::ensure_yesterday();
         }
     });
     let _ = document

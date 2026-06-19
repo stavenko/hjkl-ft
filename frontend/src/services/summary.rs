@@ -2,7 +2,10 @@
 //! IndexedDB (`summaries` store). Daily summaries are available for any past day;
 //! the week report is computed once the week has ended (the following Monday).
 
+use std::cell::RefCell;
+
 use chrono::{Datelike, Duration, NaiveDate};
+use leptos::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +17,11 @@ pub struct Summary {
     pub id: String,
     pub date: String,
     pub text: String,
+    /// Last generation error for this day, if the most recent attempt failed.
+    /// Persisted so it's visible on return; the last good `text` is kept alongside
+    /// — a failed regeneration never wipes a previous success.
+    #[serde(default)]
+    pub error: Option<String>,
     pub created_at: String,
 }
 
@@ -177,9 +185,24 @@ pub async fn get_week(week_start: &str) -> Option<Summary> {
 }
 
 async fn store(id: String, date: String, text: String) -> Summary {
-    let s = Summary { id, date, text, created_at: now() };
+    let s = Summary { id, date, text, error: None, created_at: now() };
     db::put("summaries", &s).await;
     s
+}
+
+/// Record a day's generation error WITHOUT touching the last good report: load
+/// the existing record, keep its `text`, attach the error. So a failed
+/// (re)generation leaves any previous assessment intact and the error visible.
+async fn store_error(date: &str, msg: String) {
+    let text = get_day(date).await.map(|s| s.text).unwrap_or_default();
+    let s = Summary {
+        id: format!("day:{date}"),
+        date: date.to_string(),
+        text,
+        error: Some(msg),
+        created_at: now(),
+    };
+    db::put("summaries", &s).await;
 }
 
 // ---- Context assembly ----
@@ -389,12 +412,131 @@ async fn day_context(date: &str) -> Option<DayCtx> {
 
 /// Drop the cached day assessment and generate a fresh one (the "Переделать
 /// оценку" button). `on_token` drives the live thinking/answer UI.
-pub async fn regenerate_day(
-    date: &str,
-    on_token: impl Fn(AiPhase) + Clone + 'static,
-) -> Result<Option<Summary>, String> {
-    db::delete("summaries", &format!("day:{date}")).await;
-    ensure_day(date, on_token).await
+// ── Client-side background generator (a "worker" on the front-end) ───────────
+//
+// Report generation runs as an APP-SCOPED background task, decoupled from any
+// page/component: its live status lives in a ROOT signal, so it survives the user
+// navigating away and back, and any SummaryBlock merely OBSERVES it (no
+// component-owned spawn/liveness machinery, so late stream callbacks can never
+// touch a disposed signal). Outcomes are persisted to the `summaries` store
+// (success OR error), so a result/error is visible on return and a day is never
+// auto-regenerated once an attempt exists.
+
+/// Live status of the background day generator (None = idle).
+#[derive(Clone)]
+pub struct GenProgress {
+    pub date: String,
+    pub phase: u8, // 0 working, 1 thinking, 2 answering
+    pub think: u32,
+    pub answer: u32,
+    pub started_ms: f64,
+    pub tick: u32, // bumped ~1/s so observers re-render the elapsed seconds
+}
+
+thread_local! {
+    static GEN: RefCell<Option<RwSignal<Option<GenProgress>>>> = const { RefCell::new(None) };
+}
+
+/// Create the generator's status signal at the ROOT scope. Call once from main().
+pub fn init_gen() {
+    GEN.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some(create_rw_signal(None));
+        }
+    });
+}
+
+/// Reactive status of the background generator (None when idle).
+pub fn gen_active() -> RwSignal<Option<GenProgress>> {
+    GEN.with(|c| c.borrow().expect("summary::init_gen() must run before gen_active()"))
+}
+
+/// Start generating the day's assessment in the background. Idempotent per date
+/// (a run already in flight for `date` is left alone). `force` regenerates even
+/// when a report exists; otherwise it runs ONLY when there's no record yet — so
+/// entering the app triggers it just once, never again once an attempt exists.
+/// Overwrites the stored report ONLY on success; on error it keeps the previous
+/// report and records the error. Safe to call from anywhere (no UI context).
+pub fn start_day_generation(date: String, force: bool) {
+    spawn_local(async move {
+        // Already generating this day? Don't double-run.
+        if matches!(gen_active().get_untracked(), Some(g) if g.date == date) {
+            return;
+        }
+        // Trigger on entry only if there's no record at all yet.
+        if !force && get_day(&date).await.is_some() {
+            return;
+        }
+        gen_active().set(Some(GenProgress {
+            date: date.clone(),
+            phase: 0,
+            think: 0,
+            answer: 0,
+            started_ms: js_sys::Date::now(),
+            tick: 0,
+        }));
+
+        // Elapsed-seconds ticker: a sleep loop (NOT setInterval) bumping `tick`
+        // while this date is still generating, so observers re-render the seconds.
+        {
+            let date_t = date.clone();
+            spawn_local(async move {
+                loop {
+                    ai::sleep_ms(1000).await;
+                    if !matches!(gen_active().get_untracked(), Some(g) if g.date == date_t) {
+                        break;
+                    }
+                    gen_active().update(|g| {
+                        if let Some(g) = g {
+                            g.tick += 1;
+                        }
+                    });
+                }
+            });
+        }
+
+        let date_tok = date.clone();
+        let on_token = move |phase: AiPhase| {
+            gen_active().update(|g| {
+                if let Some(g) = g {
+                    if g.date == date_tok {
+                        match phase {
+                            AiPhase::Thinking => {
+                                g.think += 1;
+                                if g.phase == 0 {
+                                    g.phase = 1;
+                                }
+                            }
+                            AiPhase::Answer => {
+                                g.answer += 1;
+                                if g.phase != 2 {
+                                    g.phase = 2;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        };
+
+        // Race against a timeout so a stalled SSE can't pin the generator
+        // forever (which would block re-tries — the per-date dedup above).
+        let build = build_day(&date, on_token);
+        let timeout = ai::sleep_ms(90_000);
+        futures::pin_mut!(build, timeout);
+        let res = match futures::future::select(build, timeout).await {
+            futures::future::Either::Left((r, _)) => r,
+            futures::future::Either::Right(_) => Err(i18n::t("summary.gen_failed").to_string()),
+        };
+        match res {
+            Ok(Some(text)) => {
+                store(format!("day:{date}"), date.clone(), text).await;
+            }
+            Ok(None) => {} // empty day — nothing to assess, nothing stored
+            Err(e) => store_error(&date, e).await,
+        }
+        gen_active().set(None);
+    });
 }
 
 /// Return the cached day assessment, or generate it with the model. The model
@@ -437,16 +579,16 @@ async fn tag_day_snacks(date: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn ensure_day(
+/// Generate the day's assessment text (the JSON `DaySummary`). Returns Ok(None)
+/// when the day is empty (nothing to assess). Does NOT touch storage — the
+/// background generator persists the outcome. FAIL LOUDLY: tagging / model /
+/// parse errors propagate.
+async fn build_day(
     date: &str,
     on_token: impl Fn(AiPhase) + Clone + 'static,
-) -> Result<Option<Summary>, String> {
-    if let Some(s) = get_day(date).await {
-        return Ok(Some(s));
-    }
-    // Tag this day's foods (snack classification) in the background and cache the
-    // verdicts BEFORE building the report, so the "low-calorie snack" fact is
-    // language-independent rather than a Russian name match.
+) -> Result<Option<String>, String> {
+    // Tag this day's foods (snack classification) and cache the verdicts BEFORE
+    // building the report, so the "low-calorie snack" fact is language-independent.
     tag_day_snacks(date).await?;
     let Some(dctx) = day_context(date).await else {
         return Ok(None);
@@ -525,7 +667,7 @@ pub async fn ensure_day(
     };
 
     let text = serde_json::to_string(&ds).map_err(|e| format!("serialize error: {e}"))?;
-    Ok(Some(store(format!("day:{date}"), date.to_string(), text).await))
+    Ok(Some(text))
 }
 
 pub async fn ensure_week(week_start: &str) -> Option<Summary> {
@@ -550,12 +692,12 @@ pub async fn ensure_week(week_start: &str) -> Option<Summary> {
 }
 
 /// Ensure YESTERDAY's assessment exists. Called on every app ACTIVATION (launch +
-/// foreground), so the report is prepared BEFORE the user opens the day rather
-/// than generated on open. Best-effort, no UI; `ensure_day` no-ops when a report
-/// already exists, so this only generates when there's none yet.
-pub async fn ensure_yesterday() {
+/// foreground): kicks off the background generator, which is a no-op when a
+/// record already exists (success OR error) — so the report is prepared once,
+/// before the user opens the day, and never auto-regenerated afterwards.
+pub fn ensure_yesterday() {
     let yesterday = (chrono::Local::now().date_naive() - Duration::days(1))
         .format("%Y-%m-%d")
         .to_string();
-    let _ = ensure_day(&yesterday, |_| {}).await;
+    start_day_generation(yesterday, false);
 }

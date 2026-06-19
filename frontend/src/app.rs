@@ -114,9 +114,6 @@ pub fn App() -> impl IntoView {
                         <Route path="/story/first-food" view=pages::story_first_food::StoryFirstFoodPage />
                         <Route path="/story/activity" view=pages::story_activity::StoryActivityPage />
                         <Route path="/story/cooking" view=pages::story_cooking::StoryCookingPage />
-                        <Route path="/story/bones" view=pages::story_bones::StoryBonesPage />
-                        <Route path="/story/restaurant" view=pages::story_restaurant::StoryRestaurantPage />
-                        <Route path="/story/next" view=pages::story_next::StoryNextPage />
                         <Route path="/story/ch2-mistake" view=pages::story_ch2_mistake::StoryCh2MistakePage />
                         <Route path="/story/ch2-veg" view=pages::story_ch2_veg::StoryCh2VegPage />
                         <Route path="/story/ch2-protein" view=pages::story_ch2_protein::StoryCh2ProteinPage />
@@ -130,6 +127,9 @@ pub fn App() -> impl IntoView {
                         <Route path="/story/ch3-minimum" view=pages::story_ch3_minimum::StoryCh3MinimumPage />
                         <Route path="/story/ch3-lean" view=pages::story_ch3_lean::StoryCh3LeanPage />
                         <Route path="/story/ch3-lifestyle" view=pages::story_ch3_lifestyle::StoryCh3LifestylePage />
+                        // Generic DSL-driven section page; serves migrated sections (those
+                        // without a bespoke static route above). Static routes win by specificity.
+                        <Route path="/story/:id" view=pages::story_section::StorySectionPage />
                         <Route path="/paywall" view=pages::paywall::PaywallPage />
                         <Route path="/progress" view=pages::progress::ProgressPage />
                         <Route path="/diary" view=pages::diary::DiaryPage />

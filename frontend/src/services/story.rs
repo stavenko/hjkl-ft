@@ -185,6 +185,21 @@ pub async fn set_flag(key: &str, value: bool) {
     sync::push_background();
 }
 
+/// Run a named `on_open` action for a story section. The closed registry the DSL
+/// references; unknown names fail loud in the log. (Goal-setting actions for
+/// chapters 2/3 are ported here as those sections migrate.)
+pub async fn run_action(name: &str) {
+    match name {
+        "arm_first_food" => {
+            set_flag(FIRST_FOOD_ARMED, true).await;
+            set_flag(MEAL_REMINDERS_UNLOCKED, true).await;
+            fire_first_food_if_armed().await;
+        }
+        "unlock_meal_split" => set_flag(MEAL_SPLIT_UNLOCKED, true).await,
+        _ => leptos::logging::warn!("story: unknown on_open action '{name}'"),
+    }
+}
+
 /// Complete the "first food entries" task if its trigger was armed (the section
 /// was opened) and it isn't done yet. Called when a food is added to the diary.
 pub async fn fire_first_food_if_armed() {

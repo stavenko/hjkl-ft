@@ -70,17 +70,46 @@ pub struct Section {
     pub legacy_route: Option<String>,
 }
 
+/// One content block. Exactly one of the content fields is set; `sex` optionally
+/// restricts the block to one biological sex. Authors order blocks freely.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Block {
     /// Show only for this biological sex ("male"/"female"); None = everyone.
     #[serde(default)]
     pub sex: Option<String>,
-    /// Prose (one localized paragraph).
+    /// Inline localized paragraph.
     #[serde(default)]
     pub text: Option<Loc>,
-    /// A named Rust widget (live data / interactive UI).
+    /// Paragraph by i18n key (prose kept in the i18n store during migration).
     #[serde(default)]
-    pub widget: Option<String>,
+    pub text_key: Option<String>,
+    /// Bold sub-heading by i18n key.
+    #[serde(default)]
+    pub heading: Option<String>,
+    /// Ordered list, each item an i18n key.
+    #[serde(default)]
+    pub list: Option<Vec<String>>,
+    /// Render the section's task rows (+ a "section complete" line).
+    #[serde(default)]
+    pub tasks: bool,
+    /// A named Rust widget (live data / interactive UI), with params.
+    #[serde(default)]
+    pub widget: Option<WidgetRef>,
+}
+
+/// A widget reference: an id resolved by the renderer's widget match, plus
+/// arbitrary params (e.g. `{id: cta, route: /diary, label: story.bones.open_diary}`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct WidgetRef {
+    pub id: String,
+    #[serde(flatten, default)]
+    pub params: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+impl WidgetRef {
+    pub fn param(&self, key: &str) -> Option<&str> {
+        self.params.get(key).and_then(|v| v.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -126,6 +155,16 @@ pub fn story() -> &'static Story {
     CELL.get_or_init(|| {
         serde_json::from_str(STORY_JSON).expect("story_dsl: story.json failed to parse")
     })
+}
+
+/// Find a section (and its chapter) by section id.
+pub fn find_section(id: &str) -> Option<(&'static Chapter, &'static Section)> {
+    for ch in &story().chapters {
+        if let Some(sec) = ch.sections.iter().find(|s| s.id == id) {
+            return Some((ch, sec));
+        }
+    }
+    None
 }
 
 // ── Sensors (numeric / boolean values read from Progress) ────────────────────

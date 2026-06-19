@@ -127,15 +127,40 @@ chapters:
       - id: bones
         title: {en: "My food with bones", ru: "Моя еда с костями"}
         tasks: [bones]
-        legacy_route: /story/bones
+        blocks:
+          - {text_key: story.bones.p1}
+          - {text_key: story.bones.p2}
+          - {text_key: story.bones.p3}
+          - {text_key: story.bones.p4}
+          - {tasks: true}
+          - {widget: {id: cta, route: /diary, label: story.bones.open_diary}}
       - id: restaurant
         title: {en: "A party or a restaurant", ru: "Праздник или ресторан"}
         tasks: [restaurant]
-        legacy_route: /story/restaurant
+        blocks:
+          - {text_key: story.rest.p1}
+          - {text_key: story.rest.p2}
+          - {list: [story.rest.method1, story.rest.method2]}
+          - {text_key: story.rest.p3}
+          - {text_key: story.rest.p4}
+          - {text_key: story.rest.p5}
+          - {text_key: story.rest.p6}
+          - {text_key: story.rest.p7}
+          - {tasks: true}
+          - {widget: {id: cta, route: /diary, label: story.rest.open_diary}}
       - id: next
         title: {en: "What's next", ru: "Что дальше"}
         tasks: [sub_paid]
-        legacy_route: /story/next
+        blocks:
+          - {text_key: story.next.p_intro}
+          - {heading: story.next.rules_label}
+          - {list: [story.next.rule1, story.next.rule2, story.next.rule3]}
+          - {text_key: story.next.p_discipline}
+          - {heading: story.next.focus_label}
+          - {list: [story.next.focus1, story.next.focus2, story.next.focus3]}
+          - {text_key: story.next.p_goals}
+          - {text_key: story.next.p_report}
+          - {widget: {id: cta, route: /diary, label: story.next.open_diary}}
 
   - id: ch2
     title: {en: "Appetite", ru: "Аппетит"}

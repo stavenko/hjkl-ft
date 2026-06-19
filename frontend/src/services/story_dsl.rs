@@ -282,14 +282,37 @@ impl<'a> Engine<'a> {
         }
     }
 
-    /// Chapter is open: sticky once it has ever opened, else its `open` cond.
-    pub fn chapter_open(&self, ch: &Chapter) -> bool {
-        self.snap.chapter_opened.contains(&ch.id) || self.eval(&ch.open)
+    /// True once the user has performed the explicit ACT of opening this section's
+    /// page (its `seen` flag) — which is what fires the section's `on_open`
+    /// triggers that create new goals / mechanics.
+    pub fn section_opened(&self, sec: &Section) -> bool {
+        self.snap.opened.contains(&sec.id)
     }
 
-    /// Section completes (unlocking the next): explicit `complete`, else all its
-    /// tasks closed, else (no tasks) always.
+    /// A chapter is open only when its own `open` criteria hold AND the PREVIOUS
+    /// chapter is fully complete — you cannot skip ahead. (Sticky flag honoured if
+    /// ever set.)
+    pub fn chapter_open(&self, ch: &Chapter) -> bool {
+        self.prev_chapter_complete(ch)
+            && (self.snap.chapter_opened.contains(&ch.id) || self.eval(&ch.open))
+    }
+
+    /// The chapter before `ch` has every section complete (true for the first
+    /// chapter, which has no predecessor).
+    fn prev_chapter_complete(&self, ch: &Chapter) -> bool {
+        match self.story.chapters.iter().position(|c| c.id == ch.id) {
+            Some(0) | None => true,
+            Some(i) => self.story.chapters[i - 1].sections.iter().all(|s| self.section_complete(s)),
+        }
+    }
+
+    /// Section completes (unlocking the next): the user must have OPENED it AND
+    /// its completion condition holds (explicit `complete`, else all its tasks
+    /// closed, else — no tasks — just being opened).
     pub fn section_complete(&self, sec: &Section) -> bool {
+        if !self.section_opened(sec) {
+            return false;
+        }
         match &sec.complete {
             Some(c) => self.eval(c),
             None if sec.tasks.is_empty() => true,
@@ -386,24 +409,32 @@ mod tests {
     }
 
     #[test]
-    fn ch1_always_open_ch3_needs_diary_days() {
+    fn first_chapter_open_by_default() {
         let s = snap();
-        let e = eng(&s);
-        assert!(e.chapter_open(chapter("ch1")));
-        assert!(!e.chapter_open(chapter("ch3")));
-
-        let mut s2 = snap();
-        s2.progress.diary_days = 7;
-        assert!(eng(&s2).chapter_open(chapter("ch3")));
+        assert!(eng(&s).chapter_open(chapter("ch1")));
     }
 
     #[test]
-    fn ch2_needs_streak_and_subscription() {
+    fn later_chapter_blocked_until_previous_complete() {
+        // Even with its OWN criteria met, a chapter stays locked while the
+        // previous chapter isn't fully complete (its sections aren't opened/done).
         let mut s = snap();
         s.progress.weight_streak = 7;
-        assert!(!eng(&s).chapter_open(chapter("ch2"))); // no sub
         s.progress.sub_active = true;
-        assert!(eng(&s).chapter_open(chapter("ch2")));
+        assert!(!eng(&s).chapter_open(chapter("ch2"))); // ch1 not complete
+        s.progress.diary_days = 7;
+        assert!(!eng(&s).chapter_open(chapter("ch3"))); // ch2 not complete
+    }
+
+    #[test]
+    fn section_requires_explicit_opening() {
+        // A read-only section (complete: always) is still not "complete" until
+        // the user has opened it.
+        let aesthetics = chapter("ch3").sections.iter().find(|x| x.id == "ch3-aesthetics").unwrap();
+        let mut s = snap();
+        assert!(!eng(&s).section_complete(aesthetics));
+        s.opened.insert("ch3-aesthetics".to_string());
+        assert!(eng(&s).section_complete(aesthetics));
     }
 
     #[test]
@@ -436,6 +467,7 @@ mod tests {
         let ch1 = chapter("ch1");
         let setup = ch1.sections.iter().find(|s| s.id == "setup").unwrap();
         let mut s = snap();
+        s.opened.insert("setup".to_string()); // must be opened first
         s.evt_closed.insert("lang".to_string());
         assert!(!eng(&s).section_complete(setup)); // notif still open
         s.evt_closed.insert("notif".to_string());

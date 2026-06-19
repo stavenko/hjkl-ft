@@ -110,23 +110,19 @@ pub async fn engine_snapshot() -> crate::services::story_dsl::EngineSnapshot {
         .map(|(id, _)| id.to_string())
         .collect();
 
-    // `{section_opened: id}` conditions (armed first-food; meals/night complete-on-open).
-    const SECTION_FLAG: &[(&str, &str)] = &[
-        ("first-food", FIRST_FOOD_ARMED),
-        ("ch2-meals", MEAL_SPLIT_UNLOCKED),
-        ("ch2-night", NIGHT_FEEDBACK_VIEWED),
-    ];
-    let opened: HashSet<String> = SECTION_FLAG
+    // "opened" = sections whose page the user has explicitly opened — the
+    // `seen:/story/<id>` flag (set by the route watcher on navigation). This is
+    // what gates section completion and chapter progression.
+    let opened: HashSet<String> = f
         .iter()
-        .filter(|(_, flag)| has(flag))
-        .map(|(id, _)| id.to_string())
+        .filter_map(|k| k.strip_prefix("seen:/story/").map(str::to_string))
         .collect();
 
     crate::services::story_dsl::EngineSnapshot {
         progress,
         opened,
         evt_closed,
-        chapter_opened: HashSet::new(), // live-evaluated during the bridge
+        chapter_opened: HashSet::new(), // sticky chapter-open not persisted yet
     }
 }
 

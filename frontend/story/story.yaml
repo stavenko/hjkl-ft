@@ -218,20 +218,35 @@ chapters:
       - id: ch3-aesthetics
         title: {en: "Aesthetics vs health", ru: "Эстетика vs здоровье"}
         complete: always
-        legacy_route: /story/ch3-aesthetics
+        blocks:
+          - {text_key: story.ch3.aesthetics.p1}
+          - {text_key: story.ch3.aesthetics.p2}
+          - {text_key: story.ch3.aesthetics.p3}
       - id: ch3-beauty
         title: {en: "What does a «beautiful person» look like?", ru: "Как выглядит «красивый человек»?"}
         complete: always
-        legacy_route: /story/ch3-beauty
+        blocks:
+          - {text_key: story.ch3.beauty.p1}
+          - {text_key: story.ch3.beauty.p2}
+          - {text_key: story.ch3.beauty.p3}
       - id: ch3-minimum
         title: {en: "What is the physiological fat minimum?", ru: "Что такое физиологический минимум жира?"}
         complete: always
-        legacy_route: /story/ch3-minimum
+        blocks:
+          - {text_key: story.ch3.minimum.p1}
+          - {text_key: story.ch3.minimum.p2}
+          - {text_key: story.ch3.minimum.p3}
       - id: ch3-lean
         title: {en: "The difference between «lean» and «fat-stripped»", ru: "Разница между «худым» и «обезжиренным»"}
         complete: always
-        legacy_route: /story/ch3-lean
+        blocks:
+          - {text_key: story.ch3.lean.p1}
+          - {text_key: story.ch3.lean.p2}
+          - {text_key: story.ch3.lean.p3}
       - id: ch3-lifestyle
         title: {en: "Life without fat", ru: "Жизнь без жира"}
         complete: always
-        legacy_route: /story/ch3-lifestyle
+        blocks:
+          - {text_key: story.ch3.lifestyle.p1}
+          - {text_key: story.ch3.lifestyle.p2}
+          - {text_key: story.ch3.lifestyle.p3}

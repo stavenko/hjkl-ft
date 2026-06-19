@@ -189,6 +189,9 @@ pub async fn set_flag(key: &str, value: bool) {
 /// references; unknown names fail loud in the log. (Goal-setting actions for
 /// chapters 2/3 are ported here as those sections migrate.)
 pub async fn run_action(name: &str) {
+    use crate::services::local;
+    use api_types::{CreateGoalInput, GoalDirection, GoalPeriod, GoalUnit};
+    let now = || chrono::Utc::now().to_rfc3339();
     match name {
         "arm_first_food" => {
             set_flag(FIRST_FOOD_ARMED, true).await;
@@ -196,6 +199,68 @@ pub async fn run_action(name: &str) {
             fire_first_food_if_armed().await;
         }
         "unlock_meal_split" => set_flag(MEAL_SPLIT_UNLOCKED, true).await,
+        "view_night_feedback" => set_flag(NIGHT_FEEDBACK_VIEWED, true).await,
+        // Hidden non-track Protein goal: 1.2 g/kg of the latest weight, rounded up
+        // to the nearest 10 g. No-op (and the widget shows "need weight") if there
+        // are no weight entries yet.
+        "set_protein_goal" => {
+            if let Some(latest) = local::list_weight_entries().await.into_iter().last() {
+                let target = ((1.2 * latest.weight_kg) / 10.0).ceil() * 10.0;
+                match local::list_goals().await.into_iter().find(|g| g.nutrient == "Protein") {
+                    Some(mut g) => {
+                        g.direction = GoalDirection::AtLeast;
+                        g.amount = target;
+                        g.unit = GoalUnit::G;
+                        g.period = GoalPeriod::Day;
+                        g.updated_at = now();
+                        local::update_goal(&g).await;
+                    }
+                    None => {
+                        local::create_goal(CreateGoalInput {
+                            nutrient: "Protein".to_string(),
+                            direction: GoalDirection::AtLeast,
+                            amount: target,
+                            unit: GoalUnit::G,
+                            period: GoalPeriod::Day,
+                        })
+                        .await;
+                    }
+                }
+                sync::push_background();
+            }
+        }
+        // Hidden non-track Calorie planka: avg daily kcal over the last 14 days with
+        // diary entries; the trend balance decides avg (deficit) vs avg*0.95, rounded
+        // to 10 kcal. No-op (widget shows "need diary") if there are no diary days.
+        "set_calorie_planka" => {
+            use crate::services::weight_trend::{self, DEFAULT_WINDOW_DAYS};
+            if let Some(avg) = local::avg_daily_kcal(14).await {
+                let weights = local::list_weight_entries().await;
+                let balance = weight_trend::weight_trend(&weights, DEFAULT_WINDOW_DAYS).balance();
+                let planka = local::calorie_planka(avg, balance);
+                match local::list_goals().await.into_iter().find(|g| g.nutrient == "Calories") {
+                    Some(mut g) => {
+                        g.direction = GoalDirection::AtMost;
+                        g.amount = planka;
+                        g.unit = GoalUnit::Kcal;
+                        g.period = GoalPeriod::Day;
+                        g.updated_at = now();
+                        local::update_goal(&g).await;
+                    }
+                    None => {
+                        local::create_goal(CreateGoalInput {
+                            nutrient: "Calories".to_string(),
+                            direction: GoalDirection::AtMost,
+                            amount: planka,
+                            unit: GoalUnit::Kcal,
+                            period: GoalPeriod::Day,
+                        })
+                        .await;
+                    }
+                }
+                sync::push_background();
+            }
+        }
         _ => leptos::logging::warn!("story: unknown on_open action '{name}'"),
     }
 }

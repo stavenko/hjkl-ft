@@ -113,7 +113,14 @@ chapters:
         title: {en: "Let's set up the app", ru: "Для начала настроим приложение"}
         tasks: [sex, lang, notif]
         complete: {all: [{task: lang}, {task: notif}]}   # sex is surfaced but not gating
-        legacy_route: /story/setup
+        blocks:
+          - {text_key: story.setup.intro}
+          - {bullets: [story.setup.s_story, story.setup.s_diary, story.setup.s_recipes, story.setup.s_settings]}
+          - {text_key: story.setup.task_intro}
+          - {bullets: [story.setup.check_lang_line, story.setup.check_notif_line]}
+          - {text_key: story.setup.instructions}
+          - {widget: {id: setup_controls}}
+          - {widget: {id: cta, route: /settings, label: story.setup.open_settings}}
       - id: accounting
         title: {en: "The accounting of weight loss", ru: "Бухгалтерия похудения"}
         tasks: [weigh_in, first_weigh, weight_streak]
@@ -218,33 +225,66 @@ chapters:
       - id: ch2-mistake
         title: {en: "The biggest mistake of dieters", ru: "Основная ошибка худеющих"}
         tasks: [diary_streak]
-        legacy_route: /story/ch2-mistake
+        blocks:
+          - {text_key: story.ch2.mistake.p1}
+          - {text_key: story.ch2.mistake.p2}
+          - {text_key: story.ch2.mistake.p3}
+          - {tasks: true}
+          - {widget: {id: cta, route: /diary, label: story.ch2.mistake.open_diary}}
       - id: ch2-veg
         title: {en: "Vegetables and fruit", ru: "Фрукты и овощи"}
         complete: always
-        legacy_route: /story/ch2-veg
+        blocks:
+          - {text_key: story.ch2.veg.p1}
+          - {text_key: story.ch2.veg.p2}
+          - {widget: {id: veg_target}}
       - id: ch2-protein
         title: {en: "Protein — your best helper", ru: "Белок — лучший помощник"}
         complete: always
         on_open: [set_protein_goal]
-        legacy_route: /story/ch2-protein
+        blocks:
+          - {text_key: story.ch2.protein.p1}
+          - {text_key: story.ch2.protein.p2}
+          - {widget: {id: goal_status, nutrient: Protein, unit: common.unit.g,
+                       title: story.ch2.protein.goal_label, set: story.ch2.protein.goal_set,
+                       need: story.ch2.protein.need_weight, route: /weight, label: story.ch2.protein.open_weight}}
       - id: ch2-snack
         title: {en: "Low-calorie snacks", ru: "Низкокалорийная закусь"}
         tasks: [snack]
-        legacy_route: /story/ch2-snack
+        blocks:
+          - {text_key: story.ch2.snack.p1}
+          - {text_key: story.ch2.snack.p2}
+          - {text_key: story.ch2.snack.p3}
+          - {tasks: true}
+          - {widget: {id: cta, route: /diary, label: story.ch2.mistake.open_diary}}
       - id: ch2-drinks
         title: {en: "Juices and drinks", ru: "Соки и питьё"}
         tasks: [drinks]
-        legacy_route: /story/ch2-drinks
+        blocks:
+          - {text_key: story.ch2.drinks.p1}
+          - {text_key: story.ch2.drinks.p2}
+          - {tasks: true}
+          - {widget: {id: cta, route: /diary, label: story.ch2.mistake.open_diary}}
       - id: ch2-meals
         title: {en: "How many meals a day", ru: "Сколько раз в день надо есть"}
         complete: {section_opened: ch2-meals}
         on_open: [unlock_meal_split]
-        legacy_route: /story/ch2-meals
+        blocks:
+          - {text_key: story.ch2.meals.p1}
+          - {text_key: story.ch2.meals.p2}
+          - {text_key: story.ch2.meals.p3}
+          - {text_key: story.ch2.meals.advice}
+          - {text_key: story.ch2.meals.unlocked}
+          - {widget: {id: cta, route: /diary, label: story.ch2.mistake.open_diary}}
       - id: ch2-night
         title: {en: "Eating at night", ru: "Еда на ночь"}
         tasks: [night]
-        legacy_route: /story/ch2-night
+        on_open: [view_night_feedback]
+        blocks:
+          - {text_key: story.ch2.night.p1}
+          - {text_key: story.ch2.night.p2}
+          - {text_key: story.ch2.night.p3}
+          - {widget: {id: night_feedback}}
 
   - id: ch3
     title: {en: "Why lose weight?", ru: "Зачем надо худеть?"}
@@ -254,7 +294,13 @@ chapters:
         title: {en: "Why do we have fat at all?", ru: "Зачем нам вообще жир?"}
         complete: {sensor: calorie_planka_set}
         on_open: [set_calorie_planka]
-        legacy_route: /story/ch3-fat
+        blocks:
+          - {text_key: story.ch3.fat.p1}
+          - {text_key: story.ch3.fat.p2}
+          - {text_key: story.ch3.fat.p3}
+          - {widget: {id: goal_status, nutrient: Calories, unit: common.unit.kcal,
+                       title: story.ch3.fat.goal_label, set: story.ch3.fat.goal_set,
+                       need: story.ch3.fat.need_diary, route: /diary, label: story.ch3.fat.open_diary}}
       - id: ch3-aesthetics
         title: {en: "Aesthetics vs health", ru: "Эстетика vs здоровье"}
         complete: always

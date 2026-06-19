@@ -1,7 +1,9 @@
 use leptos::*;
 use leptos_router::*;
 
-use crate::components::story_widgets::{Cta, ProgressPhotos, StoryTaskList};
+use crate::components::story_widgets::{
+    Cta, GoalStatus, NightFeedback, ProgressPhotos, SetupControls, StoryTaskList, VegTarget,
+};
 use crate::services::story_dsl::{self, Block, Loc, Section, WidgetRef};
 use crate::services::{i18n, i18n::t, profile, story};
 
@@ -127,6 +129,17 @@ fn render_widget(w: &WidgetRef) -> View {
             view! { <Cta route=route label=label /> }.into_view()
         }
         "progress_photos" => view! { <ProgressPhotos /> }.into_view(),
+        "veg_target" => view! { <VegTarget /> }.into_view(),
+        "night_feedback" => view! { <NightFeedback /> }.into_view(),
+        "setup_controls" => view! { <SetupControls /> }.into_view(),
+        "goal_status" => {
+            let p = |k: &str| w.param(k).unwrap_or("").to_string();
+            view! {
+                <GoalStatus nutrient=p("nutrient") unit=p("unit") title=p("title")
+                    set=p("set") need=p("need") route=p("route") label=p("label") />
+            }
+            .into_view()
+        }
         "fab" => view! {
             <div style="display: flex; justify-content: center; margin: 0 0 14px 0;">
                 <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--bulma-success); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 34px; line-height: 1; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">"+"</div>

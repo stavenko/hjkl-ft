@@ -108,15 +108,6 @@ pub fn App() -> impl IntoView {
                 <div style="padding: 0.75rem;">
                     <Routes>
                         <Route path="/" view=pages::story::StoryPage />
-                        <Route path="/story/setup" view=pages::story_setup::StorySetupPage />
-                        <Route path="/story/ch2-mistake" view=pages::story_ch2_mistake::StoryCh2MistakePage />
-                        <Route path="/story/ch2-veg" view=pages::story_ch2_veg::StoryCh2VegPage />
-                        <Route path="/story/ch2-protein" view=pages::story_ch2_protein::StoryCh2ProteinPage />
-                        <Route path="/story/ch2-snack" view=pages::story_ch2_snack::StoryCh2SnackPage />
-                        <Route path="/story/ch2-drinks" view=pages::story_ch2_drinks::StoryCh2DrinksPage />
-                        <Route path="/story/ch2-meals" view=pages::story_ch2_meals::StoryCh2MealsPage />
-                        <Route path="/story/ch2-night" view=pages::story_ch2_night::StoryCh2NightPage />
-                        <Route path="/story/ch3-fat" view=pages::story_ch3_fat::StoryCh3FatPage />
                         // Generic DSL-driven section page; serves migrated sections (those
                         // without a bespoke static route above). Static routes win by specificity.
                         <Route path="/story/:id" view=pages::story_section::StorySectionPage />

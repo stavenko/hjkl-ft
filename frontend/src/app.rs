@@ -108,7 +108,6 @@ pub fn App() -> impl IntoView {
                 <div style="padding: 0.75rem;">
                     <Routes>
                         <Route path="/" view=pages::story::StoryPage />
-                        <Route path="/story/intro" view=pages::story_intro::StoryIntroPage />
                         <Route path="/story/setup" view=pages::story_setup::StorySetupPage />
                         <Route path="/story/accounting" view=pages::story_accounting::StoryAccountingPage />
                         <Route path="/story/first-food" view=pages::story_first_food::StoryFirstFoodPage />

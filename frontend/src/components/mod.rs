@@ -19,6 +19,7 @@ pub mod qr_code;
 pub mod qr_scanner;
 pub mod weight_widget;
 pub mod summary_block;
+pub mod story_widgets;
 pub mod chat_message;
 pub mod chat_streaming;
 pub mod chat_input;

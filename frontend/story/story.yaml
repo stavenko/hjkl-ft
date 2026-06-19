@@ -99,7 +99,16 @@ chapters:
       - id: intro
         title: {en: "Introduction", ru: "Введение"}
         tasks: [photos]
-        legacy_route: /story/intro
+        blocks:
+          - {text_key: story.intro.p1}
+          - {text_key: story.intro.p2}
+          - {text_key: story.intro.p3}
+          - {text_key: story.intro.p4}
+          - {text_key: story.intro.p5}
+          - {text_key: story.intro.p6}
+          - {text_key: story.intro.p7}
+          - {text_key: story.intro.p8}
+          - {widget: {id: progress_photos}}
       - id: setup
         title: {en: "Let's set up the app", ru: "Для начала настроим приложение"}
         tasks: [sex, lang, notif]

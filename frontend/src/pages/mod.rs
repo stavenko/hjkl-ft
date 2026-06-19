@@ -33,6 +33,5 @@ pub mod story_first_food;
 pub mod story_section;
 pub mod paywall;
 pub mod progress;
-pub mod story_intro;
 pub mod story_setup;
 pub mod weight;

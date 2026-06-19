@@ -579,6 +579,7 @@ fn en(key: &str) -> &'static str {
 
         // Story
         "story.title" => "Story",
+        "story.active_tasks" => "Active tasks",
         "story.chapter" => "Chapter",
         "story.sections_opened" => "Sections opened",
         "story.tasks_done" => "Tasks completed",
@@ -1318,6 +1319,7 @@ fn ru(key: &str) -> &'static str {
 
         // История
         "story.title" => "История",
+        "story.active_tasks" => "Активные задания",
         "story.chapter" => "Глава",
         "story.sections_opened" => "Открыто секций",
         "story.tasks_done" => "Выполнено заданий",

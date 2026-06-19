@@ -66,12 +66,19 @@
   .lead{color:var(--muted);font-size:19px;max-width:640px}
 
   /* hero */
-  .hero{background:linear-gradient(180deg,#fff, #EEF2F6);border-radius:var(--radius-lg);margin-top:24px;padding:72px 40px;text-align:center}
-  .hero-inner{max-width:760px;margin:0 auto}
-  .hero h1{font-size:clamp(34px,5.6vw,60px);letter-spacing:-.02em}
-  .hero .lead{margin:22px auto 30px}
-  .hero-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-  @media(max-width:860px){.hero{padding:44px 22px}}
+  .hero{background:linear-gradient(180deg,#fff, #EEF2F6);border-radius:var(--radius-lg);margin-top:24px;padding:54px 44px}
+  .hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:44px;align-items:center}
+  .hero h1{font-size:clamp(34px,5.2vw,56px);letter-spacing:-.02em}
+  .hero .lead{margin:22px 0 30px}
+  .hero-cta{display:flex;gap:12px;flex-wrap:wrap}
+  .shot{justify-self:center;width:262px;border-radius:36px;background:var(--ink);padding:10px;box-shadow:0 30px 60px rgba(14,27,42,.28)}
+  .shot img{display:block;width:100%;border-radius:28px}
+  @media(max-width:860px){
+    .hero{padding:34px 20px;text-align:center}
+    .hero-grid{grid-template-columns:1fr;gap:28px}
+    .hero-cta{justify-content:center}
+    .shot{order:-1}
+  }
 
   /* cards grid */
   .grid{display:grid;gap:18px}
@@ -147,13 +154,18 @@
 
   <!-- HERO -->
   <section class="hero">
-    <div class="hero-inner">
-      <span class="eyebrow">Автономный инструмент</span>
-      <h1 class="mt12">Верни себе <span class="accent">норму</span><br>— без диет и кураторов</h1>
-      <p class="lead">Renorma сама считает калории и нутриенты, выставляет твою персональную норму и каждую неделю подстраивает её под результат. Тебе остаётся только записывать еду — остальное делает прибор.</p>
-      <div class="hero-cta">
-        <a class="btn" href="#start">Начать бесплатно</a>
-        <a class="btn btn-ghost" href="#what">Как это работает</a>
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <span class="eyebrow">Автономный инструмент</span>
+        <h1 class="mt12">Верни себе <span class="accent">норму</span> — без диет и кураторов</h1>
+        <p class="lead">Renorma сама считает калории и нутриенты, выставляет твою персональную норму и каждую неделю подстраивает её под результат. Тебе остаётся только записывать еду — остальное делает прибор.</p>
+        <div class="hero-cta">
+          <a class="btn" href="#start">Начать бесплатно</a>
+          <a class="btn btn-ghost" href="#what">Как это работает</a>
+        </div>
+      </div>
+      <div class="shot">
+        <img src="img/app-story.png" alt="Экран Renorma: активные задания и главы онбординга" loading="lazy">
       </div>
     </div>
   </section>

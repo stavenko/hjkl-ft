@@ -300,10 +300,11 @@ struct SnackVerdicts {
     snacks: Vec<bool>,
 }
 
-/// Classify each food NAME as a low-calorie snack (a light raw vegetable/fruit to
-/// nibble between meals) or not. Language-independent: the model judges meaning,
-/// guided by an English reference list — so it works regardless of the language
-/// the food was entered in. Returns one bool per input, in order.
+/// Classify each food NAME as a low-calorie snack or not. A snack here is judged
+/// by VOLUME vs calories — a light, filling thing to nibble between meals for few
+/// calories (raw veg/fruit, air-popped popcorn, rice cakes), NOT by calories per
+/// 100 g. Language-independent: the model judges meaning, guided by English
+/// examples, so it works regardless of the entry language. One bool per input.
 ///
 /// Used to tag foods in the background while preparing the daily summary. FAIL
 /// LOUDLY: a model / parse error, or a count that doesn't match the input, is an
@@ -319,14 +320,18 @@ pub async fn classify_snacks(names: &[String]) -> Result<Vec<bool>, String> {
         .collect::<Vec<_>>()
         .join("\n");
     let prompt = format!(
-        "Classify each food below as a low-calorie snack or not.\n\
-         A \"low-calorie snack\" is a light, low-calorie raw vegetable or fruit you'd nibble \
-         between meals. Reference examples (English): cucumber, tomato, cherry tomato, bell \
-         pepper, carrot, celery, radish, cabbage, lettuce, leafy greens, apple, pear, berries \
-         (strawberry, blueberry, raspberry), orange, kiwi, grapefruit.\n\
-         Mark as NOT a snack: full meals and cooked dishes, bread/cereal/pasta, meat, fish, \
-         dairy, sweets, nuts, calorie-dense or processed snacks (popcorn, chips, crackers, \
-         chocolate, cookies, granola bars), and any drink.\n\
+        "Decide for each food below whether it is a good low-calorie snack — something light \
+         to nibble between meals that kills the urge to chew without blowing the day.\n\
+         The single test is VOLUME vs CALORIES: a big, filling volume for relatively few \
+         calories (lots of water or air). Calories per 100 g is NOT the test — air-popped \
+         POPCORN, for example, IS such a snack, because a large airy volume costs few calories \
+         per serving.\n\
+         ARE this kind of snack (examples): cucumber, tomato, bell pepper, carrot, celery, \
+         radish, cabbage, lettuce, leafy greens, apple, pear, berries, orange, kiwi, grapefruit, \
+         popcorn (air-popped), rice cakes.\n\
+         NOT this kind of snack — calorie-dense things eaten in small dense portions: nuts, \
+         seeds, chocolate, candy, cookies, chips/crisps, crackers, granola bars; and also full \
+         meals and cooked dishes, bread/cereal/pasta, meat, fish, dairy, and any drink.\n\
          Food names may be in ANY language — judge by meaning, not by wording.\n\n\
          Foods (index. name):\n{list}\n\n\
          Respond with ONLY a single minified JSON object: a \"snacks\" array of booleans, exactly \

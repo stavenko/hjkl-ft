@@ -36,7 +36,7 @@ JWT_SECRET = "dev-secret-change-in-production"
 RETURN_URL = "https://hjkl-ft.pages.dev/paywall?status=success"
 # Plan catalog. `lavaOfferId` empty until the real lava offer ids are set →
 # /checkout returns unknown_plan until then; /plans still lists them for display.
-PLANS = '[{"id":"monthly","title":"Месяц","price":399,"currency":"RUB","period":"month","lavaOfferId":""},{"id":"yearly","title":"Год","price":3990,"currency":"RUB","period":"year","lavaOfferId":""}]'
+PLANS = '[{"id":"monthly","title":"Подписка Renorma","price":4900,"currency":"RUB","period":"month","lavaOfferId":"4d02bebe-badd-4600-8313-7f1c10a10844"}]'
 
 # ── Production (separate worker on pay.renorma.app, clean DO data) ──
 # Deploy: wrangler deploy --env production
@@ -70,4 +70,4 @@ secret_name = "lava-hook-api-key"
 
 [env.production.vars]
 RETURN_URL = "https://fit.renorma.app/paywall?status=success"
-PLANS = '[{"id":"monthly","title":"Месяц","price":399,"currency":"RUB","period":"month","lavaOfferId":""},{"id":"yearly","title":"Год","price":3990,"currency":"RUB","period":"year","lavaOfferId":""}]'
+PLANS = '[{"id":"monthly","title":"Подписка Renorma","price":4900,"currency":"RUB","period":"month","lavaOfferId":"4d02bebe-badd-4600-8313-7f1c10a10844"}]'

@@ -14,3 +14,19 @@ new_sqlite_classes = ["BugReportDO"]
 JWT_SECRET = "dev-secret-change-in-production"
 # Admin key for the read endpoint (GET /reports). Dev placeholder — harden later.
 ADMIN_KEY = "dev-admin-key-change-in-production"
+
+# ── Production (separate worker on bug.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+#          wrangler secret put ADMIN_KEY  --env production
+[env.production]
+name = "bug-report-worker-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "bug.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "BUG_REPORT_DO"
+class_name = "BugReportDO"

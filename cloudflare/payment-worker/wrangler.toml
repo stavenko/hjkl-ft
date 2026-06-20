@@ -12,3 +12,18 @@ new_sqlite_classes = ["SubscriptionDO"]
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+
+# ── Production (separate worker on pay.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+[env.production]
+name = "payment-worker-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "pay.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "SUBSCRIPTION_DO"
+class_name = "SubscriptionDO"

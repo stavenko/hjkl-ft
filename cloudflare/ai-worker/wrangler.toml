@@ -14,3 +14,23 @@ script_name = "payment-worker"
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+
+# ── Production (separate worker on ai.renorma.app) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+[env.production]
+name = "ai-worker-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "ai.renorma.app"
+custom_domain = true
+
+[env.production.ai]
+binding = "AI"
+
+# Cross-script: the prod subscription DO owned by payment-worker-prod.
+[[env.production.durable_objects.bindings]]
+name = "SUBSCRIPTION_DO"
+class_name = "SubscriptionDO"
+script_name = "payment-worker-prod"

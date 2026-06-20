@@ -12,3 +12,18 @@ new_sqlite_classes = ["SyncDO"]
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+
+# ── Production (separate worker on sync.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+[env.production]
+name = "sync-worker-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "sync.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "SYNC_DO"
+class_name = "SyncDO"

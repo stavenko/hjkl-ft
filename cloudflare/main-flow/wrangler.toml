@@ -27,3 +27,28 @@ VAPID_PUBLIC_KEY = "BHmCtJcYZNsO-xMLccKyWYSWTlxbILgd1HrRtSD4jy97PILpvdVaHadrt9an
 VAPID_PRIVATE_KEY = "2CX-Ehz-V8m_lysbW7az17KksEUlUcPRT0DS-5qfolY"
 VAPID_SUBJECT = "mailto:admin@hjkl.pro"
 
+# ── Production (separate worker on push.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+# VAPID keypair reused from dev (push subscriptions are per-endpoint); rotate later if wanted.
+[env.production]
+name = "main-flow-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "push.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "PUSH_DO"
+class_name = "PushDO"
+
+[[env.production.durable_objects.bindings]]
+name = "SCHEDULE_DO"
+class_name = "ScheduleDO"
+
+[env.production.vars]
+VAPID_PUBLIC_KEY = "BHmCtJcYZNsO-xMLccKyWYSWTlxbILgd1HrRtSD4jy97PILpvdVaHadrt9anNmgdRDVWI5mIfkpSRkxSTL0AdsM"
+VAPID_PRIVATE_KEY = "2CX-Ehz-V8m_lysbW7az17KksEUlUcPRT0DS-5qfolY"
+VAPID_SUBJECT = "mailto:admin@renorma.app"
+

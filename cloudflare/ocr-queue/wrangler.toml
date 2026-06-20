@@ -27,3 +27,28 @@ JWT_SECRET = "dev-secret-change-in-production"
 POLLER_SECRET = "dev-poller-secret-change-in-production"
 # Region hint for the queue DO.
 QUEUE_REGION = "weur"
+
+# ── Production (separate worker on ocr.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+#          wrangler secret put POLLER_SECRET --env production
+[env.production]
+name = "ocr-queue-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "ocr.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "QUEUE_DO"
+class_name = "QueueDO"
+
+# Cross-script: the prod subscription DO owned by payment-worker-prod.
+[[env.production.durable_objects.bindings]]
+name = "SUBSCRIPTION_DO"
+class_name = "SubscriptionDO"
+script_name = "payment-worker-prod"
+
+[env.production.vars]
+QUEUE_REGION = "weur"

@@ -25,3 +25,27 @@ new_sqlite_classes = ["AuthDO"]
 JWT_SECRET = "dev-secret-change-in-production"
 RP_ID = "hjkl-ft.pages.dev"
 RP_ORIGIN = "https://hjkl-ft.pages.dev"
+
+# ── Production (separate worker on auth.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+# Bindings/vars are NOT inherited by named environments — redeclared here.
+[env.production]
+name = "auth-worker-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "auth.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "USER_DO"
+class_name = "UserDO"
+
+[[env.production.durable_objects.bindings]]
+name = "AUTH_DO"
+class_name = "AuthDO"
+
+[env.production.vars]
+RP_ID = "renorma.app"
+RP_ORIGIN = "https://fit.renorma.app"

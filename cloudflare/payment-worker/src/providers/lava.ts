@@ -1,13 +1,12 @@
 // lava.top provider (hosted checkout + recurring webhooks).
 //
-// Flow: createCheckout → POST an invoice to gate.lava.top → return lava's hosted
-// paymentUrl (the frontend redirects there). lava then calls our webhook on
-// "Payment Result" (first/regular) and "Recurring Payment" (subsequent charges),
-// plus cancel/refund. We pass our own orderId so the webhook maps back to the user.
-//
-// NOTE: exact lava field names / endpoints / signature scheme are confirmed
-// against gate.lava.top/docs when wiring real credentials — every spot that
-// depends on them is marked `TODO(lava-fields)`.
+// Implemented against the lava.top OpenAPI (gate.lava.top/docs/documentation.yaml):
+//   - POST /api/v3/invoice {email, offerId, currency} → {id, paymentUrl}.
+//     `id` is the (parent) contract id and appears in EVERY webhook as
+//     contractId / parentContractId — so it's our user-mapping key.
+//   - Webhooks (X-Api-Key auth) carry: eventType, status, contractId,
+//     parentContractId (recurring), buyer.email, willExpireAt (cancelled).
+//   - DELETE /api/v1/subscriptions?contractId=&email= cancels the subscription.
 
 import type { CheckoutOpts, PaymentProvider, ProviderEnv, WebhookEvent } from "./index";
 
@@ -29,69 +28,63 @@ export class LavaProvider implements PaymentProvider {
 
   async createCheckout(o: CheckoutOpts): Promise<{ url: string; orderId: string }> {
     if (!this.apiKey) throw new Error("provider_not_configured");
-    const orderId = "ord_" + crypto.randomUUID();
-
-    // TODO(lava-fields): confirm endpoint + body shape (gate.lava.top/docs).
-    const res = await fetch(`${LAVA_API}/api/v2/invoice`, {
+    const res = await fetch(`${LAVA_API}/api/v3/invoice`, {
       method: "POST",
       headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
+      // The offer defines period/recurrence; we only pass buyer + offer + currency.
       body: JSON.stringify({
+        email: o.email,
         offerId: o.offerId,
-        email: o.email ?? `${o.userId}@users.renorma.app`,
         currency: "RUB",
         buyerLanguage: "RU",
-        // Carry our orderId so the webhook can resolve the user. TODO(lava-fields):
-        // confirm which echoed field to use (clientUtm / additionalData / etc.).
-        clientUtm: { utm_content: orderId },
-        successUrl: o.returnUrl,
-        failUrl: o.returnUrl,
       }),
     });
     if (!res.ok) throw new Error(`lava_invoice_failed_${res.status}`);
-    const data = (await res.json()) as Record<string, any>;
-    // TODO(lava-fields): confirm the hosted-page URL field.
-    const url = data.paymentUrl ?? data.url ?? data?.data?.url;
-    if (!url || typeof url !== "string") throw new Error("lava_no_payment_url");
-    return { url, orderId };
+    const data = (await res.json()) as { id?: string; paymentUrl?: string };
+    if (!data.paymentUrl || !data.id) throw new Error("lava_no_payment_url");
+    // orderId = lava's contract id; the webhook echoes it as contractId/parentContractId.
+    return { url: data.paymentUrl, orderId: data.id };
   }
 
   async verifyWebhook(req: Request): Promise<{ ok: boolean; body?: unknown }> {
     const body = await req.json().catch(() => null);
     if (!this.webhookSecret) return { ok: false };
-    // TODO(lava-fields): confirm lava's webhook auth — shared secret header vs HMAC
-    // over the raw body. Currently: shared secret in X-Api-Key must match.
+    // lava uses ApiKeyWebhookAuth → header X-Api-Key == the webhook's configured key.
     const provided = req.headers.get("X-Api-Key") ?? "";
     return { ok: provided === this.webhookSecret, body };
   }
 
   parseWebhook(body: unknown): WebhookEvent {
     const b = (body ?? {}) as Record<string, any>;
-    // TODO(lava-fields): confirm status/event names and payload shape.
-    const status = String(b.status ?? "").toLowerCase();
-    const eventType = String(b.eventType ?? b.type ?? "").toLowerCase();
-    const orderId = b?.clientUtm?.utm_content ?? b.orderId;
-    const contractId = b.contractId ?? b.parentContractId;
-    const planId = b.offerId;
-    const periodEnd =
-      typeof b.nextPayment === "string" ? Date.parse(b.nextPayment) || undefined : undefined;
+    const eventType = String(b.eventType ?? "");
+    const contractId = b.contractId;
+    const parentContractId = b.parentContractId;
+    const email = b?.buyer?.email;
 
-    let kind: WebhookEvent["kind"] = "failed";
-    if (status.includes("fail") || status.includes("declin")) kind = "failed";
-    else if (eventType.includes("recurr")) kind = "recurring";
-    else if (status.includes("refund")) kind = "refunded";
-    else if (status.includes("cancel")) kind = "cancelled";
-    else if (status.includes("success") || status.includes("paid") || status.includes("complete"))
-      kind = "paid";
-
-    return { kind, orderId, contractId, periodEnd, planId };
+    let kind: WebhookEvent["kind"];
+    let periodEnd: number | undefined;
+    switch (eventType) {
+      case "payment.success":
+        kind = "paid";
+        break;
+      case "subscription.recurring.payment.success":
+        kind = "recurring";
+        break;
+      case "subscription.cancelled":
+        kind = "cancelled";
+        periodEnd = b.willExpireAt ? Date.parse(b.willExpireAt) || undefined : undefined;
+        break;
+      // payment.failed / subscription.recurring.payment.failed and anything else:
+      default:
+        kind = "failed";
+    }
+    return { kind, contractId, parentContractId, email, periodEnd };
   }
 
-  async cancel(contractId: string): Promise<void> {
+  async cancel(contractId: string, email: string): Promise<void> {
     if (!this.apiKey) throw new Error("provider_not_configured");
-    // TODO(lava-fields): confirm cancel/refund endpoint.
-    await fetch(`${LAVA_API}/api/v2/subscriptions/${encodeURIComponent(contractId)}/cancel`, {
-      method: "POST",
-      headers: { "X-Api-Key": this.apiKey },
-    });
+    const url = `${LAVA_API}/api/v1/subscriptions?contractId=${encodeURIComponent(contractId)}&email=${encodeURIComponent(email)}`;
+    const res = await fetch(url, { method: "DELETE", headers: { "X-Api-Key": this.apiKey } });
+    if (!res.ok) throw new Error(`lava_cancel_failed_${res.status}`);
   }
 }

@@ -15,10 +15,12 @@ export interface CheckoutOpts {
 /** A payment-provider webhook, normalized to what the SubscriptionDO needs. */
 export interface WebhookEvent {
   kind: "paid" | "recurring" | "cancelled" | "refunded" | "failed";
-  orderId?: string; // our order id (set on checkout, echoed back by the provider)
-  contractId?: string; // provider's recurring-contract id (for recurring/cancel)
-  periodEnd?: number; // ms epoch the paid period runs until, if the provider says
-  planId?: string;
+  // The contract id (and, for recurring charges, the parent/root contract id).
+  // We map back to our user via whichever was stored at checkout.
+  contractId?: string;
+  parentContractId?: string;
+  email?: string; // buyer email lava recorded (also used for cancel)
+  periodEnd?: number; // ms epoch access runs until, if the provider says (e.g. willExpireAt)
 }
 
 export interface ProviderEnv {
@@ -35,7 +37,7 @@ export interface PaymentProvider {
   verifyWebhook(req: Request): Promise<{ ok: boolean; body?: unknown }>;
   parseWebhook(body: unknown): WebhookEvent;
   /** Cancel the recurring contract (no further charges). Optional. */
-  cancel?(contractId: string): Promise<void>;
+  cancel?(contractId: string, email: string): Promise<void>;
 }
 
 import { LavaProvider } from "./lava";

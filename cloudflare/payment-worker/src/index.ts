@@ -98,11 +98,9 @@ interface SubRecord {
   start: number;
   end: number;
   provider?: string;
-  contractId?: string;
-  lastOrderId?: string;
+  contractId?: string; // lava (parent) contract id — needed to cancel
+  email?: string; // buyer email lava recorded — needed to cancel
   no_renew?: boolean;
-  order_id?: string;
-  transaction_id?: string;
 }
 
 function statusOf(rec: SubRecord) {
@@ -114,9 +112,8 @@ function statusOf(rec: SubRecord) {
     active: Date.now() < rec.end,
     provider: rec.provider ?? null,
     contractId: rec.contractId ?? null,
+    email: rec.email ?? null,
     no_renew: rec.no_renew ?? false,
-    order_id: rec.order_id ?? null,
-    transaction_id: rec.transaction_id ?? null,
   };
 }
 
@@ -147,26 +144,28 @@ export class SubscriptionDO {
     // Provider-driven: a payment succeeded → mark paid and extend.
     if (request.method === "POST" && url.pathname === "/activate") {
       const b = (await request.json()) as {
-        periodEnd?: number; provider?: string; contractId?: string; orderId?: string; planId?: string;
+        periodEnd?: number; provider?: string; contractId?: string; email?: string;
       };
       const now = Date.now();
       rec.status = "paid";
-      rec.plan = b.planId ?? rec.plan;
+      rec.plan = "paid";
       rec.start = now;
+      // lava's payment webhook carries no next-charge date → assume the period.
       rec.end = b.periodEnd && b.periodEnd > now ? b.periodEnd : now + DEFAULT_PERIOD_DAYS * DAY_MS;
       rec.provider = b.provider ?? rec.provider;
       rec.contractId = b.contractId ?? rec.contractId;
-      rec.lastOrderId = b.orderId ?? rec.lastOrderId;
+      rec.email = b.email ?? rec.email;
       rec.no_renew = false;
-      rec.order_id = b.orderId ?? rec.order_id;
       await this.storage.put("sub", rec);
       return Response.json(statusOf(rec));
     }
 
-    // Cancel auto-renew: stay active until `end`, then lapse.
+    // Cancel auto-renew: stay active until `end` (or willExpireAt), then lapse.
     if (request.method === "POST" && url.pathname === "/cancel") {
+      const b = (await request.json().catch(() => ({}))) as { periodEnd?: number };
       rec.no_renew = true;
       rec.status = "cancelled";
+      if (b.periodEnd && b.periodEnd > Date.now()) rec.end = b.periodEnd;
       await this.storage.put("sub", rec);
       return Response.json(statusOf(rec));
     }
@@ -293,16 +292,25 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (!v.ok) return errorResponse("invalid_signature", 401);
     const ev = provider.parseWebhook(v.body);
 
-    // Resolve our user id from the provider's order / contract id.
+    // Resolve our user id from the contract id stored at checkout (recurring
+    // events reference the original via parentContractId); fall back to the
+    // synthetic email we passed at checkout (`<userId>@users.renorma.app`).
     let userId: string | null = null;
-    if (ev.orderId) userId = await indexGet(env, `order:${ev.orderId}`);
-    if (!userId && ev.contractId) userId = await indexGet(env, `contract:${ev.contractId}`);
+    if (ev.contractId) userId = await indexGet(env, `contract:${ev.contractId}`);
+    if (!userId && ev.parentContractId) userId = await indexGet(env, `contract:${ev.parentContractId}`);
+    if (!userId && ev.email && ev.email.endsWith("@users.renorma.app")) {
+      userId = ev.email.split("@")[0];
+    }
     if (!userId) {
       // Can't map (e.g. a stray event) — ack so the provider stops retrying.
       return corsJson(JSON.stringify({ ok: true, mapped: false }), 200);
     }
 
+    // Root (parent) contract id — what cancel() needs and what recurring events reference.
+    const rootContract = ev.parentContractId ?? ev.contractId;
     if (ev.contractId) await indexPut(env, `contract:${ev.contractId}`, userId);
+    if (rootContract) await indexPut(env, `contract:${rootContract}`, userId);
+
     const sub = subStub(env, userId);
     if (ev.kind === "paid" || ev.kind === "recurring") {
       await sub.fetch("https://do/activate", {
@@ -311,13 +319,16 @@ async function handle(request: Request, env: Env): Promise<Response> {
         body: JSON.stringify({
           periodEnd: ev.periodEnd,
           provider: name,
-          contractId: ev.contractId,
-          orderId: ev.orderId,
-          planId: ev.planId,
+          contractId: rootContract,
+          email: ev.email,
         }),
       });
     } else if (ev.kind === "cancelled") {
-      await sub.fetch("https://do/cancel", { method: "POST" });
+      await sub.fetch("https://do/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ periodEnd: ev.periodEnd }),
+      });
     } else if (ev.kind === "refunded") {
       await sub.fetch("https://do/refund", { method: "POST" });
     }
@@ -354,9 +365,13 @@ async function handle(request: Request, env: Env): Promise<Response> {
         userId,
         planId: plan.id,
         offerId: plan.lavaOfferId,
+        // Synthetic email encodes the user id (passkey app has no real email);
+        // also a fallback mapping if the contract id ever doesn't resolve.
+        email: `${userId}@users.renorma.app`,
         returnUrl,
       });
-      await indexPut(env, `order:${orderId}`, userId);
+      // orderId = lava contract id → maps the webhook back to this user.
+      await indexPut(env, `contract:${orderId}`, userId);
       return corsJson(JSON.stringify({ url: payUrl }), 200);
     } catch (e) {
       return errorResponse(`checkout_failed: ${(e as Error).message}`, 502);
@@ -365,17 +380,24 @@ async function handle(request: Request, env: Env): Promise<Response> {
 
   if (request.method === "POST" && url.pathname === "/cancel") {
     const res = await subStub(env, userId).fetch("https://do/subscription");
-    const cur = (await res.json()) as { provider?: string | null; contractId?: string };
+    const cur = (await res.json()) as {
+      provider?: string | null; contractId?: string | null; email?: string | null;
+    };
     const providerName = cur.provider ?? "";
     const provider = providerName ? await providerFor(providerName, env) : null;
+    const email = cur.email ?? `${userId}@users.renorma.app`;
     if (provider?.cancel && cur.contractId) {
       try {
-        await provider.cancel(cur.contractId);
+        await provider.cancel(cur.contractId, email);
       } catch {
         /* best-effort: still mark no-renew locally */
       }
     }
-    const out = await subStub(env, userId).fetch("https://do/cancel", { method: "POST" });
+    const out = await subStub(env, userId).fetch("https://do/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
     return corsJson(await out.text(), out.status);
   }
 

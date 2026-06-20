@@ -19,13 +19,17 @@ new_sqlite_classes = ["SubscriptionDO"]
 tag = "v2"
 new_sqlite_classes = ["PaymentIndexDO"]
 
-# lava API key from the account Secrets Store. Re-enable once the API token has
-# `Account → Secrets Store: Edit` AND the `lava-top` secret is scoped for Workers
-# (binding deploy fails with 10021 otherwise). Same for LAVA_WEBHOOK_SECRET.
-# [[secrets_store_secrets]]
-# binding = "LAVA_API_KEY"
-# store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
-# secret_name = "lava-top"
+# lava credentials from the account Secrets Store (both Workers-scoped),
+# read in-worker via env.<binding>.get().
+[[secrets_store_secrets]]
+binding = "LAVA_API_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "lava-top"
+
+[[secrets_store_secrets]]
+binding = "LAVA_WEBHOOK_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "lava-hook-api-key"
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
@@ -54,10 +58,15 @@ class_name = "SubscriptionDO"
 name = "PAYMENT_INDEX_DO"
 class_name = "PaymentIndexDO"
 
-# [[env.production.secrets_store_secrets]]
-# binding = "LAVA_API_KEY"
-# store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
-# secret_name = "lava-top"
+[[env.production.secrets_store_secrets]]
+binding = "LAVA_API_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "lava-top"
+
+[[env.production.secrets_store_secrets]]
+binding = "LAVA_WEBHOOK_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "lava-hook-api-key"
 
 [env.production.vars]
 RETURN_URL = "https://fit.renorma.app/paywall?status=success"

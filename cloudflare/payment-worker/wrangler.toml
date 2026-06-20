@@ -6,16 +6,38 @@ compatibility_date = "2024-12-01"
 name = "SUBSCRIPTION_DO"
 class_name = "SubscriptionDO"
 
+# Single global index: provider orderId / contractId → our user id.
+[[durable_objects.bindings]]
+name = "PAYMENT_INDEX_DO"
+class_name = "PaymentIndexDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SubscriptionDO"]
 
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["PaymentIndexDO"]
+
+# lava API key from the account Secrets Store. Re-enable once the API token has
+# `Account → Secrets Store: Edit` AND the `lava-top` secret is scoped for Workers
+# (binding deploy fails with 10021 otherwise). Same for LAVA_WEBHOOK_SECRET.
+# [[secrets_store_secrets]]
+# binding = "LAVA_API_KEY"
+# store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+# secret_name = "lava-top"
+
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+RETURN_URL = "https://hjkl-ft.pages.dev/paywall?status=success"
+# Plan catalog. `lavaOfferId` empty until the real lava offer ids are set →
+# /checkout returns unknown_plan until then; /plans still lists them for display.
+PLANS = '[{"id":"monthly","title":"Месяц","price":399,"currency":"RUB","period":"month","lavaOfferId":""},{"id":"yearly","title":"Год","price":3990,"currency":"RUB","period":"year","lavaOfferId":""}]'
 
 # ── Production (separate worker on pay.renorma.app, clean DO data) ──
 # Deploy: wrangler deploy --env production
-# Secrets: wrangler secret put JWT_SECRET --env production
+# Secrets: JWT_SECRET via `wrangler secret put --env production`; lava key via the
+# Secrets Store binding below.
 [env.production]
 name = "payment-worker-prod"
 workers_dev = false
@@ -27,3 +49,16 @@ custom_domain = true
 [[env.production.durable_objects.bindings]]
 name = "SUBSCRIPTION_DO"
 class_name = "SubscriptionDO"
+
+[[env.production.durable_objects.bindings]]
+name = "PAYMENT_INDEX_DO"
+class_name = "PaymentIndexDO"
+
+# [[env.production.secrets_store_secrets]]
+# binding = "LAVA_API_KEY"
+# store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+# secret_name = "lava-top"
+
+[env.production.vars]
+RETURN_URL = "https://fit.renorma.app/paywall?status=success"
+PLANS = '[{"id":"monthly","title":"Месяц","price":399,"currency":"RUB","period":"month","lavaOfferId":""},{"id":"yearly","title":"Год","price":3990,"currency":"RUB","period":"year","lavaOfferId":""}]'

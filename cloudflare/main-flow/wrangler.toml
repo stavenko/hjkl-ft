@@ -3,7 +3,10 @@ main = "build/worker/shim.mjs"
 compatibility_date = "2024-01-01"
 
 [build]
-command = "cargo install -q worker-build && worker-build --release"
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
+# an unpinned `cargo install worker-build` pulls a newer build that passes
+# wasm-bindgen flags the locked CLI doesn't support.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
 
 [[durable_objects.bindings]]
 name = "PUSH_DO"

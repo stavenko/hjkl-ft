@@ -16,10 +16,26 @@ interface Env {
 }
 
 const CORS_HEADERS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
+
+// Known origins only (no wildcard): the prod app + any renorma.app subdomain,
+// the dev test env, and localhost for development. The exported fetch is wrapped
+// in applyCors, which echoes a matching request Origin into Access-Control-Allow-Origin.
+const ALLOWED_ORIGIN_RE =
+  /^https:\/\/([a-z0-9-]+\.)*renorma\.app$|^https:\/\/hjkl-ft\.pages\.dev$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+function applyCors(res: Response, request: Request): Response {
+  const origin = request.headers.get("Origin");
+  const out = new Response(res.body, res);
+  out.headers.append("Vary", "Origin");
+  if (origin && ALLOWED_ORIGIN_RE.test(origin)) {
+    out.headers.set("Access-Control-Allow-Origin", origin);
+  }
+  return out;
+}
+
 
 // Collections keyed by `id`, last-writer-wins by `updated_at`.
 const ID_COLLECTIONS = [
@@ -170,7 +186,7 @@ function errorResponse(message: string, status: number): Response {
   return corsJson(JSON.stringify({ error: message }), status);
 }
 
-export default {
+const inner = {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -198,5 +214,11 @@ export default {
       body: await request.text(),
     });
     return corsJson(await res.text(), res.status);
+  },
+} satisfies ExportedHandler<Env>;
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    return applyCors(await inner.fetch!(request, env), request);
   },
 } satisfies ExportedHandler<Env>;

@@ -31,9 +31,22 @@ pub(crate) fn do_request(path: &str, body: &serde_json::Value) -> Result<Request
     )
 }
 
-fn add_cors(resp: Response) -> Result<Response> {
+/// Known origins only (no wildcard): the prod app + any renorma.app subdomain,
+/// the dev test env, and localhost for development.
+fn is_allowed_origin(origin: &str) -> bool {
+    origin == "https://renorma.app"
+        || (origin.starts_with("https://") && origin.ends_with(".renorma.app"))
+        || origin == "https://hjkl-ft.pages.dev"
+        || origin.starts_with("http://localhost")
+        || origin.starts_with("http://127.0.0.1")
+}
+
+fn add_cors(resp: Response, origin: &str) -> Result<Response> {
     let mut headers = Headers::new();
-    let _ = headers.set("Access-Control-Allow-Origin", "*");
+    if is_allowed_origin(origin) {
+        let _ = headers.set("Access-Control-Allow-Origin", origin);
+    }
+    let _ = headers.set("Vary", "Origin");
     let _ = headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     let _ = headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
     // Copy original headers
@@ -46,9 +59,15 @@ fn add_cors(resp: Response) -> Result<Response> {
 
 #[event(fetch)]
 async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    // Capture the request Origin before the router consumes `req`.
+    let origin = req.headers().get("Origin").ok().flatten().unwrap_or_default();
+
     if req.method() == Method::Options {
         let mut headers = Headers::new();
-        let _ = headers.set("Access-Control-Allow-Origin", "*");
+        if is_allowed_origin(&origin) {
+            let _ = headers.set("Access-Control-Allow-Origin", &origin);
+        }
+        let _ = headers.set("Vary", "Origin");
         let _ = headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         let _ = headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
         let _ = headers.set("Access-Control-Max-Age", "86400");
@@ -79,12 +98,15 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .await;
 
     match result {
-        Ok(resp) => add_cors(resp),
+        Ok(resp) => add_cors(resp, &origin),
         Err(e) => {
             let body = serde_json::json!({ "error": e.to_string() });
             let mut resp = Response::from_json(&body)?.with_status(500);
             let headers = resp.headers_mut();
-            let _ = headers.set("Access-Control-Allow-Origin", "*");
+            if is_allowed_origin(&origin) {
+                let _ = headers.set("Access-Control-Allow-Origin", &origin);
+            }
+            let _ = headers.set("Vary", "Origin");
             Ok(resp)
         }
     }

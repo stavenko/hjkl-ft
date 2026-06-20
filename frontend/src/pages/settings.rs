@@ -2,7 +2,7 @@ use leptos::*;
 use leptos_router::*;
 use serde::Serialize;
 
-use crate::services::{push, db, story, profile, local, sync, update, i18n::t};
+use crate::services::{push, db, story, profile, local, subscription, sync, update, i18n::t};
 use crate::services::profile::Sex;
 
 const IOS_BG: &str = "background: var(--bulma-background); min-height: 100vh; padding: 16px; margin: -0.75rem;";
@@ -46,6 +46,33 @@ pub fn SettingsPage() -> impl IntoView {
         profile::set_sex(s);
         sex.set(Some(s));
         spawn_local(async { story::set_flag(story::SEX_SELECTED, true).await; });
+    };
+
+    // Subscription (manage/cancel). Cancellation here is a convenience for users
+    // with app access; it's also self-serve via lava (the buyer's emails), so it
+    // never *requires* logging in — see info@renorma.app for the backstop.
+    let sub = create_rw_signal(None::<subscription::Status>);
+    let sub_busy = create_rw_signal(false);
+    spawn_local(async move {
+        if let Ok(s) = subscription::status().await {
+            sub.set(Some(s));
+        }
+    });
+    let cancel_sub = move |_| {
+        if sub_busy.get_untracked() {
+            return;
+        }
+        let win = web_sys::window().unwrap();
+        if !win.confirm_with_message(&t("settings.sub_cancel_confirm")).unwrap_or(false) {
+            return;
+        }
+        sub_busy.set(true);
+        spawn_local(async move {
+            if let Ok(s) = subscription::cancel().await {
+                sub.set(Some(s));
+            }
+            sub_busy.set(false);
+        });
     };
 
     view! {
@@ -316,6 +343,52 @@ pub fn SettingsPage() -> impl IntoView {
                             {move || t("settings.version_update")}
                         </button>
                     })}
+                </div>
+            </div>
+
+            // ---- Subscription ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.subscription")}</p>
+            <div style=IOS_CARD>
+                <div style="padding: 12px 16px;">
+                    {move || match sub.get() {
+                        None => view! { <span class="is-size-6 has-text-grey">{move || t("paywall.loading")}</span> }.into_view(),
+                        Some(s) => {
+                            let label = match s.status.as_deref() {
+                                Some("paid") if s.no_renew == Some(true) => t("settings.sub_cancelled"),
+                                Some("paid") => t("settings.sub_active"),
+                                _ if s.active => t("settings.sub_trial"),
+                                _ => t("settings.sub_expired"),
+                            };
+                            let day = 24 * 60 * 60 * 1000i64;
+                            let left = (((s.end - js_sys::Date::now() as i64) + day - 1) / day).max(0);
+                            view! {
+                                <span class="is-size-6 has-text-weight-semibold">{label}</span>
+                                <p class="is-size-7 has-text-grey-light" style="margin: 2px 0 0 0;">
+                                    {format!("{} {}", left, t("paywall.days_left"))}
+                                </p>
+                            }.into_view()
+                        }
+                    }}
+
+                    // Cancel auto-renew — only while paid and still renewing.
+                    {move || {
+                        let show = sub.get().map(|s| s.is_paid() && s.no_renew != Some(true)).unwrap_or(false);
+                        show.then(|| view! {
+                            <button
+                                attr:data-testid="settings-btn-cancel-sub"
+                                class="button is-danger is-light is-small is-fullwidth"
+                                style="margin-top: 12px;"
+                                disabled=move || sub_busy.get()
+                                on:click=cancel_sub
+                            >
+                                {move || t("settings.sub_cancel")}
+                            </button>
+                        })
+                    }}
+
+                    <p class="is-size-7 has-text-grey" style="margin: 12px 0 0 0; line-height: 1.4;">
+                        {move || t("settings.sub_cancel_note")}
+                    </p>
                 </div>
             </div>
 

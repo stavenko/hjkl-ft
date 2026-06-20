@@ -12,12 +12,30 @@ pub struct Status {
     pub plan: String,
     pub end: i64,
     pub active: bool,
+    // Extra fields for the Settings "manage subscription" view. `serde(default)`
+    // so older cached entries / the gate-only reads still deserialize.
+    #[serde(default)]
+    pub status: Option<String>, // "trial" | "paid" | "cancelled" | "expired"
+    #[serde(default)]
+    pub no_renew: Option<bool>,
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 impl Status {
     pub fn is_paid(&self) -> bool {
-        self.plan == "paid" && self.active
+        self.status.as_deref() == Some("paid") && self.active
     }
+}
+
+/// A purchasable plan (from the payment-worker catalog; offer ids stay server-side).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Plan {
+    pub id: String,
+    pub title: String,
+    pub price: f64,
+    pub currency: String,
+    pub period: String,
 }
 
 /// Last-known subscription status, cached in localStorage. Lets the Story page
@@ -36,23 +54,45 @@ fn cache(status: &Status) {
 }
 
 pub async fn status() -> Result<Status, String> {
-    let s = request("GET", "/subscription", None).await?;
+    let s: Status = request("GET", "/subscription", None).await?;
     cache(&s);
     Ok(s)
 }
 
-pub async fn pay(code_word: &str) -> Result<Status, String> {
-    let body = serde_json::json!({ "code_word": code_word });
-    let s = request("POST", "/pay", Some(body)).await?;
+/// Available subscription plans for the paywall.
+pub async fn plans() -> Result<Vec<Plan>, String> {
+    #[derive(Deserialize)]
+    struct Resp {
+        plans: Vec<Plan>,
+    }
+    let r: Resp = request("GET", "/plans", None).await?;
+    Ok(r.plans)
+}
+
+/// Start checkout for a plan via a provider; returns the hosted-checkout URL to
+/// redirect the browser to. (Caller does `window.location().set_href(url)`.)
+pub async fn checkout(provider: &str, plan_id: &str) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct Resp {
+        url: String,
+    }
+    let body = serde_json::json!({ "provider": provider, "planId": plan_id });
+    let r: Resp = request("POST", "/checkout", Some(body)).await?;
+    Ok(r.url)
+}
+
+/// Cancel auto-renew (stays active until the period ends).
+pub async fn cancel() -> Result<Status, String> {
+    let s: Status = request("POST", "/cancel", None).await?;
     cache(&s);
     Ok(s)
 }
 
-async fn request(
+async fn request<T: serde::de::DeserializeOwned>(
     method: &str,
     path: &str,
     body: Option<serde_json::Value>,
-) -> Result<Status, String> {
+) -> Result<T, String> {
     let base = &config::get().payment_base_url;
     let url = format!("{base}{path}");
     let token = auth::get_token().ok_or_else(|| "not authenticated".to_string())?;

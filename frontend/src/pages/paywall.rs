@@ -12,44 +12,61 @@ fn days_left(end_ms: i64) -> i64 {
     ((end_ms - now) + day - 1) / day
 }
 
+fn currency_symbol(code: &str) -> String {
+    match code {
+        "RUB" => "\u{20bd}".to_string(),
+        "USD" => "$".to_string(),
+        "EUR" => "\u{20ac}".to_string(),
+        other => other.to_string(),
+    }
+}
+
 #[component]
 pub fn PaywallPage() -> impl IntoView {
     let navigate = use_navigate();
 
     let status = create_rw_signal(None::<subscription::Status>);
-    let code = create_rw_signal(String::new());
+    let plans = create_rw_signal(Vec::<subscription::Plan>::new());
     let error = create_rw_signal(None::<String>);
-    let busy = create_rw_signal(false);
+    // The plan id currently redirecting to checkout (so its button shows progress).
+    let busy = create_rw_signal(None::<String>);
 
-    // Load current subscription status on mount (lazily creates a trial server-side).
+    // Load current subscription status (lazily creates a trial server-side) + plans.
     spawn_local(async move {
         if let Ok(s) = subscription::status().await {
             status.set(Some(s));
         }
     });
+    spawn_local(async move {
+        if let Ok(ps) = subscription::plans().await {
+            plans.set(ps);
+        }
+    });
 
-    let on_pay = move |_| {
-        let code_val = code.get_untracked().trim().to_string();
-        if code_val.is_empty() || busy.get_untracked() {
+    // Start checkout for a plan → redirect the browser to the hosted page.
+    let buy = move |plan_id: String| {
+        if busy.get_untracked().is_some() {
             return;
         }
-        busy.set(true);
+        busy.set(Some(plan_id.clone()));
         error.set(None);
         spawn_local(async move {
-            match subscription::pay(&code_val).await {
-                Ok(s) => {
-                    status.set(Some(s));
-                    code.set(String::new());
-                }
-                Err(e) => {
-                    if e.contains("HTTP 400") || e.contains("invalid_code") {
-                        error.set(Some(t("paywall.invalid_code").to_string()));
-                    } else {
-                        error.set(Some(e));
+            match subscription::checkout("lava", &plan_id).await {
+                Ok(url) => {
+                    if let Some(w) = web_sys::window() {
+                        let _ = w.location().set_href(&url);
                     }
                 }
+                Err(e) => {
+                    busy.set(None);
+                    let msg = if e.contains("provider_not_configured") || e.contains("unknown_plan") {
+                        t("paywall.not_configured").to_string()
+                    } else {
+                        t("paywall.checkout_error").to_string()
+                    };
+                    error.set(Some(msg));
+                }
             }
-            busy.set(false);
         });
     };
 
@@ -59,10 +76,7 @@ pub fn PaywallPage() -> impl IntoView {
                 <button
                     style="appearance: none; -webkit-appearance: none; border: none; background: none; cursor: pointer; padding: 4px; font: inherit;"
                     class="is-size-5"
-                    on:click={
-                        let nav = navigate.clone();
-                        move |_| nav("/", Default::default())
-                    }
+                    on:click={ let nav = navigate.clone(); move |_| nav("/", Default::default()) }
                 >
                     <span class="has-text-link">{move || t("common.back")}</span>
                 </button>
@@ -76,7 +90,6 @@ pub fn PaywallPage() -> impl IntoView {
                 <p class="is-size-6" style="line-height: 1.55; margin: 0 0 8px 0;">{move || t("story.next.p3")}</p>
             </div>
 
-            // ---- Subscription status + paywall ----
             <div style="padding: 16px 16px 0 16px;">
                 <div style=CARD>
                     // Status line
@@ -95,46 +108,57 @@ pub fn PaywallPage() -> impl IntoView {
                         }
                     }}
 
-                    // Already paid → no need for the form
-                    <Show when=move || !status.get().map(|s| s.is_paid()).unwrap_or(false)>
-                        <div style="margin-top: 14px;">
-                            <input
-                                attr:data-testid="paywall-input-code"
-                                type="text"
-                                class="input"
-                                placeholder=t("paywall.code_placeholder")
-                                prop:value=move || code.get()
-                                on:input=move |ev| code.set(event_target_value(&ev))
-                            />
-                            {move || error.get().map(|e| view! {
-                                <p class="has-text-danger is-size-7" style="margin-top: 8px;">{e}</p>
-                            })}
-                            <button
-                                attr:data-testid="paywall-btn-pay"
-                                class="button is-link is-fullwidth is-medium"
-                                style="margin-top: 12px;"
-                                disabled=move || busy.get()
-                                on:click=on_pay
-                            >
-                                {move || if busy.get() { t("paywall.paying") } else { t("paywall.pay_button") }}
-                            </button>
-                        </div>
-                    </Show>
-
+                    // Paid → success; otherwise the plan picker.
                     <Show when=move || status.get().map(|s| s.is_paid()).unwrap_or(false)>
                         <p class="is-size-6 has-text-weight-semibold has-text-success" style="margin-top: 14px;">
                             {move || t("paywall.success")}
                         </p>
+                    </Show>
+
+                    <Show when=move || !status.get().map(|s| s.is_paid()).unwrap_or(false)>
+                        <p class="is-size-7 has-text-grey-light" style="text-transform: uppercase; letter-spacing: 0.02em; margin: 16px 0 8px 0;">
+                            {move || t("paywall.choose_plan")}
+                        </p>
+                        <For
+                            each=move || plans.get()
+                            key=|p| p.id.clone()
+                            children=move |p: subscription::Plan| {
+                                let pid = p.id.clone();
+                                let period = if p.period == "year" { t("paywall.per_year") } else { t("paywall.per_month") };
+                                let price = format!("{} {} {}", p.price.round() as i64, currency_symbol(&p.currency), period);
+                                let buy = buy.clone();
+                                let pid2 = pid.clone();
+                                view! {
+                                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 0.5px solid var(--bulma-border-weak);">
+                                        <div>
+                                            <div class="is-size-6 has-text-weight-semibold">{p.title.clone()}</div>
+                                            <div class="is-size-7 has-text-grey">{price}</div>
+                                        </div>
+                                        <button
+                                            class="button is-link is-small"
+                                            disabled=move || busy.get().is_some()
+                                            on:click=move |_| buy(pid2.clone())
+                                        >
+                                            {move || if busy.get().as_deref() == Some(pid.as_str()) {
+                                                t("paywall.paying")
+                                            } else {
+                                                t("paywall.pay_button")
+                                            }}
+                                        </button>
+                                    </div>
+                                }
+                            }
+                        />
+                        {move || error.get().map(|e| view! {
+                            <p class="has-text-danger is-size-7" style="margin-top: 12px;">{e}</p>
+                        })}
                     </Show>
                 </div>
 
                 <button
                     class="button is-light is-fullwidth is-medium"
                     style="margin-top: 16px;"
-                    on:click={
-                        let nav = navigate.clone();
-                        move |_| nav("/", Default::default())
-                    }
+                    on:click={ let nav = navigate.clone(); move |_| nav("/", Default::default()) }
                 >
                     {move || t("paywall.back_to_story")}
                 </button>

@@ -73,13 +73,15 @@ pub fn App() -> impl IntoView {
         // Overlays
         {move || match state.get() {
             AppState::PwaPrompt => Some(view! {
-                <pages::pwa_prompt::PwaPrompt on_dismiss=Callback::new(move |_| {
-                    if auth::get_user_id().is_some() {
-                        after_auth();
-                    } else {
-                        state.set(AppState::Auth);
-                    }
-                }) />
+                <div style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main); overflow-y: auto;">
+                    <pages::pwa_prompt::PwaPrompt on_dismiss=Callback::new(move |_| {
+                        if auth::get_user_id().is_some() {
+                            after_auth();
+                        } else {
+                            state.set(AppState::Auth);
+                        }
+                    }) />
+                </div>
             }.into_view()),
 
             AppState::Auth => Some(view! {
@@ -121,6 +123,7 @@ pub fn App() -> impl IntoView {
                         <Route path="/settings" view=pages::settings::SettingsPage />
                         <Route path="/settings/goals" view=pages::goals::GoalsPage />
                         <Route path="/settings/privacy" view=pages::privacy::PrivacyPage />
+                        <Route path="/settings/subscription" view=pages::subscription::SubscriptionPage />
                         <Route path="/weight" view=pages::weight::WeightPage />
                         <Route path="/steps" view=pages::steps::StepsPage />
                         <Route path="/chat" view=pages::chat::ChatPage />

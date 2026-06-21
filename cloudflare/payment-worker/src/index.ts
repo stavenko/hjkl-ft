@@ -19,10 +19,36 @@ interface Env {
   JWT_SECRET: string;
   PLANS?: string; // JSON array of plans (see Plan)
   RETURN_URL?: string; // where the hosted checkout returns the buyer
+  // main-flow push endpoint + shared key for server-to-server "payment succeeded"
+  // notifications (best-effort; absence just skips the push).
+  PUSH_NOTIFY_URL?: string; // e.g. https://push.renorma.app/push/notify
+  INTERNAL_PUSH_KEY?: SecretBinding | string;
   // Provider credentials come from the account Secrets Store (binding.get()),
   // but a plain string (wrangler secret / var) is also accepted.
   LAVA_API_KEY?: SecretBinding | string;
   LAVA_WEBHOOK_SECRET?: SecretBinding | string;
+}
+
+/** Best-effort "payment succeeded" push to the user via main-flow. Never throws:
+ *  a push failure must not fail the webhook ack (the payment already succeeded),
+ *  but failures are logged loudly — never swallowed silently. */
+async function notifyPush(env: Env, userId: string, body: string, urlPath: string): Promise<void> {
+  const base = env.PUSH_NOTIFY_URL;
+  const key = await readSecret(env.INTERNAL_PUSH_KEY);
+  if (!base || !key) {
+    console.warn("notifyPush: PUSH_NOTIFY_URL / INTERNAL_PUSH_KEY not configured — skipping push");
+    return;
+  }
+  try {
+    const res = await fetch(base, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Internal-Key": key },
+      body: JSON.stringify({ userId, body, url: urlPath }),
+    });
+    if (!res.ok) console.error(`notifyPush: ${res.status} ${await res.text()}`);
+  } catch (e) {
+    console.error(`notifyPush failed: ${e}`);
+  }
 }
 
 /** Resolve a Secrets Store binding (or a plain string secret/var) to its value. */
@@ -323,6 +349,15 @@ async function handle(request: Request, env: Env): Promise<Response> {
           email: ev.email,
         }),
       });
+      // Tell the user it went through, with a deep-link back into the app.
+      await notifyPush(
+        env,
+        userId,
+        ev.kind === "recurring"
+          ? "Подписка продлена. Спасибо!"
+          : "Оплата прошла успешно — подписка активна!",
+        "/paywall?status=success",
+      );
     } else if (ev.kind === "cancelled") {
       await sub.fetch("https://do/cancel", {
         method: "POST",

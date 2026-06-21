@@ -24,6 +24,15 @@ fn currency_symbol(code: &str) -> String {
 #[component]
 pub fn PaywallPage() -> impl IntoView {
     let navigate = use_navigate();
+    // Each <Show> captures its children (and thus `navigate`) by move, so give the
+    // two Show branches their own owned clones.
+    let nav_welcome = navigate.clone();
+    let nav_main = navigate.clone();
+
+    // `?status=success` — the buyer just returned from a successful lava checkout
+    // (the webhook may still be in flight, so key the welcome screen on the param).
+    let query = use_query_map();
+    let just_paid = move || query.with(|q| q.get("status").map(|s| s == "success").unwrap_or(false));
 
     let status = create_rw_signal(None::<subscription::Status>);
     let plans = create_rw_signal(Vec::<subscription::Plan>::new());
@@ -84,6 +93,30 @@ pub fn PaywallPage() -> impl IntoView {
 
             <h1 class="is-size-1 has-text-weight-bold" style="margin: 0 16px 16px 16px;">{move || t("story.ch1.next")}</h1>
 
+            // Just returned from a successful checkout → welcome + where to manage.
+            <Show when=just_paid>
+                <div style="padding: 0 16px;">
+                    <div style=format!("{} text-align: center;", CARD)>
+                        <p class="is-size-3 has-text-weight-bold has-text-success" style="margin: 0 0 8px 0;">{move || t("paywall.welcome_title")}</p>
+                        <p class="is-size-6" style="line-height: 1.55; margin: 0 0 16px 0;">{move || t("paywall.welcome_body")}</p>
+                        <button
+                            class="button is-link is-fullwidth is-medium"
+                            on:click={ let nav = nav_welcome.clone(); move |_| nav("/settings/subscription", Default::default()) }
+                        >
+                            {move || t("paywall.welcome_manage")}
+                        </button>
+                        <button
+                            class="button is-light is-fullwidth is-medium"
+                            style="margin-top: 10px;"
+                            on:click={ let nav = nav_welcome.clone(); move |_| nav("/", Default::default()) }
+                        >
+                            {move || t("paywall.back_to_story")}
+                        </button>
+                    </div>
+                </div>
+            </Show>
+
+            <Show when=move || !just_paid()>
             <div style="padding: 0 16px 8px 16px;">
                 <p class="is-size-6" style="line-height: 1.55; margin: 0 0 14px 0;">{move || t("story.next.p1")}</p>
                 <p class="is-size-6" style="line-height: 1.55; margin: 0 0 14px 0;">{move || t("story.next.p2")}</p>
@@ -158,11 +191,12 @@ pub fn PaywallPage() -> impl IntoView {
                 <button
                     class="button is-light is-fullwidth is-medium"
                     style="margin-top: 16px;"
-                    on:click={ let nav = navigate.clone(); move |_| nav("/", Default::default()) }
+                    on:click={ let nav = nav_main.clone(); move |_| nav("/", Default::default()) }
                 >
                     {move || t("paywall.back_to_story")}
                 </button>
             </div>
+            </Show>
 
             <div style="height: 40px;"></div>
         </div>

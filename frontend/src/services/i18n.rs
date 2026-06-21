@@ -328,6 +328,10 @@ fn en(key: &str) -> &'static str {
         "settings.sub_cancel" => "Cancel subscription",
         "settings.sub_cancel_confirm" => "Cancel auto-renew? You keep access until the current period ends.",
         "settings.sub_cancel_note" => "You can cancel anytime — here, via the link in lava's emails, or by writing to info@renorma.app. No app login required.",
+        "settings.sub_manage" => "Manage subscription",
+        "settings.sub_since" => "Subscribed since",
+        "settings.sub_until" => "Active until",
+        "settings.sub_cost" => "Price",
         "settings.danger_zone" => "Danger zone",
         "settings.danger_reset_story" => "Delete my story progress",
         "settings.danger_confirm_story" => "Delete all your progress in the story? Your logged data stays.",
@@ -875,6 +879,31 @@ fn en(key: &str) -> &'static str {
         "story.rest.next_unlocked" => "Congratulations — you've completed all the tasks of chapter 1!",
         "story.rest.open_diary" => "Open the diary",
 
+        // Story — chapter 1, Why keep a diary?
+        "story.diary.p1" => "People very often underestimate how many calories they eat. The food they log might add up to 1000–1200 kcal, yet experiments often show they fail to log another 1500–2000 kcal. So total intake can be very high — the person simply doesn't know it.",
+        "story.diary.p2" => "That's why it's important to log everything in your diary. Especially when you're just starting out.",
+        "story.diary.p3" => "By the end of the course you'll know yourself which foods don't need tracking, and which ones need limiting and attention even if you don't log them.",
+        "story.diary.p4" => "So don't fall into the trap — be sure to log everything you eat:",
+        "story.diary.item1" => "Cookies and sweets.",
+        "story.diary.item2" => "Nuts.",
+        "story.diary.item3" => "Oil and butter — both vegetable and dairy.",
+        "story.diary.item4" => "Bread, crackers, chips.",
+        "story.diary.item5" => "Juices, drinks, cream and sugar in your coffee.",
+        "story.diary.p5" => "If it contains calories and you ate it, it must end up in your diary. This is the key moment in moving toward your new body.",
+        "story.diary.p6" => "The app is a tool that helps you reach your new body — but you have to use it.",
+
+        // Story — chapter 1, Make tracking easier
+        "story.easier.t1" => "Standardize your food. Try to eat the same things — it keeps tracking to a minimum.",
+        "story.easier.t2" => "Cut the number of meals. Three is ideal. You can skip snacks.",
+        "story.easier.t3" => "Copy entries from the previous day.",
+        "story.easier.t4" => "Better to log it as «approximate» when you can't be exact than not to log it at all.",
+
+        // Story — chapter 1, Subscription (onboarding paywall)
+        "story.sub.p1" => "To go further and keep the AI features, you'll need a subscription.",
+        "story.sub.p2" => "The subscription is monthly, and the first week is a free trial — your first payment is only charged after 7 days.",
+        "story.sub.p3" => "You can cancel anytime, right in the app — in Settings → Subscription.",
+        "story.sub.cta" => "Subscribe",
+
         // Story — chapter 1, What's next (paywall)
         "story.next.p1" => "You've reached the end of chapter 1. The journey continues — but to go further, two things are needed.",
         "story.next.p2" => "First, finish the remaining tasks across this chapter's sections. Second, support the project so we can keep going (and keep the AI on).",
@@ -893,6 +922,9 @@ fn en(key: &str) -> &'static str {
         "paywall.not_configured" => "Payments aren't available yet — check back soon.",
         "paywall.success" => "Thank you! Your subscription is active.",
         "paywall.back_to_story" => "Back to the Story",
+        "paywall.welcome_title" => "You're subscribed 🎉",
+        "paywall.welcome_body" => "Payment went through. You can manage your subscription anytime in Settings → Subscription — see when it renews, the price, and cancel.",
+        "paywall.welcome_manage" => "Open Settings → Subscription",
 
         _ => "???",
     }
@@ -1091,6 +1123,10 @@ fn ru(key: &str) -> &'static str {
         "settings.sub_cancel" => "Отменить подписку",
         "settings.sub_cancel_confirm" => "Отменить автопродление? Доступ сохранится до конца текущего периода.",
         "settings.sub_cancel_note" => "Отменить можно в любой момент — здесь, по ссылке в письмах lava или написав на info@renorma.app. Вход в приложение не требуется.",
+        "settings.sub_manage" => "Управление подпиской",
+        "settings.sub_since" => "Подписан с",
+        "settings.sub_until" => "Действует до",
+        "settings.sub_cost" => "Стоимость",
         "settings.danger_zone" => "Опасные дела",
         "settings.danger_reset_story" => "Удалить моё продвижение в истории",
         "settings.danger_confirm_story" => "Удалить весь ваш прогресс в истории? Записанные данные останутся.",
@@ -1628,6 +1664,31 @@ fn ru(key: &str) -> &'static str {
         "story.rest.next_unlocked" => "Поздравляем — вы выполнили все задания первой главы!",
         "story.rest.open_diary" => "Открыть дневник",
 
+        // История — глава 1, зачем вести дневник?
+        "story.diary.p1" => "Очень часто люди недооценивают количество калорий, которые они съедают. Еда, которую они записывают, может составлять 1000–1200 ккал, однако эксперименты часто показывают, что не записывают они ещё 1500–2000 ккал. То есть суммарное потребление может быть очень высоким, но человек просто этого не знает.",
+        "story.diary.p2" => "Поэтому важно, чтобы в дневник записывалось всё. Особенно если вы только начинаете.",
+        "story.diary.p3" => "К концу курса вы сами будете знать, какая еда не требует учёта и записи. А какая требует ограничения и внимания, даже если вы её не будете записывать.",
+        "story.diary.p4" => "Поэтому не попадите в ловушку и обязательно вписывайте всё, что вы едите:",
+        "story.diary.item1" => "Печеньки и конфетки.",
+        "story.diary.item2" => "Орешки.",
+        "story.diary.item3" => "Масло — растительное и сливочное.",
+        "story.diary.item4" => "Хлеб, крекеры, чипсы.",
+        "story.diary.item5" => "Соки, напитки, сливки и сахар в кофе.",
+        "story.diary.p5" => "Если что-то содержит калории и было съедено — оно должно оказаться в вашем дневнике. Это ключевой момент движения к вашему новому телу.",
+        "story.diary.p6" => "Приложение — это инструмент, который помогает вам достичь нового тела, — но им надо воспользоваться.",
+
+        // История — глава 1, облегчаем подсчёт
+        "story.easier.t1" => "Унифицируем еду. Стараемся есть одно и то же. Это помогает свести учёт к минимуму.",
+        "story.easier.t2" => "Уменьшаем количество приёмов пищи. 3 — идеально. Можно без перекусов.",
+        "story.easier.t3" => "Копируйте из предыдущего дня.",
+        "story.easier.t4" => "Лучше вписать «приблизительно», если вы не можете вписать точно, чем вообще не вписать.",
+
+        // История — глава 1, подписка (онбординг-paywall)
+        "story.sub.p1" => "Чтобы двигаться дальше и сохранить AI-функции, нужна подписка.",
+        "story.sub.p2" => "Подписка ежемесячная, и первая неделя — пробная: первый платёж спишется только через 7 дней.",
+        "story.sub.p3" => "Отменить подписку можно в любой момент прямо в приложении — в «Настройки → Подписка».",
+        "story.sub.cta" => "Оформить подписку",
+
         // История — глава 1, что дальше (paywall)
         "story.next.p1" => "Вы дошли до конца первой главы. Путь продолжается — но чтобы идти дальше, нужны две вещи.",
         "story.next.p2" => "Во-первых, выполните оставшиеся задания в секциях этой главы. Во-вторых, поддержите проект — чтобы мы могли продолжать (и держать AI включённым).",
@@ -1646,6 +1707,9 @@ fn ru(key: &str) -> &'static str {
         "paywall.not_configured" => "Оплата пока недоступна — загляните позже.",
         "paywall.success" => "Спасибо! Подписка активна.",
         "paywall.back_to_story" => "Назад к Истории",
+        "paywall.welcome_title" => "Подписка оформлена 🎉",
+        "paywall.welcome_body" => "Оплата прошла. Управлять подпиской можно в любой момент в «Настройки → Подписка» — там видно дату продления, стоимость и кнопка отмены.",
+        "paywall.welcome_manage" => "Открыть «Настройки → Подписка»",
 
         _ => "???",
     }

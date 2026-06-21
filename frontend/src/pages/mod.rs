@@ -12,6 +12,7 @@ pub mod recipe_detail;
 pub mod recipes;
 pub mod settings;
 pub mod steps;
+pub mod subscription;
 pub mod story;
 pub mod story_section;
 pub mod paywall;

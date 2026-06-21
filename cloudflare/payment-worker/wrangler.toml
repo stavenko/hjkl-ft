@@ -34,6 +34,10 @@ secret_name = "lava-hook-api-key"
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
 RETURN_URL = "https://hjkl-ft.pages.dev/paywall?status=success"
+# Payment-success push: main-flow endpoint + shared key. Prod: `wrangler secret
+# put INTERNAL_PUSH_KEY --env production` with the SAME value as main-flow-prod.
+PUSH_NOTIFY_URL = "https://main-flow.vg-stavenko.workers.dev/push/notify"
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
 # Plan catalog. `lavaOfferId` empty until the real lava offer ids are set →
 # /checkout returns unknown_plan until then; /plans still lists them for display.
 PLANS = '[{"id":"monthly","title":"Подписка Renorma","price":4900,"currency":"RUB","period":"month","lavaOfferId":"4d02bebe-badd-4600-8313-7f1c10a10844"}]'
@@ -70,4 +74,5 @@ secret_name = "lava-hook-api-key"
 
 [env.production.vars]
 RETURN_URL = "https://fit.renorma.app/paywall?status=success"
+PUSH_NOTIFY_URL = "https://push.renorma.app/push/notify"
 PLANS = '[{"id":"monthly","title":"Подписка Renorma","price":4900,"currency":"RUB","period":"month","lavaOfferId":"4d02bebe-badd-4600-8313-7f1c10a10844"}]'

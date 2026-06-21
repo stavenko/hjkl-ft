@@ -15,6 +15,8 @@ pub struct Status {
     // Extra fields for the Settings "manage subscription" view. `serde(default)`
     // so older cached entries / the gate-only reads still deserialize.
     #[serde(default)]
+    pub start: i64, // ms epoch the subscription/trial began
+    #[serde(default)]
     pub status: Option<String>, // "trial" | "paid" | "cancelled" | "expired"
     #[serde(default)]
     pub no_renew: Option<bool>,

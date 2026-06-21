@@ -75,7 +75,7 @@ tasks:
     title: {en: "Log a restaurant meal", ru: "Внесите еду из ресторана"}
     close: {event: restaurant_logged}
   - id: sub_paid
-    title: {en: "Support the project", ru: "Поддержите проект"}
+    title: {en: "Subscribe", ru: "Оформите подписку"}
     close: {sensor: sub_paid}
   - id: diary_streak
     title: {en: "Keep the food diary 7 days in a row", ru: "Ведите дневник еды 7 дней подряд"}
@@ -204,19 +204,32 @@ chapters:
           - {text_key: story.rest.p7}
           - {tasks: true}
           - {widget: {id: cta, route: /diary, label: story.rest.open_diary}}
-      - id: next
-        title: {en: "What's next", ru: "Что дальше"}
-        tasks: [sub_paid]
+      - id: diary
+        title: {en: "Why keep a diary?", ru: "Зачем вести дневник?"}
+        complete: always
         blocks:
-          - {text_key: story.next.p_intro}
-          - {heading: story.next.rules_label}
-          - {list: [story.next.rule1, story.next.rule2, story.next.rule3]}
-          - {text_key: story.next.p_discipline}
-          - {heading: story.next.focus_label}
-          - {list: [story.next.focus1, story.next.focus2, story.next.focus3]}
-          - {text_key: story.next.p_goals}
-          - {text_key: story.next.p_report}
-          - {widget: {id: cta, route: /diary, label: story.next.open_diary}}
+          - {text_key: story.diary.p1}
+          - {text_key: story.diary.p2}
+          - {text_key: story.diary.p3}
+          - {text_key: story.diary.p4}
+          - {list: [story.diary.item1, story.diary.item2, story.diary.item3, story.diary.item4, story.diary.item5]}
+          - {text_key: story.diary.p5}
+          - {text_key: story.diary.p6}
+      - id: easier
+        title: {en: "Make tracking easier", ru: "Облегчаем подсчёт"}
+        complete: always
+        blocks:
+          - {list: [story.easier.t1, story.easier.t2, story.easier.t3, story.easier.t4]}
+      - id: subscribe
+        title: {en: "Subscription", ru: "Подписка"}
+        tasks: [sub_paid]
+        complete: always
+        blocks:
+          - {text_key: story.sub.p1}
+          - {text_key: story.sub.p2}
+          - {text_key: story.sub.p3}
+          - {tasks: true}
+          - {widget: {id: cta, route: /paywall, label: story.sub.cta}}
 
   - id: ch2
     title: {en: "Appetite", ru: "Аппетит"}

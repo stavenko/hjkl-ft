@@ -26,6 +26,10 @@ new_sqlite_classes = ["ScheduleDO"]
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+# Shared key for the internal /push/notify endpoint (payment-worker calls it on
+# payment success). Prod: `wrangler secret put INTERNAL_PUSH_KEY --env production`
+# with the SAME value set on payment-worker-prod.
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
 VAPID_PUBLIC_KEY = "BHmCtJcYZNsO-xMLccKyWYSWTlxbILgd1HrRtSD4jy97PILpvdVaHadrt9anNmgdRDVWI5mIfkpSRkxSTL0AdsM"
 VAPID_PRIVATE_KEY = "2CX-Ehz-V8m_lysbW7az17KksEUlUcPRT0DS-5qfolY"
 VAPID_SUBJECT = "mailto:admin@hjkl.pro"

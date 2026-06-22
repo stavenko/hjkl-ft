@@ -907,7 +907,7 @@ fn en(key: &str) -> &'static str {
         // Story — chapter 1, What's next (paywall)
         "story.next.p1" => "You've reached the end of chapter 1. The journey continues — but to go further, two things are needed.",
         "story.next.p2" => "First, finish the remaining tasks across this chapter's sections. Second, support the project so we can keep going (and keep the AI on).",
-        "story.next.p3" => "AI features are free for your first 14 days. After that, an active subscription keeps food recognition — and your progress through the Story — going.",
+        "story.next.p3" => "AI features are free for your first 7 days. After that, an active subscription keeps food recognition — and your progress through the Story — going.",
         "paywall.loading" => "Loading…",
         "paywall.status_trial" => "Trial",
         "paywall.status_paid" => "Subscription active",
@@ -1703,7 +1703,7 @@ fn ru(key: &str) -> &'static str {
         // История — глава 1, что дальше (paywall)
         "story.next.p1" => "Вы дошли до конца первой главы. Путь продолжается — но чтобы идти дальше, нужны две вещи.",
         "story.next.p2" => "Во-первых, выполните оставшиеся задания в секциях этой главы. Во-вторых, поддержите проект — чтобы мы могли продолжать (и держать AI включённым).",
-        "story.next.p3" => "AI-функции бесплатны первые 14 дней. Дальше активная подписка сохраняет распознавание еды и ваш прогресс по Истории.",
+        "story.next.p3" => "AI-функции бесплатны первые 7 дней. Дальше активная подписка сохраняет распознавание еды и ваш прогресс по Истории.",
         "paywall.loading" => "Загрузка…",
         "paywall.status_trial" => "Пробный период",
         "paywall.status_paid" => "Подписка активна",

@@ -406,7 +406,7 @@ pub fn FoodEditor(
             <input type="text"
                 placeholder=t("food_editor.product_name")
                 class="is-size-6"
-                style="width: 100%; padding: 10px 12px; border: none; border-radius: 10px; background: var(--bulma-background); color: var(--bulma-text); outline: none; box-sizing: border-box; margin-bottom: 10px;"
+                style="width: 100%; padding: 10px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none; box-sizing: border-box; margin-bottom: 10px;"
                 prop:value=move || name.get()
                 on:input=move |ev| {
                     // Keep `draft_id` so the auto-sync effect propagates the new

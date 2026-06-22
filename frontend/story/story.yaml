@@ -105,6 +105,10 @@ chapters:
           - {text_key: story.intro.p6}
           - {text_key: story.intro.p7}
           - {text_key: story.intro.p8}
+          - {text_key: story.intro.p9}
+          - {text_key: story.intro.p10}
+          - {text_key: story.intro.p11}
+          - {text_key: story.intro.p12}
           - {widget: {id: progress_photos}}
       - id: setup
         title: {en: "Let's set up the app", ru: "Для начала настроим приложение"}

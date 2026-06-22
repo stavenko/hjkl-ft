@@ -76,19 +76,29 @@ pub fn StorySectionPage() -> impl IntoView {
     }
 }
 
-/// Render a paragraph string with inline `**bold**` segments.
+/// Render a paragraph string with inline `**bold**` and `{dot}` tokens, where
+/// `{dot}` becomes the red attention marker (the same dot shown in the nav/menu).
 fn render_rich(s: &str) -> impl IntoView {
-    s.split("**")
-        .enumerate()
-        .map(|(i, seg)| {
-            let seg = seg.to_string();
-            if i % 2 == 1 {
-                view! { <strong>{seg}</strong> }.into_view()
-            } else {
-                view! { {seg} }.into_view()
+    let mut views: Vec<View> = Vec::new();
+    for (i, seg) in s.split("**").enumerate() {
+        let bold = i % 2 == 1;
+        for (j, part) in seg.split("{dot}").enumerate() {
+            if j > 0 {
+                views.push(view! {
+                    <span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--bulma-danger); margin:0 3px; vertical-align:middle;"></span>
+                }.into_view());
             }
-        })
-        .collect_view()
+            if !part.is_empty() {
+                let p = part.to_string();
+                views.push(if bold {
+                    view! { <strong>{p}</strong> }.into_view()
+                } else {
+                    view! { {p} }.into_view()
+                });
+            }
+        }
+    }
+    views
 }
 
 fn render_block(b: &Block, sec: &'static Section) -> View {

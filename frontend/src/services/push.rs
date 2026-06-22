@@ -17,14 +17,21 @@ fn storage() -> web_sys::Storage {
         .expect("no localStorage")
 }
 
-/// Check whether the Push API is available in this browser.
+/// Check whether the Push API is available in this browser. Requires a service
+/// worker AND the `Notification` + `PushManager` globals — on iOS Safari those
+/// exist only in a home-screen (standalone) PWA, not a regular tab, so without
+/// this guard the onboarding's `Notification.requestPermission()` throws
+/// "Can't find variable: Notification".
 pub fn is_supported() -> bool {
-    let nav = window().navigator();
-    let sw = js_sys::Reflect::get(&nav, &"serviceWorker".into());
-    match sw {
-        Ok(val) => !val.is_undefined() && !val.is_null(),
-        Err(_) => false,
-    }
+    let win = window();
+    let present = |obj: &wasm_bindgen::JsValue, key: &str| {
+        js_sys::Reflect::get(obj, &wasm_bindgen::JsValue::from_str(key))
+            .map(|v| !v.is_undefined() && !v.is_null())
+            .unwrap_or(false)
+    };
+    present(win.navigator().as_ref(), "serviceWorker")
+        && present(win.as_ref(), "Notification")
+        && present(win.as_ref(), "PushManager")
 }
 
 /// Check localStorage flag indicating an active subscription.
@@ -67,6 +74,11 @@ pub fn dismiss_onboarding() {
 
 /// Request notification permission. Returns `true` if granted.
 pub async fn request_permission() -> Result<bool, String> {
+    // Guard: `Notification` may be absent (iOS Safari outside a standalone PWA);
+    // touching web_sys::Notification then throws a ReferenceError.
+    if !is_supported() {
+        return Err("notifications_unsupported".to_string());
+    }
     let promise = web_sys::Notification::request_permission()
         .map_err(|e| format!("{:?}", e))?;
     let result = JsFuture::from(promise)

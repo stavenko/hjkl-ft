@@ -389,6 +389,9 @@ pub async fn delete_story_progress() {
         f.updated_at = ts.clone();
         db::put("story", &f).await;
     }
+    // Also drop the attached progress photos (a local-only, un-synced store):
+    // resetting the story must clear the "before" photos too.
+    db::clear("progress_photos").await;
 }
 
 /// Danger zone — delete diary food entries (and their cached day-summaries).

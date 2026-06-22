@@ -94,7 +94,7 @@ pub fn PushOnboarding(on_done: Callback<()>) -> impl IntoView {
                         <p
                             attr:data-testid="push-onboarding-description"
                             class="is-size-6 has-text-grey-light"
-                            style="max-width: 320px; line-height: 1.5; margin: 0 0 32px 0;"
+                            style="max-width: 320px; line-height: 1.5; margin: 0 auto 32px auto;"
                         >
                             {move || t("push_onboarding.description")}
                         </p>

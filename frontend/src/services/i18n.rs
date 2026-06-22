@@ -925,6 +925,8 @@ fn en(key: &str) -> &'static str {
         "paywall.welcome_title" => "You're subscribed 🎉",
         "paywall.welcome_body" => "Payment went through. You can manage your subscription anytime in Settings → Subscription — see when it renews, the price, and cancel.",
         "paywall.welcome_manage" => "Open Settings → Subscription",
+        "paywall.onb_title" => "re:Norma subscription",
+        "paywall.later" => "Later",
 
         _ => "???",
     }
@@ -1710,6 +1712,8 @@ fn ru(key: &str) -> &'static str {
         "paywall.welcome_title" => "Подписка оформлена 🎉",
         "paywall.welcome_body" => "Оплата прошла. Управлять подпиской можно в любой момент в «Настройки → Подписка» — там видно дату продления, стоимость и кнопка отмены.",
         "paywall.welcome_manage" => "Открыть «Настройки → Подписка»",
+        "paywall.onb_title" => "Подписка re:Norma",
+        "paywall.later" => "Позже",
 
         _ => "???",
     }

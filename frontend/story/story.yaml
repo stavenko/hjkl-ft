@@ -74,9 +74,6 @@ tasks:
   - id: restaurant
     title: {en: "Log a restaurant meal", ru: "Внесите еду из ресторана"}
     close: {event: restaurant_logged}
-  - id: sub_paid
-    title: {en: "Subscribe", ru: "Оформите подписку"}
-    close: {sensor: sub_paid}
   - id: diary_streak
     title: {en: "Keep the food diary 7 days in a row", ru: "Ведите дневник еды 7 дней подряд"}
     close: {sensor: diary_streak, gte: 7}
@@ -220,16 +217,6 @@ chapters:
         complete: always
         blocks:
           - {list: [story.easier.t1, story.easier.t2, story.easier.t3, story.easier.t4]}
-      - id: subscribe
-        title: {en: "Subscription", ru: "Подписка"}
-        tasks: [sub_paid]
-        complete: always
-        blocks:
-          - {text_key: story.sub.p1}
-          - {text_key: story.sub.p2}
-          - {text_key: story.sub.p3}
-          - {tasks: true}
-          - {widget: {id: cta, route: /paywall, label: story.sub.cta}}
 
   - id: ch2
     title: {en: "Appetite", ru: "Аппетит"}

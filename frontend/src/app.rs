@@ -3,13 +3,14 @@ use leptos_router::*;
 
 use crate::pages;
 use crate::services::i18n::t;
-use crate::services::{auth, db, platform, push, story, update};
+use crate::services::{auth, db, platform, push, story, subscription, update};
 
 #[derive(Clone, Copy, PartialEq)]
 enum AppState {
     PwaPrompt,
     Auth,
     PushOnboarding,
+    Paywall,
     Ready,
 }
 
@@ -20,6 +21,8 @@ fn initial_state() -> AppState {
         AppState::Auth
     } else if push::needs_push_onboarding() {
         AppState::PushOnboarding
+    } else if subscription::needs_paywall_onboarding() {
+        AppState::Paywall
     } else {
         AppState::Ready
     }
@@ -61,11 +64,19 @@ pub fn App() -> impl IntoView {
         story::refresh_attention();
     });
 
+    // Onboarding step transitions: push → paywall → app.
+    let after_push = move || {
+        if subscription::needs_paywall_onboarding() {
+            state.set(AppState::Paywall);
+        } else {
+            state.set(AppState::Ready);
+        }
+    };
     let after_auth = move || {
         if push::needs_push_onboarding() {
             state.set(AppState::PushOnboarding);
         } else {
-            state.set(AppState::Ready);
+            after_push();
         }
     };
 
@@ -95,6 +106,14 @@ pub fn App() -> impl IntoView {
             AppState::PushOnboarding => Some(view! {
                 <div style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main);">
                     <pages::push_onboarding::PushOnboarding on_done=Callback::new(move |_| {
+                        after_push();
+                    }) />
+                </div>
+            }.into_view()),
+
+            AppState::Paywall => Some(view! {
+                <div style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main); overflow-y: auto;">
+                    <pages::paywall_onboarding::PaywallOnboarding on_done=Callback::new(move |_| {
                         state.set(AppState::Ready);
                     }) />
                 </div>

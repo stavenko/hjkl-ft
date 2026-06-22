@@ -6,6 +6,27 @@ use wasm_bindgen_futures::JsFuture;
 use super::{auth, config};
 
 const LS_KEY: &str = "ft_subscription";
+const LS_PAYWALL_ONBOARDING: &str = "paywall_onboarding_dismissed";
+
+/// Whether the startup onboarding paywall step should still be shown: until the
+/// user either subscribes or taps "Later". Paid users never see it.
+pub fn needs_paywall_onboarding() -> bool {
+    if cached().map(|s| s.is_paid()).unwrap_or(false) {
+        return false;
+    }
+    let dismissed = web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(LS_PAYWALL_ONBOARDING).ok().flatten())
+        .is_some();
+    !dismissed
+}
+
+/// Don't show the onboarding paywall step again (tapped "Later" or subscribed).
+pub fn dismiss_paywall_onboarding() {
+    if let Some(Ok(Some(s))) = web_sys::window().map(|w| w.local_storage()) {
+        let _ = s.set_item(LS_PAYWALL_ONBOARDING, "true");
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {

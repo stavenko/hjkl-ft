@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn yaml_parses_and_has_three_chapters() {
         assert_eq!(story().chapters.len(), 3);
-        assert_eq!(story().tasks.len(), 20);
+        assert_eq!(story().tasks.len(), 19);
     }
 
     #[test]

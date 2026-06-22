@@ -16,5 +16,6 @@ pub mod subscription;
 pub mod story;
 pub mod story_section;
 pub mod paywall;
+pub mod paywall_onboarding;
 pub mod progress;
 pub mod weight;

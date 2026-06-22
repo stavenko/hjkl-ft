@@ -146,19 +146,22 @@ pub async fn lookup(
     let prompt = format!(
         "You are a nutritional database. For the food item \"{name}\", provide nutritional \
          values per 100 grams.\n\n\
+         Form of the product: for items that are bought and weighed raw/dry (grains, rice, \
+         pasta, flour, meat, fish, legumes, etc.), give values for the RAW / as-sold product — \
+         NOT cooked — unless the name explicitly says cooked, boiled, fried, steamed or \
+         ready-to-eat.\n\n\
          For each nutrient (kcal, protein, fat, carbs{custom}), provide:\n\
          - min_value: lowest reasonable value for this food\n\
          - max_value: highest reasonable value for this food\n\
          - recommended: the most likely value to select\n\
          - comment: brief explanation why this value is appropriate\n\n\
          Use these units: kcal for calories, g/mg/mkg/kg for weights.\n\
-         All values are per 100g of the product.\n\n\
+         All values are per 100g. Compute real values specifically for \"{name}\" — do not \
+         copy any sample numbers.\n\n\
          Respond with ONLY a single minified JSON object and nothing else — no markdown, no \
          prose before or after. EVERY key and EVERY string value MUST be wrapped in double \
          quotes. EVERY `value` MUST be a real number (e.g. 12.5), never empty or null. Custom \
-         nutrients go in the \"custom_nutrients\" object (use {{}} if none). Follow exactly this \
-         shape:\n\
-         {{\"kcal\":{{\"min_value\":{{\"value\":143,\"unit\":\"kcal\"}},\"max_value\":{{\"value\":160,\"unit\":\"kcal\"}},\"recommended\":{{\"value\":155,\"unit\":\"kcal\"}},\"comment\":\"...\"}},\"protein\":{{...}},\"fat\":{{...}},\"carbs\":{{...}},\"custom_nutrients\":{{}}}}",
+         nutrients go in the \"custom_nutrients\" object (use {{}} if none).",
         name = input.name,
         custom = custom_part,
     );
@@ -167,8 +170,10 @@ pub async fn lookup(
     // instruction — that reliably keeps the model in JSON mode (without it the
     // model often replies in Markdown). The earlier "schema corrupts output" and
     // "stochastic garbage" theories were both wrong: the real bug was in the
-    // ai-worker's SSE relay dropping numeric tokens (now fixed). The strict
-    // example in the prompt above is belt-and-suspenders.
+    // ai-worker's SSE relay dropping numeric tokens (now fixed). We deliberately
+    // omit a numeric example from the prompt: concrete sample values anchored the
+    // model (it kept returning cooked-rice 155 kcal for «рис»); the schema carries
+    // the shape.
     let result = executor
         .execute::<NutritionResponse>(prompt)
         .await

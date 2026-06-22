@@ -95,19 +95,20 @@ pub fn PaywallOnboarding(on_done: Callback<()>) -> impl IntoView {
                     children=move |p: subscription::Plan| {
                         let period = if p.period == "year" { t("paywall.per_year") } else { t("paywall.per_month") };
                         let price = format!("{} {} {}", p.price.round() as i64, currency_symbol(&p.currency), period);
+                        let note = format!("{} {}", t("paywall.then"), price);
                         let buy = buy.clone();
                         let pid = p.id.clone();
                         view! {
                             <button
                                 attr:data-testid="paywall-onboarding-btn-buy"
-                                class="button is-link is-fullwidth is-medium"
-                                style="border: none; border-radius: 12px; margin-bottom: 10px;"
+                                class="button is-link is-fullwidth is-medium has-text-weight-semibold"
+                                style="border: none; border-radius: 12px; margin-bottom: 6px;"
                                 disabled=move || busy.get()
                                 on:click=move |_| buy(pid.clone())
                             >
-                                <span class="has-text-weight-semibold">{move || t("story.sub.cta")}</span>
-                                <span style="opacity: 0.85; margin-left: 8px;">{price}</span>
+                                {move || t("story.sub.cta")}
                             </button>
+                            <p class="is-size-7 has-text-grey" style="margin: 0 0 12px 0;">{note}</p>
                         }
                     }
                 />

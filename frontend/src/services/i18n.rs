@@ -899,10 +899,10 @@ fn en(key: &str) -> &'static str {
         "story.easier.t4" => "Better to log it as «approximate» when you can't be exact than not to log it at all.",
 
         // Story — chapter 1, Subscription (onboarding paywall)
-        "story.sub.p1" => "To go further and keep the AI features, you'll need a subscription.",
-        "story.sub.p2" => "The subscription is monthly, and the first week is a free trial — your first payment is only charged after 7 days.",
-        "story.sub.p3" => "You can cancel anytime, right in the app — in Settings → Subscription.",
-        "story.sub.cta" => "Subscribe",
+        "story.sub.p1" => "AI food recognition, a personal calorie target and a daily review — everything in one app.",
+        "story.sub.p2" => "Your first week is free. Billing starts only after 7 days — cancel before then and you pay nothing.",
+        "story.sub.p3" => "Cancel anytime in Settings → Subscription.",
+        "story.sub.cta" => "Try for free",
 
         // Story — chapter 1, What's next (paywall)
         "story.next.p1" => "You've reached the end of chapter 1. The journey continues — but to go further, two things are needed.",
@@ -925,8 +925,9 @@ fn en(key: &str) -> &'static str {
         "paywall.welcome_title" => "You're subscribed 🎉",
         "paywall.welcome_body" => "Payment went through. You can manage your subscription anytime in Settings → Subscription — see when it renews, the price, and cancel.",
         "paywall.welcome_manage" => "Open Settings → Subscription",
-        "paywall.onb_title" => "re:Norma subscription",
+        "paywall.onb_title" => "Full access to re:Norma",
         "paywall.later" => "Later",
+        "paywall.then" => "then",
 
         _ => "???",
     }
@@ -1686,10 +1687,10 @@ fn ru(key: &str) -> &'static str {
         "story.easier.t4" => "Лучше вписать «приблизительно», если вы не можете вписать точно, чем вообще не вписать.",
 
         // История — глава 1, подписка (онбординг-paywall)
-        "story.sub.p1" => "Чтобы двигаться дальше и сохранить AI-функции, нужна подписка.",
-        "story.sub.p2" => "Подписка ежемесячная, и первая неделя — пробная: первый платёж спишется только через 7 дней.",
-        "story.sub.p3" => "Отменить подписку можно в любой момент прямо в приложении — в «Настройки → Подписка».",
-        "story.sub.cta" => "Оформить подписку",
+        "story.sub.p1" => "AI-распознавание еды, персональная норма калорий и ежедневная оценка — всё в одном приложении.",
+        "story.sub.p2" => "Первая неделя — бесплатно. Списание начнётся только через 7 дней: отмените раньше — не заплатите ничего.",
+        "story.sub.p3" => "Отменить можно в любой момент в «Настройки → Подписка».",
+        "story.sub.cta" => "Попробовать бесплатно",
 
         // История — глава 1, что дальше (paywall)
         "story.next.p1" => "Вы дошли до конца первой главы. Путь продолжается — но чтобы идти дальше, нужны две вещи.",
@@ -1712,8 +1713,9 @@ fn ru(key: &str) -> &'static str {
         "paywall.welcome_title" => "Подписка оформлена 🎉",
         "paywall.welcome_body" => "Оплата прошла. Управлять подпиской можно в любой момент в «Настройки → Подписка» — там видно дату продления, стоимость и кнопка отмены.",
         "paywall.welcome_manage" => "Открыть «Настройки → Подписка»",
-        "paywall.onb_title" => "Подписка re:Norma",
+        "paywall.onb_title" => "Полный доступ к re:Norma",
         "paywall.later" => "Позже",
+        "paywall.then" => "затем",
 
         _ => "???",
     }

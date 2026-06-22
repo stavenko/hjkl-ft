@@ -102,13 +102,6 @@ pub fn Cta(route: String, label: String) -> impl IntoView {
     }
 }
 
-/// Schematic of the three required poses (front / side / back).
-const POSE_SCHEMA: &str = r#"<svg viewBox="0 0 300 116" fill="currentColor" style="width:100%;max-width:320px;color:var(--bulma-text-weak)">
-<g transform="translate(30,8)"><circle cx="20" cy="9" r="7.5"/><rect x="10.5" y="17" width="19" height="37" rx="8.5"/><rect x="4.5" y="19" width="5.5" height="31" rx="2.7"/><rect x="30" y="19" width="5.5" height="31" rx="2.7"/><rect x="12.5" y="51" width="6.5" height="45" rx="3.2"/><rect x="21" y="51" width="6.5" height="45" rx="3.2"/></g>
-<g transform="translate(130,8)"><circle cx="20" cy="9" r="7.5"/><path d="M27.5 7 l4.5 2 -4.5 2 z"/><rect x="14.5" y="17" width="11" height="37" rx="5.5"/><rect x="17.5" y="21" width="5" height="29" rx="2.5"/><rect x="15.5" y="51" width="8.5" height="45" rx="4.2"/></g>
-<g transform="translate(230,8)"><circle cx="20" cy="9" r="7.5"/><rect x="10.5" y="17" width="19" height="37" rx="8.5"/><rect x="4.5" y="19" width="5.5" height="31" rx="2.7"/><rect x="30" y="19" width="5.5" height="31" rx="2.7"/><rect x="12.5" y="51" width="6.5" height="45" rx="3.2"/><rect x="21" y="51" width="6.5" height="45" rx="3.2"/><line x1="20" y1="20" x2="20" y2="50" stroke="var(--bulma-scheme-main)" stroke-width="1.6"/></g>
-</svg>"#;
-
 /// Intro task: take the three progress photos (front / side / back). Completes
 /// once `PROGRESS_PHOTOS_TAKEN` is set (by the progress page).
 #[component]
@@ -128,11 +121,13 @@ pub fn ProgressPhotos() -> impl IntoView {
             <div style=CARD>
                 <div style="padding: 14px 16px;">
                     <p class="is-size-6" style="line-height: 1.55; margin: 0 0 12px 0;">{move || t("story.intro.photo_desc")}</p>
-                    <div style="display: flex; justify-content: center;" inner_html=POSE_SCHEMA></div>
+                    <div style="display: flex; justify-content: center;">
+                        <img src="/progress-poses.jpg" alt="" style="display: block; width: 100%; max-width: 320px; height: auto;" />
+                    </div>
                     <div style="display: flex; justify-content: space-around; max-width: 300px; margin: 4px auto 0 auto;">
                         <span class="is-size-7 has-text-grey">{move || t("progress.pose_front")}</span>
-                        <span class="is-size-7 has-text-grey">{move || t("progress.pose_side")}</span>
                         <span class="is-size-7 has-text-grey">{move || t("progress.pose_back")}</span>
+                        <span class="is-size-7 has-text-grey">{move || t("progress.pose_side")}</span>
                     </div>
                 </div>
                 <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>

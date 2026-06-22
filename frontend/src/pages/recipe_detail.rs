@@ -2,7 +2,6 @@ use leptos::*;
 use leptos_router::*;
 use api_types::*;
 
-use crate::components::add_ingredient_modal::AddIngredientModal;
 use crate::components::food_list_item::FoodListItem;
 use crate::components::weight_modal::WeightModal;
 use crate::services::{local, sync};
@@ -17,7 +16,6 @@ pub fn RecipeDetailPage() -> impl IntoView {
 
     let goals = create_rw_signal(Vec::<Goal>::new());
     let custom_nutrients = create_rw_signal(Vec::<api_types::NutrientSpec>::new());
-    let show_add_modal = create_rw_signal(false);
     let show_finalize = create_rw_signal(false);
     let final_weight = create_rw_signal(String::new());
 
@@ -58,26 +56,6 @@ pub fn RecipeDetailPage() -> impl IntoView {
                 sync::push_background();
             }
         });
-    };
-
-    // Add a food (existing or just-created) as an ingredient with the chosen grams.
-    let add_ingredient = move |food: Food, grams: f64| {
-        let r = recipe.get_untracked();
-        let r = match r { Some(r) => r, None => return };
-        let recipe_id = r.id.clone();
-        added_food_ids.update(|ids| if !ids.contains(&food.id) { ids.push(food.id.clone()); });
-        spawn_local(async move {
-            let ing = local::add_ingredient_to_recipe(&food, grams, &recipe_id).await;
-            recipe.update(|r| {
-                if let Some(r) = r { r.ingredients.push(ing); }
-            });
-            foods.set(local::list_foods().await);
-            sync::push_background();
-        });
-    };
-
-    let refresh_foods = move || {
-        spawn_local(async move { foods.set(local::list_foods().await); });
     };
 
     let update_grams = move |ing_id: String, new_val: String| {
@@ -323,11 +301,11 @@ pub fn RecipeDetailPage() -> impl IntoView {
                         // Buttons
                         <Show when=move || !is_finalized>
                             <div class="buttons">
-                                <button
+                                <A
                                     attr:data-testid="recipe-detail-btn-add-ingredient"
+                                    href=format!("/recipes/{}/add", r.id)
                                     class="button is-link"
-                                    on:click=move |_| show_add_modal.set(true)
-                                >{move || t("recipe.add_ingredient")}</button>
+                                >{move || t("recipe.add_ingredient")}</A>
                                 <button
                                     attr:data-testid="recipe-detail-btn-finalize"
                                     class="button is-success"
@@ -356,23 +334,6 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                 }
                             })
                         }}
-
-                        // Add ingredient modal
-                        <Show when=move || show_add_modal.get()>
-                            <AddIngredientModal
-                                foods=foods.into()
-                                goals=goals.into()
-                                custom_nutrients=custom_nutrients.into()
-                                added_food_ids=added_food_ids
-                                on_add=Callback::new(move |(food, grams): (Food, f64)| {
-                                    add_ingredient(food, grams);
-                                })
-                                on_food_created=Callback::new(move |_food: Food| {
-                                    refresh_foods();
-                                })
-                                on_close=Callback::new(move |_| show_add_modal.set(false))
-                            />
-                        </Show>
 
                         // Finalize modal
                         <Show when=move || show_finalize.get()>

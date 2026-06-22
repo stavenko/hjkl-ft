@@ -164,6 +164,7 @@ pub fn App() -> impl IntoView {
                         <Route path="/foods" view=pages::foods::FoodsPage />
                         <Route path="/recipes" view=pages::recipes::RecipesPage />
                         <Route path="/recipes/:id" view=pages::recipe_detail::RecipeDetailPage />
+                        <Route path="/recipes/:id/add" view=pages::recipe_add::RecipeAddPage />
                         <Route path="/settings" view=pages::settings::SettingsPage />
                         <Route path="/settings/goals" view=pages::goals::GoalsPage />
                         <Route path="/settings/privacy" view=pages::privacy::PrivacyPage />

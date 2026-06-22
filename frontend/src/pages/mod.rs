@@ -8,6 +8,7 @@ pub mod pair_page;
 pub mod privacy;
 pub mod push_onboarding;
 pub mod pwa_prompt;
+pub mod recipe_add;
 pub mod recipe_detail;
 pub mod recipes;
 pub mod settings;

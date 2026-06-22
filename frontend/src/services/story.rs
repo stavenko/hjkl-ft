@@ -143,9 +143,11 @@ pub async fn run_action(name: &str) {
     let now = || chrono::Utc::now().to_rfc3339();
     match name {
         "arm_first_food" => {
+            // Only ARM the task on open; it closes later, when food is actually
+            // logged (the diary-add flow calls `fire_first_food_if_armed`). Firing
+            // here would complete the task the moment the section opens.
             set_flag(FIRST_FOOD_ARMED, true).await;
             set_flag(MEAL_REMINDERS_UNLOCKED, true).await;
-            fire_first_food_if_armed().await;
         }
         "unlock_meal_split" => set_flag(MEAL_SPLIT_UNLOCKED, true).await,
         "view_night_feedback" => set_flag(NIGHT_FEEDBACK_VIEWED, true).await,

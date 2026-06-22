@@ -22,7 +22,9 @@ fn days_left(end_ms: i64) -> i64 {
 /// is still running; once it lapses the user must subscribe.
 #[component]
 pub fn PaywallOnboarding(on_done: Callback<()>) -> impl IntoView {
-    let status = create_rw_signal(None::<subscription::Status>);
+    // Seed from cache so the countdown shows instantly (and offline); the live
+    // fetch below refreshes it.
+    let status = create_rw_signal(subscription::cached());
     let plans = create_rw_signal(Vec::<subscription::Plan>::new());
     let busy = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);

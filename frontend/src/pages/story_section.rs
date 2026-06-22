@@ -76,12 +76,27 @@ pub fn StorySectionPage() -> impl IntoView {
     }
 }
 
+/// Render a paragraph string with inline `**bold**` segments.
+fn render_rich(s: &str) -> impl IntoView {
+    s.split("**")
+        .enumerate()
+        .map(|(i, seg)| {
+            let seg = seg.to_string();
+            if i % 2 == 1 {
+                view! { <strong>{seg}</strong> }.into_view()
+            } else {
+                view! { {seg} }.into_view()
+            }
+        })
+        .collect_view()
+}
+
 fn render_block(b: &Block, sec: &'static Section) -> View {
     if let Some(key) = &b.text_key {
-        return view! { <p class="is-size-6" style="line-height: 1.55; margin: 0 0 14px 0;">{t(key)}</p> }.into_view();
+        return view! { <p class="is-size-6" style="line-height: 1.55; margin: 0 0 14px 0;">{render_rich(t(key))}</p> }.into_view();
     }
     if let Some(loc) = &b.text {
-        return view! { <p class="is-size-6" style="line-height: 1.55; margin: 0 0 14px 0;">{tr(loc)}</p> }.into_view();
+        return view! { <p class="is-size-6" style="line-height: 1.55; margin: 0 0 14px 0;">{render_rich(&tr(loc))}</p> }.into_view();
     }
     if let Some(key) = &b.heading {
         return view! {

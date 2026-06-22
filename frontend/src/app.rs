@@ -21,7 +21,7 @@ fn initial_state() -> AppState {
         AppState::Auth
     } else if push::needs_push_onboarding() {
         AppState::PushOnboarding
-    } else if subscription::needs_paywall_onboarding() {
+    } else if subscription::needs_paywall() {
         AppState::Paywall
     } else {
         AppState::Ready
@@ -66,7 +66,7 @@ pub fn App() -> impl IntoView {
 
     // Onboarding step transitions: push → paywall → app.
     let after_push = move || {
-        if subscription::needs_paywall_onboarding() {
+        if subscription::needs_paywall() {
             state.set(AppState::Paywall);
         } else {
             state.set(AppState::Ready);
@@ -79,6 +79,31 @@ pub fn App() -> impl IntoView {
             after_push();
         }
     };
+
+    // Re-show the paywall on foreground: a new calendar day since the last skip,
+    // still unsubscribed, and the user is already inside the app.
+    {
+        use wasm_bindgen::prelude::Closure;
+        use wasm_bindgen::JsCast;
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            let cb = Closure::<dyn FnMut()>::new(move || {
+                let hidden = web_sys::window()
+                    .and_then(|w| w.document())
+                    .and_then(|d| js_sys::Reflect::get(d.as_ref(), &"hidden".into()).ok())
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if !hidden
+                    && state.get_untracked() == AppState::Ready
+                    && subscription::needs_paywall()
+                {
+                    state.set(AppState::Paywall);
+                }
+            });
+            let _ = doc
+                .add_event_listener_with_callback("visibilitychange", cb.as_ref().unchecked_ref());
+            cb.forget();
+        }
+    }
 
     view! {
         // Overlays

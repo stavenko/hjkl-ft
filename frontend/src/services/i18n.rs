@@ -928,6 +928,14 @@ fn en(key: &str) -> &'static str {
         "paywall.onb_title" => "Full access to re:Norma",
         "paywall.later" => "Later",
         "paywall.then" => "then",
+        "paywall.trial_left" => "{n} trial days left",
+        "paywall.trial_expired" => "Your trial period has ended",
+        "paywall.price_line" => "Subscribe for {price} per month",
+        "paywall.rule1" => "Try the app for 7 days. After that a subscription is required.",
+        "paywall.rule2" => "All features are available during the 7 days.",
+        "paywall.rule3" => "You can cancel the subscription at any time.",
+        "paywall.subscribe" => "Subscribe",
+        "paywall.skip" => "Skip",
 
         _ => "???",
     }
@@ -1716,6 +1724,14 @@ fn ru(key: &str) -> &'static str {
         "paywall.onb_title" => "Полный доступ к re:Norma",
         "paywall.later" => "Позже",
         "paywall.then" => "затем",
+        "paywall.trial_left" => "Осталось: {n} дн. ознакомительного использования",
+        "paywall.trial_expired" => "Ознакомительный период закончился",
+        "paywall.price_line" => "Оформите подписку за {price} в месяц",
+        "paywall.rule1" => "Попробуйте программу в течение 7 дней. После этого необходимо оформить подписку.",
+        "paywall.rule2" => "В течение 7 дней вам доступен весь функционал.",
+        "paywall.rule3" => "Подписку можно отменить в любое время.",
+        "paywall.subscribe" => "Оформить",
+        "paywall.skip" => "Пропустить",
 
         _ => "???",
     }

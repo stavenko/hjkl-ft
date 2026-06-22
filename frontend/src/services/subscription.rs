@@ -6,25 +6,32 @@ use wasm_bindgen_futures::JsFuture;
 use super::{auth, config};
 
 const LS_KEY: &str = "ft_subscription";
-const LS_PAYWALL_ONBOARDING: &str = "paywall_onboarding_dismissed";
+const LS_PAYWALL_SKIP_DATE: &str = "paywall_skipped_date";
 
-/// Whether the startup onboarding paywall step should still be shown: until the
-/// user either subscribes or taps "Later". Paid users never see it.
-pub fn needs_paywall_onboarding() -> bool {
+/// Local calendar date as `YYYY-MM-DD`.
+fn today_str() -> String {
+    let d = js_sys::Date::new_0();
+    format!("{:04}-{:02}-{:02}", d.get_full_year(), d.get_month() + 1, d.get_date())
+}
+
+/// Whether to show the paywall now: there's no PAID subscription AND the user
+/// hasn't already skipped it *today*. So it reappears once per calendar day
+/// (on launch and on foreground) until they subscribe. Paid users never see it.
+pub fn needs_paywall() -> bool {
     if cached().map(|s| s.is_paid()).unwrap_or(false) {
         return false;
     }
-    let dismissed = web_sys::window()
+    let skipped = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|s| s.get_item(LS_PAYWALL_ONBOARDING).ok().flatten())
-        .is_some();
-    !dismissed
+        .and_then(|s| s.get_item(LS_PAYWALL_SKIP_DATE).ok().flatten());
+    skipped.as_deref() != Some(today_str().as_str())
 }
 
-/// Don't show the onboarding paywall step again (tapped "Later" or subscribed).
-pub fn dismiss_paywall_onboarding() {
+/// Record that the user skipped the paywall today (so it won't show again until
+/// the next calendar day).
+pub fn record_paywall_skip() {
     if let Some(Ok(Some(s))) = web_sys::window().map(|w| w.local_storage()) {
-        let _ = s.set_item(LS_PAYWALL_ONBOARDING, "true");
+        let _ = s.set_item(LS_PAYWALL_SKIP_DATE, &today_str());
     }
 }
 

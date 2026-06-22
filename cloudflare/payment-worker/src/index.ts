@@ -71,7 +71,7 @@ async function providerFor(name: string, env: Env): Promise<PaymentProvider | nu
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const TRIAL_DAYS = 14;
+const TRIAL_DAYS = 7;
 const DEFAULT_PERIOD_DAYS = 30; // fallback when a webhook gives no explicit period end
 
 const CORS_HEADERS: Record<string, string> = {

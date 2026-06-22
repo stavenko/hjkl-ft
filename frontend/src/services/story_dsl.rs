@@ -320,12 +320,12 @@ impl<'a> Engine<'a> {
         }
     }
 
-    /// Cumulative chain: a section is unlocked once its chapter is open and the
-    /// user has ENTERED (opened) every earlier section in the chapter. The unlock
-    /// criterion is "you entered the previous section" — not "you completed its
-    /// tasks" — so the reader can move forward at their own pace.
+    /// Cumulative chain: a section is unlocked once its chapter is open and every
+    /// earlier section in the chapter is COMPLETE. "Complete" means opened AND its
+    /// tasks done (a section without tasks completes as soon as it's opened) — so
+    /// a section with an unfinished task does NOT unlock the next one.
     pub fn section_unlocked(&self, ch: &Chapter, idx: usize) -> bool {
-        self.chapter_open(ch) && ch.sections[..idx].iter().all(|s| self.section_opened(s))
+        self.chapter_open(ch) && ch.sections[..idx].iter().all(|s| self.section_complete(s))
     }
 
     pub fn task_active(&self, t: &Task, chapter_open: bool) -> bool {
@@ -482,15 +482,17 @@ mod tests {
     }
 
     #[test]
-    fn section_unlocks_when_previous_is_entered_not_completed() {
+    fn section_unlocks_only_when_previous_complete() {
         let ch1 = chapter("ch1");
         // `setup` (idx 1) follows `intro` (idx 0), which carries the `photos` task.
         let setup_idx = ch1.sections.iter().position(|s| s.id == "setup").unwrap();
         let mut s = snap();
-        assert!(!eng(&s).section_unlocked(ch1, setup_idx)); // intro not entered yet
+        assert!(!eng(&s).section_unlocked(ch1, setup_idx)); // intro not opened
         s.opened.insert("intro".to_string());
-        // intro's `photos` task is still open, but ENTERING intro is enough:
-        assert!(!eng(&s).section_complete(ch1.sections.first().unwrap()));
+        // Opened, but the `photos` task isn't done → intro not complete → still locked.
+        assert!(!eng(&s).section_unlocked(ch1, setup_idx));
+        s.evt_closed.insert("photos".to_string());
+        // Task done → intro complete → setup unlocks.
         assert!(eng(&s).section_unlocked(ch1, setup_idx));
     }
 

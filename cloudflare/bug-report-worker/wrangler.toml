@@ -30,3 +30,10 @@ custom_domain = true
 [[env.production.durable_objects.bindings]]
 name = "BUG_REPORT_DO"
 class_name = "BugReportDO"
+
+# JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
+# [vars] value above). The binding name MUST equal the env name the code reads.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"

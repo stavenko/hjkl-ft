@@ -7,7 +7,7 @@ use crate::{auth_do_stub, do_request};
 
 pub async fn set_recovery_key(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     // Validate session token
-    let user_id = match token::validate_from_header(&req, &ctx.env) {
+    let user_id = match token::validate_from_header(&req, &ctx.env).await {
         Ok(id) => id,
         Err(e) => {
             let body = ErrorResponse {
@@ -89,11 +89,7 @@ pub async fn authenticate_with_recovery(
     }
 
     // Issue a new session token
-    let secret = ctx
-        .env
-        .secret("JWT_SECRET")
-        .map(|s| s.to_string())
-        .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
+    let secret = token::jwt_secret(&ctx.env).await?;
 
     let (token_response, token_id) =
         token::create_token(&body.user_id, fingerprint, vec!["auth".to_string()], &secret)?;

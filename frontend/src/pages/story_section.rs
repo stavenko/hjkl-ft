@@ -2,7 +2,8 @@ use leptos::*;
 use leptos_router::*;
 
 use crate::components::story_widgets::{
-    Cta, GoalStatus, NightFeedback, ProgressPhotos, SetupControls, StoryTaskList, VegTarget,
+    CaloriePlanka, Cta, GoalStatus, NightFeedback, ProgressPhotos, SetupControls, StoryTaskList,
+    WeeklyCard,
 };
 use crate::services::story_dsl::{self, Block, Loc, Section, WidgetRef};
 use crate::services::{i18n, i18n::t, profile, story};
@@ -67,7 +68,7 @@ pub fn StorySectionPage() -> impl IntoView {
                     .collect_view();
 
                 view! {
-                    <h1 class="is-size-1 has-text-weight-bold" style="margin: 0 16px 16px 16px;">{tr(&sec.title)}</h1>
+                    <h1 class="is-size-3 has-text-weight-bold" style="margin: 0 16px 16px 16px;">{tr(&sec.title)}</h1>
                     <div style="padding: 0 16px 8px 16px;">{body}</div>
                     <div style="height: 40px;"></div>
                 }.into_view()
@@ -78,23 +79,29 @@ pub fn StorySectionPage() -> impl IntoView {
 
 /// Render a paragraph string with inline `**bold**` and `{dot}` tokens, where
 /// `{dot}` becomes the red attention marker (the same dot shown in the nav/menu).
+/// Lightweight inline markup: `**bold**`, `*italic*`, and the `{dot}` red marker.
+/// (`**` is consumed first, so single `*` inside the remaining segments is italic.)
 fn render_rich(s: &str) -> impl IntoView {
     let mut views: Vec<View> = Vec::new();
     for (i, seg) in s.split("**").enumerate() {
         let bold = i % 2 == 1;
-        for (j, part) in seg.split("{dot}").enumerate() {
-            if j > 0 {
-                views.push(view! {
-                    <span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--bulma-danger); margin:0 3px; vertical-align:middle;"></span>
-                }.into_view());
-            }
-            if !part.is_empty() {
-                let p = part.to_string();
-                views.push(if bold {
-                    view! { <strong>{p}</strong> }.into_view()
-                } else {
-                    view! { {p} }.into_view()
-                });
+        for (k, ital_seg) in seg.split('*').enumerate() {
+            let ital = k % 2 == 1;
+            for (j, part) in ital_seg.split("{dot}").enumerate() {
+                if j > 0 {
+                    views.push(view! {
+                        <span style="display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--bulma-danger); margin:0 3px; vertical-align:middle;"></span>
+                    }.into_view());
+                }
+                if !part.is_empty() {
+                    let p = part.to_string();
+                    views.push(match (bold, ital) {
+                        (true, true) => view! { <strong><em>{p}</em></strong> }.into_view(),
+                        (true, false) => view! { <strong>{p}</strong> }.into_view(),
+                        (false, true) => view! { <em>{p}</em> }.into_view(),
+                        (false, false) => view! { {p} }.into_view(),
+                    });
+                }
             }
         }
     }
@@ -154,8 +161,9 @@ fn render_widget(w: &WidgetRef) -> View {
             view! { <Cta route=route label=label /> }.into_view()
         }
         "progress_photos" => view! { <ProgressPhotos /> }.into_view(),
-        "veg_target" => view! { <VegTarget /> }.into_view(),
         "night_feedback" => view! { <NightFeedback /> }.into_view(),
+        "calorie_planka" => view! { <CaloriePlanka /> }.into_view(),
+        "weekly_card" => view! { <WeeklyCard /> }.into_view(),
         "setup_controls" => view! { <SetupControls /> }.into_view(),
         "goal_status" => {
             let p = |k: &str| w.param(k).unwrap_or("").to_string();

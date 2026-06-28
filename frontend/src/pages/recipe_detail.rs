@@ -141,11 +141,16 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                         attr:data-testid="recipe-detail-input-name"
                                         type="text"
                                         class="input is-medium"
-                                        style="border: none; border-bottom: 1px solid transparent; box-shadow: none; background: transparent; font-weight: bold; width: 100%; padding-left: 0; margin-top: 0.5rem;"
+                                        class=("is-danger", move || recipe_name.get().trim().is_empty())
+                                        style="font-weight: bold; width: 100%; margin-top: 0.5rem; background: var(--bulma-scheme-main);"
+                                        placeholder=move || t("recipe.name_placeholder")
                                         prop:value=move || recipe_name.get()
                                         on:input=move |ev| recipe_name.set(event_target_value(&ev))
                                         on:blur=save_name
                                     />
+                                    {move || recipe_name.get().trim().is_empty().then(|| view! {
+                                        <p class="help is-danger">{move || t("recipe.name_required")}</p>
+                                    })}
                                 }.into_view()
                             }}
                         </div>
@@ -224,6 +229,10 @@ pub fn RecipeDetailPage() -> impl IntoView {
                             let r = recipe.get().unwrap();
                             let fs = foods.get();
                             let gs = goals.get();
+                            // No goals/planks configured → nothing to show; skip the box entirely.
+                            if gs.is_empty() {
+                                return ().into_view();
+                            }
                             let mut total_kcal = 0.0_f64;
                             let mut total_protein = 0.0_f64;
                             let mut total_fat = 0.0_f64;
@@ -295,7 +304,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                         <a attr:data-testid="recipe-detail-link-settings" href="/settings">{move || t("recipe.settings_link")}</a>
                                     </p>
                                 </div>
-                            }
+                            }.into_view()
                         }}
 
                         // Buttons

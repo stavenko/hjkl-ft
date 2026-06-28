@@ -18,6 +18,11 @@ pub(crate) fn auth_do_stub(env: &Env) -> Result<worker::durable::Stub> {
     namespace.id_from_name("global")?.get_stub()
 }
 
+/// Read the browser Origin header from a request (empty string if absent).
+pub(crate) fn request_origin(req: &Request) -> String {
+    req.headers().get("Origin").ok().flatten().unwrap_or_default()
+}
+
 /// Build an internal POST request to a Durable Object with the given path and JSON body.
 pub(crate) fn do_request(path: &str, body: &serde_json::Value) -> Result<Request> {
     let url = format!("https://internal{path}");
@@ -37,6 +42,7 @@ fn is_allowed_origin(origin: &str) -> bool {
     origin == "https://renorma.app"
         || (origin.starts_with("https://") && origin.ends_with(".renorma.app"))
         || origin == "https://hjkl-ft.pages.dev"
+        || origin == "https://renorma-admin.pages.dev"
         || origin.starts_with("http://localhost")
         || origin.starts_with("http://127.0.0.1")
 }
@@ -57,6 +63,22 @@ fn add_cors(resp: Response, origin: &str) -> Result<Response> {
     Ok(Response::from_body(resp.body().clone())?.with_headers(headers).with_status(status))
 }
 
+/// Resolve every REQUIRED Store-bound secret at the top of the fetch entry. On
+/// the first failure, log the full reason loudly and return a 503 so that ANY
+/// request immediately shows the worker is misconfigured and why.
+async fn require_secrets(env: &Env) -> std::result::Result<(), Response> {
+    for name in ["JWT_SECRET"] {
+        if let Err(reason) = token::secret_or_var(env, name).await {
+            console_error!("STARTUP MISCONFIG: {name}: {reason}");
+            let body = format!("MISCONFIGURED: {name} — {reason}");
+            return Err(
+                Response::error(body, 503).unwrap_or_else(|_| Response::error("MISCONFIGURED", 503).unwrap()),
+            );
+        }
+    }
+    Ok(())
+}
+
 #[event(fetch)]
 async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     // Capture the request Origin before the router consumes `req`.
@@ -72,6 +94,10 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         let _ = headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
         let _ = headers.set("Access-Control-Max-Age", "86400");
         return Ok(Response::empty()?.with_headers(headers).with_status(204));
+    }
+
+    if let Err(resp) = require_secrets(&env).await {
+        return Ok(resp);
     }
 
     let router = Router::new();

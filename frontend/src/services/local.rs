@@ -119,6 +119,18 @@ pub fn calorie_planka(avg_kcal: f64, balance: crate::services::weight_trend::Bal
     (raw / 10.0).round() * 10.0
 }
 
+/// The suggested daily calorie planka shown (and accepted) in ch3: average intake
+/// over the last 7 logged days, adjusted for the current weight balance via
+/// [`calorie_planka`] (deficit → keep; maintenance/surplus → −5%, rounded to 10).
+/// `None` when there are no logged days yet. Single source of truth so the widget's
+/// displayed figure and the value it accepts cannot drift apart.
+pub async fn calorie_planka_suggestion() -> Option<f64> {
+    use crate::services::weight_trend::{self, DEFAULT_WINDOW_DAYS};
+    let avg = avg_daily_kcal(7).await?;
+    let balance = weight_trend::weight_trend(&list_weight_entries().await, DEFAULT_WINDOW_DAYS).balance();
+    Some(calorie_planka(avg, balance))
+}
+
 // --- Chapter 2 detection helpers ---
 //
 // Case-insensitive substring name-matching on `food.name.to_lowercase()`. These
@@ -164,9 +176,10 @@ pub fn is_drink_food(food: &Food) -> bool {
     name_matches(&food.name, DRINK_SUBSTRINGS)
 }
 
-/// A drink is HIGH-CAL if its per-100g kcal > 30.
+/// A drink is HIGH-CAL ("liquid calories") if its per-100g kcal > 10 — the
+/// threshold the ch2 "soda & juice" lesson teaches.
 pub fn is_high_cal_drink(food: &Food) -> bool {
-    is_drink_food(food) && food.kcal > 30.0
+    is_drink_food(food) && food.kcal > 10.0
 }
 
 /// A drink is ZERO-CAL if its per-100g kcal <= 5.
@@ -824,6 +837,66 @@ pub async fn update_goal(goal: &Goal) {
 pub async fn delete_goal(id: &str) {
     record_deletion("goals", id).await;
     db::delete("goals", id).await;
+}
+
+/// Create or update the hidden daily-Calories `AtMost` goal (the "planka") to
+/// `amount` kcal. Used when the user accepts the calorie planka in ch3.
+pub async fn set_calorie_goal(amount: f64) {
+    match list_goals().await.into_iter().find(|g| g.nutrient == "Calories") {
+        Some(mut g) => {
+            g.direction = GoalDirection::AtMost;
+            g.amount = amount;
+            g.unit = GoalUnit::Kcal;
+            g.period = GoalPeriod::Day;
+            g.updated_at = now();
+            update_goal(&g).await;
+        }
+        None => {
+            create_goal(CreateGoalInput {
+                nutrient: "Calories".to_string(),
+                direction: GoalDirection::AtMost,
+                amount,
+                unit: GoalUnit::Kcal,
+                period: GoalPeriod::Day,
+            })
+            .await;
+        }
+    }
+}
+
+/// Create or update the daily Steps `AtLeast` goal to `amount` steps. A real
+/// persisted goal (same machinery as nutrient goals), set when the user accepts
+/// the weekly card's steps lever; backs the steps_planka source threshold.
+pub async fn set_steps_goal(amount: f64) {
+    match list_goals().await.into_iter().find(|g| g.nutrient == "Steps") {
+        Some(mut g) => {
+            g.direction = GoalDirection::AtLeast;
+            g.amount = amount;
+            g.unit = GoalUnit::Steps;
+            g.period = GoalPeriod::Day;
+            g.updated_at = now();
+            update_goal(&g).await;
+        }
+        None => {
+            create_goal(CreateGoalInput {
+                nutrient: "Steps".to_string(),
+                direction: GoalDirection::AtLeast,
+                amount,
+                unit: GoalUnit::Steps,
+                period: GoalPeriod::Day,
+            })
+            .await;
+        }
+    }
+}
+
+/// The current daily steps target from the Steps `AtLeast` goal, if set.
+pub async fn steps_goal_amount() -> Option<f64> {
+    list_goals()
+        .await
+        .into_iter()
+        .find(|g| g.nutrient == "Steps" && g.direction == GoalDirection::AtLeast && g.amount > 0.0)
+        .map(|g| g.amount)
 }
 
 // --- Weight Entries ---

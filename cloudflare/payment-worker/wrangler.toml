@@ -1,41 +1,59 @@
 name = "payment-worker"
-main = "src/index.ts"
+main = "build/worker/shim.mjs"
 compatibility_date = "2024-12-01"
+
+[build]
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
+# an unpinned `cargo install worker-build` pulls a newer build that passes
+# wasm-bindgen flags the locked CLI doesn't support.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
 
 [[durable_objects.bindings]]
 name = "SUBSCRIPTION_DO"
 class_name = "SubscriptionDO"
 
-# Single global index: provider orderId / contractId → our user id.
+# Single global index: provider orderId / contractId → our user id (or guest claimId).
 [[durable_objects.bindings]]
 name = "PAYMENT_INDEX_DO"
 class_name = "PaymentIndexDO"
 
+# Single global guest paid-sub ledger + atomic claim compare-and-set point.
+[[durable_objects.bindings]]
+name = "CLAIM_DO"
+class_name = "ClaimDO"
+
+# Clean DO migration (no users to preserve): all three classes as SQLite DOs.
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["SubscriptionDO"]
+new_sqlite_classes = ["SubscriptionDO", "PaymentIndexDO", "ClaimDO"]
 
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["PaymentIndexDO"]
+# /admin/* authorizes via the SUPPORT_WORKER service binding + INTERNAL_PUSH_KEY;
+# one source of truth = the support-worker approved-admins (env EXPERT_IDS bootstrap
+# OR the DO `admins` table). NO env allowlist, no redeploy to add an admin — the old
+# ADMIN_ALLOWLIST + EXPERT_JWT_SECRET have been removed.
+[[services]]
+binding = "SUPPORT_WORKER"
+service = "support-worker"
 
-# lava credentials from the account Secrets Store (both Workers-scoped),
-# read in-worker via env.<binding>.get().
-[[secrets_store_secrets]]
-binding = "LAVA_API_KEY"
-store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
-secret_name = "lava-top"
-
-[[secrets_store_secrets]]
-binding = "LAVA_WEBHOOK_SECRET"
-store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
-secret_name = "lava-hook-api-key"
+# NO lava credentials on the default (dev/test) worker — the real lava Secrets
+# Store is bound ONLY under [env.production.*] below. The test env must NEVER be
+# able to take real money (locked decision: payment is PROD-ONLY). With no lava
+# key here `provider.configured()` is false → /checkout/guest returns 400 and
+# webhook signature verification fails closed. e2e uses the TEST_ENTITLEMENT path
+# (/test/guest-checkout → ClaimDO /test-activate), which never touches lava.
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
-RETURN_URL = "https://hjkl-ft.pages.dev/paywall?status=success"
+# Landing → app onboarding return URL; the worker appends `#claim=<id>.<secret>`.
+LANDING_RETURN_URL = "https://hjkl-ft.pages.dev/onboard"
+# PRODUCTION-IMPOSSIBLE test-entitlement flag (dev/test only). Its ABSENCE from
+# [env.production.vars] is the prod safety — NEVER add it there (free-sub backdoor).
+TEST_ENTITLEMENT = "1"
 # Payment-success push: main-flow endpoint + shared key. Prod: `wrangler secret
 # put INTERNAL_PUSH_KEY --env production` with the SAME value as main-flow-prod.
+# INTERNAL_PUSH_KEY ALSO guards the support-worker /internal/is-admin check
+# (X-Internal-Key) — the SAME shared cross-worker key, identical dev value here
+# and in support-worker's wrangler.toml.
 PUSH_NOTIFY_URL = "https://main-flow.vg-stavenko.workers.dev/push/notify"
 INTERNAL_PUSH_KEY = "dev-internal-push-key"
 # Plan catalog. `lavaOfferId` empty until the real lava offer ids are set →
@@ -62,6 +80,14 @@ class_name = "SubscriptionDO"
 name = "PAYMENT_INDEX_DO"
 class_name = "PaymentIndexDO"
 
+[[env.production.durable_objects.bindings]]
+name = "CLAIM_DO"
+class_name = "ClaimDO"
+
+[[env.production.services]]
+binding = "SUPPORT_WORKER"
+service = "support-worker-prod"
+
 [[env.production.secrets_store_secrets]]
 binding = "LAVA_API_KEY"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
@@ -72,7 +98,26 @@ binding = "LAVA_WEBHOOK_SECRET"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "lava-hook-api-key"
 
+# Shared secrets mounted from the global Secrets Store in prod (dev keeps the
+# [vars] values above). Each binding name MUST equal the env name the code reads.
+# INTERNAL_PUSH_KEY is the SAME shared key as main-flow-prod / support-worker-prod.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"
+
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"
+
 [env.production.vars]
-RETURN_URL = "https://fit.renorma.app/paywall?status=success"
+# App onboarding entry; the worker appends `#claim=<id>.<secret>` after a guest pay.
+LANDING_RETURN_URL = "https://fit.renorma.app/onboard"
+# DO NOT add TEST_ENTITLEMENT here — its absence is the prod safety.
+# /admin/* authorizes via the SUPPORT_WORKER (support-worker-prod) binding +
+# INTERNAL_PUSH_KEY; the approved-admins live in support-worker — no allowlist here.
+# INTERNAL_PUSH_KEY is a SECRET in prod: `wrangler secret put INTERNAL_PUSH_KEY
+# --env production` (same value as support-worker-prod / main-flow-prod).
 PUSH_NOTIFY_URL = "https://push.renorma.app/push/notify"
 PLANS = '[{"id":"monthly","title":"Подписка Renorma","price":4900,"currency":"RUB","period":"month","lavaOfferId":"4d02bebe-badd-4600-8313-7f1c10a10844"}]'

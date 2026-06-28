@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod api;
+pub mod app_flags;
 pub mod bug_report;
 pub mod chat;
 pub mod auth;
@@ -15,7 +16,9 @@ pub mod story;
 pub mod story_dsl;
 pub mod subscription;
 pub mod summary;
+pub mod support_chat;
 pub mod sync;
 pub mod update;
+pub mod weekly_card;
 pub mod weight_cycle;
 pub mod weight_trend;

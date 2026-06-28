@@ -12,9 +12,38 @@
 interface Env {
   QUEUE_DO: DurableObjectNamespace;
   SUBSCRIPTION_DO: DurableObjectNamespace;
-  JWT_SECRET: string;
-  POLLER_SECRET: string;
+  // In dev this is the plain [vars] string; in prod it is a Secrets Store
+  // binding (SecretsStoreSecret with async .get()). Resolve via readSecret().
+  JWT_SECRET: string | SecretsStoreSecret;
+  POLLER_SECRET: string | undefined;
   QUEUE_REGION: DurableObjectLocationHint;
+}
+
+/// Resolve a value that is either a plain [vars] string (dev) or a Secrets Store
+/// binding (prod, SecretsStoreSecret with async .get()). Never swallows: when the
+/// binding is present but unresolvable (empty/reject), or when the value is
+/// undefined (configured nowhere), it THROWS a clear MISCONFIGURED error.
+async function readSecret(value: string | SecretsStoreSecret | undefined, name: string): Promise<string> {
+  if (value === undefined) throw new Error(`MISCONFIGURED: ${name} not set (no Secrets Store binding and no var)`);
+  if (typeof value === "string") return value;                 // dev [vars]
+  let v: string;
+  try { v = await value.get(); }
+  catch (e) { throw new Error(`MISCONFIGURED: Secrets Store binding '${name}' get() failed: ${e}`); }
+  if (!v) throw new Error(`MISCONFIGURED: Secrets Store binding '${name}' is empty/unset`);
+  return v;
+}
+
+/// Resolve every REQUIRED Store-bound secret at the top of fetch. On any failure,
+/// loudly log and return a 503 so every request shows the worker is not operational.
+async function requireSecrets(env: Env): Promise<Response | null> {
+  for (const name of ["JWT_SECRET", "POLLER_SECRET"]) {
+    try { await readSecret((env as any)[name], name); }
+    catch (e) {
+      console.error(`STARTUP MISCONFIG: ${name}: ${e}`);
+      return new Response(`MISCONFIGURED: ${name} — ${e instanceof Error ? e.message : String(e)}`, { status: 503 });
+    }
+  }
+  return null;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -269,6 +298,9 @@ const inner = {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
+    const misconfig = await requireSecrets(env);
+    if (misconfig) return misconfig;
+
     const url = new URL(request.url);
     const stub = env.QUEUE_DO.get(env.QUEUE_DO.idFromName("global"), {
       locationHint: env.QUEUE_REGION,
@@ -277,7 +309,7 @@ const inner = {
     // ----- Client routes (app JWT) -----
     if (url.pathname === "/submit" && request.method === "POST") {
       const token = bearer(request);
-      if (!token || !(await verifyJwt(token, env.JWT_SECRET))) return corsJson({ error: "Unauthorized" }, 401);
+      if (!token || !(await verifyJwt(token, await readSecret(env.JWT_SECRET, "JWT_SECRET")))) return corsJson({ error: "Unauthorized" }, 401);
       const sub = decodeJwtSub(token);
       if (!sub) return corsJson({ error: "Unauthorized" }, 401);
       // Only enqueue for users with an active subscription (Trial/Paid).
@@ -304,7 +336,7 @@ const inner = {
 
     if (url.pathname.startsWith("/job/") && request.method === "GET") {
       const token = bearer(request);
-      if (!token || !(await verifyJwt(token, env.JWT_SECRET))) return corsJson({ error: "Unauthorized" }, 401);
+      if (!token || !(await verifyJwt(token, await readSecret(env.JWT_SECRET, "JWT_SECRET")))) return corsJson({ error: "Unauthorized" }, 401);
       const sub = decodeJwtSub(token);
       const jobId = url.pathname.slice("/job/".length);
       const res = await stub.fetch(`https://do/status?id=${encodeURIComponent(jobId)}`);
@@ -317,7 +349,7 @@ const inner = {
     // long-polls the DO (one subrequest per change) and forwards phase/tokens.
     if (url.pathname.startsWith("/stream/") && request.method === "GET") {
       const token = bearer(request);
-      if (!token || !(await verifyJwt(token, env.JWT_SECRET))) return corsJson({ error: "Unauthorized" }, 401);
+      if (!token || !(await verifyJwt(token, await readSecret(env.JWT_SECRET, "JWT_SECRET")))) return corsJson({ error: "Unauthorized" }, 401);
       const sub = decodeJwtSub(token);
       const jobId = url.pathname.slice("/stream/".length);
 
@@ -351,7 +383,7 @@ const inner = {
     }
 
     // ----- Poller routes (POLLER_SECRET) -----
-    const isPoller = bearer(request) === env.POLLER_SECRET;
+    const isPoller = bearer(request) === (await readSecret(env.POLLER_SECRET, "POLLER_SECRET"));
 
     if (url.pathname === "/claim" && request.method === "POST") {
       if (!isPoller) return corsJson({ error: "Unauthorized" }, 401);

@@ -6,7 +6,6 @@ use crate::components::qr_scanner::QrScanner;
 
 #[derive(Clone, PartialEq)]
 enum AuthStep {
-    Main,
     Login,
     ShowQr { qr_url: String, pairing_id: String },
     Scanning,
@@ -14,25 +13,12 @@ enum AuthStep {
 
 #[component]
 pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
-    let step = create_rw_signal(AuthStep::Main);
+    // The no-session "/" entry is LOGIN-only: a returning user signs back in via
+    // another device or their passkey. Creating an account happens only in the
+    // paid `/onboard` claim flow, never here.
+    let step = create_rw_signal(AuthStep::Login);
     let loading = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);
-    let display_name = create_rw_signal(String::new());
-
-    let on_register = move |_| {
-        let name = display_name.get_untracked();
-        loading.set(true);
-        error.set(None);
-        spawn_local(async move {
-            match auth::register(&name).await {
-                Ok(_) => on_authenticated.call(()),
-                Err(e) => {
-                    error.set(Some(e));
-                    loading.set(false);
-                }
-            }
-        });
-    };
 
     let on_try_passkey = move |_| {
         loading.set(true);
@@ -242,61 +228,6 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                                 on:click=on_try_passkey
                             >
                                 {move || if loading.get() { t("auth.authenticating") } else { t("auth.try_passkey") }}
-                            </button>
-                        </div>
-
-                        <button
-                            attr:data-testid="auth-btn-back"
-                            class="button is-ghost has-text-grey is-fullwidth"
-                            style="font-size: 0.85rem; text-decoration: underline;"
-                            on:click=move |_| { step.set(AuthStep::Main); error.set(None); }
-                        >
-                            {move || t("auth.back")}
-                        </button>
-                    </div>
-                </div>
-            }.into_view(),
-
-            AuthStep::Main => view! {
-                <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
-                    <div style="max-width: 24rem; width: 100%;">
-                        <img src="/icon-192.png" alt="Food Tracker" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
-                        <h1 class="title is-3" style="margin-bottom: 0.5rem;">"Food Tracker"</h1>
-                        <p class="has-text-grey mb-5" style="font-size: 1.05rem; line-height: 1.6;">
-                            {move || t("auth.main_description")}
-                        </p>
-
-                        {error_view}
-
-                        <div style="display: flex; flex-direction: column; gap: 1rem;">
-                            <input
-                                attr:data-testid="auth-input-name"
-                                class="input is-medium"
-                                type="text"
-                                placeholder=t("auth.name_placeholder")
-                                prop:value=move || display_name.get()
-                                on:input=move |ev| {
-                                    display_name.set(event_target_value(&ev));
-                                }
-                            />
-                            <button
-                                attr:data-testid="auth-btn-register"
-                                class="button is-link is-medium is-fullwidth"
-                                disabled=move || loading.get() || display_name.get().trim().is_empty()
-                                on:click=on_register
-                            >
-                                {move || if loading.get() { t("auth.creating") } else { t("auth.create_account") }}
-                            </button>
-                            <p class="has-text-grey mt-2 mb-1" style="font-size: 0.95rem;">
-                                {move || t("auth.already_used")}
-                            </p>
-                            <button
-                                attr:data-testid="auth-btn-login"
-                                class="button is-medium is-fullwidth"
-                                disabled=move || loading.get()
-                                on:click=move |_| { step.set(AuthStep::Login); error.set(None); }
-                            >
-                                {move || t("auth.login_title")}
                             </button>
                         </div>
                     </div>

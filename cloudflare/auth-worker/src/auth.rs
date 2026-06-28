@@ -7,6 +7,7 @@ use crate::{auth_do_stub, do_request};
 // ---- Registration ----
 
 pub async fn register_begin(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let origin = crate::request_origin(&req);
     let body: serde_json::Value = req.json().await.unwrap_or_default();
     let display_name = body
         .get("display_name")
@@ -14,13 +15,15 @@ pub async fn register_begin(mut req: Request, ctx: RouteContext<()>) -> Result<R
         .unwrap_or("");
     let stub = auth_do_stub(&ctx.env)?;
     let internal_req = do_request("/register/begin", &serde_json::json!({
-        "display_name": display_name
+        "display_name": display_name,
+        "origin": origin
     }))?;
     let resp = stub.fetch_with_request(internal_req).await?;
     Ok(resp)
 }
 
 pub async fn register_finish(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let origin = crate::request_origin(&req);
     let body: serde_json::Value = req
         .json()
         .await
@@ -40,7 +43,7 @@ pub async fn register_finish(mut req: Request, ctx: RouteContext<()>) -> Result<
         .unwrap_or("");
 
     let stub = auth_do_stub(&ctx.env)?;
-    let do_body = serde_json::json!({ "credential": credential, "user_id": user_id });
+    let do_body = serde_json::json!({ "credential": credential, "user_id": user_id, "origin": origin });
     let internal_req = do_request("/register/finish", &do_body)?;
     let resp = stub.fetch_with_request(internal_req).await?;
 
@@ -49,11 +52,7 @@ pub async fn register_finish(mut req: Request, ctx: RouteContext<()>) -> Result<
     }
 
     // Issue JWT after successful registration
-    let secret = ctx
-        .env
-        .secret("JWT_SECRET")
-        .map(|s| s.to_string())
-        .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
+    let secret = token::jwt_secret(&ctx.env).await?;
 
     let (token_response, token_id) =
         token::create_token(user_id, fingerprint, vec!["auth".to_string()], &secret)?;
@@ -71,14 +70,16 @@ pub async fn register_finish(mut req: Request, ctx: RouteContext<()>) -> Result<
 
 // ---- Authentication (discoverable, no username) ----
 
-pub async fn authenticate_begin(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+pub async fn authenticate_begin(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let origin = crate::request_origin(&req);
     let stub = auth_do_stub(&ctx.env)?;
-    let internal_req = do_request("/authenticate/begin", &serde_json::json!({}))?;
+    let internal_req = do_request("/authenticate/begin", &serde_json::json!({ "origin": origin }))?;
     let resp = stub.fetch_with_request(internal_req).await?;
     Ok(resp)
 }
 
 pub async fn authenticate_finish(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let origin = crate::request_origin(&req);
     let body: serde_json::Value = req
         .json()
         .await
@@ -94,7 +95,7 @@ pub async fn authenticate_finish(mut req: Request, ctx: RouteContext<()>) -> Res
         .unwrap_or("");
 
     let stub = auth_do_stub(&ctx.env)?;
-    let do_body = serde_json::json!({ "credential": credential });
+    let do_body = serde_json::json!({ "credential": credential, "origin": origin });
     let internal_req = do_request("/authenticate/finish", &do_body)?;
     let mut resp = stub.fetch_with_request(internal_req).await?;
 
@@ -113,11 +114,7 @@ pub async fn authenticate_finish(mut req: Request, ctx: RouteContext<()>) -> Res
         .and_then(|v| v.as_str())
         .ok_or_else(|| Error::RustError("DO did not return user_id".into()))?;
 
-    let secret = ctx
-        .env
-        .secret("JWT_SECRET")
-        .map(|s| s.to_string())
-        .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
+    let secret = token::jwt_secret(&ctx.env).await?;
 
     let (token_response, token_id) =
         token::create_token(user_id, fingerprint, vec!["auth".to_string()], &secret)?;
@@ -136,7 +133,7 @@ pub async fn authenticate_finish(mut req: Request, ctx: RouteContext<()>) -> Res
 
 pub async fn add_device_begin(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     // Validate existing session token
-    let user_id = match token::validate_from_header(&req, &ctx.env) {
+    let user_id = match token::validate_from_header(&req, &ctx.env).await {
         Ok(sub) => sub,
         Err(e) => {
             let body = ErrorResponse {
@@ -146,8 +143,9 @@ pub async fn add_device_begin(req: Request, ctx: RouteContext<()>) -> Result<Res
         }
     };
 
+    let origin = crate::request_origin(&req);
     let stub = auth_do_stub(&ctx.env)?;
-    let do_body = serde_json::json!({ "user_id": user_id });
+    let do_body = serde_json::json!({ "user_id": user_id, "origin": origin });
     let internal_req = do_request("/register/begin", &do_body)?;
     let resp = stub.fetch_with_request(internal_req).await?;
 
@@ -156,7 +154,7 @@ pub async fn add_device_begin(req: Request, ctx: RouteContext<()>) -> Result<Res
 
 pub async fn add_device_finish(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     // Validate existing session token
-    let user_id = match token::validate_from_header(&req, &ctx.env) {
+    let user_id = match token::validate_from_header(&req, &ctx.env).await {
         Ok(sub) => sub,
         Err(e) => {
             let body = ErrorResponse {
@@ -166,6 +164,7 @@ pub async fn add_device_finish(mut req: Request, ctx: RouteContext<()>) -> Resul
         }
     };
 
+    let origin = crate::request_origin(&req);
     let body: serde_json::Value = req
         .json()
         .await
@@ -177,7 +176,7 @@ pub async fn add_device_finish(mut req: Request, ctx: RouteContext<()>) -> Resul
         .ok_or_else(|| Error::RustError("missing credential".into()))?;
 
     let stub = auth_do_stub(&ctx.env)?;
-    let do_body = serde_json::json!({ "credential": credential, "user_id": user_id });
+    let do_body = serde_json::json!({ "credential": credential, "user_id": user_id, "origin": origin });
     let internal_req = do_request("/register/finish", &do_body)?;
     let resp = stub.fetch_with_request(internal_req).await?;
 

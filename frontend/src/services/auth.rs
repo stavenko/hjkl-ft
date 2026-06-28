@@ -30,8 +30,22 @@ fn set_token(token: &str) {
     if let Some(token_id) = extract_token_id_from_jwt(token) {
         storage().set_item(KEY_TOKEN_ID, &token_id).expect("write token_id");
     }
-    // Reconcile with the server right after sign-in / pairing so a freshly-paired
-    // device pulls the account's existing data without waiting for a relaunch.
+}
+
+/// Finalize a sign-in / registration / pairing: record the identity, switch to
+/// this user's per-user database, then reconcile with the server so the device
+/// pulls the account's existing data without waiting for a relaunch.
+///
+/// The per-user DB switch happens BEFORE the sync (and with no bootstrap
+/// migration) so a freshly-signed-in account never pushes the previous user's
+/// leftover local data up under its token.
+async fn establish_session(user_id: &str, token: Option<&str>) {
+    set_user(user_id);
+    crate::services::db::activate_for_user(user_id, false).await;
+    crate::services::app_flags::activate().await;
+    if let Some(token) = token {
+        set_token(token);
+    }
     crate::services::sync::sync_now_background();
 }
 
@@ -54,11 +68,13 @@ pub fn get_token() -> Option<String> {
     storage().get_item(KEY_AUTH_TOKEN).ok().flatten()
 }
 
+/// Sign out: wipe the ENTIRE localStorage — identity (`user_id`/`auth_token`/
+/// `token_id`) plus all device-level prefs and flags (`pwa_dismissed`, language,
+/// weight unit, …). The per-user IndexedDB is left intact, so signing back in
+/// restores that account's data. The caller should reload the page afterwards to
+/// reset the app state to the auth screen and the active database to bootstrap.
 pub fn logout() {
-    let s = storage();
-    let _ = s.remove_item(KEY_USER_ID);
-    let _ = s.remove_item(KEY_AUTH_TOKEN);
-    let _ = s.remove_item(KEY_TOKEN_ID);
+    let _ = storage().clear();
 }
 
 /// Return the token_id stored in localStorage (extracted from JWT on login).
@@ -366,11 +382,7 @@ pub async fn register(display_name: &str) -> Result<String, String> {
         .unwrap_or(&user_id)
         .to_string();
 
-    set_user(&user_id);
-
-    if let Some(token) = finish_resp.get("token").and_then(|v| v.as_str()) {
-        set_token(token);
-    }
+    establish_session(&user_id, finish_resp.get("token").and_then(|v| v.as_str())).await;
 
     Ok(user_id)
 }
@@ -423,8 +435,7 @@ pub async fn authenticate() -> Result<String, String> {
         .and_then(|v| v.as_str())
         .ok_or("missing token")?;
 
-    set_user(user_id);
-    set_token(token);
+    establish_session(user_id, Some(token)).await;
     Ok(user_id.to_string())
 }
 
@@ -573,11 +584,7 @@ pub async fn pair_claim(pairing_id: &str, secret: &str) -> Result<String, String
         .unwrap_or(&user_id)
         .to_string();
 
-    set_user(&user_id);
-
-    if let Some(token) = finish_resp.get("token").and_then(|v| v.as_str()) {
-        set_token(token);
-    }
+    establish_session(&user_id, finish_resp.get("token").and_then(|v| v.as_str())).await;
 
     Ok(user_id)
 }

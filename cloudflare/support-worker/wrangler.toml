@@ -1,0 +1,88 @@
+name = "support-worker"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-12-01"
+
+[build]
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
+# an unpinned `cargo install worker-build` pulls a newer build that passes
+# wasm-bindgen flags the locked CLI doesn't support.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "CONVERSATION_DO"
+class_name = "ConversationDO"
+
+[[durable_objects.bindings]]
+name = "CONVERSATION_INDEX_DO"
+class_name = "ConversationIndexDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ConversationDO", "ConversationIndexDO"]
+
+# Expert-reply push nudge goes to main-flow via a SERVICE BINDING (not a public
+# workers.dev fetch — a Worker→Worker fetch over workers.dev returns 404).
+[[services]]
+binding = "MAIN_FLOW"
+service = "main-flow"
+
+[vars]
+JWT_SECRET = "dev-secret-change-in-production"
+# Comma-separated allowlist of user_ids (JWT sub) permitted to use /conversations*.
+EXPERT_IDS = "expert-1,expert-2"
+# Shared secret main-flow's /push/notify verifies (X-Internal-Key). Prod:
+# `wrangler secret put INTERNAL_PUSH_KEY --env production` (same value as main-flow-prod).
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
+# Operator-only secret for POST /admin/approve (X-Admin-Secret). Dev uses this
+# [vars] value; prod uses `wrangler secret put ADMIN_APPROVE_SECRET --env production`.
+ADMIN_APPROVE_SECRET = "dev-admin-approve-secret"
+
+# ── Production (separate worker; clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+# Bindings/vars are NOT inherited by named environments — redeclared here.
+[env.production]
+name = "support-worker-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "support.renorma.app"
+custom_domain = true
+
+[[env.production.services]]
+binding = "MAIN_FLOW"
+service = "main-flow-prod"
+
+[[env.production.durable_objects.bindings]]
+name = "CONVERSATION_DO"
+class_name = "ConversationDO"
+
+[[env.production.durable_objects.bindings]]
+name = "CONVERSATION_INDEX_DO"
+class_name = "ConversationIndexDO"
+
+# All three shared secrets are mounted from the global Secrets Store in prod
+# (dev keeps the [vars] values in the default-env [vars] block above). Each
+# binding name MUST equal the env name the code reads.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"
+
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"
+
+[[env.production.secrets_store_secrets]]
+binding = "ADMIN_APPROVE_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "admin-approve-secret"
+
+[env.production.vars]
+# set real expert ids at deploy time
+EXPERT_IDS = ""
+# INTERNAL_PUSH_KEY and ADMIN_APPROVE_SECRET are mounted from the Secrets Store
+# in prod (the secrets_store_secrets blocks above), NOT plaintext vars. The push
+# target is the MAIN_FLOW service binding above (main-flow-prod), not a URL.
+# admin_approve fails closed (500) if ADMIN_APPROVE_SECRET is unset.

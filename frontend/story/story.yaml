@@ -9,22 +9,32 @@
 #   {event: <name>}                 a task closes when this event fires while enabled
 #   {sensor: <name>}                boolean sensor is true
 #   {sensor: <name>, gte: <n>}      numeric sensor >= n   (counter-based close)
+#   {streak: <source>}              consecutive-day streak over <source> >= 1
+#   {streak: <source>, gte: <n>}    consecutive-day streak over <source> >= n
+#   {streak: <source>, gte: <n>, since_open: <section-id>}
+#                                   fresh consecutive streak counting only days
+#                                   strictly AFTER that section's open date
+#   {count:  <source>, gte: <n>, since_open: <section-id>}
+#                                   NON-consecutive distinct-day count strictly
+#                                   AFTER that section's open date
 #   {section_opened: <section-id>}  the user has opened that section's page
 #   {task: <task-id>}               that task is closed
 #   {all: [<cond>, ...]} / {any: [<cond>, ...]}
 #
-# `sensors`/`events` below are documentation of the closed Rust vocabularies the
-# engine implements (sensors read from Progress/gather(); events are emitted from
-# feature code via story::emit). Actions (`on_open`) and `widget`s are likewise a
-# closed Rust registry referenced by name.
+# `sensors`/`sources`/`events` below are documentation of the closed Rust
+# vocabularies the engine implements (sensors read from Progress/gather(); sources
+# are day-source closures reduced in-engine by streak/count; events are emitted
+# from feature code via story::emit). Actions (`on_open`) and `widget`s are
+# likewise a closed Rust registry referenced by name.
 # ─────────────────────────────────────────────────────────────────────────────
 
-sensors: [weight_streak, steps_streak, diary_streak, diary_days,
-          calorie_planka_set, sub_active, sub_paid,
+sensors: [calorie_planka_set, sub_active, sub_paid,
           snack_yesterday, no_high_cal_drink_yesterday]
+sources: [diary, weight, weighin_q5, steps, steps_planka, veg, protein, no_liquid_cal, evening_protein]
 events:  [weight_saved, steps_saved, food_logged, recipe_finalized, recipe_in_diary,
-          waste_entered, restaurant_logged, photos_done, sex_selected,
-          weigh_in_reminder_on, steps_reminder_on, lang_configured, notif_received]
+          waste_entered, restaurant_logged, photos_done, sex_selected, birth_year_set,
+          weigh_in_reminder_on, steps_reminder_on, lang_configured, notif_received,
+          food_repeated]
 
 # ── Tasks (the single pool; "active" = enabled & not closed) ─────────────────
 tasks:
@@ -34,6 +44,9 @@ tasks:
   - id: sex
     title: {en: "Pick your sex in settings", ru: "Укажите пол в настройках"}
     close: {event: sex_selected}
+  - id: age
+    title: {en: "Set your birth year", ru: "Укажите год рождения"}
+    close: {event: birth_year_set}
   - id: lang
     title: {en: "Confirm the app language", ru: "Подтвердите язык приложения"}
     close: {event: lang_configured}
@@ -48,11 +61,14 @@ tasks:
     close: {event: weight_saved}
   - id: weight_streak
     title: {en: "Weigh in 7 days in a row", ru: "Взвешивайтесь 7 дней подряд"}
-    close: {sensor: weight_streak, gte: 7}
+    close: {streak: weight, gte: 7}
   - id: first_food
     title: {en: "Log your first food", ru: "Внесите первую еду"}
     enable: {section_opened: first-food}   # armed when the section is opened
     close:  {event: food_logged}            # fired only while enabled
+  - id: repeat_food
+    title: {en: "Repeat yesterday's food", ru: "Повторите вчерашнюю еду"}
+    close:  {event: food_repeated}          # fired by "Repeat today" in the diary
   - id: steps_reminder
     title: {en: "Enable the steps reminder", ru: "Включите напоминание о шагах"}
     close: {event: steps_reminder_on}
@@ -61,7 +77,7 @@ tasks:
     close: {event: steps_saved}
   - id: steps_streak
     title: {en: "Log steps 7 days in a row", ru: "Записывайте шаги 7 дней подряд"}
-    close: {sensor: steps_streak, gte: 7}
+    close: {streak: steps, gte: 7}
   - id: dish_created
     title: {en: "Create a cooked dish", ru: "Создайте готовое блюдо"}
     close: {event: recipe_finalized}
@@ -74,18 +90,41 @@ tasks:
   - id: restaurant
     title: {en: "Log a restaurant meal", ru: "Внесите еду из ресторана"}
     close: {event: restaurant_logged}
-  - id: diary_streak
-    title: {en: "Keep the food diary 7 days in a row", ru: "Ведите дневник еды 7 дней подряд"}
-    close: {sensor: diary_streak, gte: 7}
+  - id: diary_continue
+    title: {en: "Keep the food diary 7 more days in a row", ru: "Ведите дневник еды ещё 7 дней подряд"}
+    # Counts only days AFTER ch2-mistake is opened (baseline = that section's seen
+    # flag) — so it's a fresh 7 days, not the streak that already unlocked chapter 2.
+    close: {streak: diary, gte: 7, since_open: ch2-mistake}
+  - id: veg_streak
+    # {n} is replaced with the sex-specific target (600 g men / 400 g women) at render.
+    title: {en: "Eat and log {n} g of vegetables or more every day", ru: "Каждый день съедайте и записывайте {n} г овощей или больше"}
+    close: {streak: veg, gte: 7, since_open: ch2-veg}
+  - id: protein_streak
+    # {n} is replaced with the calculated target (1.2 g/kg of latest weight) at render.
+    title: {en: "Eat and log {n} g of protein or more every day", ru: "Каждый день съедайте и записывайте {n} г белка или больше"}
+    close: {streak: protein, gte: 7, since_open: ch2-protein}
   - id: snack
     title: {en: "Log a low-calorie snack", ru: "Внесите низкокалорийную закусь"}
     close: {sensor: snack_yesterday}
   - id: drinks
-    title: {en: "A day with no high-calorie drinks", ru: "День без калорийных напитков"}
-    close: {sensor: no_high_cal_drink_yesterday}
+    # A WEEK with no liquid calories, counted fresh from when ch2-drinks opens
+    # (armed via on_open) — so it reads 0/7 on opening, not pre-satisfied.
+    title: {en: "A week with no liquid calories. Don't log calorie drinks — and, most importantly, don't drink them.", ru: "Неделю без жидких калорий. Не записываем калорийные напитки, и самое главное не употребляем."}
+    close: {streak: no_liquid_cal, gte: 7, since_open: ch2-drinks}
   - id: night
-    title: {en: "Check your evening feedback", ru: "Посмотрите вечернюю обратную связь"}
-    close: {section_opened: ch2-night}
+    # Two dinners (not necessarily in a row) with ≥1/3 of the daily protein norm,
+    # assessed retrospectively per completed day, counted from when ch2-night opens.
+    title: {en: "Log a dinner with a third or more of your daily protein norm — twice.", ru: "Два раза записываем на ужин треть или более дневной нормы белка."}
+    close: {count: evening_protein, gte: 2, since_open: ch2-night}
+  - id: steps_planka
+    # A week of hitting the daily steps planka (7000), counted fresh from when the
+    # ch3 "Почему не уходит вес" section opens.
+    title: {en: "Hit the steps planka every day for a week: 7000 steps", ru: "Неделю выполняйте планку по шагам: 7000 шагов в день"}
+    close: {streak: steps_planka, gte: 7, since_open: ch3-no-loss}
+  - id: weighin_q5
+    # A week of top-quality (5/5) weigh-ins, counted fresh from when ch3-calorie opens.
+    title: {en: "Weigh in at 5/5 quality 7 days in a row", ru: "Взвешивайтесь с качеством 5/5 — 7 дней подряд"}
+    close: {streak: weighin_q5, gte: 7, since_open: ch3-calorie}
 
 # ── Chapters ─────────────────────────────────────────────────────────────────
 chapters:
@@ -94,6 +133,7 @@ chapters:
     open: always
     sections:
       - id: intro
+        icon: "➡️"
         title: {en: "Introduction", ru: "Введение"}
         tasks: [photos]
         blocks:
@@ -111,21 +151,26 @@ chapters:
           - {text_key: story.intro.p12}
           - {widget: {id: progress_photos}}
       - id: setup
+        icon: "⚙️"
         title: {en: "Let's set up the app", ru: "Для начала настроим приложение"}
         tasks: [sex, lang, notif]
-        complete: {all: [{task: lang}, {task: notif}]}   # sex is surfaced but not gating
+        # All three gate completion (no override → every listed task must be done).
         blocks:
           - {text_key: story.setup.intro}
           - {bullets: [story.setup.s_story, story.setup.s_diary, story.setup.s_recipes, story.setup.s_settings]}
           - {text_key: story.setup.task_intro}
           - {bullets: [story.setup.check_lang_line, story.setup.check_notif_line]}
+          - {text_key: story.setup.enable_push}
           - {text_key: story.setup.instructions}
           - {widget: {id: setup_controls}}
           - {widget: {id: cta, route: /settings, label: story.setup.open_settings}}
       - id: accounting
+        icon: "💰"
         title: {en: "The accounting of weight loss", ru: "Бухгалтерия похудения"}
-        tasks: [weigh_in, first_weigh, weight_streak]
-        complete: {task: weigh_in}
+        tasks: [weigh_in, first_weigh, weight_streak, age]
+        # Gate the next section ("My first food entries") on BOTH enabling the
+        # weigh-in reminder AND recording an actual weight.
+        complete: {all: [{task: weigh_in}, {task: first_weigh}]}
         blocks:
           - {text_key: story.acc.p1}
           - {text_key: story.acc.p2}
@@ -140,6 +185,7 @@ chapters:
           - {tasks: true}
           - {widget: {id: cta, route: /settings, label: story.setup.open_settings}}
       - id: first-food
+        icon: "🍽️"
         title: {en: "My first food entries", ru: "Мои первые записи еды"}
         tasks: [first_food]
         on_open: [arm_first_food]
@@ -155,9 +201,10 @@ chapters:
           - {tasks: true}
           - {widget: {id: cta, route: /diary, label: story.ff.open_diary}}
       - id: activity
+        icon: "🚶"
         title: {en: "Activity and weight", ru: "Активность и вес"}
         tasks: [steps_reminder, first_steps, steps_streak]
-        complete: {task: first_steps}
+        complete: {all: [{task: steps_reminder}, {task: first_steps}]}
         blocks:
           - {text_key: story.act.p1}
           - {text_key: story.act.p2}
@@ -172,6 +219,7 @@ chapters:
           - {tasks: true}
           - {widget: {id: cta, route: /steps, label: story.act.record_steps}}
       - id: cooking
+        icon: "👨‍🍳"
         title: {en: "I'm cooking", ru: "Я готовлю"}
         tasks: [dish_created, dish_in_diary]
         blocks:
@@ -182,6 +230,7 @@ chapters:
           - {tasks: true}
           - {widget: {id: cta, route: /recipes, label: story.cook.open_recipes}}
       - id: bones
+        icon: "🦴"
         title: {en: "My food with bones", ru: "Моя еда с костями"}
         tasks: [bones]
         blocks:
@@ -192,6 +241,7 @@ chapters:
           - {tasks: true}
           - {widget: {id: cta, route: /diary, label: story.bones.open_diary}}
       - id: restaurant
+        icon: "🎉"
         title: {en: "A party or a restaurant", ru: "Праздник или ресторан"}
         tasks: [restaurant]
         blocks:
@@ -206,8 +256,9 @@ chapters:
           - {tasks: true}
           - {widget: {id: cta, route: /diary, label: story.rest.open_diary}}
       - id: diary
+        icon: "📔"
         title: {en: "Why keep a diary?", ru: "Зачем вести дневник?"}
-        complete: always
+        tasks: [repeat_food]
         blocks:
           - {text_key: story.diary.p1}
           - {text_key: story.diary.p2}
@@ -216,60 +267,77 @@ chapters:
           - {list: [story.diary.item1, story.diary.item2, story.diary.item3, story.diary.item4, story.diary.item5]}
           - {text_key: story.diary.p5}
           - {text_key: story.diary.p6}
-      - id: easier
-        title: {en: "Make tracking easier", ru: "Облегчаем подсчёт"}
-        complete: always
-        blocks:
+          # "Make tracking easier" — now a sub-heading of this section, not its own.
+          - {heading: story.easier.heading}
           - {list: [story.easier.t1, story.easier.t2, story.easier.t3, story.easier.t4]}
+          - {text_key: story.diary.repeat_howto}
+          - {tasks: true}
+          - {widget: {id: cta, route: /diary, label: story.diary.open_diary}}
 
   - id: ch2
     title: {en: "Appetite", ru: "Аппетит"}
-    open: {all: [{sensor: weight_streak, gte: 7}, {sensor: sub_active}]}
+    open: {all: [{streak: weight, gte: 7}, {streak: steps, gte: 7}, {streak: diary, gte: 7}, {sensor: sub_active}]}
     sections:
       - id: ch2-mistake
+        icon: "⚠️"
         title: {en: "The biggest mistake of dieters", ru: "Основная ошибка худеющих"}
-        tasks: [diary_streak]
+        tasks: [diary_continue]
+        complete: always   # task shown but does NOT gate — next section opens on open
         blocks:
           - {text_key: story.ch2.mistake.p1}
+          - {text_key: story.ch2.mistake.p1b}
           - {text_key: story.ch2.mistake.p2}
           - {text_key: story.ch2.mistake.p3}
+          - {text_key: story.ch2.mistake.p4}
+          - {text_key: story.ch2.mistake.p5}
           - {tasks: true}
-          - {widget: {id: cta, route: /diary, label: story.ch2.mistake.open_diary}}
       - id: ch2-veg
+        icon: "🥦"
         title: {en: "Vegetables and fruit", ru: "Фрукты и овощи"}
-        complete: always
+        tasks: [veg_streak]
+        complete: always   # the week-long veg habit is shown but does NOT gate progress
+        on_open: [set_veg_goal]   # opening sets the veg/fruit planka (joins the goals list)
         blocks:
           - {text_key: story.ch2.veg.p1}
           - {text_key: story.ch2.veg.p2}
-          - {widget: {id: veg_target}}
+          - {tasks: true}
       - id: ch2-protein
+        icon: "🍗"
         title: {en: "Protein — your best helper", ru: "Белок — лучший помощник"}
-        complete: always
-        on_open: [set_protein_goal]
+        tasks: [protein_streak]
+        complete: always   # week-long protein habit is shown but does NOT gate progress
+        on_open: [set_protein_goal]   # also sets the hidden Protein goal for the diary header
         blocks:
           - {text_key: story.ch2.protein.p1}
           - {text_key: story.ch2.protein.p2}
-          - {widget: {id: goal_status, nutrient: Protein, unit: common.unit.g,
-                       title: story.ch2.protein.goal_label, set: story.ch2.protein.goal_set,
-                       need: story.ch2.protein.need_weight, route: /weight, label: story.ch2.protein.open_weight}}
+          - {tasks: true}
       - id: ch2-snack
-        title: {en: "Low-calorie snacks", ru: "Низкокалорийная закусь"}
-        tasks: [snack]
+        icon: "🍿"
+        title: {en: "Eating out of boredom", ru: "Еда от скуки"}
+        # No task here — informational section (completes on open, non-gating).
         blocks:
           - {text_key: story.ch2.snack.p1}
           - {text_key: story.ch2.snack.p2}
           - {text_key: story.ch2.snack.p3}
-          - {tasks: true}
+          - {text_key: story.ch2.snack.p4}
+          - {list: [story.ch2.snack.h1, story.ch2.snack.h2, story.ch2.snack.h3, story.ch2.snack.h4, story.ch2.snack.h5]}
+          - {text_key: story.ch2.snack.p5}
           - {widget: {id: cta, route: /diary, label: story.ch2.mistake.open_diary}}
       - id: ch2-drinks
-        title: {en: "Juices and drinks", ru: "Соки и питьё"}
+        icon: "🥤"
+        title: {en: "Juices and soda", ru: "Соки и газировка"}
         tasks: [drinks]
+        complete: always   # task is shown but does NOT gate — next section opens on open
         blocks:
           - {text_key: story.ch2.drinks.p1}
           - {text_key: story.ch2.drinks.p2}
+          - {text_key: story.ch2.drinks.p3}
+          - {text_key: story.ch2.drinks.swap}
+          - {list: [story.ch2.drinks.h1, story.ch2.drinks.h2, story.ch2.drinks.h3]}
           - {tasks: true}
           - {widget: {id: cta, route: /diary, label: story.ch2.mistake.open_diary}}
       - id: ch2-meals
+        icon: "🍽️"
         title: {en: "How many meals a day", ru: "Сколько раз в день надо есть"}
         complete: {section_opened: ch2-meals}
         on_open: [unlock_meal_split]
@@ -281,62 +349,147 @@ chapters:
           - {text_key: story.ch2.meals.unlocked}
           - {widget: {id: cta, route: /diary, label: story.ch2.mistake.open_diary}}
       - id: ch2-night
+        icon: "🌙"
         title: {en: "Eating at night", ru: "Еда на ночь"}
         tasks: [night]
-        on_open: [view_night_feedback]
+        complete: always   # task is shown but does NOT gate — chapter advances on open
         blocks:
           - {text_key: story.ch2.night.p1}
           - {text_key: story.ch2.night.p2}
           - {text_key: story.ch2.night.p3}
-          - {widget: {id: night_feedback}}
+          - {text_key: story.ch2.night.p4}
+          - {text_key: story.ch2.night.p5}
+          - {text_key: story.ch2.night.p6}
+          - {text_key: story.ch2.night.p7}
+          - {list: [story.ch2.night.h1, story.ch2.night.h2, story.ch2.night.h3]}
+          - {tasks: true}
 
   - id: ch3
-    title: {en: "Why lose weight?", ru: "Зачем надо худеть?"}
-    open: {sensor: diary_days, gte: 7}
+    title: {en: "We start losing weight", ru: "Начинаем худеть"}
+    # Opens once the food diary has 7 days of entries IN A ROW (read from the diary).
+    open: {streak: diary, gte: 7}
     sections:
-      - id: ch3-fat
-        title: {en: "Why do we have fat at all?", ru: "Зачем нам вообще жир?"}
+      # Section 1 — carries the calorie-planka task (kept exactly as before).
+      # Lesson prose for "Ищем дефицит" is added later.
+      - id: ch3-deficit
+        icon: "🔍"
+        title: {en: "Finding the deficit", ru: "Ищем дефицит"}
         complete: {sensor: calorie_planka_set}
-        on_open: [set_calorie_planka]
         blocks:
-          - {text_key: story.ch3.fat.p1}
-          - {text_key: story.ch3.fat.p2}
-          - {text_key: story.ch3.fat.p3}
-          - {widget: {id: goal_status, nutrient: Calories, unit: common.unit.kcal,
-                       title: story.ch3.fat.goal_label, set: story.ch3.fat.goal_set,
-                       need: story.ch3.fat.need_diary, route: /diary, label: story.ch3.fat.open_diary}}
-      - id: ch3-aesthetics
-        title: {en: "Aesthetics vs health", ru: "Эстетика vs здоровье"}
-        complete: always
+          - {text_key: story.ch3.deficit.p1}
+          - {text_key: story.ch3.deficit.p2}
+          - {text_key: story.ch3.deficit.p3}
+          - {text_key: story.ch3.deficit.p4}
+          - {text_key: story.ch3.deficit.p5}
+          - {text_key: story.ch3.deficit.p6}
+          - {text_key: story.ch3.deficit.p7}
+          - {text_key: story.ch3.deficit.ex1}
+          - {text_key: story.ch3.deficit.ex2}
+          - {text_key: story.ch3.deficit.ex3}
+          - {text_key: story.ch3.deficit.ex4}
+          - {text_key: story.ch3.deficit.p8}
+          - {text_key: story.ch3.deficit.p9}
+          - {text_key: story.ch3.deficit.p10}
+          - {text_key: story.ch3.deficit.p11}
+          - {text_key: story.ch3.deficit.p12}
+          - {text_key: story.ch3.deficit.p13}
+          - {text_key: story.ch3.deficit.p14}
+          - {widget: {id: calorie_planka}}
+      # Sections 2–9 — structure only; prose blocks are filled in once written.
+      - id: ch3-no-loss
+        icon: "🤔"
+        title: {en: "Why the weight isn't coming off", ru: "Почему не уходит вес"}
+        tasks: [steps_planka]
+        complete: always   # task shown but does NOT gate — next section opens on open
         blocks:
-          - {text_key: story.ch3.aesthetics.p1}
-          - {text_key: story.ch3.aesthetics.p2}
-          - {text_key: story.ch3.aesthetics.p3}
-      - id: ch3-beauty
-        title: {en: "What does a «beautiful person» look like?", ru: "Как выглядит «красивый человек»?"}
-        complete: always
+          - {text_key: story.ch3.noloss.p1}
+          - {text_key: story.ch3.noloss.p2}
+          - {text_key: story.ch3.noloss.p3}
+          - {text_key: story.ch3.noloss.p4}
+          - {text_key: story.ch3.noloss.p5}
+          - {text_key: story.ch3.noloss.p6}
+          - {text_key: story.ch3.noloss.p7}
+          - {text_key: story.ch3.noloss.p8}
+          - {text_key: story.ch3.noloss.p9}
+          - {text_key: story.ch3.noloss.p10}
+          - {text_key: story.ch3.noloss.p11}
+          - {tasks: true}
+          - {widget: {id: weekly_card}}
+      - id: ch3-calorie
+        icon: "⚡"
+        title: {en: "The calorie", ru: "Калория"}
+        tasks: [weighin_q5]
+        complete: always   # task shown but does NOT gate — next section opens on open
         blocks:
-          - {text_key: story.ch3.beauty.p1}
-          - {text_key: story.ch3.beauty.p2}
-          - {text_key: story.ch3.beauty.p3}
-      - id: ch3-minimum
-        title: {en: "What is the physiological fat minimum?", ru: "Что такое физиологический минимум жира?"}
-        complete: always
+          - {text_key: story.ch3.calorie.p1}
+          - {text_key: story.ch3.calorie.p2}
+          - {text_key: story.ch3.calorie.p3}
+          - {text_key: story.ch3.calorie.p4}
+          - {text_key: story.ch3.calorie.p5}
+          - {text_key: story.ch3.calorie.p6}
+          - {text_key: story.ch3.calorie.p7}
+          - {text_key: story.ch3.calorie.p8}
+          - {text_key: story.ch3.calorie.p9}
+          - {text_key: story.ch3.calorie.p10}
+          - {text_key: story.ch3.calorie.p11}
+          - {tasks: true}
+      - id: ch3-friend
+        icon: "🍰"
+        title: {en: "A friend eats a lot but stays slim", ru: "Подруга ест много, но худая"}
+        complete: always   # informational — completes on open
         blocks:
-          - {text_key: story.ch3.minimum.p1}
-          - {text_key: story.ch3.minimum.p2}
-          - {text_key: story.ch3.minimum.p3}
-      - id: ch3-lean
-        title: {en: "The difference between «lean» and «fat-stripped»", ru: "Разница между «худым» и «обезжиренным»"}
-        complete: always
+          - {text_key: story.ch3.friend.p1}
+          - {text_key: story.ch3.friend.p2}
+          - {text_key: story.ch3.friend.p3}
+          - {text_key: story.ch3.friend.p4}
+          - {text_key: story.ch3.friend.p5}
+      - id: ch3-sleep
+        icon: "😴"
+        title: {en: "Sleep", ru: "Сон"}
+        complete: always   # informational — completes on open
         blocks:
-          - {text_key: story.ch3.lean.p1}
-          - {text_key: story.ch3.lean.p2}
-          - {text_key: story.ch3.lean.p3}
-      - id: ch3-lifestyle
-        title: {en: "Life without fat", ru: "Жизнь без жира"}
-        complete: always
+          - {text_key: story.ch3.sleep.p1}
+          - {text_key: story.ch3.sleep.p2}
+          - {text_key: story.ch3.sleep.p3}
+          - {text_key: story.ch3.sleep.p4}
+          - {text_key: story.ch3.sleep.p5}
+          - {text_key: story.ch3.sleep.p6}
+          - {text_key: story.ch3.sleep.p7}
+          - {text_key: story.ch3.sleep.p8}
+          - {text_key: story.ch3.sleep.p9}
+          - {text_key: story.ch3.sleep.p10}
+      - id: ch3-walk
+        icon: "🚶"
+        title: {en: "Walk more", ru: "Ходим больше"}
+        complete: always   # informational — completes on open
         blocks:
-          - {text_key: story.ch3.lifestyle.p1}
-          - {text_key: story.ch3.lifestyle.p2}
-          - {text_key: story.ch3.lifestyle.p3}
+          - {text_key: story.ch3.walk.p1}
+          - {text_key: story.ch3.walk.p2}
+          - {text_key: story.ch3.walk.p3}
+          - {text_key: story.ch3.walk.p4}
+          - {text_key: story.ch3.walk.p5}
+          - {text_key: story.ch3.walk.p6}
+          - {text_key: story.ch3.walk.p7}
+          - {text_key: story.ch3.walk.p8}
+          - {text_key: story.ch3.walk.p9}
+          - {text_key: story.ch3.walk.p10}
+          - {text_key: story.ch3.walk.p11}
+          - {text_key: story.ch3.walk.p12}
+          - {text_key: story.ch3.walk.p13}
+          - {text_key: story.ch3.walk.p14}
+      - id: ch3-habits
+        icon: "🔁"
+        title: {en: "Swap awful habits for bad ones", ru: "Меняем ужасные привычки на плохие"}
+        complete: always   # informational — completes on open
+        blocks:
+          - {text_key: story.ch3.habits.p1}
+          - {text_key: story.ch3.habits.p2}
+          - {text_key: story.ch3.habits.p3}
+          - {text_key: story.ch3.habits.p4}
+          - {text_key: story.ch3.habits.p5}
+          - {text_key: story.ch3.habits.p6}
+          - {text_key: story.ch3.habits.p7}
+          - {text_key: story.ch3.habits.p8}
+      - id: ch3-reward
+        icon: "🏆"
+        title: {en: "Food is a reward", ru: "Еда — это награда"}

@@ -29,6 +29,15 @@ pub fn main() {
         );
 
         services::db::init().await;
+        services::app_flags::reload().await;
+        // Switch to the signed-in user's per-user database before any sync. The
+        // bootstrap (`hjkl-ft`) database belongs to this user — they were the last
+        // signed-in account on the device — so migrate it in (one-time, rescues
+        // local-only stores like progress photos), then keep using the per-user DB.
+        if let Some(uid) = services::auth::get_user_id() {
+            services::db::activate_for_user(&uid, true).await;
+            services::app_flags::activate().await;
+        }
         services::i18n::init_lang();
         services::i18n::init_weight_unit();
         services::update::init(); // create the update-available signal at the root

@@ -32,7 +32,7 @@ pub fn RecipesPage() -> impl IntoView {
 
     let on_create = move |_| {
         spawn_local(async move {
-            let recipe = local::new_recipe("Новый рецепт").await;
+            let recipe = local::new_recipe("").await;
             let id = recipe.id.clone();
             invalidate();
             sync::push_background();

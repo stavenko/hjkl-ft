@@ -3,11 +3,13 @@
 //! scope and manages its own state, so the generic section page can rebuild its
 //! body on section change without remounting / resetting a widget mid-stream.
 
+use chrono::Datelike;
 use leptos::*;
 use leptos_router::*;
 
 use crate::services::story_dsl::{self, Engine, EngineSnapshot, Loc};
-use crate::services::{db, i18n, i18n::t, local, profile, story, summary};
+use crate::services::weekly_card::{self, Card, CardState, CourseGoalDto, EngineInput, TrendDir};
+use crate::services::{app_flags, db, i18n, i18n::t, local, profile, story, sync};
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden;";
 
@@ -60,7 +62,8 @@ pub fn StoryTaskList(section_id: String) -> impl IntoView {
                 };
                 let rows = sec.tasks.iter().map(|tid| {
                     let done = e.task_closed(tid);
-                    let title = e.task(tid).map(|t| tr(&t.title)).unwrap_or_default();
+                    let raw = e.task(tid).map(|t| tr(&t.title)).unwrap_or_default();
+                    let title = story::fill_task_target(tid, raw, &s.progress);
                     let icon = if done { "\u{2705}" } else { "\u{23f3}" };
                     // Counter tasks (7-day streaks etc.) show a "current/target" sub-line.
                     let counter = e.task_counter(tid).map(|(cur, target)| view! {
@@ -212,44 +215,75 @@ pub fn GoalStatus(
     }
 }
 
-/// Chapter-2 vegetables/fruit: yesterday's logged grams vs the sex-specific
-/// target (600 g women / 800 g men).
+/// Chapter-3 calorie planka: shows the daily planka computed LIVE as the average
+/// of the last 7 logged days, and a button to accept it. Accepting sets the hidden
+/// daily-Calories goal (completing the section). The suggested figure is recomputed
+/// every time the widget mounts, so returning a day later offers a fresh planka.
 #[component]
-pub fn VegTarget() -> impl IntoView {
-    let target = match profile::get_sex() {
-        Some(profile::Sex::Female) => 600.0_f64,
-        _ => 800.0,
-    };
-    let summaries_ver = db::version("summaries");
-    let grams = create_rw_signal(None::<f64>);
+pub fn CaloriePlanka() -> impl IntoView {
+    let diary_ver = db::version("diary");
+    let goals_ver = db::version("goals");
+    let suggestion = create_rw_signal(None::<f64>); // live 7-day average (kcal)
+    let accepted = create_rw_signal(None::<f64>); // the currently-set planka, if any
+
     create_effect(move |_| {
-        summaries_ver.get();
+        diary_ver.get();
+        goals_ver.get();
         spawn_local(async move {
-            let y = local::yesterday();
-            let v = match summary::get_day(&y).await {
-                Some(s) => summary::parse_day(&s.text).and_then(|d| d.facts.map(|f| f.veg_fruit_grams)),
-                None => None,
-            };
-            grams.set(v);
+            suggestion.set(local::calorie_planka_suggestion().await);
+            accepted.set(
+                local::list_goals().await.into_iter()
+                    .find(|g| g.nutrient == "Calories" && g.amount > 0.0)
+                    .map(|g| g.amount),
+            );
         });
     });
+
+    let accept = move |_| {
+        let Some(n) = suggestion.get() else { return };
+        spawn_local(async move {
+            local::set_calorie_goal(n).await;
+            crate::services::sync::push_background();
+        });
+    };
+
+    // The task's intro text, shared by the "take the planka" states (before accept).
+    let intro = || view! {
+        <p class="is-size-6" style="line-height: 1.55; margin: 0 0 14px 0;">{t("story.ch3.fat.task_intro")}</p>
+    };
+
     view! {
+        // Same wrapper + "ЗАДАНИЕ" label as the standard task list in other chapters.
         <div style="margin: 16px 0 0 0;">
             <p class="is-size-7 has-text-grey-light" style="text-transform: uppercase; letter-spacing: 0.02em; margin: 0 0 8px 4px;">
-                {move || t("story.ch2.veg.target_label")}
+                {move || t("story.section_task_label")}
             </p>
-            <div style=CARD>
-                <div style="display: flex; align-items: center; justify-content: center; padding: 18px 16px;">
-                    {move || match grams.get() {
-                        Some(g) => view! {
-                            <span class="is-size-3 has-text-weight-bold">
-                                {format!("{} / {} {}", g.round() as i64, target.round() as i64, t("common.unit.g"))}
-                            </span>
-                        }.into_view(),
-                        None => view! { <span class="is-size-6 has-text-grey">{move || t("story.ch2.veg.no_data")}</span> }.into_view(),
-                    }}
-                </div>
-            </div>
+            {move || match suggestion.get() {
+                // Already accepted at the current value → ONLY the confirmation text.
+                Some(v) if accepted.get().map(|a| a.round() as i64) == Some(v.round() as i64) => view! {
+                    <p class="is-size-6 has-text-weight-semibold">
+                        {t("story.ch3.fat.planka_accepted").replace("{n}", &(v.round() as i64).to_string())}
+                    </p>
+                    <p class="is-size-6 has-text-grey" style="margin-top: 6px; line-height: 1.5;">
+                        {t("story.ch3.fat.planka_accepted_note")}
+                    </p>
+                }.into_view(),
+                // A figure to take → intro + a full-width button carrying the number
+                // (same style as the section CTAs — no separate number plate).
+                Some(v) => {
+                    let label = t("story.ch3.fat.planka_accept").replace("{n}", &(v.round() as i64).to_string());
+                    view! {
+                        {intro()}
+                        <button class="button is-link is-fullwidth is-medium" on:click=accept>{label}</button>
+                    }.into_view()
+                }
+                // No diary yet → intro + a grey note + the diary CTA.
+                None => view! {
+                    {intro()}
+                    <p class="is-size-6 has-text-grey" style="margin: 0 0 12px 0; line-height: 1.5;">{t("story.ch3.fat.need_diary")}</p>
+                    <A href="/diary" class="button is-link is-fullwidth is-medium">{t("story.ch3.fat.open_diary")}</A>
+                }.into_view(),
+            }}
         </div>
     }
 }
@@ -288,6 +322,255 @@ pub fn NightFeedback() -> impl IntoView {
             </div>
         </div>
     }
+}
+
+// app_flags keys backing the weekly-card cadence (non-synced, per-device).
+const WC_CARD_KEY: &str = "weekly_card";
+const WC_LAST_RECOMPUTE_KEY: &str = "weekly_card_last_recompute";
+
+/// The most recent Monday on/before `d` (ISO week start).
+fn week_start(d: chrono::NaiveDate) -> chrono::NaiveDate {
+    let dow = d.weekday().num_days_from_monday() as i64;
+    d - chrono::Duration::days(dow)
+}
+
+/// Whether the card should be recomputed: never computed yet, or the current
+/// week's Monday is strictly after the last-recompute's date (the §10 Monday
+/// boundary, NOT a rolling 7-day window). Hysteresis: between Mondays the stored
+/// card is reused so mid-week weight noise never flips the tier.
+fn should_recompute(last_recompute: Option<&str>, today: chrono::NaiveDate) -> bool {
+    let Some(ts) = last_recompute else { return true };
+    let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) else { return true };
+    let last_date = dt.with_timezone(&chrono::Local).date_naive();
+    week_start(today) > week_start(last_date)
+}
+
+/// Gather the engine inputs from the local services and call `decide`.
+async fn compute_card() -> Card {
+    let weight_entries = local::list_weight_entries().await;
+    let step_entries = local::list_step_entries().await;
+    let avg_intake_14d = local::avg_daily_kcal(14).await;
+
+    // Distinct diary days within the last 14 calendar days (coverage numerator).
+    let today = chrono::Local::now().date_naive();
+    let window_start = today - chrono::Duration::days(13);
+    let logged_days_14d = local::list_diary_dates()
+        .await
+        .iter()
+        .filter_map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        .filter(|d| *d >= window_start && *d <= today)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len() as u32;
+
+    let current_cal_planka = local::list_goals().await.into_iter().find(|g| {
+        g.nutrient == "Calories" && g.direction == api_types::GoalDirection::AtMost && g.amount > 0.0
+    }).map(|g| g.amount);
+
+    let today_year = chrono::Local::now().format("%Y").to_string().parse::<i32>().unwrap_or(2026);
+
+    let input = EngineInput {
+        sex: profile::get_sex(),
+        height_cm: profile::get_height_cm(),
+        birth_year: profile::get_birth_year(),
+        today_year,
+        weight_entries,
+        avg_intake_14d,
+        logged_days_14d,
+        step_entries,
+        current_cal_planka,
+        current_steps_target: local::steps_goal_amount().await.map(|a| a as u32).unwrap_or(story::STEPS_PLANKA),
+        goal: profile::get_goal(),
+    };
+    weekly_card::decide(&input)
+}
+
+/// The weekly recommendation card (DSL: `{widget: {id: weekly_card}}`). A DUMB
+/// component: it gathers inputs, calls the pure `decide`, and renders STRICTLY by
+/// `state` + `levers`. It makes no decisions. Recompute is gated to a weekly
+/// Monday boundary (cadence + hysteresis); within the week the stored card is
+/// rendered verbatim. A "Пересчитать" button forces a recompute.
+#[component]
+pub fn WeeklyCard() -> impl IntoView {
+    // Recompute on the version signals AND when the profile cache may have changed.
+    let vers = [
+        db::version("weight_entries"),
+        db::version("step_entries"),
+        db::version("diary"),
+        db::version("goals"),
+        db::version("story"),
+        db::version("summaries"),
+        db::version("profile"),
+    ];
+    let card = create_rw_signal(None::<Card>);
+    // A manual-recompute nonce: bumping it re-runs the effect (the click also
+    // clears last_recompute, so should_recompute then returns true).
+    let force = create_rw_signal(0u32);
+
+    create_effect(move |_| {
+        for v in &vers {
+            v.get();
+        }
+        force.get();
+        spawn_local(async move {
+            let today = chrono::Local::now().date_naive();
+            let last = app_flags::get(WC_LAST_RECOMPUTE_KEY);
+            if should_recompute(last.as_deref(), today) {
+                let c = compute_card().await;
+                if let Ok(json) = serde_json::to_string(&c) {
+                    app_flags::set(WC_CARD_KEY, &json);
+                }
+                app_flags::set(WC_LAST_RECOMPUTE_KEY, &chrono::Utc::now().to_rfc3339());
+                card.set(Some(c));
+            } else if let Some(stored) = app_flags::get(WC_CARD_KEY) {
+                // Render the STORED card verbatim (hysteresis: no recompute mid-week).
+                match serde_json::from_str::<Card>(&stored) {
+                    Ok(c) => card.set(Some(c)),
+                    Err(_) => card.set(Some(compute_card().await)),
+                }
+            } else {
+                card.set(Some(compute_card().await));
+            }
+        });
+    });
+
+    let recompute = move |_| {
+        app_flags::remove(WC_LAST_RECOMPUTE_KEY);
+        force.update(|n| *n += 1);
+    };
+
+    // Accept the calorie suggestion: set the daily Calories goal + push.
+    let accept_calories = move |n: f64| {
+        spawn_local(async move {
+            local::set_calorie_goal(n).await;
+            sync::push_background();
+        });
+    };
+    // Accept the steps suggestion: set the daily Steps goal + push.
+    let accept_steps = move |n: u32| {
+        spawn_local(async move {
+            local::set_steps_goal(n as f64).await;
+            sync::push_background();
+        });
+    };
+
+    view! {
+        <div style="margin: 16px 0 0 0;">
+            <p class="is-size-7 has-text-grey-light" style="text-transform: uppercase; letter-spacing: 0.02em; margin: 0 0 8px 4px;">
+                {move || t("weekly_card.title")}
+            </p>
+            {move || {
+                let Some(c) = card.get() else {
+                    return view! { <div style=CARD></div> }.into_view();
+                };
+                render_card(c, accept_calories, accept_steps, recompute)
+            }}
+        </div>
+    }
+}
+
+/// Render the card strictly by `state` + `levers`. The calorie button is emitted
+/// ONLY inside `levers.calories.then(...)` with `computed.new_cal` present — so in
+/// HARD (levers.calories == false) no calorie node is constructed at all (§7.1).
+fn render_card(
+    c: Card,
+    accept_calories: impl Fn(f64) + Copy + 'static,
+    accept_steps: impl Fn(u32) + Copy + 'static,
+    recompute: impl Fn(web_sys::MouseEvent) + Copy + 'static,
+) -> View {
+    // Universal terminal states (goal-independent).
+    let body = if c.state == CardState::NeedBirthYear {
+        view! {
+            <div style=CARD>
+                <div style="padding: 16px;">
+                    <p class="is-size-6" style="line-height: 1.55; margin: 0 0 12px 0;">{t("weekly_card.need_birth_year")}</p>
+                    <A href="/settings" class="button is-link is-fullwidth is-medium">{t("weekly_card.open_settings")}</A>
+                </div>
+            </div>
+        }.into_view()
+    } else if c.state == CardState::InsufficientData {
+        view! {
+            <div style=CARD><div style="padding: 16px;">
+                <p class="is-size-6" style="line-height: 1.55; margin: 0;">{t("weekly_card.insufficient")}</p>
+            </div></div>
+        }.into_view()
+    } else if c.state == CardState::Hard {
+        view! {
+            <div style=CARD><div style="padding: 16px;">
+                <p class="is-size-6" style="line-height: 1.55; margin: 0;">{t("weekly_card.msg_hard")}</p>
+                // §7.1: NO calorie button is constructed in HARD.
+                {steps_button(&c, accept_steps)}
+            </div></div>
+        }.into_view()
+    } else if c.goal == CourseGoalDto::Maintain {
+        // Maintenance: copy by direction; the calorie lever is off by construction.
+        // Flat = success; Rising = add steps; Falling = info only.
+        let msg = match c.trend {
+            TrendDir::Flat => t("weekly_card.maintain_ok"),
+            TrendDir::Rising => t("weekly_card.maintain_rising"),
+            TrendDir::Falling => t("weekly_card.maintain_falling"),
+        };
+        view! {
+            <div style=CARD><div style="padding: 16px;">
+                <p class="is-size-6" style="line-height: 1.55; margin: 0;">{msg}</p>
+                {steps_button(&c, accept_steps)}
+            </div></div>
+        }.into_view()
+    } else if c.state == CardState::OnTrack {
+        // Lose goal, confidently falling, clean ratio → all good.
+        view! {
+            <div style=CARD><div style="padding: 16px;">
+                <p class="is-size-6" style="line-height: 1.55; margin: 0;">{t("weekly_card.on_track")}</p>
+            </div></div>
+        }.into_view()
+    } else {
+        // Lose goal, Plateau | Surplus | Soft. Message by direction (#2 / #3).
+        let msg = if c.trend == TrendDir::Rising {
+            t("weekly_card.msg_surplus")
+        } else {
+            t("weekly_card.msg_plateau")
+        };
+        let soft_note = (c.state == CardState::Soft).then(|| view! {
+            <p class="is-size-7 has-text-grey" style="margin: 8px 0 0 0; line-height: 1.45;">{t("weekly_card.soft_note")}</p>
+        });
+        let cal_btn = (c.levers.calories).then(|| c.computed.new_cal.map(|n| {
+            let label = t("weekly_card.btn_calories").replace("{n}", &(n.round() as i64).to_string());
+            view! {
+                <button class="button is-link is-fullwidth is-medium" style="margin-top: 12px;"
+                    on:click=move |_| accept_calories(n)>{label}</button>
+            }
+        })).flatten();
+        view! {
+            <div style=CARD><div style="padding: 16px;">
+                <p class="is-size-6" style="line-height: 1.55; margin: 0;">{msg}</p>
+                {soft_note}
+                {cal_btn}
+                {steps_button(&c, accept_steps)}
+            </div></div>
+        }.into_view()
+    };
+
+    view! {
+        {body}
+        <div style="padding: 12px 4px 0 4px;">
+            <button class="button is-small is-light" on:click=recompute>{t("weekly_card.recompute")}</button>
+        </div>
+    }.into_view()
+}
+
+/// The steps button, emitted only when `levers.steps` is set and a value exists.
+/// Accepting it persists the new daily Steps goal (same machinery as nutrient goals).
+fn steps_button(c: &Card, accept_steps: impl Fn(u32) + Copy + 'static) -> View {
+    if !c.levers.steps {
+        return ().into_view();
+    }
+    let Some(n) = c.computed.new_steps else {
+        return ().into_view();
+    };
+    let label = t("weekly_card.btn_steps").replace("{n}", &n.to_string());
+    view! {
+        <button class="button is-link is-fullwidth is-medium" style="margin-top: 12px;"
+            on:click=move |_| accept_steps(n)>{label}</button>
+    }.into_view()
 }
 
 /// Chapter-1 setup controls: the language checkbox (toggles the task), the test

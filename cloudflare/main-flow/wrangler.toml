@@ -1,6 +1,6 @@
 name = "main-flow"
 main = "build/worker/shim.mjs"
-compatibility_date = "2024-01-01"
+compatibility_date = "2024-12-01"
 
 [build]
 # Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
@@ -53,6 +53,19 @@ class_name = "PushDO"
 [[env.production.durable_objects.bindings]]
 name = "SCHEDULE_DO"
 class_name = "ScheduleDO"
+
+# Shared secrets mounted from the global Secrets Store in prod (dev keeps the
+# [vars] values above). Each binding name MUST equal the env name the code reads.
+# INTERNAL_PUSH_KEY is the SAME shared key as payment-worker-prod / support-worker-prod.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"
+
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"
 
 [env.production.vars]
 VAPID_PUBLIC_KEY = "BHmCtJcYZNsO-xMLccKyWYSWTlxbILgd1HrRtSD4jy97PILpvdVaHadrt9anNmgdRDVWI5mIfkpSRkxSTL0AdsM"

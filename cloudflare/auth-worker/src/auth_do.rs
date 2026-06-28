@@ -28,6 +28,15 @@ const STORAGE_KEY_USER_TOKENS_PREFIX: &str = "user_tokens:";
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Inputs are the FIXED env-derived configs plus the ceremony origin.
+/// Returns true => use ADMIN config, false => use APP config.
+/// Selection is pure string equality against the configured admin origin;
+/// a client-supplied origin is ONLY ever used as a selector, never copied
+/// into the returned config.
+fn select_is_admin(origin: &str, admin_rp_origin: &str) -> bool {
+    !origin.is_empty() && origin == admin_rp_origin
+}
+
 // ---- Recovery hash helpers (HMAC-SHA256 based) ----
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -203,23 +212,66 @@ pub struct AuthDO {
 }
 
 impl AuthDO {
-    fn passkey_config(&self) -> PasskeyConfig {
-        let rp_id = self
+    /// The fixed app RP_ORIGIN env value (used to resolve app-only flows like
+    /// pairing to the app config). Falls back to https://{RP_ID} like the
+    /// original config logic.
+    fn app_rp_origin(&self) -> String {
+        self.env
+            .var("RP_ORIGIN")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|_| {
+                format!(
+                    "https://{}",
+                    self.env
+                        .var("RP_ID")
+                        .map(|v| v.to_string())
+                        .unwrap_or_default()
+                )
+            })
+    }
+
+    fn passkey_config(&self, origin: &str) -> Result<PasskeyConfig> {
+        // Read all four FIXED env values up front (vars only, never the client origin).
+        let app_rp_id = self
             .env
             .var("RP_ID")
             .map(|v| v.to_string())
-            .unwrap_or_else(|_| "localhost".to_string());
-        let rp_origin = self
+            .map_err(|_| Error::RustError("RP_ID not configured".into()))?;
+        let app_rp_origin = self
             .env
             .var("RP_ORIGIN")
             .map(|v| v.to_string())
-            .unwrap_or_else(|_| format!("https://{rp_id}"));
-        PasskeyConfig {
+            .unwrap_or_else(|_| format!("https://{app_rp_id}"));
+        let admin_rp_id = self
+            .env
+            .var("ADMIN_RP_ID")
+            .map(|v| v.to_string())
+            .map_err(|_| Error::RustError("ADMIN_RP_ID not configured".into()))?;
+        let admin_rp_origin = self
+            .env
+            .var("ADMIN_RP_ORIGIN")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|_| format!("https://{admin_rp_id}"));
+
+        // Fail loudly on empty origin: do NOT silently fall back to a scope.
+        if origin.is_empty() {
+            return Err(Error::RustError("missing ceremony origin".into()));
+        }
+
+        let (rp_id, rp_origin) = if select_is_admin(origin, &admin_rp_origin) {
+            (admin_rp_id, admin_rp_origin)
+        } else {
+            // App path selects EXACTLY the existing app config — no behavior change,
+            // no downgrade, and the client origin is discarded here.
+            (app_rp_id, app_rp_origin)
+        };
+
+        Ok(PasskeyConfig {
             rp_id,
             rp_name: "Food Tracker".to_string(),
-            origin: rp_origin,
+            origin: rp_origin, // FIXED env value, never the client-supplied origin
             state_ttl: 300,
-        }
+        })
     }
 
     // ---- Storage helpers ----
@@ -240,9 +292,9 @@ impl AuthDO {
                 let arr: js_sys::Array = entry.unchecked_into();
                 let val = arr.get(1);
                 if let Ok(json_str) = serde_wasm_bindgen::from_value::<String>(val) {
-                    if let Ok(cred) = serde_json::from_str::<StoredPasskey>(&json_str) {
-                        result.push(cred);
-                    }
+                    let cred: StoredPasskey = serde_json::from_str(&json_str)
+                        .map_err(|e| Error::RustError(format!("parse credential: {e}")))?;
+                    result.push(cred);
                 }
             }
         }
@@ -256,9 +308,9 @@ impl AuthDO {
             let key = format!("{STORAGE_KEY_CRED_PREFIX}{cred_id}");
             let stored: Option<String> = self.state.storage().get(&key).await?;
             if let Some(json) = stored {
-                if let Ok(cred) = serde_json::from_str::<StoredPasskey>(&json) {
-                    result.push(cred);
-                }
+                let cred: StoredPasskey = serde_json::from_str(&json)
+                    .map_err(|e| Error::RustError(format!("parse credential: {e}")))?;
+                result.push(cred);
             }
         }
         Ok(result)
@@ -406,7 +458,7 @@ impl AuthDO {
 
     // ---- Registration handlers ----
 
-    async fn handle_register_begin(&self, user_id: Option<&str>, display_name: Option<&str>) -> Result<Response> {
+    async fn handle_register_begin(&self, user_id: Option<&str>, display_name: Option<&str>, origin: &str) -> Result<Response> {
         let user_id = match user_id {
             Some(id) if !id.is_empty() => id.to_string(),
             _ => uuid::Uuid::new_v4().to_string(),
@@ -417,7 +469,7 @@ impl AuthDO {
             _ => user_id.clone(),
         };
 
-        let config = self.passkey_config();
+        let config = self.passkey_config(origin)?;
         let credentials = self.load_user_credentials(&user_id).await?;
         let states = self.load_states().await?;
         let store = DoPasskeyStore::new(credentials, states);
@@ -442,8 +494,8 @@ impl AuthDO {
         Response::from_json(&body)
     }
 
-    async fn handle_register_finish(&self, credential: serde_json::Value, user_id: &str) -> Result<Response> {
-        let config = self.passkey_config();
+    async fn handle_register_finish(&self, credential: serde_json::Value, user_id: &str, origin: &str) -> Result<Response> {
+        let config = self.passkey_config(origin)?;
         let credentials = self.load_user_credentials(user_id).await?;
         let states = self.load_states().await?;
         let store = DoPasskeyStore::new(credentials, states);
@@ -469,8 +521,8 @@ impl AuthDO {
 
     // ---- Authentication handlers (discoverable, no username) ----
 
-    async fn handle_authenticate_begin(&self) -> Result<Response> {
-        let config = self.passkey_config();
+    async fn handle_authenticate_begin(&self, origin: &str) -> Result<Response> {
+        let config = self.passkey_config(origin)?;
         // Load ALL credentials for discoverable auth
         let credentials = self.load_all_credentials().await?;
         let states = self.load_states().await?;
@@ -489,8 +541,9 @@ impl AuthDO {
     async fn handle_authenticate_finish(
         &self,
         credential: serde_json::Value,
+        origin: &str,
     ) -> Result<Response> {
-        let config = self.passkey_config();
+        let config = self.passkey_config(origin)?;
         // Load ALL credentials so we can look up by credential ID
         let credentials = self.load_all_credentials().await?;
         let states = self.load_states().await?;
@@ -662,7 +715,8 @@ impl AuthDO {
             Some(_) => user_id.clone(), // existing user, use user_id as fallback
             None => user_id.clone(),
         };
-        let config = self.passkey_config();
+        // Pairing is an app-only flow; resolve to the app config explicitly.
+        let config = self.passkey_config(&self.app_rp_origin())?;
         let credentials = self.load_user_credentials(&user_id).await?;
         let states = self.load_states().await?;
         let store = DoPasskeyStore::new(credentials, states);
@@ -696,8 +750,8 @@ impl AuthDO {
 
         let user_id = session.user_id.clone();
 
-        // Complete passkey registration
-        let config = self.passkey_config();
+        // Complete passkey registration. Pairing is an app-only flow.
+        let config = self.passkey_config(&self.app_rp_origin())?;
         let credentials = self.load_user_credentials(&user_id).await?;
         let states = self.load_states().await?;
         let store = DoPasskeyStore::new(credentials, states);
@@ -875,7 +929,11 @@ impl DurableObject for AuthDO {
                 let body: serde_json::Value = req.json().await.unwrap_or_default();
                 let user_id = body.get("user_id").and_then(|v| v.as_str());
                 let display_name = body.get("display_name").and_then(|v| v.as_str());
-                self.handle_register_begin(user_id, display_name).await
+                let origin = body
+                    .get("origin")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing origin".into()))?;
+                self.handle_register_begin(user_id, display_name, origin).await
             }
             "/register/finish" => {
                 let body: serde_json::Value = req.json().await?;
@@ -887,16 +945,31 @@ impl DurableObject for AuthDO {
                     .get("user_id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing user_id".into()))?;
-                self.handle_register_finish(credential, user_id).await
+                let origin = body
+                    .get("origin")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing origin".into()))?;
+                self.handle_register_finish(credential, user_id, origin).await
             }
-            "/authenticate/begin" => self.handle_authenticate_begin().await,
+            "/authenticate/begin" => {
+                let body: serde_json::Value = req.json().await.unwrap_or_default();
+                let origin = body
+                    .get("origin")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing origin".into()))?;
+                self.handle_authenticate_begin(origin).await
+            }
             "/authenticate/finish" => {
                 let body: serde_json::Value = req.json().await?;
                 let credential = body
                     .get("credential")
                     .cloned()
                     .ok_or_else(|| Error::RustError("missing credential".into()))?;
-                self.handle_authenticate_finish(credential).await
+                let origin = body
+                    .get("origin")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing origin".into()))?;
+                self.handle_authenticate_finish(credential, origin).await
             }
             "/pair/create" => {
                 let body: serde_json::Value = req.json().await?;
@@ -1058,5 +1131,37 @@ impl DurableObject for AuthDO {
             }
             _ => Response::error(format!("unknown DO path: {path}"), 404),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_is_admin;
+    const ADMIN_DEV: &str = "https://renorma-admin.pages.dev";
+    const ADMIN_PROD: &str = "https://admin.renorma.app";
+
+    #[test]
+    fn admin_origin_selects_admin_dev() {
+        assert!(select_is_admin("https://renorma-admin.pages.dev", ADMIN_DEV));
+    }
+    #[test]
+    fn admin_origin_selects_admin_prod() {
+        assert!(select_is_admin("https://admin.renorma.app", ADMIN_PROD));
+    }
+    #[test]
+    fn app_origin_selects_app_dev() {
+        assert!(!select_is_admin("https://hjkl-ft.pages.dev", ADMIN_DEV));
+    }
+    #[test]
+    fn app_origin_selects_app_prod() {
+        assert!(!select_is_admin("https://fit.renorma.app", ADMIN_PROD));
+    }
+    #[test]
+    fn empty_origin_is_not_admin() {
+        assert!(!select_is_admin("", ADMIN_DEV));
+    }
+    #[test]
+    fn unknown_origin_is_not_admin() {
+        assert!(!select_is_admin("https://evil.example", ADMIN_DEV));
     }
 }

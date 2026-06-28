@@ -336,6 +336,7 @@ pub enum GoalUnit {
     G,
     Mg,
     Mcg,
+    Steps,
 }
 
 impl GoalUnit {
@@ -345,6 +346,7 @@ impl GoalUnit {
             GoalUnit::G => "g",
             GoalUnit::Mg => "mg",
             GoalUnit::Mcg => "µg",
+            GoalUnit::Steps => "steps",
         }
     }
 }
@@ -457,6 +459,26 @@ pub struct StoryFlag {
     pub updated_at: String,
 }
 
+/// The synced user profile, modelled as a keyed singleton (one row, key
+/// "profile") so it rides the same array-of-keyed-rows, LWW-by-`updated_at`
+/// machinery as story flags. All fields `#[serde(default)]` so old clients and
+/// servers stay compatible.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileRow {
+    pub key: String, // always "profile"
+    #[serde(default)]
+    pub sex: Option<String>, // "male" | "female" | None
+    #[serde(default)]
+    pub height_cm: Option<f64>,
+    #[serde(default)]
+    pub birth_year: Option<i32>,
+    /// The course goal: "lose" | "maintain". None ⇒ default "lose".
+    #[serde(default)]
+    pub goal: Option<String>,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
 /// An explicit deletion record (tombstone). Deleting an entity on the client
 /// produces one of these; it is synced like any other row and APPLIED on every
 /// device (remove the target locally). The backend never hard-deletes entities —
@@ -483,6 +505,8 @@ pub struct SyncDumpResponse {
     #[serde(default)]
     pub story: Vec<StoryFlag>,
     #[serde(default)]
+    pub profile: Vec<ProfileRow>,
+    #[serde(default)]
     pub weight_entries: Vec<WeightEntry>,
     #[serde(default)]
     pub step_entries: Vec<StepEntry>,
@@ -499,6 +523,8 @@ pub struct SyncPushPayload {
     pub goals: Vec<Goal>,
     #[serde(default)]
     pub story: Vec<StoryFlag>,
+    #[serde(default)]
+    pub profile: Vec<ProfileRow>,
     #[serde(default)]
     pub weight_entries: Vec<WeightEntry>,
     #[serde(default)]

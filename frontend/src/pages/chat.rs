@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use leptos::*;
 use leptos_router::use_navigate;
 use wasm_bindgen::JsCast;
@@ -5,9 +8,12 @@ use wasm_bindgen::JsCast;
 use crate::components::chat_input::ChatInput;
 use crate::components::chat_message::ChatMessage as ChatMessageBubble;
 use crate::components::chat_streaming::StreamingBubble;
+use crate::components::live_message::LiveBubble;
+use crate::components::mode_toggle::ModeToggle;
 use crate::services::chat::{self, ChatMessage};
 use crate::services::i18n::t;
-use crate::services::{ai, i18n};
+use crate::services::support_chat::{self, ChatMode, LiveMessage, OutboxItem};
+use crate::services::{ai, db, i18n};
 
 /// Single support chat. History is loaded from / persisted to IndexedDB (one
 /// record per message). The assistant reply streams in (requesting → thinking →
@@ -19,6 +25,32 @@ pub fn ChatPage() -> impl IntoView {
     let input_text = create_rw_signal(String::new());
     let pending_image = create_rw_signal(None::<String>);
     let pending_audio = create_rw_signal(None::<(String, f64)>);
+
+    // Live thread (server-backed support-worker). Entirely separate signals + stores
+    // from the AI thread above — switching `mode` only swaps which subtree renders
+    // and where `do_send` routes; neither thread reads or writes the other's store.
+    // A push nudge from the support-worker deep-links here as `/chat?notif=1` —
+    // open the Live thread (not the AI thread) and persist that choice.
+    let from_notif = web_sys::window()
+        .map(|w| w.location())
+        .and_then(|l| l.search().ok())
+        .unwrap_or_default()
+        .contains("notif=1");
+    let initial_mode = if from_notif { ChatMode::Live } else { support_chat::load_mode() };
+    if from_notif {
+        support_chat::save_mode(ChatMode::Live);
+    }
+    let mode = create_rw_signal(initial_mode);
+    let live_messages = create_rw_signal(Vec::<LiveMessage>::new());
+    let live_outbox = create_rw_signal(Vec::<OutboxItem>::new());
+    let live_sending = create_rw_signal(false);
+    let live_input = create_rw_signal(String::new());
+    // Unused attachment signals for the Live ChatInput (Live is text-only).
+    let live_no_image = create_rw_signal(None::<String>);
+    let live_no_audio = create_rw_signal(None::<(String, f64)>);
+    let live_no_recording = create_rw_signal(false);
+    let live_rec_start = create_rw_signal(0f64);
+    let live_rec_tick = create_rw_signal(0u32);
 
     // Streaming / phase signals (mirror food_editor): phase 0 requesting,
     // 1 thinking, 2 answer.
@@ -44,9 +76,118 @@ pub fn ChatPage() -> impl IntoView {
         messages.set(msgs);
     });
 
+    // Re-query the Live cache whenever its stores change (after every db::put from
+    // send/retry/poll) and whenever we (re)enter Live mode. The poll loop never
+    // writes these signals directly — it only writes the DB; the store-version
+    // signals drive the re-render.
+    create_effect(move |_| {
+        db::version("support_messages").get();
+        db::version("support_outbox").get();
+        if mode.get() == ChatMode::Live {
+            spawn_local(async move {
+                live_messages.set(support_chat::list_messages().await);
+                live_outbox.set(support_chat::list_outbox().await);
+            });
+        }
+    });
+
+    // Safe polling timer (NO setInterval): a component-owned alive-guard set false
+    // on unmount, plus a per-entry effect that re-checks `mode`/visibility each tick
+    // and self-terminates on leaving Live so loops never stack.
+    let alive = Rc::new(Cell::new(true));
+    on_cleanup({
+        let a = alive.clone();
+        move || a.set(false)
+    });
+    // A generation counter so rapid Live→AI→Live toggling can't STACK poll loops:
+    // each (re)entry into Live bumps it; an older loop sees the bump and exits.
+    let poll_gen = create_rw_signal(0u32);
+    create_effect({
+        let alive = alive.clone();
+        move |_| {
+            if mode.get() != ChatMode::Live {
+                return;
+            }
+            poll_gen.update(|g| *g += 1);
+            let my_gen = poll_gen.get_untracked();
+            let alive = alive.clone();
+            spawn_local(async move {
+                // Immediate poll on entering Live.
+                if let Err(e) = support_chat::poll().await {
+                    logging::warn!("support poll: {e}");
+                }
+                loop {
+                    ai::sleep_ms(4000).await;
+                    if !alive.get() {
+                        break; // unmounted
+                    }
+                    if mode.get_untracked() != ChatMode::Live {
+                        break; // left Live
+                    }
+                    if poll_gen.get_untracked() != my_gen {
+                        break; // a newer poll loop superseded this one
+                    }
+                    if document_hidden() {
+                        continue; // page not visible → skip this tick
+                    }
+                    if let Err(e) = support_chat::poll().await {
+                        logging::warn!("support poll: {e}");
+                    }
+                }
+            });
+        }
+    });
+
+    // Poll once on focus / visibility-restore while in Live mode.
+    {
+        let win = web_sys::window().expect("no window");
+        let cb = wasm_bindgen::closure::Closure::<dyn Fn()>::new(move || {
+            if mode.get_untracked() == ChatMode::Live && !document_hidden() {
+                spawn_local(async move {
+                    if let Err(e) = support_chat::poll().await {
+                        logging::warn!("support poll: {e}");
+                    }
+                });
+            }
+        });
+        let cb_ref = cb.as_ref().unchecked_ref::<js_sys::Function>().clone();
+        let _ = win.add_event_listener_with_callback("focus", &cb_ref);
+        let _ = win.add_event_listener_with_callback("visibilitychange", &cb_ref);
+        on_cleanup(move || {
+            let win = web_sys::window().expect("no window");
+            let _ = win.remove_event_listener_with_callback("focus", &cb_ref);
+            let _ = win.remove_event_listener_with_callback("visibilitychange", &cb_ref);
+            drop(cb);
+        });
+    }
+
     let navigate = use_navigate();
 
     let do_send = move |_: ()| {
+        // Live mode: route to the support-worker thread and return BEFORE touching
+        // any AI signal/timer/stream (AI behavior stays byte-for-byte identical).
+        if mode.get_untracked() == ChatMode::Live {
+            if live_sending.get_untracked() {
+                return;
+            }
+            let text = live_input.get_untracked().trim().to_string();
+            if text.is_empty() {
+                return;
+            }
+            live_input.set(String::new());
+            live_sending.set(true);
+            spawn_local(async move {
+                // The optimistic outbox item is written inside send(); the
+                // store-version effect re-renders messages + outbox.
+                if let Err(e) = support_chat::send(text).await {
+                    // FAIL LOUDLY (the outbox item stays "failed" and retryable).
+                    logging::error!("support send: {e}");
+                }
+                live_sending.set(false);
+            });
+            return;
+        }
+
         if ai_loading.get_untracked() {
             return;
         }
@@ -184,7 +325,7 @@ pub fn ChatPage() -> impl IntoView {
                     ai_loading.set(false);
                     streaming_text.set(String::new());
                     if e.contains("HTTP 402") {
-                        navigate("/paywall", Default::default());
+                        navigate("/settings/subscription", Default::default());
                     } else {
                         // FAIL LOUDLY: surface the error as an assistant-styled
                         // bubble and log it — never drop it silently.
@@ -196,6 +337,9 @@ pub fn ChatPage() -> impl IntoView {
             }
         });
     };
+
+    // One callback shared by both ChatInput instances (it self-routes by `mode`).
+    let on_send = Callback::new(do_send);
 
     // Messages shown in the stream: everything except tool_call records (those
     // live only in the "Context" section and the model's context).
@@ -221,7 +365,9 @@ pub fn ChatPage() -> impl IntoView {
         <div style="position: fixed; inset: 0; padding: env(safe-area-inset-top) 0.75rem 0; display: flex; flex-direction: column; background: var(--bulma-background);">
             <h1 class="title is-5" style="margin: 0 auto 0.75rem; max-width: 30rem; width: 100%; flex-shrink: 0;">{move || t("nav.support")}</h1>
 
-            <Show when=move || !context_tools().is_empty()>
+            <ModeToggle mode=mode />
+
+            <Show when=move || mode.get() == ChatMode::Ai && !context_tools().is_empty()>
                 <details attr:data-testid="chat-context"
                     style="flex-shrink: 0; max-width: 30rem; width: 100%; margin: 0 auto 0.5rem;">
                     <summary class="is-size-7 has-text-grey" style="cursor: pointer;">
@@ -252,43 +398,142 @@ pub fn ChatPage() -> impl IntoView {
             </Show>
 
             <div attr:data-testid="chat-messages" attr:data-ios-scroll="1" style="flex: 1; overflow-y: auto; overscroll-behavior: contain; max-width: 30rem; width: 100%; margin: 0 auto; padding-bottom: 9rem;">
-                <Show
-                    when=move || !messages.get().is_empty() || ai_loading.get()
-                    fallback=move || view! {
-                        <p class="has-text-grey has-text-centered" style="margin-top: 2rem;">
-                            {move || t("chat.empty")}
-                        </p>
-                    }
-                >
-                    <For
-                        // tool_call messages are NOT drawn in the stream; they live
-                        // only in the collapsible "Context" section (and the model's
-                        // context). Only user / assistant bubbles render here.
-                        each=move || stream_messages()
-                        key=|m| m.id.clone()
-                        children=move |m| view! { <ChatMessageBubble msg=m /> }
-                    />
-                    <Show when=move || ai_loading.get()>
-                        <StreamingBubble
-                            ai_phase=ai_phase ai_think=ai_think ai_answer=ai_answer
-                            ai_tick=ai_tick ai_start=ai_start streaming_text=streaming_text
-                            ai_tool=ai_tool />
+                // ── AI thread ──
+                <Show when=move || mode.get() == ChatMode::Ai>
+                    <Show
+                        when=move || !messages.get().is_empty() || ai_loading.get()
+                        fallback=move || view! {
+                            <p class="has-text-grey has-text-centered" style="margin-top: 2rem;">
+                                {move || t("chat.empty")}
+                            </p>
+                        }
+                    >
+                        <For
+                            // tool_call messages are NOT drawn in the stream; they live
+                            // only in the collapsible "Context" section (and the model's
+                            // context). Only user / assistant bubbles render here.
+                            each=move || stream_messages()
+                            key=|m| m.id.clone()
+                            children=move |m| view! { <ChatMessageBubble msg=m /> }
+                        />
+                        <Show when=move || ai_loading.get()>
+                            <StreamingBubble
+                                ai_phase=ai_phase ai_think=ai_think ai_answer=ai_answer
+                                ai_tick=ai_tick ai_start=ai_start streaming_text=streaming_text
+                                ai_tool=ai_tool />
+                        </Show>
+                    </Show>
+                </Show>
+
+                // ── Live thread (server-backed support-worker) ──
+                <Show when=move || mode.get() == ChatMode::Live>
+                    <Show
+                        when=move || !live_messages.get().is_empty() || !live_outbox.get().is_empty()
+                        fallback=move || view! {
+                            <p class="has-text-grey has-text-centered" style="margin-top: 2rem;">
+                                {move || t("chat.live_empty")}
+                            </p>
+                        }
+                    >
+                        <For
+                            each=move || live_messages.get()
+                            key=|m| m.seq
+                            children=move |m| view! { <LiveBubble msg=m /> }
+                        />
+                        // Optimistic outbox: right-aligned bubbles with a sending /
+                        // retry affordance.
+                        <For
+                            // Hide an outbox item once its message has landed as a
+                            // server row (reconciled by client_id) — avoids a transient
+                            // double-render in the lost-ack window.
+                            each=move || {
+                                let seen: std::collections::HashSet<String> =
+                                    live_messages.get().into_iter().map(|m| m.client_id).collect();
+                                live_outbox.get().into_iter().filter(|o| !seen.contains(&o.client_id)).collect::<Vec<_>>()
+                            }
+                            key=|o| o.client_id.clone()
+                            children=move |o| {
+                                let failed = o.status == "failed";
+                                let client_id = o.client_id.clone();
+                                view! {
+                                    <div attr:data-testid="live-outbox" attr:data-status=o.status.clone()
+                                        style="display: flex; flex-direction: column; margin-bottom: 10px;">
+                                        <div style="background: var(--bulma-link); color: var(--bulma-link-invert); border-radius: 12px; padding: 14px 16px; max-width: 80%; margin-left: auto; opacity: 0.6;">
+                                            <p class="is-size-6" style="white-space: pre-wrap; line-height: 1.45; margin: 0;">
+                                                {o.text.clone()}
+                                            </p>
+                                        </div>
+                                        {if failed {
+                                            let client_id = client_id.clone();
+                                            view! {
+                                                <button attr:data-testid="live-retry"
+                                                    class="is-size-7 has-text-danger"
+                                                    style="background: none; border: none; cursor: pointer; margin: 4px 0 0 auto; padding: 0;"
+                                                    on:click=move |_| {
+                                                        let client_id = client_id.clone();
+                                                        spawn_local(async move {
+                                                            if let Err(e) = support_chat::retry(client_id).await {
+                                                                logging::error!("support retry: {e}");
+                                                            }
+                                                        });
+                                                    }>
+                                                    {move || t("chat.live_retry")}
+                                                </button>
+                                            }.into_view()
+                                        } else {
+                                            view! {
+                                                <span class="is-size-7 has-text-grey" style="margin: 4px 0 0 auto;">
+                                                    {move || t("chat.live_sending")}
+                                                </span>
+                                            }.into_view()
+                                        }}
+                                    </div>
+                                }
+                            }
+                        />
                     </Show>
                 </Show>
             </div>
 
-            <ChatInput
-                input_text=input_text
-                pending_image=pending_image
-                pending_audio=pending_audio
-                recording=recording
-                rec_start=rec_start
-                rec_tick=rec_tick
-                sending=ai_loading
-                on_send=Callback::new(do_send)
-            />
+            // AI input (with attachments). Hidden in Live mode.
+            <Show when=move || mode.get() == ChatMode::Ai>
+                <ChatInput
+                    input_text=input_text
+                    pending_image=pending_image
+                    pending_audio=pending_audio
+                    recording=recording
+                    rec_start=rec_start
+                    rec_tick=rec_tick
+                    sending=ai_loading
+                    on_send=on_send
+                />
+            </Show>
+
+            // Live input (text-only; attachment signals are inert). Separate draft
+            // signal so toggling never clobbers the AI draft.
+            <Show when=move || mode.get() == ChatMode::Live>
+                <ChatInput
+                    input_text=live_input
+                    pending_image=live_no_image
+                    pending_audio=live_no_audio
+                    recording=live_no_recording
+                    rec_start=live_rec_start
+                    rec_tick=live_rec_tick
+                    sending=live_sending
+                    on_send=on_send
+                />
+            </Show>
         </div>
     }
+}
+
+/// True when the document is hidden (background tab / app backgrounded) — used to
+/// skip Live polling ticks while the page isn't visible.
+fn document_hidden() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .map(|d| d.hidden())
+        .unwrap_or(false)
 }
 
 fn lang_name() -> &'static str {

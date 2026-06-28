@@ -73,7 +73,11 @@ pub fn StoryPage() -> impl IntoView {
                 let seen_set = seen.get();
 
                 // ── Single active-task list ──
-                let active: Vec<String> = e.active_tasks().iter().map(|t| tr(&t.title)).collect();
+                let active: Vec<String> = e
+                    .active_tasks()
+                    .iter()
+                    .map(|t| story::fill_task_target(&t.id, tr(&t.title), &e.snap.progress))
+                    .collect();
                 let total = st.tasks.len();
                 let done = st.tasks.iter().filter(|t| e.task_closed(&t.id)).count();
                 let active_view = (!active.is_empty()).then(|| {
@@ -99,11 +103,16 @@ pub fn StoryPage() -> impl IntoView {
                         let route = sec.legacy_route.clone()
                             .unwrap_or_else(|| format!("/story/{}", sec.id));
                         let title = tr(&sec.title);
+                        let icon = sec.icon.clone();
+                        let icon_span = (!icon.is_empty()).then(|| view! {
+                            <span style="font-size: 20px; width: 26px; text-align: center; flex-shrink: 0;">{icon}</span>
+                        });
                         let is_new = unlocked && !seen_set.contains(&route);
                         let sep = (i > 0).then(|| view! { <div style=IOS_SEPARATOR></div> });
                         let row = if unlocked {
                             view! {
                                 <a href=route style=format!("{}cursor: pointer;", ROW_STYLE)>
+                                    {icon_span}
                                     <span class="is-size-6" style="flex: 1;">{title}</span>
                                     {is_new.then(new_dot)}
                                     <span style="color: var(--bulma-text-weak); font-size: 18px;">"\u{203a}"</span>
@@ -112,6 +121,7 @@ pub fn StoryPage() -> impl IntoView {
                         } else {
                             view! {
                                 <div style=format!("{}opacity: 0.45;", ROW_STYLE)>
+                                    {icon_span}
                                     <span class="is-size-6" style="flex: 1;">{title}</span>
                                     <span style="font-size: 15px;">"\u{1f512}"</span>
                                 </div>

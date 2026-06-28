@@ -141,17 +141,23 @@ pub fn SubscriptionPage() -> impl IntoView {
                     }}
                 </div>
 
-                // Not subscribed → a way to subscribe.
+                // Not subscribed → purchase happens on the website (landing), not
+                // in-app. Show a hint + a link out to the site.
                 {move || {
                     let unpaid = status.get().map(|s| !s.is_paid()).unwrap_or(false);
                     unpaid.then(|| view! {
-                        <button
+                        <p class="is-size-6 has-text-grey" style="margin-top: 16px; line-height: 1.5;">
+                            {move || t("settings.sub_buy_on_site")}
+                        </p>
+                        <a
                             class="button is-link is-fullwidth is-medium"
-                            style="margin-top: 16px;"
-                            on:click={ let nav = navigate.clone(); move |_| nav("/paywall", Default::default()) }
+                            style="margin-top: 8px;"
+                            href="https://renorma.app"
+                            target="_blank"
+                            rel="noopener"
                         >
-                            {move || t("story.sub.cta")}
-                        </button>
+                            {move || t("settings.sub_open_site")}
+                        </a>
                     })
                 }}
             </div>

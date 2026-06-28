@@ -62,6 +62,7 @@ pub async fn pull_full_dump() -> Result<(), String> {
     merge_store("recipe_ingredients", &dump.recipe_ingredients).await;
     merge_store("goals", &dump.goals).await;
     merge_store("story", &dump.story).await;
+    merge_store("profile", &dump.profile).await;
     merge_store("weight_entries", &dump.weight_entries).await;
     merge_store("step_entries", &dump.step_entries).await;
 
@@ -69,6 +70,10 @@ pub async fn pull_full_dump() -> Result<(), String> {
     // locally even though the server still re-sends the (un-deleted) entities.
     merge_store("deletions", &dump.deletions).await;
     local::apply_deletions().await;
+
+    // A pulled profile row lands in IndexedDB above; refresh the synchronous
+    // in-memory cache so getters see a remote update without a relaunch.
+    super::profile::hydrate().await;
 
     set_meta("last_pull_at", &chrono::Utc::now().to_rfc3339()).await;
     Ok(())
@@ -90,6 +95,7 @@ pub async fn push_to_server() -> Result<(), String> {
         recipe_ingredients: db::list_all("recipe_ingredients").await,
         goals: db::list_all("goals").await,
         story: db::list_all("story").await,
+        profile: db::list_all("profile").await,
         weight_entries: db::list_all("weight_entries").await,
         step_entries: db::list_all("step_entries").await,
         deletions: db::list_all("deletions").await,

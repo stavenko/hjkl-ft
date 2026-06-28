@@ -147,6 +147,9 @@
   .btn-white{background:#fff;color:var(--accent-ink);box-shadow:0 12px 28px -12px rgba(0,0,0,.35);margin-top:30px}
   .btn-white:hover{transform:translateY(-2px);box-shadow:0 18px 36px -12px rgba(0,0,0,.4)}
   .cta .fine{color:rgba(255,255,255,.86);font-size:13px;margin-top:18px;font-weight:600}
+  .cta .fine a{color:#fff;text-decoration:underline}
+  #pay-btn[disabled]{opacity:.6;cursor:progress}
+  .pay-error{color:#FB7156;background:rgba(255,255,255,.10);border:1px solid rgba(251,113,86,.5);border-radius:12px;padding:10px 14px;max-width:42ch;margin:16px auto 0;font-size:14px;font-weight:600;line-height:1.4}
 
   .policy{display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:980px;margin:18px auto 0}
   .pcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:26px;box-shadow:0 14px 36px -26px rgba(14,22,48,.45)}
@@ -197,7 +200,7 @@
       <h1>Не диета, а <span class="hl">привычка</span>, которая остаётся</h1>
       <p class="lead">re:Norma ведёт тебя маленькими ежедневными заданиями: шаг за шагом <b>формируется привычка</b> — и ты начинаешь понимать, что происходит с твоим питанием и весом. Через ведение дневника, <b>ты разбираешься в себе</b>.</p>
       <div class="hero-cta">
-        <a class="btn btn-primary" href="#start">Начать бесплатно</a>
+        <a class="btn btn-primary" href="#start">Оформить подписку</a>
         <a class="btn btn-ghost" href="#what">Как это работает</a>
       </div>
       <div class="hero-meta">
@@ -283,8 +286,10 @@
       <div class="cta">
         <h2>Открой re:Norma прямо сейчас</h2>
         <p class="c-lead">Работает в браузере и устанавливается как приложение на телефон. Данные хранятся на твоём устройстве.</p>
-        <a class="btn btn-white" href="https://fit.renorma.app" target="_blank" rel="noopener">Открыть приложение →</a>
+        <button id="pay-btn" class="btn btn-white" type="button">Оформить подписку →</button>
+        <p id="pay-error" class="pay-error" role="alert" hidden></p>
         <div class="fine">подписка ежемесячная · продлевается автоматически</div>
+        <div class="fine"><a href="https://fit.renorma.app">Уже оформили? Войти в приложение</a></div>
       </div>
 
       <div class="policy">
@@ -348,6 +353,61 @@
     <div class="cc">© re:Norma</div>
   </div>
 </footer>
+
+<script>
+  // ── Guest checkout (PROD-only by construction) ──────────────────────────────
+  // The landing is unauthenticated: it calls the PROD payment-worker
+  // /checkout/guest, then redirects the buyer to lava's hosted checkout. After a
+  // successful payment lava redirects to LANDING_RETURN_URL#claim=<id>.<secret>
+  // (the app /onboard), where the buyer registers and claims the paid sub.
+  // We receive only {payUrl, claimId} here — NEVER the claim secret (it travels
+  // back solely via the lava redirect fragment). No silent catch: every failure
+  // is surfaced in #pay-error.
+  (function () {
+    var PAY_BASE = "https://pay.renorma.app";
+    var PLAN_ID = "monthly";
+
+    var btn = document.getElementById("pay-btn");
+    var err = document.getElementById("pay-error");
+    if (!btn) return;
+
+    function showError(msg) {
+      err.textContent = "Не удалось оформить подписку: " + msg + ". Попробуйте ещё раз или напишите на info@renorma.app.";
+      err.hidden = false;
+    }
+
+    btn.addEventListener("click", async function () {
+      err.hidden = true;
+      btn.disabled = true;
+      var prev = btn.textContent;
+      btn.textContent = "Создаём оплату…";
+      try {
+        var r = await fetch(PAY_BASE + "/checkout/guest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: "lava", planId: PLAN_ID }),
+        });
+        if (!r.ok) {
+          showError(await r.text());
+          return;
+        }
+        var data = await r.json();
+        if (!data || !data.payUrl) {
+          showError("сервер не вернул ссылку на оплату");
+          return;
+        }
+        // lava hosted checkout; on success lava redirects to .../onboard#claim=...
+        window.location.href = data.payUrl;
+      } catch (e) {
+        showError(e && e.message ? e.message : String(e));
+      } finally {
+        // If we did NOT navigate away, re-enable the button.
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    });
+  })();
+</script>
 
 </body>
 </html>

@@ -223,7 +223,7 @@ pub fn FoodEditor(
                 ai_vision_msg.set(String::new());
                 ai_loading.set(false);
                 if let Some(e) = err {
-                    if e.contains("HTTP 402") { nav("/paywall"); } else { ai_error.set(Some(e)); }
+                    if e.contains("HTTP 402") { nav("/settings/subscription"); } else { ai_error.set(Some(e)); }
                 }
             };
 
@@ -234,7 +234,7 @@ pub fn FoodEditor(
                 if !s.active {
                     stop_timer();
                     ai_loading.set(false);
-                    navigate("/paywall", Default::default());
+                    navigate("/settings/subscription", Default::default());
                     return;
                 }
             }
@@ -355,18 +355,20 @@ pub fn FoodEditor(
                 let details = ai_details.get();
                 let key = key.clone();
                 details.get(&key).map(|d| {
+                    let unit = crate::services::i18n::unit_label(&d.recommended.unit);
                     let tip = format!(
-                        "{:.1}–{:.1} {} (rec: {:.1})\n{}",
-                        d.min_value.value, d.max_value.value, d.recommended.unit,
-                        d.recommended.value, d.comment,
+                        "{:.1}–{:.1} {} ({}: {:.1})\n{}",
+                        d.min_value.value, d.max_value.value, unit,
+                        t("food_editor.recommended_abbr"), d.recommended.value, d.comment,
                     );
                     let key_click = key.clone();
                     let key_open = key.clone();
                     view! {
                         <span style="position: relative; display: inline-block;">
-                            <span
+                            <button
+                                type="button"
                                 class="has-text-link is-size-7"
-                                style="margin-left: 4px; cursor: pointer; text-decoration: underline;"
+                                style="margin-left: 4px; cursor: pointer; text-decoration: underline; border: none; background: none; padding: 0; font: inherit; -webkit-appearance: none; appearance: none;"
                                 title=tip.clone()
                                 on:click=move |ev| {
                                     ev.stop_propagation();
@@ -375,11 +377,11 @@ pub fn FoodEditor(
                                         else { *o = Some(key_click.clone()); }
                                     });
                                 }
-                            >"?"</span>
+                            >"?"</button>
                             <Show when=move || open_tip.get().as_deref() == Some(key_open.as_str())>
                                 <div
                                     class="is-size-7"
-                                    style="position: absolute; z-index: 30; top: 1.4rem; left: 0; min-width: 12rem; max-width: 16rem; background: var(--bulma-scheme-main); color: var(--bulma-text); border: 1px solid var(--bulma-border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); padding: 8px 10px; white-space: pre-wrap; line-height: 1.4; text-align: left;"
+                                    style="position: absolute; z-index: 50; top: 1.4rem; left: 0; min-width: 12rem; max-width: 16rem; background: var(--bulma-scheme-main); color: var(--bulma-text); border: 1px solid var(--bulma-border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); padding: 8px 10px; white-space: pre-wrap; line-height: 1.4; text-align: left;"
                                     on:click=move |_| open_tip.set(None)
                                 >{tip.clone()}</div>
                             </Show>
@@ -406,7 +408,7 @@ pub fn FoodEditor(
             <input type="text"
                 placeholder=t("food_editor.product_name")
                 class="is-size-6"
-                style="width: 100%; padding: 10px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none; box-sizing: border-box; margin-bottom: 10px;"
+                style="width: 100%; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none; box-sizing: border-box; margin-bottom: 10px;"
                 prop:value=move || name.get()
                 on:input=move |ev| {
                     // Keep `draft_id` so the auto-sync effect propagates the new
@@ -502,8 +504,11 @@ pub fn FoodEditor(
                 </div>
             })}
 
-            // Nutrient fields card
-            <div style="background: var(--bulma-background); border-radius: 12px; overflow: hidden;">
+            // Nutrient fields card. NB: no `overflow: hidden` — it would clip the
+            // "?" hint popover that floats below the lower rows. The rounded look is
+            // kept by making the card itself the rounded surface (scheme-main) with
+            // transparent rows, rather than clipping opaque rows to the radius.
+            <div style="background: var(--bulma-scheme-main); border-radius: 12px;">
                 <NutrientRow label=t("food_editor.calories") unit=t("common.unit.kcal") placeholder="165"
                     value=kcal hint=ai_hint("kcal").into_view() last=false />
                 <NutrientRow label=t("food_editor.protein") unit=t("common.unit.g") placeholder="31"
@@ -561,7 +566,7 @@ fn NutrientRow(
 ) -> impl IntoView {
     view! {
         <div>
-            <div style="display: flex; align-items: center; padding: 10px 12px; background: var(--bulma-scheme-main);">
+            <div style="display: flex; align-items: center; padding: 10px 12px;">
                 <span class="is-size-6" style="color: var(--bulma-text); min-width: 80px;">
                     {label}
                 </span>

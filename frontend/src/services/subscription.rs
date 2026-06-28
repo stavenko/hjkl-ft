@@ -3,37 +3,9 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
-use super::{auth, config};
+use super::{app_flags, auth, config};
 
 const LS_KEY: &str = "ft_subscription";
-const LS_PAYWALL_SKIP_DATE: &str = "paywall_skipped_date";
-
-/// Local calendar date as `YYYY-MM-DD`.
-fn today_str() -> String {
-    let d = js_sys::Date::new_0();
-    format!("{:04}-{:02}-{:02}", d.get_full_year(), d.get_month() + 1, d.get_date())
-}
-
-/// Whether to show the paywall now: there's no PAID subscription AND the user
-/// hasn't already skipped it *today*. So it reappears once per calendar day
-/// (on launch and on foreground) until they subscribe. Paid users never see it.
-pub fn needs_paywall() -> bool {
-    if cached().map(|s| s.is_paid()).unwrap_or(false) {
-        return false;
-    }
-    let skipped = web_sys::window()
-        .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|s| s.get_item(LS_PAYWALL_SKIP_DATE).ok().flatten());
-    skipped.as_deref() != Some(today_str().as_str())
-}
-
-/// Record that the user skipped the paywall today (so it won't show again until
-/// the next calendar day).
-pub fn record_paywall_skip() {
-    if let Some(Ok(Some(s))) = web_sys::window().map(|w| w.local_storage()) {
-        let _ = s.set_item(LS_PAYWALL_SKIP_DATE, &today_str());
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
@@ -45,7 +17,7 @@ pub struct Status {
     #[serde(default)]
     pub start: i64, // ms epoch the subscription/trial began
     #[serde(default)]
-    pub status: Option<String>, // "trial" | "paid" | "cancelled" | "expired"
+    pub status: Option<String>, // "paid" | "cancelled" | "expired"
     #[serde(default)]
     pub no_renew: Option<bool>,
     #[serde(default)]
@@ -71,16 +43,13 @@ pub struct Plan {
 /// Last-known subscription status, cached in localStorage. Lets the Story page
 /// gate chapter 2 while briefly offline; refreshed on every successful fetch.
 pub fn cached() -> Option<Status> {
-    let storage = web_sys::window()?.local_storage().ok()??;
-    let json = storage.get_item(LS_KEY).ok()??;
+    let json = app_flags::get(LS_KEY)?;
     serde_json::from_str(&json).ok()
 }
 
 fn cache(status: &Status) {
     let Ok(json) = serde_json::to_string(status) else { return };
-    if let Some(Ok(Some(storage))) = web_sys::window().map(|w| w.local_storage()) {
-        let _ = storage.set_item(LS_KEY, &json);
-    }
+    app_flags::set(LS_KEY, &json);
 }
 
 pub async fn status() -> Result<Status, String> {
@@ -99,16 +68,35 @@ pub async fn plans() -> Result<Vec<Plan>, String> {
     Ok(r.plans)
 }
 
-/// Start checkout for a plan via a provider; returns the hosted-checkout URL to
-/// redirect the browser to. (Caller does `window.location().set_href(url)`.)
-pub async fn checkout(provider: &str, plan_id: &str) -> Result<String, String> {
+/// Claim a paid guest subscription (post-registration). Binds it to this account.
+///
+/// The `claim_id`/`secret` come from the `#claim=claimId.secret` fragment lava
+/// redirected to after payment. The server does an atomic compare-and-set inside
+/// the ClaimDO: idempotent for the same account, hard-rejected (403) for another.
+/// Success requires the signed webhook to have already marked the record paid; a
+/// not-yet-paid claim returns HTTP 409 `not_paid_yet` (the onboarding retries).
+pub async fn claim(claim_id: &str, secret: &str) -> Result<Status, String> {
+    let body = serde_json::json!({ "claimId": claim_id, "secret": secret });
+    let s: Status = request("POST", "/claim", Some(body)).await?;
+    cache(&s);
+    Ok(s)
+}
+
+/// Test-only entitlement path used by e2e: mints a deterministically-paid guest
+/// claim WITHOUT taking real money. Reachable only when the worker has
+/// `TEST_ENTITLEMENT=1` (absent in production, where `/test/*` returns 404), so
+/// compiling this in always is harmless in prod. Returns `(claim_id, secret)`.
+pub async fn test_guest_checkout(plan_id: &str) -> Result<(String, String), String> {
     #[derive(Deserialize)]
     struct Resp {
-        url: String,
+        #[serde(rename = "claimId")]
+        claim_id: String,
+        secret: String,
     }
-    let body = serde_json::json!({ "provider": provider, "planId": plan_id });
-    let r: Resp = request("POST", "/checkout", Some(body)).await?;
-    Ok(r.url)
+    let body = serde_json::json!({ "planId": plan_id });
+    // Unauthenticated (the user doesn't exist yet) — use the dedicated helper.
+    let r: Resp = request_unauthed("POST", "/test/guest-checkout", Some(body)).await?;
+    Ok((r.claim_id, r.secret))
 }
 
 /// Cancel auto-renew (stays active until the period ends).
@@ -123,9 +111,28 @@ async fn request<T: serde::de::DeserializeOwned>(
     path: &str,
     body: Option<serde_json::Value>,
 ) -> Result<T, String> {
+    let token = auth::get_token().ok_or_else(|| "not authenticated".to_string())?;
+    request_inner(method, path, body, Some(&token)).await
+}
+
+/// Like [`request`] but sends no `Authorization` header. Used for the
+/// unauthenticated test-entitlement path (the user doesn't exist yet).
+async fn request_unauthed<T: serde::de::DeserializeOwned>(
+    method: &str,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> Result<T, String> {
+    request_inner(method, path, body, None).await
+}
+
+async fn request_inner<T: serde::de::DeserializeOwned>(
+    method: &str,
+    path: &str,
+    body: Option<serde_json::Value>,
+    token: Option<&str>,
+) -> Result<T, String> {
     let base = &config::get().payment_base_url;
     let url = format!("{base}{path}");
-    let token = auth::get_token().ok_or_else(|| "not authenticated".to_string())?;
 
     let opts = web_sys::RequestInit::new();
     opts.set_method(method);
@@ -136,7 +143,9 @@ async fn request<T: serde::de::DeserializeOwned>(
 
     let headers = web_sys::Headers::new().map_err(|e| format!("{e:?}"))?;
     headers.set("Content-Type", "application/json").map_err(|e| format!("{e:?}"))?;
-    headers.set("Authorization", &format!("Bearer {token}")).map_err(|e| format!("{e:?}"))?;
+    if let Some(token) = token {
+        headers.set("Authorization", &format!("Bearer {token}")).map_err(|e| format!("{e:?}"))?;
+    }
     opts.set_headers(&headers);
 
     let request = web_sys::Request::new_with_str_and_init(&url, &opts)

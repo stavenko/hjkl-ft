@@ -26,6 +26,8 @@ pub struct FrontendConfig {
     pub sync_base_url: String,
     #[serde(default)]
     pub bug_report_base_url: String,
+    #[serde(default)]
+    pub support_base_url: String,
 }
 
 static CONFIG: OnceLock<FrontendConfig> = OnceLock::new();

@@ -7,7 +7,7 @@
 //! so all logic is pure and unit-testable. The snapshot is built in
 //! `story::engine_snapshot()` off IndexedDB.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
 
 use serde::Deserialize;
@@ -52,6 +52,9 @@ pub struct Chapter {
 pub struct Section {
     pub id: String,
     pub title: Loc,
+    /// Emoji shown next to the section in the story hub (cosmetic). Empty = none.
+    #[serde(default)]
+    pub icon: String,
     #[serde(default)]
     pub tasks: Vec<String>,
     /// Named Rust actions run when the section page is opened.
@@ -135,6 +138,24 @@ pub enum Cond {
         #[serde(default)]
         gte: Option<u32>,
     },
+    /// Longest run of consecutive calendar days over a day-source (registry key),
+    /// optionally counting only days strictly AFTER a section's open date.
+    Streak {
+        streak: String,
+        #[serde(default)]
+        gte: Option<u32>,
+        #[serde(default)]
+        since_open: Option<String>,
+    },
+    /// Distinct-day COUNT over a day-source (not requiring consecutiveness),
+    /// optionally counting only days strictly AFTER a section's open date.
+    Count {
+        count: String,
+        #[serde(default)]
+        gte: Option<u32>,
+        #[serde(default)]
+        since_open: Option<String>,
+    },
     SectionOpened { section_opened: String },
     TaskClosed { task: String },
     All { all: Vec<Cond> },
@@ -171,42 +192,21 @@ pub fn find_section(id: &str) -> Option<(&'static Chapter, &'static Section)> {
     None
 }
 
-// ── Sensors (numeric / boolean values read from Progress) ────────────────────
+// ── Sensors (single-day boolean values read from Progress) ───────────────────
+//
+// After the streak/count refactor, every remaining sensor is boolean (the numeric
+// consecutive-day streaks moved to `{streak}`/`{count}` day-sources). A `{sensor,
+// gte}` therefore compares the boolean's 0/1 value; `{sensor}` reads it directly.
 
-#[derive(Debug, Clone, Copy)]
-enum SensorVal {
-    Num(u32),
-    Bool(bool),
-}
-
-impl SensorVal {
-    fn as_num(self) -> u32 {
-        match self {
-            SensorVal::Num(n) => n,
-            SensorVal::Bool(b) => b as u32,
-        }
-    }
-    fn as_bool(self) -> bool {
-        match self {
-            SensorVal::Num(n) => n > 0,
-            SensorVal::Bool(b) => b,
-        }
-    }
-}
-
-fn sensor(name: &str, p: &Progress) -> SensorVal {
+fn sensor(name: &str, p: &Progress) -> bool {
     match name {
-        "weight_streak" => SensorVal::Num(p.weight_streak),
-        "steps_streak" => SensorVal::Num(p.steps_streak),
-        "diary_streak" => SensorVal::Num(p.diary_streak),
-        "diary_days" => SensorVal::Num(p.diary_days),
-        "calorie_planka_set" => SensorVal::Bool(p.calorie_planka_set),
-        "sub_active" => SensorVal::Bool(p.sub_active),
-        "sub_paid" => SensorVal::Bool(p.sub_paid),
-        "snack_yesterday" => SensorVal::Bool(p.s4_done),
-        "no_high_cal_drink_yesterday" => SensorVal::Bool(p.s5_done),
+        "calorie_planka_set" => p.calorie_planka_set,
+        "sub_active" => p.sub_active,
+        "sub_paid" => p.sub_paid,
+        "snack_yesterday" => p.s4_done,
+        "no_high_cal_drink_yesterday" => p.s5_done,
         // Unknown sensor: an authoring bug, guarded by `all_sensors_known` test.
-        _ => SensorVal::Bool(false),
+        _ => false,
     }
 }
 
@@ -223,6 +223,41 @@ pub struct EngineSnapshot {
     pub evt_closed: HashSet<String>,
     /// Chapter ids that have ever been open (`chapter_opened:<id>` — sticky).
     pub chapter_opened: HashSet<String>,
+    /// For each registered day-source (registry key → qualifying local dates),
+    /// the calendar days that satisfy that source's predicate. The engine reduces
+    /// these purely (consecutive-run or distinct-count), optionally filtered by a
+    /// `since_open` baseline. Built in `story::engine_snapshot()`.
+    pub source_days: BTreeMap<String, Vec<chrono::NaiveDate>>,
+    /// Per-section open date (local) read from each `seen:/story/<id>` flag — the
+    /// baseline for `since_open` counting (strictly-after).
+    pub section_open_date: BTreeMap<String, chrono::NaiveDate>,
+}
+
+/// Longest run of consecutive calendar days in `days` (sorted+deduped internally).
+fn longest_consecutive_run(days: &[chrono::NaiveDate]) -> u32 {
+    let mut days: Vec<chrono::NaiveDate> = days.to_vec();
+    days.sort();
+    days.dedup();
+    let mut best = 0u32;
+    let mut cur = 0u32;
+    let mut prev: Option<chrono::NaiveDate> = None;
+    for d in days {
+        cur = match prev {
+            Some(p) if d == p + chrono::Duration::days(1) => cur + 1,
+            _ => 1,
+        };
+        best = best.max(cur);
+        prev = Some(d);
+    }
+    best
+}
+
+/// Number of DISTINCT calendar days in `days`.
+fn distinct_day_count(days: &[chrono::NaiveDate]) -> u32 {
+    let mut days: Vec<chrono::NaiveDate> = days.to_vec();
+    days.sort();
+    days.dedup();
+    days.len() as u32
 }
 
 /// Read-only view bundling the parsed story with a snapshot, exposing the
@@ -241,6 +276,31 @@ impl<'a> Engine<'a> {
         self.story.tasks.iter().find(|t| t.id == id)
     }
 
+    /// Reduced value of a day-source: the source's qualifying dates, filtered to
+    /// days strictly after the `since_open` section's open date (if set), then
+    /// reduced by longest-consecutive-run (`consecutive`) or distinct-day-count.
+    /// Missing source → empty; `since_open` set but baseline absent → 0.
+    fn streak_value(&self, source: &str, since_open: &Option<String>, consecutive: bool) -> u32 {
+        let days = match self.snap.source_days.get(source) {
+            Some(d) => d,
+            None => return 0,
+        };
+        let filtered: Vec<chrono::NaiveDate> = match since_open {
+            Some(sec) => {
+                let Some(base) = self.snap.section_open_date.get(sec) else {
+                    return 0;
+                };
+                days.iter().copied().filter(|d| d > base).collect()
+            }
+            None => days.clone(),
+        };
+        if consecutive {
+            longest_consecutive_run(&filtered)
+        } else {
+            distinct_day_count(&filtered)
+        }
+    }
+
     fn eval(&self, c: &Cond) -> bool {
         match c {
             Cond::Word(Word::Always) => true,
@@ -250,8 +310,22 @@ impl<'a> Engine<'a> {
             Cond::Sensor { sensor: name, gte } => {
                 let v = sensor(name, &self.snap.progress);
                 match gte {
-                    Some(n) => v.as_num() >= *n,
-                    None => v.as_bool(),
+                    Some(n) => (v as u32) >= *n,
+                    None => v,
+                }
+            }
+            Cond::Streak { streak, gte, since_open } => {
+                let v = self.streak_value(streak, since_open, true);
+                match gte {
+                    Some(n) => v >= *n,
+                    None => v > 0,
+                }
+            }
+            Cond::Count { count, gte, since_open } => {
+                let v = self.streak_value(count, since_open, false);
+                match gte {
+                    Some(n) => v >= *n,
+                    None => v > 0,
                 }
             }
             Cond::SectionOpened { section_opened } => self.snap.opened.contains(section_opened),
@@ -275,10 +349,17 @@ impl<'a> Engine<'a> {
     /// for a progress display; None for non-counter tasks.
     pub fn task_counter(&self, id: &str) -> Option<(u32, u32)> {
         let t = self.task(id)?;
-        if let Cond::Sensor { sensor: name, gte: Some(n) } = &t.close {
-            Some((sensor(name, &self.snap.progress).as_num(), *n))
-        } else {
-            None
+        match &t.close {
+            Cond::Sensor { sensor: name, gte: Some(n) } => {
+                Some((sensor(name, &self.snap.progress) as u32, *n))
+            }
+            Cond::Streak { streak, gte: Some(n), since_open } => {
+                Some((self.streak_value(streak, since_open, true), *n))
+            }
+            Cond::Count { count, gte: Some(n), since_open } => {
+                Some((self.streak_value(count, since_open, false), *n))
+            }
+            _ => None,
         }
     }
 
@@ -379,7 +460,7 @@ mod tests {
     #[test]
     fn yaml_parses_and_has_three_chapters() {
         assert_eq!(story().chapters.len(), 3);
-        assert_eq!(story().tasks.len(), 19);
+        assert_eq!(story().tasks.len(), 25);
     }
 
     #[test]
@@ -387,32 +468,50 @@ mod tests {
         // Walk every Cond; assert each sensor name maps to a real sensor (the
         // `_ => false` fallback would silently break the DSL otherwise).
         const KNOWN: &[&str] = &[
-            "weight_streak", "steps_streak", "diary_streak", "diary_days",
             "calorie_planka_set", "sub_active", "sub_paid",
             "snack_yesterday", "no_high_cal_drink_yesterday",
         ];
-        fn walk(c: &Cond, known: &[&str]) {
+        // Day-sources referenced by {streak}/{count} conditions; each must map to a
+        // source closure registered in story::engine_snapshot().
+        const KNOWN_SOURCES: &[&str] = &[
+            "diary", "weight", "weighin_q5", "steps", "steps_planka", "veg", "protein",
+            "no_liquid_cal", "evening_protein",
+        ];
+        fn walk(c: &Cond, known: &[&str], known_sources: &[&str]) {
             match c {
                 Cond::Sensor { sensor, .. } => {
                     assert!(known.contains(&sensor.as_str()), "unknown sensor: {sensor}");
                 }
-                Cond::All { all } => all.iter().for_each(|c| walk(c, known)),
-                Cond::Any { any } => any.iter().for_each(|c| walk(c, known)),
+                Cond::Streak { streak, .. } => {
+                    assert!(known_sources.contains(&streak.as_str()), "unknown source: {streak}");
+                }
+                Cond::Count { count, .. } => {
+                    assert!(known_sources.contains(&count.as_str()), "unknown source: {count}");
+                }
+                Cond::All { all } => all.iter().for_each(|c| walk(c, known, known_sources)),
+                Cond::Any { any } => any.iter().for_each(|c| walk(c, known, known_sources)),
                 _ => {}
             }
         }
         for t in &story().tasks {
-            walk(&t.enable, KNOWN);
-            walk(&t.close, KNOWN);
+            walk(&t.enable, KNOWN, KNOWN_SOURCES);
+            walk(&t.close, KNOWN, KNOWN_SOURCES);
         }
         for ch in &story().chapters {
-            walk(&ch.open, KNOWN);
+            walk(&ch.open, KNOWN, KNOWN_SOURCES);
             for s in &ch.sections {
                 if let Some(c) = &s.complete {
-                    walk(c, KNOWN);
+                    walk(c, KNOWN, KNOWN_SOURCES);
                 }
             }
         }
+    }
+
+    /// Helper: `n` consecutive NaiveDates ending today.
+    #[cfg(test)]
+    fn consecutive_dates(n: u32) -> Vec<chrono::NaiveDate> {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        (0..n).map(|i| today - chrono::Duration::days(i as i64)).collect()
     }
 
     #[test]
@@ -426,10 +525,10 @@ mod tests {
         // Even with its OWN criteria met, a chapter stays locked while the
         // previous chapter isn't fully complete (its sections aren't opened/done).
         let mut s = snap();
-        s.progress.weight_streak = 7;
+        s.source_days.insert("weight".to_string(), consecutive_dates(7));
         s.progress.sub_active = true;
         assert!(!eng(&s).chapter_open(chapter("ch2"))); // ch1 not complete
-        s.progress.diary_days = 7;
+        s.source_days.insert("diary".to_string(), consecutive_dates(7));
         assert!(!eng(&s).chapter_open(chapter("ch3"))); // ch2 not complete
     }
 
@@ -437,18 +536,18 @@ mod tests {
     fn section_requires_explicit_opening() {
         // A read-only section (complete: always) is still not "complete" until
         // the user has opened it.
-        let aesthetics = chapter("ch3").sections.iter().find(|x| x.id == "ch3-aesthetics").unwrap();
+        let info = chapter("ch3").sections.iter().find(|x| x.id == "ch3-no-loss").unwrap();
         let mut s = snap();
-        assert!(!eng(&s).section_complete(aesthetics));
-        s.opened.insert("ch3-aesthetics".to_string());
-        assert!(eng(&s).section_complete(aesthetics));
+        assert!(!eng(&s).section_complete(info));
+        s.opened.insert("ch3-no-loss".to_string());
+        assert!(eng(&s).section_complete(info));
     }
 
     #[test]
     fn counter_close_at_seven() {
         let mut s = snap();
         assert!(!eng(&s).task_closed("weight_streak"));
-        s.progress.weight_streak = 7;
+        s.source_days.insert("weight".to_string(), consecutive_dates(7));
         assert!(eng(&s).task_closed("weight_streak"));
     }
 
@@ -470,15 +569,16 @@ mod tests {
     }
 
     #[test]
-    fn setup_completes_on_lang_and_notif_not_sex() {
+    fn setup_completes_only_when_all_three_done() {
         let ch1 = chapter("ch1");
         let setup = ch1.sections.iter().find(|s| s.id == "setup").unwrap();
         let mut s = snap();
         s.opened.insert("setup".to_string()); // must be opened first
         s.evt_closed.insert("lang".to_string());
-        assert!(!eng(&s).section_complete(setup)); // notif still open
         s.evt_closed.insert("notif".to_string());
-        assert!(eng(&s).section_complete(setup)); // sex NOT required
+        assert!(!eng(&s).section_complete(setup)); // sex still open → not complete
+        s.evt_closed.insert("sex".to_string());
+        assert!(eng(&s).section_complete(setup)); // sex + lang + notif all done
     }
 
     #[test]
@@ -507,6 +607,6 @@ mod tests {
         s2.opened.insert("intro".to_string());
         let active = eng(&s2).active_tasks();
         assert!(active.iter().any(|t| t.id == "photos")); // intro's task is now active
-        assert!(active.iter().all(|t| t.id != "diary_streak")); // ch2 section not opened
+        assert!(active.iter().all(|t| t.id != "diary_continue")); // ch2 section not opened
     }
 }

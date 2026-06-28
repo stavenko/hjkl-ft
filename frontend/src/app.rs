@@ -3,26 +3,51 @@ use leptos_router::*;
 
 use crate::pages;
 use crate::services::i18n::t;
-use crate::services::{auth, db, platform, push, story, subscription, update};
+use crate::services::{auth, db, platform, story, subscription, update};
 
 #[derive(Clone, Copy, PartialEq)]
 enum AppState {
     PwaPrompt,
     Auth,
-    PushOnboarding,
-    Paywall,
+    /// Session exists but there is NO active subscription (e.g. the user closed
+    /// the PWA mid-claim, or a terminal claim failure left a registered account
+    /// with no sub). We must NEVER drop such a user into the app (locked decision:
+    /// "never drop the user into the app unsubscribed"). This is a blocking screen,
+    /// not the app.
+    Locked,
     Ready,
 }
 
+/// Does the session currently hold an active subscription? Reads the cached status
+/// (refreshed on every successful fetch). A never-claimed account has no cache →
+/// false. Used to gate app entry so a registered-but-unclaimed session is blocked.
+fn has_active_sub() -> bool {
+    subscription::cached().map(|s| s.active).unwrap_or(false)
+}
+
+/// True when the current URL is the paid-landing claim entry (`/onboard#claim=…`).
+/// Registration happens ONLY here, so we must let OnboardPage render with no
+/// session instead of dropping the Auth (login) overlay over it.
+fn is_onboard_claim_entry() -> bool {
+    let Some(loc) = web_sys::window().map(|w| w.location()) else { return false };
+    let path = loc.pathname().unwrap_or_default();
+    let hash = loc.hash().unwrap_or_default();
+    path == "/onboard" && hash.starts_with("#claim=")
+}
+
 fn initial_state() -> AppState {
+    // `/onboard#claim=` drives its own register→claim flow; bypass all overlays so
+    // the Auth (login-only) screen doesn't cover it.
+    if is_onboard_claim_entry() {
+        return AppState::Ready;
+    }
     if platform::needs_pwa_prompt() {
         AppState::PwaPrompt
     } else if auth::get_user_id().is_none() {
         AppState::Auth
-    } else if push::needs_push_onboarding() {
-        AppState::PushOnboarding
-    } else if subscription::needs_paywall() {
-        AppState::Paywall
+    } else if !has_active_sub() {
+        // Session but no active sub → blocking screen, never the app.
+        AppState::Locked
     } else {
         AppState::Ready
     }
@@ -64,46 +89,36 @@ pub fn App() -> impl IntoView {
         story::refresh_attention();
     });
 
-    // Onboarding step transitions: push → paywall → app.
-    let after_push = move || {
-        if subscription::needs_paywall() {
-            state.set(AppState::Paywall);
+    // Onboarding step transitions: auth → app. Purchase is no longer an onboarding
+    // step — it happens on the landing before the app is ever opened, and binding
+    // the paid sub happens in the dedicated `/onboard` claim flow. Enabling push is
+    // no longer an onboarding screen either — the Story (chapter 1) walks the user
+    // through it instead.
+    let after_auth = move || {
+        // Gate on the subscription: a session with no active sub is blocked, never
+        // dropped into the app (locked decision). The Locked screen re-checks live.
+        if !has_active_sub() {
+            state.set(AppState::Locked);
         } else {
             state.set(AppState::Ready);
         }
     };
-    let after_auth = move || {
-        if push::needs_push_onboarding() {
-            state.set(AppState::PushOnboarding);
-        } else {
-            after_push();
-        }
-    };
 
-    // Re-show the paywall on foreground: a new calendar day since the last skip,
-    // still unsubscribed, and the user is already inside the app.
-    {
-        use wasm_bindgen::prelude::Closure;
-        use wasm_bindgen::JsCast;
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            let cb = Closure::<dyn FnMut()>::new(move || {
-                let hidden = web_sys::window()
-                    .and_then(|w| w.document())
-                    .and_then(|d| js_sys::Reflect::get(d.as_ref(), &"hidden".into()).ok())
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                if !hidden
-                    && state.get_untracked() == AppState::Ready
-                    && subscription::needs_paywall()
-                {
-                    state.set(AppState::Paywall);
-                }
-            });
-            let _ = doc
-                .add_event_listener_with_callback("visibilitychange", cb.as_ref().unchecked_ref());
-            cb.forget();
+    // On the Locked screen, re-fetch the live subscription status: if it became
+    // active (e.g. a claim completed in another tab, or a renewal landed), proceed
+    // into the app. Otherwise the user stays blocked (must claim / log in).
+    create_effect(move |_| {
+        if state.get() != AppState::Locked {
+            return;
         }
-    }
+        spawn_local(async move {
+            if let Ok(s) = subscription::status().await {
+                if s.active {
+                    state.set(AppState::Ready);
+                }
+            }
+        });
+    });
 
     view! {
         // Overlays
@@ -128,19 +143,28 @@ pub fn App() -> impl IntoView {
                 </div>
             }.into_view()),
 
-            AppState::PushOnboarding => Some(view! {
-                <div style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main);">
-                    <pages::push_onboarding::PushOnboarding on_done=Callback::new(move |_| {
-                        after_push();
-                    }) />
-                </div>
-            }.into_view()),
-
-            AppState::Paywall => Some(view! {
-                <div style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main); overflow-y: auto;">
-                    <pages::paywall_onboarding::PaywallOnboarding on_done=Callback::new(move |_| {
-                        state.set(AppState::Ready);
-                    }) />
+            // Session but no active subscription → blocking screen. The app behind
+            // it is NOT reachable (this overlay covers it). The user can log into a
+            // different account; a fresh sub is bought on the landing, not here.
+            AppState::Locked => Some(view! {
+                <div attr:data-testid="app-locked" style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center;">
+                    <div style="max-width: 24rem; width: 100%;">
+                        <img src="/icon-192.png" alt="re:Norma" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
+                        <h1 class="title is-5" style="margin-bottom: 0.5rem;">{move || t("locked.title")}</h1>
+                        <p class="has-text-grey mb-5" style="line-height: 1.6;">{move || t("locked.body")}</p>
+                        <button
+                            attr:data-testid="locked-btn-login"
+                            class="button is-light is-fullwidth"
+                            style="text-decoration: underline;"
+                            on:click=move |_| {
+                                // Switch account: drop the session and show the login dialog.
+                                auth::logout();
+                                state.set(AppState::Auth);
+                            }
+                        >
+                            {move || t("auth.login_title")}
+                        </button>
+                    </div>
                 </div>
             }.into_view()),
 
@@ -157,7 +181,7 @@ pub fn App() -> impl IntoView {
                         // Generic DSL-driven section page; serves migrated sections (those
                         // without a bespoke static route above). Static routes win by specificity.
                         <Route path="/story/:id" view=pages::story_section::StorySectionPage />
-                        <Route path="/paywall" view=pages::paywall::PaywallPage />
+                        <Route path="/onboard" view=pages::onboard::OnboardPage />
                         <Route path="/progress" view=pages::progress::ProgressPage />
                         <Route path="/diary" view=pages::diary::DiaryPage />
                         <Route path="/diary/add" view=pages::diary_add::DiaryAddPage />

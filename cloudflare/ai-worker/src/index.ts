@@ -1,7 +1,39 @@
 interface Env {
   AI: Ai;
-  JWT_SECRET: string;
+  // In dev this is the plain [vars] string; in prod it is a Secrets Store
+  // binding (SecretsStoreSecret with async .get()). Resolve via readSecret().
+  JWT_SECRET: string | SecretsStoreSecret;
   SUBSCRIPTION_DO: DurableObjectNamespace;
+}
+
+/// Resolve a value that is either a plain [vars] string (dev) or a Secrets Store
+/// binding (prod, SecretsStoreSecret with async .get()). Never swallows:
+/// distinguishes undefined (configured nowhere → throw), a string (dev [vars]
+/// → return), and a SecretsStoreSecret (prod → await .get(), throw a clear
+/// MISCONFIGURED error if it rejects or resolves empty). Fails loudly so a
+/// misconfigured Store binding cannot silently degrade into a confusing 401.
+async function readSecret(value: string | SecretsStoreSecret | undefined, name: string): Promise<string> {
+  if (value === undefined) throw new Error(`MISCONFIGURED: ${name} not set (no Secrets Store binding and no var)`);
+  if (typeof value === "string") return value; // dev [vars]
+  let v: string;
+  try { v = await value.get(); }
+  catch (e) { throw new Error(`MISCONFIGURED: Secrets Store binding '${name}' get() failed: ${e}`); }
+  if (!v) throw new Error(`MISCONFIGURED: Secrets Store binding '${name}' is empty/unset`);
+  return v;
+}
+
+/// Resolve every required Store-bound secret at the top of fetch. Workers have
+/// no separate startup, so this runs per-request: any request to a misconfigured
+/// worker returns 503 + logs the reason instead of a confusing 401.
+async function requireSecrets(env: Env): Promise<Response | null> {
+  for (const name of ["JWT_SECRET"]) {
+    try { await readSecret((env as any)[name], name); }
+    catch (e) {
+      console.error(`STARTUP MISCONFIG: ${name}: ${e}`);
+      return new Response(`MISCONFIGURED: ${name} — ${e instanceof Error ? e.message : String(e)}`, { status: 503 });
+    }
+  }
+  return null;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -63,9 +95,9 @@ function decodeJwtSub(token: string): string | null {
   }
 }
 
-/// True if the user's subscription (Trial or Paid) is still active. Reads the
-/// per-user SubscriptionDO owned by payment-worker, which lazily creates a Trial
-/// on first read.
+/// True if the user's paid subscription is still active. Reads the per-user
+/// SubscriptionDO owned by payment-worker. There is no trial: a never-paid
+/// account reports active:false until it claims a paid guest subscription.
 async function subscriptionActive(env: Env, userId: string): Promise<boolean> {
   const stub = env.SUBSCRIPTION_DO.get(env.SUBSCRIPTION_DO.idFromName(userId));
   const res = await stub.fetch("https://do/subscription");
@@ -211,9 +243,12 @@ const inner = {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
+    const misconfig = await requireSecrets(env);
+    if (misconfig) return misconfig;
+
     const authHeader = request.headers.get("Authorization") ?? "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token || !(await verifyJwt(token, env.JWT_SECRET))) {
+    if (!token || !(await verifyJwt(token, await readSecret(env.JWT_SECRET, "JWT_SECRET")))) {
       return errorResponse("Unauthorized", 401);
     }
 

@@ -14,3 +14,5 @@ screenshot-*.png
 *.tgz
 test-results/
 e2e/test-results/
+
+.env

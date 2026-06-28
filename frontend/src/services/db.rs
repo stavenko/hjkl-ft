@@ -27,11 +27,34 @@ fn bump(store_name: &str) {
     });
 }
 
-// TODO: scope DB by user_id — change name to "hjkl-ft-{user_id}" so each user
-// gets their own IndexedDB. After login, reinitialize DB with the user's ID.
-pub async fn init() {
-    let rexie = Rexie::builder("hjkl-ft")
-        .version(9)
+/// The legacy, device-global database. Used before login (no user identity yet)
+/// and as the one-time migration source for users created before per-user scoping.
+const BOOTSTRAP_DB: &str = "hjkl-ft";
+const DB_VERSION: u32 = 12;
+
+/// Every object store, in a single list. `_sync_meta` carries sync cursors and
+/// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
+/// synced. The rest hold user data. Used for migration copy/clear and emptiness
+/// checks.
+const ALL_STORES: &[&str] = &[
+    "foods", "diary", "recipes", "recipe_ingredients",
+    "goals", "food_drafts", "weight_entries", "step_entries",
+    "progress_photos", "summaries", "chat", "story", "profile", "deletions", "_sync_meta",
+    "app_flags",
+    "support_messages", "support_outbox", "support_meta",
+];
+
+/// Per-user database name. Each account gets its own IndexedDB so a different
+/// user signing in on the same device never sees or pushes the previous user's
+/// data.
+fn user_db_name(user_id: &str) -> String {
+    format!("hjkl-ft-{user_id}")
+}
+
+/// Build the schema (identical for every database name we open).
+fn builder(name: &str) -> rexie::RexieBuilder {
+    Rexie::builder(name)
+        .version(DB_VERSION)
         .add_object_store(
             ObjectStore::new("foods")
                 .key_path("id")
@@ -98,24 +121,136 @@ pub async fn init() {
                 .add_index(rexie::Index::new("created_at", "created_at")),
         )
         .add_object_store(ObjectStore::new("story").key_path("key"))
+        // Synced user profile, a keyed singleton (one row, key "profile").
+        .add_object_store(ObjectStore::new("profile").key_path("key"))
         // Explicit deletion records (tombstones), synced and applied on every device.
         .add_object_store(ObjectStore::new("deletions").key_path("id"))
         .add_object_store(ObjectStore::new("_sync_meta").key_path("key"))
+        // Per-user UI flags (onboarding dismissals, paywall-skip date, cached
+        // subscription status). Not synced — these are per-user-per-device.
+        .add_object_store(ObjectStore::new("app_flags").key_path("key"))
+        // Live support thread (separate server from the AI `chat` store). Not
+        // synced — per-user-per-device cache, cursor, and optimistic outbox.
+        .add_object_store(ObjectStore::new("support_messages").key_path("seq"))
+        .add_object_store(ObjectStore::new("support_outbox").key_path("client_id"))
+        .add_object_store(ObjectStore::new("support_meta").key_path("key"))
+}
+
+async fn open(name: &str) -> Rexie {
+    builder(name)
         .build()
         .await
-        .expect("failed to open IndexedDB");
+        .expect("failed to open IndexedDB")
+}
 
+/// Open the bootstrap database and create the reactive version signals. The
+/// active database is switched to the per-user one by [`activate_for_user`] once
+/// the signed-in user is known (at launch, and on login / pairing).
+pub async fn init() {
+    let rexie = open(BOOTSTRAP_DB).await;
     DB.with(|cell| cell.replace(Some(rexie)));
 
-    const STORES: &[&str] = &[
-        "foods", "diary", "recipes", "recipe_ingredients",
-        "goals", "food_drafts", "weight_entries", "step_entries",
-        "progress_photos", "summaries", "chat", "story", "deletions", "_sync_meta",
-    ];
     STORE_VERSIONS.with(|cell| {
         let mut map = cell.borrow_mut();
-        for &name in STORES {
+        for &name in ALL_STORES {
             map.entry(name).or_insert_with(|| create_rw_signal(0u32));
+        }
+    });
+
+    // Hydrate the profile cache off the bootstrap DB for the signed-out path
+    // (`activate_for_user` re-hydrates once a user's database is swapped in).
+    crate::services::profile::migrate_from_local_storage().await;
+    crate::services::profile::hydrate().await;
+}
+
+/// Switch the active database to this user's per-user IndexedDB.
+///
+/// When `migrate_bootstrap` is set and the user's database is still empty, the
+/// legacy shared `hjkl-ft` database is copied in and then cleared — a one-time
+/// migration for accounts created before per-user scoping (it also rescues
+/// local-only stores like `progress_photos`, which sync never carries). Pass
+/// `migrate_bootstrap=true` ONLY for the already-signed-in user at launch, where
+/// the bootstrap data is attributable to them; on an explicit login it MUST be
+/// false so a new account never inherits the previous user's leftover data.
+pub async fn activate_for_user(user_id: &str, migrate_bootstrap: bool) {
+    let target = open(&user_db_name(user_id)).await;
+
+    if migrate_bootstrap && is_data_empty(&target).await {
+        let bootstrap = open(BOOTSTRAP_DB).await;
+        if !is_data_empty(&bootstrap).await {
+            copy_all(&bootstrap, &target).await;
+            clear_db(&bootstrap).await;
+        }
+    }
+
+    DB.with(|cell| cell.replace(Some(target)));
+
+    // One-time backfill of the legacy localStorage profile into the synced
+    // `profile` store (no-op if a row already exists), then hydrate the in-memory
+    // cache so synchronous profile getters read the active user's profile.
+    crate::services::profile::migrate_from_local_storage().await;
+    crate::services::profile::hydrate().await;
+
+    bump_all();
+}
+
+/// True when no data store holds any row (`_sync_meta` is ignored — cursors are
+/// not user data).
+async fn is_data_empty(db: &Rexie) -> bool {
+    for &store in ALL_STORES {
+        if store == "_sync_meta" {
+            continue;
+        }
+        let tx = db
+            .transaction(&[store], TransactionMode::ReadOnly)
+            .expect("failed to create transaction");
+        let count = tx.store(store).expect("store not found").count(None).await.expect("count failed");
+        if count > 0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Copy every row of every store from `src` into `dst` (raw values, by key path).
+async fn copy_all(src: &Rexie, dst: &Rexie) {
+    for &store in ALL_STORES {
+        let rtx = src
+            .transaction(&[store], TransactionMode::ReadOnly)
+            .expect("failed to create transaction");
+        let rows = rtx.store(store).expect("store not found").get_all(None, None).await.expect("get_all failed");
+        if rows.is_empty() {
+            continue;
+        }
+        let wtx = dst
+            .transaction(&[store], TransactionMode::ReadWrite)
+            .expect("failed to create transaction");
+        let wstore = wtx.store(store).expect("store not found");
+        for val in &rows {
+            wstore.put(val, None).await.expect("put failed");
+        }
+        wtx.done().await.expect("transaction failed");
+    }
+}
+
+/// Clear every store of a database (used to wipe the bootstrap DB after its data
+/// has been migrated into a per-user database).
+async fn clear_db(db: &Rexie) {
+    for &store in ALL_STORES {
+        let tx = db
+            .transaction(&[store], TransactionMode::ReadWrite)
+            .expect("failed to create transaction");
+        tx.store(store).expect("store not found").clear().await.expect("clear failed");
+        tx.done().await.expect("transaction failed");
+    }
+}
+
+/// Bump every store's version signal — call after swapping the active database so
+/// reactive readers re-query against the new data.
+fn bump_all() {
+    STORE_VERSIONS.with(|cell| {
+        for sig in cell.borrow().values() {
+            sig.update(|v| *v += 1);
         }
     });
 }
@@ -212,7 +347,7 @@ pub async fn count(store_name: &str) -> u32 {
 }
 
 pub async fn wipe_all() {
-    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "step_entries", "chat", "story", "deletions", "_sync_meta"];
+    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "step_entries", "chat", "support_messages", "support_outbox", "support_meta", "story", "profile", "deletions", "_sync_meta"];
     for store in stores {
         clear(store).await;
     }

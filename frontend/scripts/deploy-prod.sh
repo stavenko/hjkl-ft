@@ -27,7 +27,7 @@ s = open(p).read()
 prod = ("connect-src 'self' "
         "https://auth.renorma.app https://push.renorma.app https://ai.renorma.app "
         "https://pay.renorma.app https://ocr.renorma.app https://sync.renorma.app "
-        "https://bug.renorma.app;")
+        "https://bug.renorma.app https://support.renorma.app;")
 s, n = re.subn(r"connect-src [^;]*;", prod, s, count=1)
 assert n == 1, "connect-src directive not found in dist/_headers"
 open(p, "w").write(s)

@@ -5,7 +5,7 @@ use leptos::*;
 use serde::{Deserialize, Serialize};
 
 use crate::services::story_dsl::{self, Engine};
-use crate::services::{db, local, subscription, sync};
+use crate::services::{db, local, profile, subscription, summary, sync};
 
 /// Task flag: the user committed to wanting a new body (chapter 1, intro).
 pub const WANT_NEW_BODY: &str = "want_new_body";
@@ -28,6 +28,9 @@ pub const FIRST_FOOD_ARMED: &str = "first_food_armed";
 /// Milestone (event): a food was entered into the diary while the trigger was
 /// armed — i.e. the "first food entries" task is done.
 pub const FIRST_FOOD_DONE: &str = "first_food_done";
+/// Milestone (event): the user repeated a past day's food into today via the
+/// diary's "Repeat today" action — the "why keep a diary" section task.
+pub const FOOD_REPEATED: &str = "food_repeated";
 /// Milestone (event): the user enabled the steps reminder at least once.
 pub const STEPS_REMINDER: &str = "steps_reminder_enabled";
 /// Milestone (event): the user recorded their steps at least once.
@@ -42,12 +45,23 @@ pub const RESTAURANT_FOOD_ENTERED: &str = "restaurant_food_entered";
 pub const PROGRESS_PHOTOS_TAKEN: &str = "progress_photos_taken";
 /// Set once the user picks their sex in settings (setup section task).
 pub const SEX_SELECTED: &str = "sex_selected";
+/// Set once the user saves a valid year of birth in settings (accounting section
+/// task `age`). A STORY flag — distinct from the synced profile.birth_year value.
+pub const BIRTH_YEAR_SET: &str = "birth_year_set";
 /// Chapter 2 / s6: set when the meal-split section is opened. While set, the
 /// diary page groups the day's entries by derived meal instead of a flat list.
 pub const MEAL_SPLIT_UNLOCKED: &str = "meal_split_unlocked";
 /// Chapter 2 / s7: set when the "eating at night" section is opened and the
 /// user views today's evening feedback. Completes that section's task.
 pub const NIGHT_FEEDBACK_VIEWED: &str = "night_feedback_viewed";
+/// Chapter 3: the current daily steps planka (the "Почему не уходит вес" task —
+/// hit it 7 days in a row). A day counts toward the `steps_planka` source when
+/// its logged steps reach this value.
+pub const STEPS_PLANKA: u32 = 7000;
+/// Set when the chapter that lets the user pick their course goal (lose vs
+/// maintain) opens. Until then the goal chooser stays hidden in Settings and the
+/// goal defaults to weight loss.
+pub const COURSE_GOAL_UNLOCKED: &str = "course_goal_unlocked";
 
 #[derive(Serialize, Deserialize)]
 struct Flag {
@@ -62,6 +76,18 @@ struct Flag {
 /// Read a story progress flag. Defaults to `false` when not yet set.
 pub async fn get_flag(key: &str) -> bool {
     db::get::<Flag>("story", key).await.map(|f| f.value).unwrap_or(false)
+}
+
+/// The local date a (set) flag was last written — used as a baseline for
+/// "since this happened" counters. `None` if the flag is unset/false/undated.
+async fn flag_set_date(key: &str) -> Option<chrono::NaiveDate> {
+    let f = db::get::<Flag>("story", key).await?;
+    if !f.value {
+        return None;
+    }
+    chrono::DateTime::parse_from_rfc3339(&f.updated_at)
+        .ok()
+        .map(|dt| dt.with_timezone(&chrono::Local).date_naive())
 }
 
 /// All story flag keys currently set to `true`. Backs the DSL engine snapshot
@@ -92,11 +118,13 @@ pub async fn engine_snapshot() -> crate::services::story_dsl::EngineSnapshot {
     const TASK_FLAG: &[(&str, &str)] = &[
         ("photos", PROGRESS_PHOTOS_TAKEN),
         ("sex", SEX_SELECTED),
+        ("age", BIRTH_YEAR_SET),
         ("lang", LANGUAGE_CONFIGURED),
         ("notif", NOTIFICATION_RECEIVED),
         ("weigh_in", WEIGH_IN_REMINDER),
         ("first_weigh", FIRST_WEIGH),
         ("first_food", FIRST_FOOD_DONE),
+        ("repeat_food", FOOD_REPEATED),
         ("steps_reminder", STEPS_REMINDER),
         ("first_steps", FIRST_STEPS),
         ("dish_created", COOKING_DISH_CREATED),
@@ -118,12 +146,149 @@ pub async fn engine_snapshot() -> crate::services::story_dsl::EngineSnapshot {
         .filter_map(|k| k.strip_prefix("seen:/story/").map(str::to_string))
         .collect();
 
+    // Per-section open date (local) from each `seen:/story/<id>` flag's timestamp —
+    // the baseline for `since_open` streak/count counting (strictly-after).
+    let mut section_open_date: std::collections::BTreeMap<String, chrono::NaiveDate> =
+        std::collections::BTreeMap::new();
+    for id in &opened {
+        if let Some(d) = flag_set_date(&format!("seen:/story/{id}")).await {
+            section_open_date.insert(id.clone(), d);
+        }
+    }
+
+    let source_days = source_days().await;
+
     crate::services::story_dsl::EngineSnapshot {
         progress,
         opened,
         evt_closed,
         chapter_opened: HashSet::new(), // sticky chapter-open not persisted yet
+        source_days,
+        section_open_date,
     }
+}
+
+/// Parse a "YYYY-MM-DD" string to a local NaiveDate (None on bad input).
+fn parse_date(d: &str) -> Option<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
+}
+
+/// Build the day-source registry: for each registered source, the calendar days
+/// (local NaiveDate) that satisfy its predicate. This is the ONE place a new
+/// day-measurement registers — add a source closure here. The engine then reduces
+/// these purely (consecutive-run for `{streak}`, distinct-count for `{count}`),
+/// optionally filtered by a `since_open` baseline.
+///
+/// Predicates/thresholds are carried verbatim from the old per-sensor gather()
+/// blocks so behaviour is identical.
+async fn source_days() -> std::collections::BTreeMap<String, Vec<chrono::NaiveDate>> {
+    use std::collections::BTreeMap;
+    let mut out: BTreeMap<String, Vec<chrono::NaiveDate>> = BTreeMap::new();
+
+    // Entry-date sources.
+    let weight_entries = local::list_weight_entries().await;
+    let weight: Vec<chrono::NaiveDate> = weight_entries
+        .iter()
+        .filter_map(|e| parse_date(&e.date))
+        .collect();
+    out.insert("weight".to_string(), weight);
+
+    // Top-quality weigh-ins: all 5 quality conditions met (the "X/5" score = 5/5).
+    // Backs the ch3 "Калория" task (weigh in at 5/5, 7 days in a row).
+    let weighin_q5: Vec<chrono::NaiveDate> = weight_entries
+        .iter()
+        .filter(|e| e.no_water && e.no_food && e.no_wash && e.used_toilet && e.morning)
+        .filter_map(|e| parse_date(&e.date))
+        .collect();
+    out.insert("weighin_q5".to_string(), weighin_q5);
+
+    let step_entries = local::list_step_entries().await;
+    let steps: Vec<chrono::NaiveDate> = step_entries
+        .iter()
+        .filter_map(|e| parse_date(&e.date))
+        .collect();
+    out.insert("steps".to_string(), steps);
+
+    // Days that hit the steps planka (ch3 "Почему не уходит вес" task). The target
+    // is the current Steps goal (set via the weekly card), defaulting to STEPS_PLANKA.
+    let steps_target = local::steps_goal_amount().await.map(|a| a as u32).unwrap_or(STEPS_PLANKA);
+    let steps_planka: Vec<chrono::NaiveDate> = step_entries
+        .iter()
+        .filter(|e| e.steps >= steps_target)
+        .filter_map(|e| parse_date(&e.date))
+        .collect();
+    out.insert("steps_planka".to_string(), steps_planka);
+
+    let diary: Vec<chrono::NaiveDate> = local::list_diary_dates()
+        .await
+        .iter()
+        .filter_map(|d| parse_date(d))
+        .collect();
+    out.insert("diary".to_string(), diary);
+
+    // Per-day facts (from each stored day summary) back the veg/protein/drink sources.
+    let day_facts: Vec<(String, summary::DayFacts)> = db::list_all::<summary::Summary>("summaries")
+        .await
+        .into_iter()
+        .filter(|s| s.id.starts_with("day:"))
+        .filter_map(|s| summary::parse_day(&s.text).and_then(|d| d.facts).map(|f| (s.date, f)))
+        .collect();
+
+    // Veg/fruit: sex-specific target (≥400 g women / ≥600 g men).
+    let veg_target = match profile::get_sex() {
+        Some(profile::Sex::Female) => 400.0,
+        Some(profile::Sex::Male) => 600.0,
+        None => 600.0,
+    };
+    let veg: Vec<chrono::NaiveDate> = day_facts
+        .iter()
+        .filter(|(_, f)| f.veg_fruit_grams >= veg_target)
+        .filter_map(|(d, _)| parse_date(d))
+        .collect();
+    out.insert("veg".to_string(), veg);
+
+    // Protein target = 1.2 g/kg of the latest logged weight (0 if no weight).
+    let protein_target_g = weight_entries
+        .last()
+        .map(|e| (1.2 * e.weight_kg).round() as u32)
+        .unwrap_or(0);
+
+    // Protein: days hitting the calculated target. Empty when target==0 (preserving
+    // the old `only when target>0` gate → streak 0).
+    let protein: Vec<chrono::NaiveDate> = if protein_target_g > 0 {
+        day_facts
+            .iter()
+            .filter(|(_, f)| f.protein >= protein_target_g as f64)
+            .filter_map(|(d, _)| parse_date(d))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    out.insert("protein".to_string(), protein);
+
+    // No liquid calories: days with NO high-calorie ("liquid-calorie") drink logged.
+    let no_liquid_cal: Vec<chrono::NaiveDate> = day_facts
+        .iter()
+        .filter(|(_, f)| !f.high_cal_drink)
+        .filter_map(|(d, _)| parse_date(d))
+        .collect();
+    out.insert("no_liquid_cal".to_string(), no_liquid_cal);
+
+    // Evening protein: days whose evening protein reached ≥1/3 of the daily norm.
+    // Empty when target==0 (preserving the old gate → count 0). Used with COUNT.
+    let evening_protein: Vec<chrono::NaiveDate> = if protein_target_g > 0 {
+        let third = protein_target_g as f64 / 3.0;
+        day_facts
+            .iter()
+            .filter(|(_, f)| f.evening_protein_g >= third)
+            .filter_map(|(d, _)| parse_date(d))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    out.insert("evening_protein".to_string(), evening_protein);
+
+    out
 }
 
 /// Persist a story progress flag in the IndexedDB `story` store, stamp it for
@@ -156,7 +321,7 @@ pub async fn run_action(name: &str) {
         // are no weight entries yet.
         "set_protein_goal" => {
             if let Some(latest) = local::list_weight_entries().await.into_iter().last() {
-                let target = ((1.2 * latest.weight_kg) / 10.0).ceil() * 10.0;
+                let target = (1.2 * latest.weight_kg).round();
                 match local::list_goals().await.into_iter().find(|g| g.nutrient == "Protein") {
                     Some(mut g) => {
                         g.direction = GoalDirection::AtLeast;
@@ -179,6 +344,35 @@ pub async fn run_action(name: &str) {
                 }
                 sync::push_background();
             }
+        }
+        // Veg/fruit aggregate planka: sex-specific daily target (400 g women /
+        // 600 g men). Set when the section opens — joins the goals list.
+        "set_veg_goal" => {
+            let target = match profile::get_sex() {
+                Some(profile::Sex::Female) => 400.0,
+                _ => 600.0,
+            };
+            match local::list_goals().await.into_iter().find(|g| g.nutrient == "Овощи и фрукты") {
+                Some(mut g) => {
+                    g.direction = GoalDirection::AtLeast;
+                    g.amount = target;
+                    g.unit = GoalUnit::G;
+                    g.period = GoalPeriod::Day;
+                    g.updated_at = now();
+                    local::update_goal(&g).await;
+                }
+                None => {
+                    local::create_goal(CreateGoalInput {
+                        nutrient: "Овощи и фрукты".to_string(),
+                        direction: GoalDirection::AtLeast,
+                        amount: target,
+                        unit: GoalUnit::G,
+                        period: GoalPeriod::Day,
+                    })
+                    .await;
+                }
+            }
+            sync::push_background();
         }
         // Hidden non-track Calorie planka: avg daily kcal over the last 14 days with
         // diary entries; the trend balance decides avg (deficit) vs avg*0.95, rounded
@@ -224,29 +418,6 @@ pub async fn fire_first_food_if_armed() {
     }
 }
 
-/// Longest run of consecutive calendar days present in `dates` (each "YYYY-MM-DD").
-pub fn consecutive_day_streak(dates: &[String]) -> u32 {
-    let mut days: Vec<chrono::NaiveDate> = dates
-        .iter()
-        .filter_map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-        .collect();
-    days.sort();
-    days.dedup();
-
-    let mut best = 0u32;
-    let mut cur = 0u32;
-    let mut prev: Option<chrono::NaiveDate> = None;
-    for d in days {
-        cur = match prev {
-            Some(p) if d == p + chrono::Duration::days(1) => cur + 1,
-            _ => 1,
-        };
-        best = best.max(cur);
-        prev = Some(d);
-    }
-    best
-}
-
 // ---------------------------------------------------------------------------
 // Story progress model (shared by the Story page and the attention markers).
 // ---------------------------------------------------------------------------
@@ -272,10 +443,10 @@ pub struct Progress {
     pub restaurant_food: bool,
     pub meal_split_unlocked: bool,
     pub night_feedback_viewed: bool,
-    pub weight_streak: u32,
-    pub steps_streak: u32,
-    pub diary_streak: u32,
-    pub diary_days: u32,
+    /// The calculated daily protein target in grams: 1.2 g per kg of the latest
+    /// logged body weight, rounded up to 10 g (0 if no weight logged). Shown in
+    /// the protein task title.
+    pub protein_target_g: u32,
     pub calorie_planka_set: bool,
     pub s4_done: bool,
     pub s5_done: bool,
@@ -284,19 +455,29 @@ pub struct Progress {
 }
 
 
-/// Collect the current [`Progress`] from the DB (flags + derived streaks +
-/// cached subscription). Mirrors the per-signal effects on the Story page.
-pub async fn gather() -> Progress {
-    let weight_dates: Vec<String> =
-        local::list_weight_entries().await.into_iter().map(|e| e.date).collect();
-    let steps_dates: Vec<String> =
-        local::list_step_entries().await.into_iter().map(|e| e.date).collect();
-    let mut diary_dates = local::list_diary_dates().await;
-    let diary_streak = consecutive_day_streak(&diary_dates);
-    diary_dates.sort();
-    diary_dates.dedup();
-    let diary_days = diary_dates.len() as u32;
+/// Substitute the `{n}` target placeholder in a task title. The veg task shows
+/// the sex-specific target (400 g women / 600 g men); the protein task shows the
+/// calculated 1.2 g/kg target. Other tasks are returned unchanged. Used in BOTH
+/// the per-section task list and the hub's "active tasks" list.
+pub fn fill_task_target(id: &str, title: String, progress: &Progress) -> String {
+    match id {
+        "veg_streak" => {
+            let g = match crate::services::profile::get_sex() {
+                Some(crate::services::profile::Sex::Female) => 400,
+                _ => 600,
+            };
+            title.replace("{n}", &g.to_string())
+        }
+        "protein_streak" => title.replace("{n}", &progress.protein_target_g.to_string()),
+        _ => title,
+    }
+}
 
+/// Collect the current [`Progress`] from the DB (bool milestone flags + the
+/// displayed protein target + single-day bool sensors + cached subscription).
+/// Consecutive-day streaks / counts are NOT here — they are derived in-engine from
+/// the day-source registry (`source_days()`), filtered by section open dates.
+pub async fn gather() -> Progress {
     let calorie_planka_set = local::list_goals().await.into_iter().any(|g| {
         g.nutrient == "Calories"
             && g.direction == api_types::GoalDirection::AtMost
@@ -306,7 +487,23 @@ pub async fn gather() -> Progress {
     let y = local::yesterday();
     let report_ready = local::report_ready_on(&y).await;
     let s4_done = report_ready && local::snack_logged_on(&y).await;
-    let s5_done = report_ready && !local::high_cal_drink_on(&y).await;
+    // The drinks task counts a clean day only AFTER the ch2-drinks section was
+    // opened, so it isn't pre-satisfied by yesterday at opening time. Baseline is
+    // that section's `seen` flag (the old DRINKS_ARMED flag is gone).
+    let drinks_after_open = match flag_set_date("seen:/story/ch2-drinks").await {
+        Some(base) => chrono::NaiveDate::parse_from_str(&y, "%Y-%m-%d").map(|d| d > base).unwrap_or(false),
+        None => false,
+    };
+    let s5_done = report_ready && !local::high_cal_drink_on(&y).await && drinks_after_open;
+
+    // Protein target = 1.2 g/kg of the latest logged weight (0 if no weight). Kept
+    // here because it is a displayed target (fill_task_target) — not a sensor.
+    let protein_target_g = local::list_weight_entries()
+        .await
+        .into_iter()
+        .last()
+        .map(|e| (1.2 * e.weight_kg).round() as u32)
+        .unwrap_or(0);
 
     let sub = subscription::cached();
 
@@ -326,10 +523,7 @@ pub async fn gather() -> Progress {
         restaurant_food: get_flag(RESTAURANT_FOOD_ENTERED).await,
         meal_split_unlocked: get_flag(MEAL_SPLIT_UNLOCKED).await,
         night_feedback_viewed: get_flag(NIGHT_FEEDBACK_VIEWED).await,
-        weight_streak: consecutive_day_streak(&weight_dates),
-        steps_streak: consecutive_day_streak(&steps_dates),
-        diary_streak,
-        diary_days,
+        protein_target_g,
         calorie_planka_set,
         s4_done,
         s5_done,
@@ -502,7 +696,7 @@ mod tests {
     fn section_routes_are_recognised() {
         // Engine/unlock logic is tested in story_dsl; here just the route mapping.
         assert!(is_section_route("/story/intro"));
-        assert!(is_section_route("/story/ch3-lifestyle"));
+        assert!(is_section_route("/story/ch3-reward"));
         assert!(!is_section_route("/diary"));
         assert!(!is_section_route("/paywall"));
     }

@@ -118,14 +118,9 @@ test.describe('Flow B: New device shows QR → logged-in approves → auto-claim
     await page.reload();
     await page.waitForTimeout(3000);
 
-    // Should see auth page (onboarding)
-    const loginBtn = page.getByTestId('auth-btn-login');
-    await expect(loginBtn).toBeVisible({ timeout: 15_000 });
-    await loginBtn.click();
-
-    // -- Step 3: Click "Показать QR-код" on login screen --
+    // Should see the login screen directly (no-session "/" is login-only).
     const showQrBtn = page.getByTestId('auth-btn-show-qr');
-    await expect(showQrBtn).toBeVisible({ timeout: 5_000 });
+    await expect(showQrBtn).toBeVisible({ timeout: 15_000 });
 
     // Intercept /pair/request to get pairing data
     const [requestResp] = await Promise.all([

@@ -23,3 +23,5 @@ pub mod story_widgets;
 pub mod chat_message;
 pub mod chat_streaming;
 pub mod chat_input;
+pub mod mode_toggle;
+pub mod live_message;

@@ -143,6 +143,10 @@ pub async fn lookup(
         )
     };
 
+    let lang = match crate::services::i18n::get_lang() {
+        crate::services::i18n::Lang::Ru => "Russian",
+        crate::services::i18n::Lang::En => "English",
+    };
     let prompt = format!(
         "You are a nutritional database. For the food item \"{name}\", provide nutritional \
          values per 100 grams.\n\n\
@@ -154,7 +158,7 @@ pub async fn lookup(
          - min_value: lowest reasonable value for this food\n\
          - max_value: highest reasonable value for this food\n\
          - recommended: the most likely value to select\n\
-         - comment: brief explanation why this value is appropriate\n\n\
+         - comment: brief explanation why this value is appropriate, written in {lang}\n\n\
          Use these units: kcal for calories, g/mg/mkg/kg for weights.\n\
          All values are per 100g. Compute real values specifically for \"{name}\" — do not \
          copy any sample numbers.\n\n\
@@ -164,6 +168,7 @@ pub async fn lookup(
          nutrients go in the \"custom_nutrients\" object (use {{}} if none).",
         name = input.name,
         custom = custom_part,
+        lang = lang,
     );
 
     // Use `execute::<T>` so the ai-worker injects the JSON schema as an
@@ -520,6 +525,7 @@ pub async fn build_progress_snapshot() -> ProgressSnapshot {
                 GoalUnit::G => "g",
                 GoalUnit::Mg => "mg",
                 GoalUnit::Mcg => "mcg",
+                GoalUnit::Steps => "steps",
             }
             .to_string(),
         })
@@ -1170,7 +1176,7 @@ fn exact_range(value: f64, unit: &str) -> AiNutrientDetail {
         min_value: v.clone(),
         max_value: v.clone(),
         recommended: v,
-        comment: "Extracted from label".to_string(),
+        comment: crate::services::i18n::t("ai.extracted_from_label").to_string(),
     }
 }
 

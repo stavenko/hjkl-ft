@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <title>Renorma — поддержка</title>
+    <link data-trunk rel="rust" data-wasm-opt="z" />
+    <link data-trunk rel="copy-dir" href="config" />
+    <link data-trunk rel="copy-file" href="_redirects" />
+    <link data-trunk rel="copy-file" href="_headers" />
+    <style>
+        :root {
+            --bg: #f6f7f9; --card: #fff; --text: #1f2430; --muted: #6b7280;
+            --line: #e5e7eb; --link: #485fc7; --link-inv: #fff; --pink: #db2777;
+            --warn-bg: #fff7ed; --warn-text: #9a3412;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #14161c; --card: #1d212b; --text: #e7e9ee; --muted: #9aa3b2;
+                --line: #2c313d; --link: #6b86ff; --link-inv: #fff; --pink: #f472b6;
+                --warn-bg: #3a2a16; --warn-text: #fbbf24;
+            }
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; height: 100%; }
+        body {
+            background: var(--bg); color: var(--text);
+            font: 15px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+        }
+        button { font: inherit; cursor: pointer; }
+        input, textarea { font: inherit; }
+        .btn {
+            border: 1px solid var(--line); background: var(--card); color: var(--text);
+            border-radius: 10px; padding: 10px 14px;
+        }
+        .btn-primary { background: var(--link); color: var(--link-inv); border-color: var(--link); }
+        .btn:disabled { opacity: 0.5; cursor: default; }
+        .wrap { max-width: 640px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; }
+    </style>
+</head>
+<body></body>
+</html>

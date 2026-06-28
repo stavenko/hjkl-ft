@@ -51,7 +51,7 @@ fn now_secs() -> i64 {
 // ---- POST /pair/create (authenticated) ----
 
 pub async fn create_pairing(req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = match token::validate_from_header(&req, &ctx.env) {
+    let user_id = match token::validate_from_header(&req, &ctx.env).await {
         Ok(sub) => sub,
         Err(e) => {
             let body = ErrorResponse {
@@ -125,7 +125,7 @@ pub async fn request_pairing(_req: Request, ctx: RouteContext<()>) -> Result<Res
 // ---- POST /pair/approve (authenticated) ----
 
 pub async fn approve_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = match token::validate_from_header(&req, &ctx.env) {
+    let user_id = match token::validate_from_header(&req, &ctx.env).await {
         Ok(sub) => sub,
         Err(e) => {
             let body = ErrorResponse {
@@ -260,11 +260,7 @@ pub async fn finish_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<R
         .and_then(|v| v.as_str())
         .ok_or_else(|| Error::RustError("DO did not return user_id".into()))?;
 
-    let secret = ctx
-        .env
-        .secret("JWT_SECRET")
-        .map(|s| s.to_string())
-        .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
+    let secret = token::jwt_secret(&ctx.env).await?;
 
     let (token_response, token_id) =
         token::create_token(user_id, fingerprint, vec!["auth".to_string()], &secret)?;
@@ -282,7 +278,7 @@ pub async fn finish_pairing(mut req: Request, ctx: RouteContext<()>) -> Result<R
 // ---- GET /pair/status/:id (authenticated) ----
 
 pub async fn pairing_status(req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let _user_id = match token::validate_from_header(&req, &ctx.env) {
+    let _user_id = match token::validate_from_header(&req, &ctx.env).await {
         Ok(sub) => sub,
         Err(e) => {
             let body = ErrorResponse {

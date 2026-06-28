@@ -1,6 +1,6 @@
 name = "auth-worker"
 main = "build/worker/shim.mjs"
-compatibility_date = "2024-01-01"
+compatibility_date = "2024-12-01"
 
 [build]
 # Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
@@ -28,6 +28,8 @@ new_sqlite_classes = ["AuthDO"]
 JWT_SECRET = "dev-secret-change-in-production"
 RP_ID = "hjkl-ft.pages.dev"
 RP_ORIGIN = "https://hjkl-ft.pages.dev"
+ADMIN_RP_ID = "renorma-admin.pages.dev"
+ADMIN_RP_ORIGIN = "https://renorma-admin.pages.dev"
 
 # ── Production (separate worker on auth.renorma.app, clean DO data) ──
 # Deploy: wrangler deploy --env production
@@ -49,6 +51,22 @@ class_name = "UserDO"
 name = "AUTH_DO"
 class_name = "AuthDO"
 
+# JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
+# [vars] value above). The binding name MUST equal the env name the code reads.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"
+
 [env.production.vars]
 RP_ID = "renorma.app"
 RP_ORIGIN = "https://fit.renorma.app"
+# Admin must use a DISTINCT registrable rp_id so the WebAuthn rp_id-hash gate
+# (and the platform authenticator's per-RP credential scoping) separates admin
+# from app credentials. If admin shared rp_id="renorma.app" it would be a valid
+# registrable suffix of BOTH fit.renorma.app and admin.renorma.app, making an
+# admin passkey structurally usable on the app (and vice versa) — origin-only
+# isolation with no defense in depth. "admin.renorma.app" is NOT a registrable
+# suffix of "fit.renorma.app", so the scopes cannot cross.
+ADMIN_RP_ID = "admin.renorma.app"
+ADMIN_RP_ORIGIN = "https://admin.renorma.app"

@@ -157,14 +157,18 @@ test.describe('Username display name', () => {
       },
     });
 
-    await page.reload();
+    // Registration lives in the paid /onboard claim flow now. Mint a test claim
+    // and drive that page to audit the name-input gating.
+    const { mintTestClaim } = await import('./helpers');
+    const { claimId, secret } = await mintTestClaim(page);
+    await page.goto(`/onboard#claim=${claimId}.${secret}`);
     await page.waitForTimeout(3000);
 
-    const registerBtn = page.getByTestId('auth-btn-register');
+    const registerBtn = page.getByTestId('onboard-btn-register');
     await expect(registerBtn).toBeVisible({ timeout: 15_000 });
 
     // Register button should be disabled when name is empty
-    const nameInput = page.getByTestId('auth-input-name');
+    const nameInput = page.getByTestId('onboard-input-name');
     const hasNameInput = await nameInput.isVisible().catch(() => false);
 
     if (hasNameInput) {

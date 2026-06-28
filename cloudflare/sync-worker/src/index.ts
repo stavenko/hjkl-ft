@@ -12,7 +12,37 @@
 
 interface Env {
   SYNC_DO: DurableObjectNamespace;
-  JWT_SECRET: string;
+  // In dev this is the plain [vars] string; in prod it is a Secrets Store
+  // binding (SecretsStoreSecret with async .get()). Resolve via readSecret().
+  JWT_SECRET: string | SecretsStoreSecret;
+}
+
+/// Resolve a value that is either a plain [vars] string (dev) or a Secrets Store
+/// binding (prod, SecretsStoreSecret with async .get()). Never swallows: a
+/// Store-bound secret present but unresolvable (rejects/empty) throws a clear
+/// MISCONFIGURED error; an undefined value (configured nowhere) also throws.
+async function readSecret(value: string | SecretsStoreSecret | undefined, name: string): Promise<string> {
+  if (value === undefined) throw new Error(`MISCONFIGURED: ${name} not set (no Secrets Store binding and no var)`);
+  if (typeof value === "string") return value;                 // dev [vars]
+  let v: string;
+  try { v = await value.get(); }
+  catch (e) { throw new Error(`MISCONFIGURED: Secrets Store binding '${name}' get() failed: ${e}`); }
+  if (!v) throw new Error(`MISCONFIGURED: Secrets Store binding '${name}' is empty/unset`);
+  return v;
+}
+
+/// Resolve every REQUIRED Store-bound secret. Returns a 503 Response (and logs
+/// the full reason) on the first failure so any request to a misconfigured
+/// worker fails loudly instead of degrading to a confusing 401.
+async function requireSecrets(env: Env): Promise<Response | null> {
+  for (const name of ["JWT_SECRET"]) {
+    try { await readSecret((env as any)[name], name); }
+    catch (e) {
+      console.error(`STARTUP MISCONFIG: ${name}: ${e}`);
+      return new Response(`MISCONFIGURED: ${name} — ${e instanceof Error ? e.message : String(e)}`, { status: 503 });
+    }
+  }
+  return null;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -59,6 +89,7 @@ interface DumpShape {
   recipe_ingredients: any[];
   goals: any[];
   story: any[];
+  profile: any[];
   weight_entries: any[];
   step_entries: any[];
   deletions: any[];
@@ -108,6 +139,8 @@ export class SyncDO {
     }
     const story = await this.map("story");
     out.story = Object.values(story);
+    const profile = await this.map("profile");
+    out.profile = Object.values(profile);
     return out as DumpShape;
   }
 
@@ -136,6 +169,17 @@ export class SyncDO {
         if (isNewer(row, m[row.key])) m[row.key] = row;
       }
       await this.storage.put("story", m);
+    }
+
+    // Profile is a keyed singleton (one key, "profile") — same LWW machinery as
+    // story: whole-object last-writer-wins, no per-field merge.
+    if (Array.isArray(payload.profile) && payload.profile.length > 0) {
+      const m = await this.map("profile");
+      for (const row of payload.profile) {
+        if (!row || typeof row.key !== "string") continue;
+        if (isNewer(row, m[row.key])) m[row.key] = row;
+      }
+      await this.storage.put("profile", m);
     }
   }
 }
@@ -192,9 +236,12 @@ const inner = {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
+    const misconfig = await requireSecrets(env);
+    if (misconfig) return misconfig;
+
     const authHeader = request.headers.get("Authorization") ?? "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token || !(await verifyJwt(token, env.JWT_SECRET))) {
+    if (!token || !(await verifyJwt(token, await readSecret(env.JWT_SECRET, "JWT_SECRET")))) {
       return errorResponse("Unauthorized", 401);
     }
     const userId = decodeJwtSub(token);

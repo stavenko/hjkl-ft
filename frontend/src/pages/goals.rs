@@ -398,6 +398,7 @@ fn goal_controls(
                         GoalUnit::G => "common.unit.g",
                         GoalUnit::Mg => "common.unit.mg",
                         GoalUnit::Mcg => "common.unit.mcg",
+                        GoalUnit::Steps => "common.unit.steps",
                     };
 
                     view! {

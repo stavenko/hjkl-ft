@@ -126,7 +126,7 @@ pub fn SummaryBlock(#[prop(into)] date: Signal<String>) -> impl IntoView {
                         day_text.set((!s.text.is_empty()).then_some(s.text));
                         if let Some(err) = s.error.as_ref() {
                             if err.contains("HTTP 402") {
-                                navigate("/paywall", Default::default());
+                                navigate("/settings/subscription", Default::default());
                             }
                         }
                         ai_error.set(s.error);

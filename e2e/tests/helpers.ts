@@ -34,8 +34,45 @@ export async function patchRegisterFinish(page: Page) {
   });
 }
 
+/** Read the test env's `payment_base_url` from the served frontend config. */
+export async function paymentBaseUrl(page: Page): Promise<string> {
+  const toml = await page.evaluate(async () => {
+    const r = await fetch('/config/frontend.toml');
+    return r.text();
+  });
+  const m = toml.match(/^\s*payment_base_url\s*=\s*"([^"]+)"/m);
+  if (!m) throw new Error('payment_base_url not found in /config/frontend.toml');
+  return m[1];
+}
+
 /**
- * Set up virtual authenticator, dismiss PWA, register account.
+ * Mint a deterministically-paid GUEST claim via the payment-worker's
+ * PRODUCTION-IMPOSSIBLE test-entitlement path (`POST /test/guest-checkout`,
+ * gated by TEST_ENTITLEMENT — absent in prod, where it 404s). No real money.
+ * Returns the `{claimId, secret}` that go in the `#claim=claimId.secret` fragment.
+ */
+export async function mintTestClaim(page: Page, planId = 'monthly'): Promise<{ claimId: string; secret: string }> {
+  const base = await paymentBaseUrl(page);
+  const res = await page.evaluate(async ({ base, planId }) => {
+    const r = await fetch(`${base}/test/guest-checkout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId }),
+    });
+    return { status: r.status, body: await r.text() };
+  }, { base, planId });
+  if (res.status !== 200) {
+    throw new Error(`test/guest-checkout failed: HTTP ${res.status}: ${res.body}`);
+  }
+  const json = JSON.parse(res.body);
+  return { claimId: json.claimId, secret: json.secret };
+}
+
+/**
+ * Set up virtual authenticator, dismiss PWA, then run the FULL paid-onboarding:
+ * mint a test claim → /onboard#claim=… → register (name+passkey) → auto-claim →
+ * land in the app. Since the trial is gone, this is how e2e gets a *usable*
+ * (subscription-active) account.
  * Returns user_id and cdpSession.
  */
 export async function registerAccount(page: Page): Promise<{ cdpSession: CDPSession; userId: string }> {
@@ -55,19 +92,20 @@ export async function registerAccount(page: Page): Promise<{ cdpSession: CDPSess
   // Patch the register/finish request
   await patchRegisterFinish(page);
 
+  // Mint the paid guest claim first (needs the page origin for the config fetch).
   await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
-  await page.reload();
-  await page.waitForTimeout(3000);
+  const { claimId, secret } = await mintTestClaim(page);
 
-  // TryingPassKey → fail → Auth page
-  const createBtn = page.getByTestId('auth-btn-register');
+  // Drive the onboarding entry with the claim in the URL fragment.
+  await page.goto(`/onboard#claim=${claimId}.${secret}`);
+  await page.waitForTimeout(2000);
+
+  const createBtn = page.getByTestId('onboard-btn-register');
   await expect(createBtn).toBeVisible({ timeout: 15_000 });
 
-  // Fill in display name (required for registration)
-  const nameInput = page.getByTestId('auth-input-name');
+  const nameInput = page.getByTestId('onboard-input-name');
   await nameInput.fill('Test User');
   await expect(createBtn).toBeEnabled({ timeout: 2_000 });
-
   await createBtn.click();
 
   // Wait for registration complete
@@ -78,16 +116,17 @@ export async function registerAccount(page: Page): Promise<{ cdpSession: CDPSess
     await page.waitForTimeout(500);
   }
   expect(userId).toBeTruthy();
-  await page.waitForTimeout(1000);
 
-  // Dismiss push onboarding if it appears
+  // Auto-claim (test row is already paid) → success → app. The onboard page
+  // navigates to "/" on success; push onboarding may appear there.
+  await page.waitForTimeout(2000);
   const skipBtn = page.getByTestId('push-onboarding-btn-skip');
   const navDiary = page.getByTestId('nav-diary');
-  const visible = await skipBtn.isVisible({ timeout: 3000 }).catch(() => false);
+  const visible = await skipBtn.isVisible({ timeout: 5000 }).catch(() => false);
   if (visible) {
     await skipBtn.click();
   }
-  await expect(navDiary).toBeVisible({ timeout: 10_000 });
+  await expect(navDiary).toBeVisible({ timeout: 15_000 });
 
   return { cdpSession, userId };
 }

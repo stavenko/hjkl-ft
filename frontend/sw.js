@@ -148,18 +148,33 @@ self.addEventListener('notificationclick', function(event) {
     event.notification.close();
     var url = event.notification.data || '/';
 
-    if (event.action === 'open' || !event.action) {
-        event.waitUntil(
-            clients.matchAll({ type: 'window' }).then(function(windowClients) {
-                for (var i = 0; i < windowClients.length; i++) {
-                    var client = windowClients[i];
-                    if (client.url.includes(self.location.origin) && 'focus' in client) {
-                        client.navigate(url);
+    // Action buttons other than "open" do nothing; tapping the body gives an
+    // empty action and proceeds.
+    if (event.action && event.action !== 'open') {
+        return;
+    }
+
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(windowClients) {
+            for (var i = 0; i < windowClients.length; i++) {
+                var client = windowClients[i];
+                if (client.url.indexOf(self.location.origin) === 0) {
+                    // `client.navigate()` is a no-op on an already-focused iOS PWA
+                    // window, so the deep link (e.g. `?notif=1`) never reaches the
+                    // app. Hand the URL to the running page via postMessage instead;
+                    // the page navigates itself (see index.html). Fall back to a
+                    // best-effort navigate for engines that honour it.
+                    client.postMessage({ type: 'notificationclick', url: url });
+                    if (client.navigate) {
+                        try { client.navigate(url); } catch (e) {}
+                    }
+                    if ('focus' in client) {
                         return client.focus();
                     }
+                    return;
                 }
-                return clients.openWindow(url);
-            })
-        );
-    }
+            }
+            return clients.openWindow(url);
+        })
+    );
 });

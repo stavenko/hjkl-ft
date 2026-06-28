@@ -57,7 +57,7 @@ pub struct DayFacts {
     /// A low-calorie snack food was logged today (name-matched in Rust).
     #[serde(default)]
     pub snack_logged: bool,
-    /// A high-calorie drink was logged today (name-matched, >30 kcal/100g).
+    /// A high-calorie drink was logged today (name-matched, >10 kcal/100g).
     #[serde(default)]
     pub high_cal_drink: bool,
     /// Protein (g) eaten in the evening (Dinner + NightSnack meal buckets).

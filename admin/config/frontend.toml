@@ -1,0 +1,3 @@
+auth_base_url = "https://auth-worker.vg-stavenko.workers.dev"
+support_base_url = "https://support-worker.vg-stavenko.workers.dev"
+payment_base_url = "https://payment-worker.vg-stavenko.workers.dev"

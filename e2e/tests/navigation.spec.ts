@@ -1,5 +1,5 @@
 import { test, expect, type CDPSession } from '@playwright/test';
-import { patchRegisterFinish } from './helpers';
+import { registerAccount } from './helpers';
 
 test.describe('App navigation', () => {
   let cdpSession: CDPSession;
@@ -8,48 +8,10 @@ test.describe('App navigation', () => {
     await page.goto('/');
     await page.evaluate(() => localStorage.clear());
 
-    cdpSession = await page.context().newCDPSession(page);
-    await cdpSession.send('WebAuthn.enable');
-    await cdpSession.send('WebAuthn.addVirtualAuthenticator', {
-      options: {
-        protocol: 'ctap2',
-        transport: 'internal',
-        hasResidentKey: true,
-        hasUserVerification: true,
-        isUserVerified: true,
-        automaticPresenceSimulation: true,
-      },
-    });
+    // Register + claim a paid sub via /onboard (the only registration path now),
+    // landing in the app with a usable (subscription-active) account.
+    ({ cdpSession } = await registerAccount(page));
 
-    // Patch register/finish to include user_id
-    await patchRegisterFinish(page);
-
-    await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
-    await page.reload();
-    await page.waitForTimeout(3000);
-
-    // Wait for TryingPassKey → Auth page
-    const createBtn = page.getByTestId('auth-btn-register');
-    await expect(createBtn).toBeVisible({ timeout: 15_000 });
-
-    // Fill in display name (required for registration)
-    const nameInput = page.getByTestId('auth-input-name');
-    await nameInput.fill('Test User');
-    await expect(createBtn).toBeEnabled({ timeout: 2_000 });
-
-    await createBtn.click();
-
-    // Wait for registration complete -- verify it actually worked
-    let registered = false;
-    for (let i = 0; i < 40; i++) {
-      const uid = await page.evaluate(() => localStorage.getItem('user_id'));
-      if (uid) { registered = true; break; }
-      await page.waitForTimeout(500);
-    }
-    expect(registered).toBe(true);
-    await page.waitForTimeout(1000);
-
-    // Verify the auth overlay is gone by waiting for nav to be clickable
     const navLink = page.getByTestId('nav-recipes');
     await expect(navLink).toBeVisible({ timeout: 10_000 });
   });

@@ -5,16 +5,10 @@ use wasm_bindgen_futures::JsFuture;
 const KEY_PUSH_SUBSCRIBED: &str = "push_subscribed";
 const KEY_PUSH_ONBOARDING_DISMISSED: &str = "push_onboarding_dismissed";
 
+use super::app_flags;
+
 fn window() -> web_sys::Window {
     web_sys::window().expect("no window")
-}
-
-fn storage() -> web_sys::Storage {
-    window()
-        .local_storage()
-        .ok()
-        .flatten()
-        .expect("no localStorage")
 }
 
 /// Check whether the Push API is available in this browser. Requires a service
@@ -34,24 +28,13 @@ pub fn is_supported() -> bool {
         && present(win.as_ref(), "PushManager")
 }
 
-/// Check localStorage flag indicating an active subscription.
+/// Whether this device has an active push subscription (per-user flag).
 pub fn is_subscribed() -> bool {
-    storage()
-        .get_item(KEY_PUSH_SUBSCRIBED)
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false)
+    app_flags::get_bool(KEY_PUSH_SUBSCRIBED)
 }
 
 fn set_subscribed(val: bool) {
-    if val {
-        storage()
-            .set_item(KEY_PUSH_SUBSCRIBED, "true")
-            .expect("write push_subscribed");
-    } else {
-        let _ = storage().remove_item(KEY_PUSH_SUBSCRIBED);
-    }
+    app_flags::set_bool(KEY_PUSH_SUBSCRIBED, val);
 }
 
 pub fn needs_push_onboarding() -> bool {
@@ -59,17 +42,11 @@ pub fn needs_push_onboarding() -> bool {
 }
 
 fn onboarding_dismissed() -> bool {
-    storage()
-        .get_item(KEY_PUSH_ONBOARDING_DISMISSED)
-        .ok()
-        .flatten()
-        .is_some()
+    app_flags::get_bool(KEY_PUSH_ONBOARDING_DISMISSED)
 }
 
 pub fn dismiss_onboarding() {
-    storage()
-        .set_item(KEY_PUSH_ONBOARDING_DISMISSED, "true")
-        .expect("write push_onboarding_dismissed");
+    app_flags::set_bool(KEY_PUSH_ONBOARDING_DISMISSED, true);
 }
 
 /// Request notification permission. Returns `true` if granted.

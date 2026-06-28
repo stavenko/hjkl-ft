@@ -67,7 +67,7 @@ async fn vapid_key(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
 }
 
 async fn subscribe(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = validate_token(&req, &ctx)?;
+    let user_id = validate_token(&req, &ctx).await?;
     let subscription: PushSubscription = req.json().await
         .map_err(|e| Error::RustError(format!("invalid body: {e}")))?;
 
@@ -81,7 +81,7 @@ async fn subscribe(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
 }
 
 async fn unsubscribe(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = validate_token(&req, &ctx)?;
+    let user_id = validate_token(&req, &ctx).await?;
     let body: serde_json::Value = req.json().await
         .map_err(|e| Error::RustError(format!("invalid body: {e}")))?;
     let endpoint = body.get("endpoint").and_then(|v| v.as_str())
@@ -97,7 +97,7 @@ async fn unsubscribe(mut req: Request, ctx: RouteContext<()>) -> Result<Response
 }
 
 async fn update_schedule(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = validate_token(&req, &ctx)?;
+    let user_id = validate_token(&req, &ctx).await?;
     let schedule: serde_json::Value = req.json().await
         .map_err(|e| Error::RustError(format!("invalid body: {e}")))?;
 
@@ -120,7 +120,7 @@ async fn test_alarm(mut req: Request, ctx: RouteContext<()>) -> Result<Response>
 }
 
 async fn test_push(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = validate_token(&req, &ctx)?;
+    let user_id = validate_token(&req, &ctx).await?;
     // The client owns routing: it decides body + deep-link url based on the
     // user's story progress and passes them here. The worker just relays.
     let body_json: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
@@ -145,9 +145,9 @@ async fn test_push(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
 /// by a shared secret header (`X-Internal-Key`), NOT a user JWT — the caller is
 /// trusted and passes the target `userId` explicitly.
 async fn notify_push(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let key = ctx.env.var("INTERNAL_PUSH_KEY")
-        .map(|v| v.to_string())
-        .map_err(|_| Error::RustError("INTERNAL_PUSH_KEY not configured".into()))?;
+    let key = secret_or_var(&ctx.env, "INTERNAL_PUSH_KEY")
+        .await
+        .map_err(Error::RustError)?;
     let provided = req.headers().get("X-Internal-Key")
         .map_err(|e| Error::RustError(format!("{e}")))?
         .unwrap_or_default();
@@ -177,7 +177,7 @@ async fn notify_push(mut req: Request, ctx: RouteContext<()>) -> Result<Response
 }
 
 async fn get_schedule(req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = validate_token(&req, &ctx)?;
+    let user_id = validate_token(&req, &ctx).await?;
     let stub = schedule_do_stub(&ctx.env, &user_id)?;
     let url = "https://internal/get";
     let internal_req = Request::new(url, Method::Get)?;
@@ -197,16 +197,35 @@ async fn broadcast(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
 // Token validation (calls auth-worker)
 // ---------------------------------------------------------------------------
 
-fn validate_token(req: &Request, ctx: &RouteContext<()>) -> Result<String> {
+/// Resolve a secret, preferring the Cloudflare Secrets Store binding (prod) and
+/// falling back to a per-worker secret / [vars] value (dev/test). In dev there is
+/// NO Store binding → `env.secret_store` errs → we fall back to the [vars] value,
+/// so nothing dev-side changes. In prod the Store binding returns the global value.
+/// Returns Err with a clear MISCONFIGURED message when the Store binding is
+/// present but unresolvable, or when the secret is configured nowhere.
+async fn secret_or_var(env: &Env, name: &str) -> std::result::Result<String, String> {
+    match env.secret_store(name) {
+        Ok(store) => match store.get().await {
+            Ok(Some(v)) if !v.is_empty() => Ok(v),
+            Ok(_) => Err(format!("MISCONFIGURED: Secrets Store binding '{name}' is empty/unset")),
+            Err(e) => Err(format!("MISCONFIGURED: Secrets Store binding '{name}' get() failed: {e:?}")),
+        },
+        Err(_) => env.secret(name).map(|s| s.to_string()).ok()
+            .or_else(|| env.var(name).map(|v| v.to_string()).ok())
+            .ok_or_else(|| format!("MISCONFIGURED: '{name}' not set (no Secrets Store binding and no var/secret)")),
+    }
+}
+
+async fn validate_token(req: &Request, ctx: &RouteContext<()>) -> Result<String> {
     let auth_header = req.headers().get("Authorization")
         .map_err(|e| Error::RustError(format!("{e}")))?
         .ok_or_else(|| Error::RustError("missing Authorization header".into()))?;
     let token = auth_header.strip_prefix("Bearer ")
         .ok_or_else(|| Error::RustError("invalid Authorization header".into()))?;
 
-    let secret = ctx.env.var("JWT_SECRET")
-        .map(|v| v.to_string())
-        .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
+    let secret = secret_or_var(&ctx.env, "JWT_SECRET")
+        .await
+        .map_err(Error::RustError)?;
 
     verify_jwt(token, &secret)
 }
@@ -360,6 +379,22 @@ pub struct PushSubscriptionKeys {
 // Entrypoints
 // ---------------------------------------------------------------------------
 
+/// Resolve every REQUIRED secret for this worker up front. On the first failure,
+/// log the full reason loudly and return a 503 so any request immediately shows
+/// the worker is misconfigured and why. Runs per-request (Workers have no separate
+/// startup phase) — intended: a misconfigured worker fails LOUDLY on every request.
+async fn require_secrets(env: &Env) -> std::result::Result<(), Response> {
+    for name in ["JWT_SECRET", "INTERNAL_PUSH_KEY"] {
+        if let Err(reason) = secret_or_var(env, name).await {
+            console_error!("STARTUP MISCONFIG: {name}: {reason}");
+            let body = format!("MISCONFIGURED: {name} — {reason}");
+            return Err(Response::error(body, 503)
+                .unwrap_or_else(|_| Response::error("MISCONFIGURED", 503).unwrap()));
+        }
+    }
+    Ok(())
+}
+
 #[event(fetch)]
 async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     // Capture the request Origin before the router consumes `req`.
@@ -375,6 +410,10 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         let _ = headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
         let _ = headers.set("Access-Control-Max-Age", "86400");
         return Ok(Response::empty()?.with_headers(headers).with_status(204));
+    }
+
+    if let Err(resp) = require_secrets(&env).await {
+        return Ok(resp);
     }
 
     let router = Router::new();

@@ -112,7 +112,7 @@ pub fn FoodPicker(
                     type="text"
                     placeholder=t("diary_add.search_placeholder")
                     class="is-size-6"
-                    style="flex: 1; padding: 8px 12px; border: none; border-radius: 10px; background: var(--bulma-background); color: var(--bulma-text); outline: none;"
+                    style="flex: 1; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none;"
                     prop:value=move || search.get()
                     on:input=move |ev| search.set(event_target_value(&ev))
                 />

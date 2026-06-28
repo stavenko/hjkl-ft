@@ -65,11 +65,12 @@ test.describe('Content Security Policy', () => {
 
     await page.goto('/');
 
-    // Wait for actual WASM-rendered content — not just HTML skeleton
-    // Either PWA prompt dismiss button OR auth register button must appear
+    // Wait for actual WASM-rendered content — not just HTML skeleton.
+    // Either the PWA prompt dismiss button OR the login (try-passkey) button must
+    // appear. (Registration lives at /onboard now; "/" shows login only.)
     const rendered = await Promise.race([
       page.getByTestId('pwa-btn-dismiss').waitFor({ timeout: 15_000 }).then(() => 'pwa'),
-      page.getByTestId('auth-btn-register').waitFor({ timeout: 15_000 }).then(() => 'auth'),
+      page.getByTestId('auth-btn-try-passkey').waitFor({ timeout: 15_000 }).then(() => 'auth'),
     ]).catch(() => 'nothing');
 
     // Log ALL console messages for debugging

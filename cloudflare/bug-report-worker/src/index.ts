@@ -9,8 +9,50 @@
 
 interface Env {
   BUG_REPORT_DO: DurableObjectNamespace;
-  JWT_SECRET: string;
-  ADMIN_KEY: string;
+  // In dev this is the plain [vars] string; in prod it is a Secrets Store
+  // binding (SecretsStoreSecret with async .get()). Resolve via readSecret().
+  JWT_SECRET: string | SecretsStoreSecret | undefined;
+  ADMIN_KEY: string | undefined;
+}
+
+/// Resolve a value that is either a plain [vars] string (dev) or a Secrets Store
+/// binding (prod, SecretsStoreSecret with async .get()). Never swallows: an
+/// undefined value, or a Store-bound secret that rejects/returns empty, throws a
+/// clear MISCONFIGURED error and fails loudly (no silent fallback).
+async function readSecret(
+  value: string | SecretsStoreSecret | undefined,
+  name: string,
+): Promise<string> {
+  if (value === undefined)
+    throw new Error(`MISCONFIGURED: ${name} not set (no Secrets Store binding and no var)`);
+  if (typeof value === "string") return value; // dev [vars]
+  let v: string;
+  try {
+    v = await value.get();
+  } catch (e) {
+    throw new Error(`MISCONFIGURED: Secrets Store binding '${name}' get() failed: ${e}`);
+  }
+  if (!v) throw new Error(`MISCONFIGURED: Secrets Store binding '${name}' is empty/unset`);
+  return v;
+}
+
+/// Resolve every REQUIRED Store-bound secret up-front so a misconfigured worker
+/// fails LOUDLY and OBVIOUSLY (503 + console.error) on every request, instead of
+/// silently degrading into a confusing 401. Runs per-request (Workers have no
+/// separate startup) — intended.
+async function requireSecrets(env: Env): Promise<Response | null> {
+  for (const name of ["JWT_SECRET", "ADMIN_KEY"]) {
+    try {
+      await readSecret((env as any)[name], name);
+    } catch (e) {
+      console.error(`STARTUP MISCONFIG: ${name}: ${e}`);
+      return new Response(
+        `MISCONFIGURED: ${name} — ${e instanceof Error ? e.message : String(e)}`,
+        { status: 503 },
+      );
+    }
+  }
+  return null;
 }
 
 const CORS_HEADERS: Record<string, string> = {
@@ -152,6 +194,9 @@ const inner = {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
+    const misconfig = await requireSecrets(env);
+    if (misconfig) return misconfig;
+
     const url = new URL(request.url);
     const stub = env.BUG_REPORT_DO.get(env.BUG_REPORT_DO.idFromName("global"));
 
@@ -159,7 +204,7 @@ const inner = {
     // tool), NOT a user JWT — so one signed-in user can't read others' reports.
     if (request.method === "GET" && url.pathname === "/reports") {
       const adminKey = request.headers.get("X-Admin-Key") ?? "";
-      if (!env.ADMIN_KEY || adminKey !== env.ADMIN_KEY) {
+      if (adminKey !== (await readSecret(env.ADMIN_KEY, "ADMIN_KEY"))) {
         return errorResponse("Unauthorized", 401);
       }
       const res = await stub.fetch("https://do/reports");
@@ -168,7 +213,7 @@ const inner = {
 
     const authHeader = request.headers.get("Authorization") ?? "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token || !(await verifyJwt(token, env.JWT_SECRET))) {
+    if (!token || !(await verifyJwt(token, await readSecret(env.JWT_SECRET, "JWT_SECRET")))) {
       return errorResponse("Unauthorized", 401);
     }
     const userId = decodeJwtSub(token);

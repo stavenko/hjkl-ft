@@ -1,6 +1,6 @@
 # Production worker URLs (fit.renorma.app app → *.renorma.app workers).
 # Swapped into dist/config/frontend.toml by scripts/deploy-prod.sh; the dev
-# config under config/ is used for the hjkl-ft.pages.dev test env.
+# config under config/ is used for the renorma-fit-dev.pages.dev test env.
 api_base_url = ""
 auth_base_url = "https://auth.renorma.app"
 push_base_url = "https://push.renorma.app"

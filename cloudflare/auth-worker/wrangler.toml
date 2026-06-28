@@ -1,4 +1,4 @@
-name = "auth-worker"
+name = "auth-worker-dev"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-12-01"
 
@@ -26,10 +26,10 @@ new_sqlite_classes = ["AuthDO"]
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
-RP_ID = "hjkl-ft.pages.dev"
-RP_ORIGIN = "https://hjkl-ft.pages.dev"
-ADMIN_RP_ID = "renorma-admin.pages.dev"
-ADMIN_RP_ORIGIN = "https://renorma-admin.pages.dev"
+RP_ID = "renorma-fit-dev.pages.dev"
+RP_ORIGIN = "https://renorma-fit-dev.pages.dev"
+ADMIN_RP_ID = "renorma-admin-dev.pages.dev"
+ADMIN_RP_ORIGIN = "https://renorma-admin-dev.pages.dev"
 
 # ── Production (separate worker on auth.renorma.app, clean DO data) ──
 # Deploy: wrangler deploy --env production

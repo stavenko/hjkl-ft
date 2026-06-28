@@ -6,7 +6,7 @@
 # swapped into dist/ after the build:
 #   - config/frontend.toml  → prod worker URLs (config-prod/frontend.toml)
 #   - _headers CSP connect-src → the prod *.renorma.app worker origins
-# The dev project (renorma-admin.pages.dev) keeps the dev config/CSP.
+# The dev project (renorma-admin-dev.pages.dev) keeps the dev config/CSP.
 #
 # Usage: admin/scripts/deploy-prod.sh [pages-project-name]   (default: renorma-admin-prod)
 set -euo pipefail

@@ -2,8 +2,8 @@ import { test, expect, type CDPSession } from '@playwright/test';
 import { registerAccount } from './helpers';
 
 // Push lives on the main-flow worker (push.renorma.app /
-// main-flow.vg-stavenko.workers.dev), NOT auth-worker.
-const PUSH_BASE = 'https://main-flow.vg-stavenko.workers.dev';
+// main-flow-dev.vg-stavenko.workers.dev), NOT auth-worker.
+const PUSH_BASE = 'https://main-flow-dev.vg-stavenko.workers.dev';
 
 test.describe('Push notification flow', () => {
   test('VAPID public key endpoint works', async ({ request }) => {

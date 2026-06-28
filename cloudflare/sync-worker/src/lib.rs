@@ -22,7 +22,7 @@ use token::validate_from_header;
 // Known origins only (no wildcard): the prod app + any renorma.app subdomain, the
 // dev test env, and localhost for development. Mirrors the TS ALLOWED_ORIGIN_RE.
 fn is_allowed_origin(origin: &str) -> bool {
-    if origin == "https://hjkl-ft.pages.dev" {
+    if origin == "https://renorma-fit-dev.pages.dev" {
         return true;
     }
     if origin == "https://renorma.app" || origin.ends_with(".renorma.app") {

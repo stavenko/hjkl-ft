@@ -1,4 +1,4 @@
-name = "payment-worker"
+name = "payment-worker-dev"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-12-01"
 
@@ -33,7 +33,7 @@ new_sqlite_classes = ["SubscriptionDO", "PaymentIndexDO", "ClaimDO"]
 # ADMIN_ALLOWLIST + EXPERT_JWT_SECRET have been removed.
 [[services]]
 binding = "SUPPORT_WORKER"
-service = "support-worker"
+service = "support-worker-dev"
 
 # NO lava credentials on the default (dev/test) worker — the real lava Secrets
 # Store is bound ONLY under [env.production.*] below. The test env must NEVER be
@@ -45,7 +45,7 @@ service = "support-worker"
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
 # Landing → app onboarding return URL; the worker appends `#claim=<id>.<secret>`.
-LANDING_RETURN_URL = "https://hjkl-ft.pages.dev/onboard"
+LANDING_RETURN_URL = "https://renorma-fit-dev.pages.dev/onboard"
 # PRODUCTION-IMPOSSIBLE test-entitlement flag (dev/test only). Its ABSENCE from
 # [env.production.vars] is the prod safety — NEVER add it there (free-sub backdoor).
 TEST_ENTITLEMENT = "1"
@@ -54,7 +54,7 @@ TEST_ENTITLEMENT = "1"
 # INTERNAL_PUSH_KEY ALSO guards the support-worker /internal/is-admin check
 # (X-Internal-Key) — the SAME shared cross-worker key, identical dev value here
 # and in support-worker's wrangler.toml.
-PUSH_NOTIFY_URL = "https://main-flow.vg-stavenko.workers.dev/push/notify"
+PUSH_NOTIFY_URL = "https://main-flow-dev.vg-stavenko.workers.dev/push/notify"
 INTERNAL_PUSH_KEY = "dev-internal-push-key"
 # Plan catalog. `lavaOfferId` empty until the real lava offer ids are set →
 # /checkout returns unknown_plan until then; /plans still lists them for display.

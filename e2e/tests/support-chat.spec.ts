@@ -13,9 +13,9 @@ import { registerAccount } from './helpers';
  * ──────────────────────────────────────────────────────────────────────────────
  * PARENT RESPONSIBILITIES (NOT done by this file — the agents do not deploy or run
  * wrangler):
- *   1. Deploy the frontend to https://hjkl-ft.pages.dev with `support_base_url`
+ *   1. Deploy the frontend to https://renorma-fit-dev.pages.dev with `support_base_url`
  *      pointing at the live support-worker (config/frontend.toml already carries
- *      https://support-worker.vg-stavenko.workers.dev).
+ *      https://support-worker-dev.vg-stavenko.workers.dev).
  *   2. EXPERT-REPLY TRIGGER for step 4: the support-worker must expose a way to
  *      inject an expert message into a user's thread so the poll can pick it up.
  *      Wire `injectExpertReply()` below to that mechanism. Two known options:
@@ -34,7 +34,7 @@ import { registerAccount } from './helpers';
  */
 
 const SUPPORT_BASE_URL =
-  process.env.SUPPORT_BASE_URL ?? 'https://support-worker.vg-stavenko.workers.dev';
+  process.env.SUPPORT_BASE_URL ?? 'https://support-worker-dev.vg-stavenko.workers.dev';
 // Expert-side injection (option (b) in the header): mint an expert JWT with the
 // worker's signing key and POST its expert reply route. Dev defaults match the
 // deployed support-worker (JWT_SECRET="dev-secret-change-in-production",

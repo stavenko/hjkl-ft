@@ -40,7 +40,7 @@ fn is_allowed_origin(origin: &str) -> bool {
         })
         .unwrap_or(false);
     renorma
-        || origin == "https://hjkl-ft.pages.dev"
+        || origin == "https://renorma-fit-dev.pages.dev"
         || origin == "http://localhost"
         || origin.starts_with("http://localhost:")
         || origin == "http://127.0.0.1"

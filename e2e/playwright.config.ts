@@ -8,7 +8,7 @@ export default defineConfig({
   // before failing — a genuinely broken test still fails every attempt.
   retries: 2,
   use: {
-    baseURL: 'https://hjkl-ft.pages.dev',
+    baseURL: 'https://renorma-fit-dev.pages.dev',
     browserName: 'chromium',
     serviceWorkers: 'block',
   },

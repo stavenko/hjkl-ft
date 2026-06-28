@@ -35,8 +35,8 @@ use token::validate_from_header;
 fn is_allowed_origin(origin: &str) -> bool {
     origin == "https://renorma.app"
         || (origin.starts_with("https://") && origin.ends_with(".renorma.app"))
-        || origin == "https://hjkl-ft.pages.dev"
-        || origin == "https://renorma-admin.pages.dev"
+        || origin == "https://renorma-fit-dev.pages.dev"
+        || origin == "https://renorma-admin-dev.pages.dev"
         || origin.starts_with("http://localhost")
         || origin.starts_with("http://127.0.0.1")
 }

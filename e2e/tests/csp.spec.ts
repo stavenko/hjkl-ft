@@ -48,7 +48,7 @@ test.describe('Content Security Policy', () => {
   test('App renders with CSP enabled (no bypass)', async ({ browser }) => {
     // This test does NOT bypass CSP — it verifies the real user experience
     const context = await browser.newContext({
-      baseURL: 'https://hjkl-ft.pages.dev',
+      baseURL: 'https://renorma-fit-dev.pages.dev',
       serviceWorkers: 'block',
       bypassCSP: false,
     });

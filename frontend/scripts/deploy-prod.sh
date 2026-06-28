@@ -5,13 +5,13 @@
 # swapped into dist/ after the build:
 #   - config/frontend.toml  → prod worker URLs (config-prod/frontend.toml)
 #   - _headers CSP connect-src → the prod *.renorma.app worker origins
-# The dev project (hjkl-ft.pages.dev) keeps the dev config/CSP.
+# The dev project (renorma-fit-dev.pages.dev) keeps the dev config/CSP.
 #
 # Usage: frontend/scripts/deploy-prod.sh [pages-project-name]   (default: renorma-app)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PROJECT="${1:-renorma-app}"
+PROJECT="${1:-renorma-fit-prod}"
 
 trunk build --release
 

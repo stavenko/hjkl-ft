@@ -1,4 +1,4 @@
-name = "support-worker"
+name = "support-worker-dev"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-12-01"
 
@@ -24,7 +24,7 @@ new_sqlite_classes = ["ConversationDO", "ConversationIndexDO"]
 # workers.dev fetch — a Worker→Worker fetch over workers.dev returns 404).
 [[services]]
 binding = "MAIN_FLOW"
-service = "main-flow"
+service = "main-flow-dev"
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"

@@ -1137,12 +1137,12 @@ impl DurableObject for AuthDO {
 #[cfg(test)]
 mod tests {
     use super::select_is_admin;
-    const ADMIN_DEV: &str = "https://renorma-admin.pages.dev";
+    const ADMIN_DEV: &str = "https://renorma-admin-dev.pages.dev";
     const ADMIN_PROD: &str = "https://admin.renorma.app";
 
     #[test]
     fn admin_origin_selects_admin_dev() {
-        assert!(select_is_admin("https://renorma-admin.pages.dev", ADMIN_DEV));
+        assert!(select_is_admin("https://renorma-admin-dev.pages.dev", ADMIN_DEV));
     }
     #[test]
     fn admin_origin_selects_admin_prod() {
@@ -1150,7 +1150,7 @@ mod tests {
     }
     #[test]
     fn app_origin_selects_app_dev() {
-        assert!(!select_is_admin("https://hjkl-ft.pages.dev", ADMIN_DEV));
+        assert!(!select_is_admin("https://renorma-fit-dev.pages.dev", ADMIN_DEV));
     }
     #[test]
     fn app_origin_selects_app_prod() {

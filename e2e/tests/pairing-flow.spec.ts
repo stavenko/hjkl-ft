@@ -1,7 +1,7 @@
 import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import { registerAccount } from './helpers';
 
-const AUTH_WORKER = 'https://auth-worker.vg-stavenko.workers.dev';
+const AUTH_WORKER = 'https://auth-worker-dev.vg-stavenko.workers.dev';
 
 // =========================================================================
 // Flow A: Logged-in device shows QR → new device scans and gets account
@@ -68,7 +68,7 @@ test.describe('Flow A: Logged-in shows QR → new device claims', () => {
     expect(claimResult.body.publicKey).toBeTruthy();
     expect(claimResult.body.publicKey.challenge).toBeTruthy();
     expect(claimResult.body.publicKey.rp).toBeTruthy();
-    expect(claimResult.body.publicKey.rp.id).toBe('hjkl-ft.pages.dev');
+    expect(claimResult.body.publicKey.rp.id).toBe('renorma-fit-dev.pages.dev');
     expect(claimResult.body.publicKey.user).toBeTruthy();
     expect(claimResult.body.user_id).toBeTruthy();
 
@@ -222,7 +222,7 @@ test.describe('Pairing error handling', () => {
   });
 
   test('wrong secret returns 403 with clean error', async ({ page }) => {
-    // fetch() must run from the app origin (hjkl-ft.pages.dev) so the
+    // fetch() must run from the app origin (renorma-fit-dev.pages.dev) so the
     // auth-worker CORS check passes — about:blank has no allowed origin.
     await page.goto('/');
 

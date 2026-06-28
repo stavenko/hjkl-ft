@@ -1,9 +1,9 @@
 import { test, expect, type CDPSession } from '@playwright/test';
 import { registerAccount } from './helpers';
 
-const AUTH_BASE = 'https://auth-worker.vg-stavenko.workers.dev';
+const AUTH_BASE = 'https://auth-worker-dev.vg-stavenko.workers.dev';
 // Push is served by main-flow (frontend.toml push_base_url), NOT auth-worker.
-const PUSH_BASE = 'https://main-flow.vg-stavenko.workers.dev';
+const PUSH_BASE = 'https://main-flow-dev.vg-stavenko.workers.dev';
 
 // =========================================================================
 // 1. CSP: Bulma loads locally, no CDN requests
@@ -11,7 +11,7 @@ const PUSH_BASE = 'https://main-flow.vg-stavenko.workers.dev';
 test.describe('CSP: no external resource requests', () => {
   test('No requests to CDN domains', async ({ browser }) => {
     const context = await browser.newContext({
-      baseURL: 'https://hjkl-ft.pages.dev',
+      baseURL: 'https://renorma-fit-dev.pages.dev',
       serviceWorkers: 'block',
       bypassCSP: false,
     });
@@ -20,8 +20,8 @@ test.describe('CSP: no external resource requests', () => {
     const externalRequests: string[] = [];
     page.on('request', req => {
       const url = new URL(req.url());
-      if (url.hostname !== 'hjkl-ft.pages.dev' &&
-          url.hostname !== 'auth-worker.vg-stavenko.workers.dev' &&
+      if (url.hostname !== 'renorma-fit-dev.pages.dev' &&
+          url.hostname !== 'auth-worker-dev.vg-stavenko.workers.dev' &&
           url.hostname !== 'localhost') {
         externalRequests.push(req.url());
       }
@@ -39,7 +39,7 @@ test.describe('CSP: no external resource requests', () => {
 
   test('CSS loads without CSP violation', async ({ browser }) => {
     const context = await browser.newContext({
-      baseURL: 'https://hjkl-ft.pages.dev',
+      baseURL: 'https://renorma-fit-dev.pages.dev',
       serviceWorkers: 'block',
       bypassCSP: false,
     });

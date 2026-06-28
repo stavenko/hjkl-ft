@@ -1,4 +1,4 @@
-name = "ai-worker"
+name = "ai-worker-dev"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-12-01"
 
@@ -13,7 +13,7 @@ binding = "AI"
 [[durable_objects.bindings]]
 name = "SUBSCRIPTION_DO"
 class_name = "SubscriptionDO"
-script_name = "payment-worker"
+script_name = "payment-worker-dev"
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"

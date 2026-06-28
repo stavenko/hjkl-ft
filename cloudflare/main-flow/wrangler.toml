@@ -1,4 +1,4 @@
-name = "main-flow"
+name = "main-flow-dev"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-12-01"
 

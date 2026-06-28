@@ -116,7 +116,7 @@ test.describe('Device pairing (logged-in device)', () => {
   test('New device Show QR creates data parseable as 2-part format', async ({ page }) => {
     // Test the /pair/request endpoint directly (new device, no auth)
     const resp = await page.evaluate(async () => {
-      const r = await fetch('https://auth-worker.vg-stavenko.workers.dev/pair/request', {
+      const r = await fetch('https://auth-worker-dev.vg-stavenko.workers.dev/pair/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',

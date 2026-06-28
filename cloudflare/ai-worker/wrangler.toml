@@ -1,6 +1,9 @@
 name = "ai-worker"
-main = "src/index.ts"
+main = "build/worker/shim.mjs"
 compatibility_date = "2024-12-01"
+
+[build]
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
 
 [ai]
 binding = "AI"

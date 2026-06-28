@@ -1,6 +1,12 @@
 name = "ocr-queue"
-main = "src/index.ts"
+main = "build/worker/shim.mjs"
 compatibility_date = "2024-12-01"
+
+[build]
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
+# an unpinned `cargo install worker-build` pulls a newer build that passes
+# wasm-bindgen flags the locked CLI doesn't support.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
 
 # Job queue, status AND the image blob (chunked) live in a single Durable Object,
 # pinned to Western Europe (closest region CF offers to Italy, where the poller's
@@ -9,6 +15,8 @@ compatibility_date = "2024-12-01"
 name = "QUEUE_DO"
 class_name = "QueueDO"
 
+# Fresh DO: the worker is deleted + recreated to wipe old (KV-API) data, so a
+# single v1 SQLite migration applies cleanly to the brand-new namespace.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["QueueDO"]

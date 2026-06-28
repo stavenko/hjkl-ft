@@ -38,6 +38,9 @@
 
 :root {
   --bulma-body-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Translucent dark scrim for captions overlaid on imagery (e.g. progress
+     photos). Derived from Bulma's dark scheme component vars. */
+  --overlay-scrim: hsla(var(--bulma-dark-h), var(--bulma-dark-s), var(--bulma-dark-l), 0.55);
 }
 
 html {

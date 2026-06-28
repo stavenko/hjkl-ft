@@ -175,7 +175,7 @@ fn render_widget(w: &WidgetRef) -> View {
         }
         "fab" => view! {
             <div style="display: flex; justify-content: center; margin: 0 0 14px 0;">
-                <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--bulma-success); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 34px; line-height: 1; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">"+"</div>
+                <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--bulma-success); color: var(--bulma-success-invert); display: flex; align-items: center; justify-content: center; font-size: 34px; line-height: 1; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">"+"</div>
             </div>
         }.into_view(),
         other => {

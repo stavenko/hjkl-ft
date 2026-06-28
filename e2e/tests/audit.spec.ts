@@ -2,6 +2,8 @@ import { test, expect, type CDPSession } from '@playwright/test';
 import { registerAccount } from './helpers';
 
 const AUTH_BASE = 'https://auth-worker.vg-stavenko.workers.dev';
+// Push is served by main-flow (frontend.toml push_base_url), NOT auth-worker.
+const PUSH_BASE = 'https://main-flow.vg-stavenko.workers.dev';
 
 // =========================================================================
 // 1. CSP: Bulma loads locally, no CDN requests
@@ -193,7 +195,7 @@ test.describe('Username display name', () => {
 // =========================================================================
 test.describe('VAPID key validation', () => {
   test('Public key is valid 65-byte uncompressed P-256 point', async ({ request }) => {
-    const resp = await request.get(`${AUTH_BASE}/push/vapid-key`);
+    const resp = await request.get(`${PUSH_BASE}/push/vapid-key`);
     expect(resp.status()).toBe(200);
 
     const body = await resp.json();
@@ -209,7 +211,7 @@ test.describe('VAPID key validation', () => {
 
   test('VAPID private and public keys are different', async ({ request }) => {
     // Fetch public key from API
-    const resp = await request.get(`${AUTH_BASE}/push/vapid-key`);
+    const resp = await request.get(`${PUSH_BASE}/push/vapid-key`);
     const body = await resp.json();
     const publicKey = body.public_key;
 
@@ -235,7 +237,7 @@ test.describe('Push subscription persistence', () => {
 
     // Step 1: Subscribe
     const subResp = await page.evaluate(async (data) => {
-      const resp = await fetch(`${data.url}/push/subscribe`, {
+      const resp = await fetch(`${data.pushUrl}/push/subscribe`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -250,30 +252,32 @@ test.describe('Push subscription persistence', () => {
         }),
       });
       return { status: resp.status };
-    }, { url: AUTH_BASE, token, endpoint: uniqueEndpoint });
+    }, { pushUrl: PUSH_BASE, token, endpoint: uniqueEndpoint });
 
     expect(subResp.status).toBe(200);
 
-    // Step 2: Verify subscription exists by sending a push to it
-    // (it will fail delivery since endpoint is fake, but the worker should attempt it)
-    // Better: use /push/send and check that it doesn't return "no subscriptions"
+    // Step 2: Verify the subscription is persisted + retrievable by the worker:
+    // /push/test relays to whatever subscriptions the PushDO holds for this user.
+    // It only succeeds (200 {ok:true}) if our just-added subscription was found and
+    // attempted; with no stored subscription the worker has nothing to send to.
     const sendResp = await page.evaluate(async (data) => {
-      const resp = await fetch(`${data.url}/push/send`, {
+      const resp = await fetch(`${data.pushUrl}/push/test`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${data.token}`,
         },
         body: JSON.stringify({
-          title: 'Test',
           body: 'Audit test',
+          url: '/',
         }),
       });
       return { status: resp.status, body: await resp.text() };
-    }, { url: AUTH_BASE, token });
+    }, { pushUrl: PUSH_BASE, token });
 
-    // Should not be 404 "no subscriptions" — the subscription we just added should be found
-    expect(sendResp.status).not.toBe(404);
+    // The worker must have found our subscription and relayed without erroring.
+    expect(sendResp.status).toBe(200);
+    expect(sendResp.body).toContain('ok');
 
     await cdpSession.send('WebAuthn.disable').catch(() => {});
   });
@@ -352,8 +356,10 @@ test.describe('Privacy as separate page', () => {
     const text = await sessionItem.textContent();
     expect(text).toBeTruthy();
 
-    // Fingerprint: at least 8 hex-like chars
-    expect(text).toMatch(/[a-f0-9]{8,}/i);
+    // Fingerprint: the row leads with the short (8-char) device fingerprint.
+    // It's a base64url token (A-Z a-z 0-9 - _), not hex — assert a non-empty
+    // run of base64url chars is present before the "this device" / date text.
+    expect(text).toMatch(/^[A-Za-z0-9_-]{6,}/);
 
     // Creation date: DD.MM.YYYY HH:MM format
     expect(text).toMatch(/\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}/);

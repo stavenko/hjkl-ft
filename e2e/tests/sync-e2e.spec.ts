@@ -16,9 +16,19 @@ import { registerAccount } from './helpers';
 
 const TS = '2026-06-16T10:00:00Z';
 
-async function seedStores(page: Page, data: Record<string, any[]>) {
-  await page.evaluate(async (d) => {
-    const open = indexedDB.open('hjkl-ft');
+/**
+ * A signed-in user no longer reads/writes the device-global `hjkl-ft` database —
+ * each account gets its own per-user IndexedDB `hjkl-ft-{user_id}` (see
+ * `frontend/src/services/db.rs` `user_db_name` / `activate_for_user`). Sync
+ * push/pull operate on that active per-user DB, so the e2e seeding and readback
+ * MUST target the same per-user name, otherwise nothing the test writes is ever
+ * pushed and B's pull lands in a store the test never inspects.
+ */
+const userDbName = (userId: string) => `hjkl-ft-${userId}`;
+
+async function seedStores(page: Page, dbName: string, data: Record<string, any[]>) {
+  await page.evaluate(async ({ dbName, d }) => {
+    const open = indexedDB.open(dbName);
     const db: IDBDatabase = await new Promise((resolve, reject) => {
       open.onsuccess = () => resolve(open.result);
       open.onerror = () => reject(open.error);
@@ -33,12 +43,12 @@ async function seedStores(page: Page, data: Record<string, any[]>) {
       });
     }
     db.close();
-  }, data);
+  }, { dbName, d: data });
 }
 
-async function readStore(page: Page, storeName: string): Promise<any[]> {
-  return page.evaluate(async (name) => {
-    const open = indexedDB.open('hjkl-ft');
+async function readStore(page: Page, dbName: string, storeName: string): Promise<any[]> {
+  return page.evaluate(async ({ dbName, name }) => {
+    const open = indexedDB.open(dbName);
     const db: IDBDatabase = await new Promise((resolve, reject) => {
       open.onsuccess = () => resolve(open.result);
       open.onerror = () => reject(open.error);
@@ -51,7 +61,7 @@ async function readStore(page: Page, storeName: string): Promise<any[]> {
     });
     db.close();
     return all;
-  }, storeName);
+  }, { dbName, name: storeName });
 }
 
 test('two devices: A creates data, B pulls it, deletion on A propagates to B', async ({ browser }) => {
@@ -65,8 +75,9 @@ test('two devices: A creates data, B pulls it, deletion on A propagates to B', a
   const { userId } = await registerAccount(pageA);
   const token = await pageA.evaluate(() => localStorage.getItem('auth_token'));
   expect(token).toBeTruthy();
+  const dbName = userDbName(userId);
 
-  await seedStores(pageA, {
+  await seedStores(pageA, dbName, {
     foods: [{
       id: 'f-sync-1', name: 'Курица', kcal: 100, protein: 10, fat: 5, carbs: 20,
       nutrients: {}, package_weight: null, is_recipe: false, recipe_id: null,
@@ -102,11 +113,11 @@ test('two devices: A creates data, B pulls it, deletion on A propagates to B', a
   await pageB.getByTestId('nav-diary').waitFor({ state: 'visible', timeout: 15_000 });
   await pageB.waitForTimeout(3000); // launch reconcile (push empty + pull A's data)
 
-  const bStory = await readStore(pageB, 'story');
-  const bDiary = await readStore(pageB, 'diary');
-  const bWeight = await readStore(pageB, 'weight_entries');
-  const bSteps = await readStore(pageB, 'step_entries');
-  const bFoods = await readStore(pageB, 'foods');
+  const bStory = await readStore(pageB, dbName, 'story');
+  const bDiary = await readStore(pageB, dbName, 'diary');
+  const bWeight = await readStore(pageB, dbName, 'weight_entries');
+  const bSteps = await readStore(pageB, dbName, 'step_entries');
+  const bFoods = await readStore(pageB, dbName, 'foods');
 
   expect(bFoods.find((f) => f.id === 'f-sync-1'), 'B sees A food').toBeTruthy();
   expect(bStory.find((s) => s.key === 'want_new_body')?.value, 'B sees A story progress').toBe(true);
@@ -127,7 +138,7 @@ test('two devices: A creates data, B pulls it, deletion on A propagates to B', a
   await pageB.reload();
   await pageB.getByTestId('nav-diary').waitFor({ state: 'visible', timeout: 15_000 });
   await expect
-    .poll(async () => (await readStore(pageB, 'story')).find((s) => s.key === 'want_new_body')?.value,
+    .poll(async () => (await readStore(pageB, dbName, 'story')).find((s) => s.key === 'want_new_body')?.value,
       { timeout: 15_000 })
     .toBe(false);
 

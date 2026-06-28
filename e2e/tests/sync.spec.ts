@@ -16,7 +16,12 @@ import { registerAccount } from './helpers';
 const TS = '2026-06-16T10:00:00Z';
 async function seedFood(page: Page, name = 'Курица') {
   await page.evaluate(async ([n, ts]) => {
-    const open = indexedDB.open('hjkl-ft');
+    // Data is now per-user: the app reads/writes `hjkl-ft-<user_id>`, not the
+    // legacy shared `hjkl-ft`. Seed into the active user's DB so the food shows
+    // up on /diary/add (and would be picked up by sync push).
+    const userId = localStorage.getItem('user_id');
+    if (!userId) throw new Error('seedFood: no user_id in localStorage (register first)');
+    const open = indexedDB.open(`hjkl-ft-${userId}`);
     const db: IDBDatabase = await new Promise((resolve, reject) => {
       open.onsuccess = () => resolve(open.result);
       open.onerror = () => reject(open.error);

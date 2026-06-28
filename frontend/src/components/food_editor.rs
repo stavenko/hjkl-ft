@@ -430,7 +430,7 @@ pub fn FoodEditor(
                                 <img src=format!("data:image/jpeg;base64,{b64}")
                                     style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
                                 <button type="button"
-                                    style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: #fff; font-size: 13px; cursor: pointer;"
+                                    style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
                                     on:click=move |_| {
                                         photos_base64.update(|v| { if i < v.len() { v.remove(i); } });
                                         photo_count.set(photos_base64.get_untracked().len());

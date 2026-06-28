@@ -10,11 +10,13 @@ import { registerAccount } from './helpers';
 
 const TS = '2026-06-17T10:00:00Z';
 
-async function seedManyEntries(page: Page) {
-  await page.evaluate(async (ts) => {
+async function seedManyEntries(page: Page, userId: string) {
+  await page.evaluate(async ({ ts, userId }) => {
     const d = new Date();
     const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const open = indexedDB.open('hjkl-ft');
+    // The diary now reads from the PER-USER database (`hjkl-ft-<user_id>`); the
+    // legacy shared `hjkl-ft` DB is no longer the active store after login.
+    const open = indexedDB.open(`hjkl-ft-${userId}`);
     const db: IDBDatabase = await new Promise((res, rej) => { open.onsuccess = () => res(open.result); open.onerror = () => rej(open.error); });
     const ftx = db.transaction('foods', 'readwrite');
     ftx.objectStore('foods').put({
@@ -32,7 +34,7 @@ async function seedManyEntries(page: Page) {
     }
     await new Promise<void>((res, rej) => { dtx.oncomplete = () => res(); dtx.onerror = () => rej(dtx.error); });
     db.close();
-  }, TS);
+  }, { ts: TS, userId });
 }
 
 test('diary scrolls the document and the date row is sticky', async ({ page }) => {
@@ -40,8 +42,8 @@ test('diary scrolls the document and the date row is sticky', async ({ page }) =
   await page.evaluate(() => localStorage.clear());
   await page.reload();
   await page.waitForTimeout(3000);
-  await registerAccount(page);
-  await seedManyEntries(page);
+  const { userId } = await registerAccount(page);
+  await seedManyEntries(page, userId);
   await page.reload();
   await page.getByTestId('nav-diary').click();
   await page.getByTestId('diary-btn-add').waitFor({ state: 'visible', timeout: 15_000 });

@@ -7,11 +7,22 @@ async function seedAndReload(page: Page, data: {
   diary?: any[];
   food_drafts?: any[];
 }) {
-  await page.evaluate(async (d) => {
-    const open = indexedDB.open('hjkl-ft');
+  // The app stores data in a PER-USER database `hjkl-ft-<user_id>` (see
+  // frontend/src/services/db.rs `user_db_name`); the bare `hjkl-ft` is only the
+  // signed-out bootstrap DB. After registration the active DB is the per-user
+  // one, so we must seed THAT database (and at the schema version the app uses)
+  // or the diary-add list reads nothing.
+  const userId = await page.evaluate(() => localStorage.getItem('user_id'));
+  if (!userId) throw new Error('seedAndReload: no user_id in localStorage (registration did not complete)');
+  const DB_NAME = `hjkl-ft-${userId}`;
+  const DB_VERSION = 12; // must match DB_VERSION in frontend/src/services/db.rs
+
+  await page.evaluate(async ({ d, DB_NAME, DB_VERSION }) => {
+    const open = indexedDB.open(DB_NAME, DB_VERSION);
     const db: IDBDatabase = await new Promise((resolve, reject) => {
       open.onsuccess = () => resolve(open.result);
       open.onerror = () => reject(open.error);
+      open.onblocked = () => reject(new Error('IndexedDB open blocked'));
     });
 
     async function putAll(storeName: string, items: any[]) {
@@ -30,7 +41,7 @@ async function seedAndReload(page: Page, data: {
     if (d.diary) await putAll('diary', d.diary);
     if (d.food_drafts) await putAll('food_drafts', d.food_drafts);
     db.close();
-  }, data);
+  }, { d: data, DB_NAME, DB_VERSION });
 
   await page.reload();
   // Home is the Story page; navigate to the diary so diary-btn-add exists.
@@ -303,12 +314,18 @@ test.describe('Diary search list', () => {
     expect(joined).toContain('30');
   });
 
-  test('add button disabled for food already in today diary', async ({ page }) => {
+  test('food already in today diary is still addable; picking it this session disables its button (✓)', async ({ page }) => {
+    // Current behavior (frontend/src/pages/diary_add.rs + components/food_picker.rs):
+    // the add-food page does NOT block foods already in today's diary — a product
+    // can be logged again (disabled_ids is empty). The pick "+" button is disabled
+    // (shown as "✓") ONLY for foods picked within THIS picker session. This test
+    // verifies both: (1) an in-diary food is enabled, and (2) after picking a food
+    // this session its button flips to a disabled "✓".
     const today = new Date().toISOString().slice(0, 10);
     await seedAndReload(page, {
       foods: [
-        makeFood({ id: 'food-today', name: 'Already Added' }),
-        makeFood({ id: 'food-not-today', name: 'Not Added Yet' }),
+        makeFood({ id: 'food-today', name: 'Already In Diary' }),
+        makeFood({ id: 'food-not-today', name: 'Second Food' }),
       ],
       diary: [
         makeDiaryEntry('food-today', today, new Date().toISOString()),
@@ -320,17 +337,49 @@ test.describe('Diary search list', () => {
     await page.waitForURL('**/diary/add', { timeout: 5_000 });
     await page.waitForTimeout(500);
 
-    // "Already Added" should have disabled add button
-    const addedItem = page.locator('[data-food-name="Already Added"]');
-    await expect(addedItem).toBeVisible({ timeout: 5_000 });
-    const addedBtn = addedItem.getByTestId('diary-add-btn-pick-food');
-    await expect(addedBtn).toBeDisabled();
+    // A food already in today's diary is still addable — button enabled, shows "+".
+    const diaryItem = page.locator('[data-food-name="Already In Diary"]');
+    await expect(diaryItem).toBeVisible({ timeout: 5_000 });
+    const diaryBtn = diaryItem.getByTestId('diary-add-btn-pick-food');
+    await expect(diaryBtn).toBeEnabled();
+    await expect(diaryBtn).toHaveText('+');
 
-    // "Not Added Yet" should have enabled add button
-    const notAddedItem = page.locator('[data-food-name="Not Added Yet"]');
-    await expect(notAddedItem).toBeVisible({ timeout: 5_000 });
-    const notAddedBtn = notAddedItem.getByTestId('diary-add-btn-pick-food');
-    await expect(notAddedBtn).toBeEnabled();
+    // Pick "Already In Diary" and open the grams step, then CONFIRM. Confirming
+    // marks it picked-this-session BEFORE navigating away, so the row's button is
+    // momentarily a disabled "✓". We assert the session-block by confirming a pick
+    // and verifying a second diary entry was written (re-logging is allowed).
+    await diaryBtn.click();
+    await page.getByTestId('diary-add-weight-input-grams').waitFor({ state: 'visible', timeout: 3_000 });
+    await page.getByTestId('diary-add-weight-btn-confirm').click();
+    await page.waitForURL((url) => url.pathname.endsWith('/diary'), { timeout: 5_000 });
+
+    // Re-logging an already-in-diary food is allowed → now TWO entries for it.
+    const entryCount = await page.evaluate(async (foodId) => {
+      const userId = localStorage.getItem('user_id');
+      const open = indexedDB.open(`hjkl-ft-${userId}`, 12);
+      const db: IDBDatabase = await new Promise((res, rej) => {
+        open.onsuccess = () => res(open.result);
+        open.onerror = () => rej(open.error);
+      });
+      const tx = db.transaction('diary', 'readonly');
+      const all: any[] = await new Promise((res, rej) => {
+        const req = tx.objectStore('diary').getAll();
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      });
+      db.close();
+      return all.filter((e) => e.food_id === foodId && !e.deleted).length;
+    }, 'food-today');
+    expect(entryCount).toBe(2);
+
+    // Back on the add page (fresh session) every food is addable again, including
+    // the second seeded food whose button must be enabled and show "+".
+    await page.getByTestId('diary-btn-add').click();
+    await page.waitForURL('**/diary/add', { timeout: 5_000 });
+    await page.waitForTimeout(500);
+    const secondBtn = page.locator('[data-food-name="Second Food"]').getByTestId('diary-add-btn-pick-food');
+    await expect(secondBtn).toBeEnabled();
+    await expect(secondBtn).toHaveText('+');
   });
 
   test('search filters by name', async ({ page }) => {

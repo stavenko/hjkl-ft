@@ -10,9 +10,16 @@ import { registerAccount } from './helpers';
 
 // Seed `weight_entries` (one per day, last `n` days ending today) plus the story
 // flags that reveal the dashboard widgets, then reload.
+//
+// The app uses a per-user IndexedDB (`hjkl-ft-<user_id>`, see services/db.rs
+// `activate_for_user`); the bootstrap `hjkl-ft` DB is emptied after sign-in. So
+// the seed must target the *active* per-user DB, derived from localStorage.
 async function seedWeights(page: Page, startKg: number, slopePerDay: number, n: number) {
   await page.evaluate(async ([start, slope, count]) => {
-    const open = indexedDB.open('hjkl-ft');
+    const userId = localStorage.getItem('user_id');
+    if (!userId) throw new Error('seedWeights: no user_id in localStorage (not signed in)');
+    const dbName = `hjkl-ft-${userId}`;
+    const open = indexedDB.open(dbName);
     const db: IDBDatabase = await new Promise((resolve, reject) => {
       open.onsuccess = () => resolve(open.result);
       open.onerror = () => reject(open.error);

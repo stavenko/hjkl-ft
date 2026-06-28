@@ -67,7 +67,10 @@ async fn vapid_key(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
 }
 
 async fn subscribe(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = validate_token(&req, &ctx).await?;
+    let user_id = match validate_token(&req, &ctx).await? {
+        Ok(uid) => uid,
+        Err(resp) => return Ok(resp),
+    };
     let subscription: PushSubscription = req.json().await
         .map_err(|e| Error::RustError(format!("invalid body: {e}")))?;
 
@@ -81,7 +84,10 @@ async fn subscribe(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
 }
 
 async fn unsubscribe(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = validate_token(&req, &ctx).await?;
+    let user_id = match validate_token(&req, &ctx).await? {
+        Ok(uid) => uid,
+        Err(resp) => return Ok(resp),
+    };
     let body: serde_json::Value = req.json().await
         .map_err(|e| Error::RustError(format!("invalid body: {e}")))?;
     let endpoint = body.get("endpoint").and_then(|v| v.as_str())
@@ -97,7 +103,10 @@ async fn unsubscribe(mut req: Request, ctx: RouteContext<()>) -> Result<Response
 }
 
 async fn update_schedule(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = validate_token(&req, &ctx).await?;
+    let user_id = match validate_token(&req, &ctx).await? {
+        Ok(uid) => uid,
+        Err(resp) => return Ok(resp),
+    };
     let schedule: serde_json::Value = req.json().await
         .map_err(|e| Error::RustError(format!("invalid body: {e}")))?;
 
@@ -120,7 +129,10 @@ async fn test_alarm(mut req: Request, ctx: RouteContext<()>) -> Result<Response>
 }
 
 async fn test_push(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = validate_token(&req, &ctx).await?;
+    let user_id = match validate_token(&req, &ctx).await? {
+        Ok(uid) => uid,
+        Err(resp) => return Ok(resp),
+    };
     // The client owns routing: it decides body + deep-link url based on the
     // user's story progress and passes them here. The worker just relays.
     let body_json: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
@@ -177,7 +189,10 @@ async fn notify_push(mut req: Request, ctx: RouteContext<()>) -> Result<Response
 }
 
 async fn get_schedule(req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = validate_token(&req, &ctx).await?;
+    let user_id = match validate_token(&req, &ctx).await? {
+        Ok(uid) => uid,
+        Err(resp) => return Ok(resp),
+    };
     let stub = schedule_do_stub(&ctx.env, &user_id)?;
     let url = "https://internal/get";
     let internal_req = Request::new(url, Method::Get)?;
@@ -216,18 +231,36 @@ async fn secret_or_var(env: &Env, name: &str) -> std::result::Result<String, Str
     }
 }
 
-async fn validate_token(req: &Request, ctx: &RouteContext<()>) -> Result<String> {
-    let auth_header = req.headers().get("Authorization")
+/// Authenticate a request from its Bearer JWT.
+///
+/// The outer `Result` is reserved for genuine infrastructure failures (e.g. a
+/// misconfigured `JWT_SECRET`), which legitimately surface as HTTP 500. A
+/// caller/credential problem — missing/malformed `Authorization` header or an
+/// invalid token — is NOT a server error: it is returned as `Ok(Err(401))` so
+/// the route can short-circuit with an Unauthorized response instead of a 500.
+async fn validate_token(
+    req: &Request,
+    ctx: &RouteContext<()>,
+) -> Result<std::result::Result<String, Response>> {
+    let auth_header = match req.headers().get("Authorization")
         .map_err(|e| Error::RustError(format!("{e}")))?
-        .ok_or_else(|| Error::RustError("missing Authorization header".into()))?;
-    let token = auth_header.strip_prefix("Bearer ")
-        .ok_or_else(|| Error::RustError("invalid Authorization header".into()))?;
+    {
+        Some(h) => h,
+        None => return Ok(Err(Response::error("unauthorized", 401)?)),
+    };
+    let token = match auth_header.strip_prefix("Bearer ") {
+        Some(t) => t,
+        None => return Ok(Err(Response::error("unauthorized", 401)?)),
+    };
 
     let secret = secret_or_var(&ctx.env, "JWT_SECRET")
         .await
         .map_err(Error::RustError)?;
 
-    verify_jwt(token, &secret)
+    match verify_jwt(token, &secret) {
+        Ok(user_id) => Ok(Ok(user_id)),
+        Err(_) => Ok(Err(Response::error("unauthorized", 401)?)),
+    }
 }
 
 fn verify_jwt(token: &str, secret: &str) -> Result<String> {

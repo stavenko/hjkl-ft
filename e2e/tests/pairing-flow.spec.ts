@@ -222,6 +222,10 @@ test.describe('Pairing error handling', () => {
   });
 
   test('wrong secret returns 403 with clean error', async ({ page }) => {
+    // fetch() must run from the app origin (hjkl-ft.pages.dev) so the
+    // auth-worker CORS check passes — about:blank has no allowed origin.
+    await page.goto('/');
+
     const requestResult = await page.evaluate(async (url) => {
       const resp = await fetch(`${url}/pair/request`, {
         method: 'POST',

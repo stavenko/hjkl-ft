@@ -12,7 +12,13 @@ async function seedCyclicWeights(page: Page, sex: 'female' | 'male', amplitude: 
   await page.evaluate(async ([sexVal, amp]) => {
     if (sexVal) localStorage.setItem('profile_sex', sexVal as string);
 
-    const open = indexedDB.open('hjkl-ft');
+    // After login the app uses a PER-USER IndexedDB (`hjkl-ft-<user_id>`), not the
+    // device-global `hjkl-ft`. Seed the active one so the diary reads our data.
+    const userId = localStorage.getItem('user_id');
+    if (!userId) throw new Error('seedCyclicWeights: no user_id in localStorage (not registered?)');
+    const dbName = `hjkl-ft-${userId}`;
+
+    const open = indexedDB.open(dbName);
     const db: IDBDatabase = await new Promise((resolve, reject) => {
       open.onsuccess = () => resolve(open.result);
       open.onerror = () => reject(open.error);
@@ -44,6 +50,19 @@ async function seedCyclicWeights(page: Page, sex: 'female' | 'male', amplitude: 
       stx.objectStore('story').put({ key, value: true, updated_at: ts });
     }
     await new Promise<void>((res, rej) => { stx.oncomplete = () => res(); stx.onerror = () => rej(stx.error); });
+
+    // Sex now lives in the synced `profile` row (the in-memory cache hydrates from
+    // this store on launch); the legacy `localStorage.profile_sex` is no longer the
+    // source of truth for profile::get_sex(). Seed the profile row so the modal's
+    // female-only cycle block renders.
+    const ptx = db.transaction('profile', 'readwrite');
+    ptx.objectStore('profile').put({
+      key: 'profile',
+      sex: sexVal,
+      height_cm: null, birth_year: null, goal: null,
+      updated_at: ts,
+    });
+    await new Promise<void>((res, rej) => { ptx.oncomplete = () => res(); ptx.onerror = () => rej(ptx.error); });
     db.close();
   }, [sex, amplitude] as const);
 }

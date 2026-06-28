@@ -118,7 +118,7 @@ pub fn ProgressPage() -> impl IntoView {
                                     view! {
                                         <div style="position: relative;">
                                             <img src=p.image style="display: block; width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px;" />
-                                            <span class="is-size-7" style="position: absolute; bottom: 4px; left: 4px; background: rgba(0,0,0,0.55); color: #fff; padding: 1px 6px; border-radius: 6px;">
+                                            <span class="is-size-7" style="position: absolute; bottom: 4px; left: 4px; background: var(--overlay-scrim); color: var(--bulma-dark-invert); padding: 1px 6px; border-radius: 6px;">
                                                 {format!("{} · {}", t(pose_label), p.date)}
                                             </span>
                                         </div>

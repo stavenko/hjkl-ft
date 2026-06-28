@@ -1,5 +1,47 @@
-import { test, expect, type CDPSession } from '@playwright/test';
+import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import { registerAccount } from './helpers';
+
+/**
+ * Write story-progress flags directly into the freshly-registered account's
+ * per-user IndexedDB (`hjkl-ft-<user_id>`, store `story`, keyPath `key`) and
+ * reload so the settings page re-reads them. Several Settings sections are gated
+ * behind these flags (the notification schedule needs LANGUAGE_CONFIGURED +
+ * NOTIFICATION_RECEIVED; the meal/steps reminder rows need MEAL_REMINDERS_UNLOCKED),
+ * which a brand-new account doesn't have yet.
+ */
+async function setStoryFlags(page: Page, userId: string, flags: string[]) {
+  await page.evaluate(async ({ userId, flags }) => {
+    const dbName = `hjkl-ft-${userId}`;
+    const db: IDBDatabase = await new Promise((resolve, reject) => {
+      const req = indexedDB.open(dbName);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('story', 'readwrite');
+      const store = tx.objectStore('story');
+      const now = new Date().toISOString();
+      for (const key of flags) {
+        store.put({ key, value: true, updated_at: now });
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, { userId, flags });
+}
+
+/** Resolve a CSS custom-property color (e.g. `var(--bulma-success)`) to its computed rgb(...) string. */
+async function resolveColor(page: Page, cssVar: string): Promise<string> {
+  return page.evaluate((v) => {
+    const d = document.createElement('div');
+    d.style.background = v;
+    document.body.appendChild(d);
+    const c = getComputedStyle(d).backgroundColor;
+    d.remove();
+    return c;
+  }, cssVar);
+}
 
 test.describe('Settings — Privacy section', () => {
   let cdpSession: CDPSession;
@@ -42,18 +84,22 @@ test.describe('Settings — Privacy section', () => {
     const sessionsHeader = page.getByTestId('privacy-sessions-header');
     await expect(sessionsHeader).toBeVisible({ timeout: 5_000 });
 
+    // Wait for the tokens resource to resolve (session rows or the "—" fallback).
     await page.waitForTimeout(3000);
 
-    const sessionEntries = page.locator('text=created:');
-    const fallback = page.locator('text="--"');
-    const hasEntries = await sessionEntries.count() > 0;
-    const hasFallback = await fallback.count() > 0;
+    // The redesigned privacy page renders each session as a `privacy-session-item`
+    // row; an empty/failed fetch renders a single "—" (em-dash) placeholder.
+    const sessionEntries = page.getByTestId('privacy-session-item');
+    const fallback = page.locator('text="—"');
+    const hasEntries = (await sessionEntries.count()) > 0;
+    const hasFallback = (await fallback.count()) > 0;
 
     expect(hasEntries || hasFallback).toBe(true);
 
     if (hasEntries) {
       const count = await sessionEntries.count();
       expect(count).toBeGreaterThanOrEqual(1);
+      await expect(sessionEntries.first()).toBeVisible({ timeout: 5_000 });
     }
   });
 
@@ -63,16 +109,18 @@ test.describe('Settings — Privacy section', () => {
     await privacyBtn.click();
     await page.waitForTimeout(5000);
 
-    const currentDevice = page.locator('text=/This device|Это устройство/');
-    const fallback = page.locator('text="--"');
+    // Current device is badged via `privacy-session-current` (RU "Это устройство").
+    const currentDevice = page.getByTestId('privacy-session-current');
+    const fallback = page.locator('text="—"');
 
-    const hasDevice = await currentDevice.count() > 0;
-    const hasFallback = await fallback.count() > 0;
+    const hasDevice = (await currentDevice.count()) > 0;
+    const hasFallback = (await fallback.count()) > 0;
 
     expect(hasDevice || hasFallback).toBe(true);
 
     if (hasDevice) {
-      await expect(currentDevice).toBeVisible({ timeout: 5_000 });
+      await expect(currentDevice.first()).toBeVisible({ timeout: 5_000 });
+      await expect(currentDevice.first()).toHaveText(/This device|Это устройство/);
     }
   });
 
@@ -98,11 +146,21 @@ test.describe('Settings — Notification schedule', () => {
     const result = await registerAccount(page);
     cdpSession = result.cdpSession;
 
+    // The schedule section is gated behind the setup-section story flags
+    // (LANGUAGE_CONFIGURED + NOTIFICATION_RECEIVED); the breakfast/lunch/dinner/
+    // steps rows additionally need MEAL_REMINDERS_UNLOCKED. Set them so the full
+    // schedule renders, then reload so settings re-reads the flags on mount.
+    await setStoryFlags(page, result.userId, [
+      'language_configured',
+      'notification_received',
+      'meal_reminders_unlocked',
+    ]);
+
     const navSettings = page.getByTestId('nav-settings');
     await expect(navSettings).toBeVisible({ timeout: 10_000 });
     await navSettings.click();
     await expect(page).toHaveURL(/\/settings/);
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
   });
 
   test.afterEach(async () => {
@@ -125,16 +183,22 @@ test.describe('Settings — Notification schedule', () => {
     const toggle = page.getByTestId('schedule-toggle-breakfast');
     await expect(toggle).toBeVisible({ timeout: 5_000 });
 
-    // Default is off — background should be gray (#e5e5ea)
-    const bgBefore = await toggle.evaluate(el => el.style.background);
-    expect(bgBefore).toContain('#e5e5ea');
+    // The toggle background is driven by design-system CSS vars:
+    // off = var(--bulma-border) (gray), on = var(--bulma-success) (green).
+    const offColor = await resolveColor(page, 'var(--bulma-border)');
+    const onColor = await resolveColor(page, 'var(--bulma-success)');
+    expect(offColor).not.toBe(onColor);
+
+    // Default is off — computed background should match the gray border color.
+    const bgBefore = await toggle.evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(bgBefore).toBe(offColor);
 
     await toggle.click();
     await page.waitForTimeout(300);
 
-    // After click — background should be green (#34c759)
-    const bgAfter = await toggle.evaluate(el => el.style.background);
-    expect(bgAfter).toContain('#34c759');
+    // After click — computed background should match the green success color.
+    const bgAfter = await toggle.evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(bgAfter).toBe(onColor);
   });
 
   test('Time inputs have correct default values', async ({ page }) => {
@@ -165,18 +229,13 @@ test.describe('Settings — Goals page', () => {
     const result = await registerAccount(page);
     cdpSession = result.cdpSession;
 
-    // Navigate to settings → goals
-    const navSettings = page.getByTestId('nav-settings');
-    await expect(navSettings).toBeVisible({ timeout: 10_000 });
-    await navSettings.click();
-    await expect(page).toHaveURL(/\/settings/);
-    await page.waitForTimeout(500);
-
-    const goalsBtn = page.getByTestId('settings-btn-goals');
-    await expect(goalsBtn).toBeVisible({ timeout: 5_000 });
-    await goalsBtn.click();
+    // The Goals row is hidden in the current build (SHOW_GOALS=false), but the
+    // /settings/goals route still exists — navigate to it directly.
+    await page.goto('/settings/goals');
     await expect(page).toHaveURL(/\/settings\/goals/);
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
+    // Standard nutrients are ensured on mount; wait for the first to render.
+    await expect(page.getByTestId('goals-nutrient-calories')).toBeVisible({ timeout: 10_000 });
   });
 
   test.afterEach(async () => {
@@ -185,35 +244,40 @@ test.describe('Settings — Goals page', () => {
     }
   });
 
-  test('Goals page has standard nutrient checkboxes', async ({ page }) => {
+  test('Goals page has standard nutrient rows', async ({ page }) => {
     for (const nutrient of ['calories', 'protein', 'fat', 'carbs']) {
-      const checkbox = page.getByTestId(`goals-checkbox-${nutrient}`);
-      await expect(checkbox).toBeVisible({ timeout: 5_000 });
+      const row = page.getByTestId(`goals-nutrient-${nutrient}`);
+      await expect(row).toBeVisible({ timeout: 5_000 });
     }
   });
 
-  test('Enable nutrient shows Track/Goal mode toggle', async ({ page }) => {
-    const checkbox = page.getByTestId('goals-checkbox-calories');
-    await checkbox.check();
-    await page.waitForTimeout(500);
-
+  test('Standard nutrient shows Track/Goal mode toggle', async ({ page }) => {
+    // Standard nutrients always render their Track/Goal segmented toggle.
     const modeToggle = page.getByTestId('goals-mode-calories');
     await expect(modeToggle).toBeVisible({ timeout: 5_000 });
+
+    // Both segmented options are present.
+    await expect(modeToggle.getByText('Следить')).toBeVisible({ timeout: 5_000 });
+    await expect(modeToggle.getByText('Цель')).toBeVisible({ timeout: 5_000 });
   });
 
-  test('Track mode does not show amount input', async ({ page }) => {
-    const checkbox = page.getByTestId('goals-checkbox-calories');
-    await checkbox.check();
-    await page.waitForTimeout(500);
-
-    // Default is Track mode (amount=0), so direction/amount selects should not be visible
+  test('Track mode does not show amount/direction selects', async ({ page }) => {
     const modeToggle = page.getByTestId('goals-mode-calories');
     await expect(modeToggle).toBeVisible({ timeout: 5_000 });
 
-    // In Track mode, the select for direction should NOT be present
+    // Default is Track mode (amount=0); the direction/amount/period controls
+    // (which include <select> elements) are only rendered in Goal mode. The
+    // mode toggle's parent column should therefore contain no <select>.
     const goalSelects = modeToggle.locator('..').locator('select');
     const selectCount = await goalSelects.count();
     expect(selectCount).toBe(0);
+
+    // Switching to Goal mode reveals the selects, confirming the Track-mode
+    // absence above is meaningful (not just a missing-element false positive).
+    await modeToggle.getByText('Цель').click();
+    await page.waitForTimeout(500);
+    const goalSelectsAfter = modeToggle.locator('..').locator('select');
+    expect(await goalSelectsAfter.count()).toBeGreaterThan(0);
   });
 
   test('Add custom nutrient', async ({ page }) => {

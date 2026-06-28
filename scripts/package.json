@@ -1,0 +1,13 @@
+{
+  "name": "renorma-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Dev tooling: story manual-test harness.",
+  "scripts": {
+    "manual-test": "node manual-test.mjs",
+    "test": "node --test \"**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

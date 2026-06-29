@@ -183,6 +183,26 @@
   .foot-links a{color:var(--muted);font-weight:600;font-size:14px;text-decoration:none;margin-right:22px}
   .foot-links a:hover{color:var(--ink)}
   .foot .cc{color:var(--muted);font-size:14px}
+
+  /* pay modal — explainer + promo code */
+  .modal-overlay{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;
+    background:rgba(14,22,48,.55);backdrop-filter:blur(6px)}
+  .modal-overlay[hidden]{display:none}
+  .modal{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);
+    box-shadow:0 40px 90px -30px rgba(14,22,48,.6);max-width:420px;width:100%;padding:34px 30px 30px;animation:modal-in .22s ease}
+  @keyframes modal-in{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+  .modal-x{position:absolute;top:12px;right:14px;width:34px;height:34px;border:none;background:transparent;color:var(--muted);
+    font-size:26px;line-height:1;cursor:pointer;border-radius:9px}
+  .modal-x:hover{background:var(--bg);color:var(--ink)}
+  .modal h3{font-size:23px;font-weight:800;letter-spacing:-.02em;margin:0 0 10px;color:var(--ink)}
+  .modal-lead{color:var(--ink-2);font-size:15px;line-height:1.55;margin:0 0 20px}
+  .modal-label{display:block;font-size:13.5px;font-weight:700;color:var(--ink);margin-bottom:7px}
+  .modal-label span{color:var(--muted);font-weight:500}
+  .modal-input{width:100%;box-sizing:border-box;padding:13px 15px;font-size:16px;font-family:inherit;border:1.5px solid var(--line);
+    border-radius:14px;background:var(--bg);color:var(--ink);outline:none;transition:border-color .15s,box-shadow .15s}
+  .modal-input:focus{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+  .modal-go{width:100%;justify-content:center;margin-top:18px}
+  .modal-err{margin-top:14px}
 </style>
 </head>
 <body>
@@ -195,7 +215,7 @@
       <a href="#why">Почему работает</a>
       <a href="#faq">Вопросы</a>
     </nav>
-    <a class="btn btn-primary" href="#start">Начать похудение</a>
+    <a class="btn btn-primary js-pay" href="#start">Начать похудение</a>
   </div>
 </header>
 
@@ -205,7 +225,7 @@
       <h1>Приложение по <span class="hl">нормализации</span> веса, рациона питания и образа жизни.</h1>
       <p class="lead">Мы создали re:Norma — инструмент, который <b>поможет вам похудеть</b>. Мы собрали большую базу данных знаний о теле и метаболизме. Вы будете постепенно в неё погружаться, начиная с самого важного и эффективного и заканчивая деталями и нюансами, которые вы сразу будете применять. С помощью re:Norma вы сами выстроите свой рацион похудения и на всю оставшуюся жизнь поймёте, <b>как быть в форме всегда</b>.</p>
       <div class="hero-cta">
-        <a class="btn btn-primary" href="#start">Начать похудение</a>
+        <a class="btn btn-primary js-pay" href="#start">Начать похудение</a>
         <a class="btn btn-ghost" href="#what">Как это работает</a>
       </div>
     </div>
@@ -365,6 +385,19 @@
   </div>
 </footer>
 
+<!-- ── Pay modal: explainer + promo code ── -->
+<div id="pay-modal" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pm-title">
+    <button class="modal-x" id="pm-close" type="button" aria-label="Закрыть">×</button>
+    <h3 id="pm-title">Переходим к оплате</h3>
+    <p class="modal-lead">Сейчас вы перейдёте в систему оплаты — на защищённую страницу платёжного провайдера. После успешной оплаты вы вернётесь сюда, создадите аккаунт и активируете подписку.</p>
+    <label class="modal-label" for="pm-promo">Промокод <span>— если есть</span></label>
+    <input id="pm-promo" class="modal-input" type="text" placeholder="Введите промокод" autocomplete="off" autocapitalize="off" spellcheck="false" />
+    <button id="pm-go" class="btn btn-primary modal-go" type="button">Перейти к оплате →</button>
+    <p id="pm-error" class="pay-error modal-err" role="alert" hidden></p>
+  </div>
+</div>
+
 <script>
   // ── Guest checkout (PROD-only by construction) ──────────────────────────────
   // The landing is unauthenticated: it calls the PROD payment-worker
@@ -378,25 +411,49 @@
     var PAY_BASE = "https://pay.renorma.app";
     var PLAN_ID = "monthly";
 
-    var btn = document.getElementById("pay-btn");
-    var err = document.getElementById("pay-error");
-    if (!btn) return;
+    var modal = document.getElementById("pay-modal");
+    var goBtn = document.getElementById("pm-go");
+    var promo = document.getElementById("pm-promo");
+    var err = document.getElementById("pm-error");
+    if (!modal || !goBtn) return;
 
     function showError(msg) {
       err.textContent = "Не удалось оформить подписку: " + msg + ". Попробуйте ещё раз.";
       err.hidden = false;
     }
-
-    btn.addEventListener("click", async function () {
+    function openModal() {
       err.hidden = true;
-      btn.disabled = true;
-      var prev = btn.textContent;
-      btn.textContent = "Создаём оплату…";
+      modal.hidden = false;
+      document.body.style.overflow = "hidden";
+      setTimeout(function () { if (promo) promo.focus(); }, 60);
+    }
+    function closeModal() {
+      modal.hidden = true;
+      document.body.style.overflow = "";
+    }
+
+    // Every "Начать похудение" (header / hero / pay section) opens the explainer
+    // + promo modal instead of going straight to checkout.
+    Array.prototype.forEach.call(document.querySelectorAll(".js-pay, #pay-btn"), function (t) {
+      t.addEventListener("click", function (e) { e.preventDefault(); openModal(); });
+    });
+    document.getElementById("pm-close").addEventListener("click", closeModal);
+    modal.addEventListener("click", function (e) { if (e.target === modal) closeModal(); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !modal.hidden) closeModal(); });
+
+    goBtn.addEventListener("click", async function () {
+      err.hidden = true;
+      goBtn.disabled = true;
+      var prev = goBtn.textContent;
+      goBtn.textContent = "Создаём оплату…";
       try {
+        var payload = { provider: "lava", planId: PLAN_ID };
+        var code = promo ? promo.value.trim() : "";
+        if (code) payload.promoCode = code;
         var r = await fetch(PAY_BASE + "/checkout/guest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: "lava", planId: PLAN_ID }),
+          body: JSON.stringify(payload),
         });
         if (!r.ok) {
           showError(await r.text());
@@ -413,8 +470,8 @@
         showError(e && e.message ? e.message : String(e));
       } finally {
         // If we did NOT navigate away, re-enable the button.
-        btn.disabled = false;
-        btn.textContent = prev;
+        goBtn.disabled = false;
+        goBtn.textContent = prev;
       }
     });
   })();

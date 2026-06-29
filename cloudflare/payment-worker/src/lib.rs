@@ -493,6 +493,12 @@ async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
     let plan_price = plan.get("price").and_then(|v| v.as_i64());
     let plan_currency = plan.get("currency").and_then(|v| v.as_str()).map(String::from);
     let plan_id_owned = plan.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    // Optional promo code from the landing modal (trimmed; empty → None).
+    let promo_code = body
+        .get("promoCode")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
     let claim_id = random_claim_secret()?; // opaque public id (≠ contractId; #1)
     let secret = random_claim_secret()?; // high-entropy claim secret (256-bit)
@@ -509,7 +515,7 @@ async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
             offer_id,
             email: format!("{claim_id}@guest.renorma.app"),
             return_url: _return_url,
-            promo_code: None,
+            promo_code,
         })
         .await
     {

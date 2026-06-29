@@ -58,15 +58,12 @@ def mark_svg(z, bg):
 
 OUT = os.path.dirname(os.path.abspath(__file__)); NAVY = '#0E1630'
 # (label, protein, fiber, micro-acid)
-# FIXED: emerald #10B981 (60) + rose #F43F5E (30); vary the indigo accent (10)
+# FIXED: emerald #10B981 (60) + rose #F43F5E (30); accent = ACID YELLOW (pops on navy)
 GREEN, ROSE = '#10B981', '#F43F5E'
 PALETTES = [
-    ('#818CF8', GREEN, ROSE, '#818CF8'),   # indigo-400 — light, pops on navy
-    ('#6366F1', GREEN, ROSE, '#6366F1'),   # indigo-500 — current pick
-    ('#4F46E5', GREEN, ROSE, '#4F46E5'),   # indigo-600 — more saturated
-    ('#4338CA', GREEN, ROSE, '#4338CA'),   # indigo-700 — deep saturated
-    ('#4C4CFF', GREEN, ROSE, '#4C4CFF'),   # electric indigo — high sat + bright
-    ('#7C3AED', GREEN, ROSE, '#7C3AED'),   # violet-indigo — saturated, warmer
+    ('#FFD400', GREEN, ROSE, '#FFD400'),   # golden acid yellow
+    ('#FFF200', GREEN, ROSE, '#FFF200'),   # lemon acid yellow
+    ('#EAFF00', GREEN, ROSE, '#EAFF00'),   # neon lime-yellow (most acid)
 ]
 pngs = []
 for lab, p, f, m in PALETTES:
@@ -77,7 +74,7 @@ for lab, p, f, m in PALETTES:
     pngs.append((lab, pngp))
 
 # comparison sheet: 3 cols x 2 rows, navy tiles on a light page
-COLS, CELL, PAD, LBL = 3, 240, 34, 30
+COLS, CELL, PAD, LBL = 3, 150, 30, 28
 rows = (len(pngs) + COLS - 1)//COLS
 Wd = COLS*CELL + (COLS+1)*PAD
 Hd = rows*(CELL+LBL) + (rows+1)*PAD

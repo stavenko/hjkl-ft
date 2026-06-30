@@ -218,7 +218,7 @@ async fn webhook_telegram(mut req: Request, env: &Env) -> Result<Response> {
         };
         match data {
             "start" => {
-                send_promo_prompt(env, chat_id).await?;
+                send_welcome(env, chat_id).await?;
             }
             "pay" => {
                 handle_pay(env, chat_id).await?;
@@ -231,28 +231,9 @@ async fn webhook_telegram(mut req: Request, env: &Env) -> Result<Response> {
     if let Some(msg) = &update.message {
         let chat_id = msg.chat.id;
         let text = msg.text.as_deref().unwrap_or("").trim();
-        if text == "/start" {
-            send_promo_prompt(env, chat_id).await?;
-        } else if !text.is_empty() {
-            // Any other non-empty text is treated as a promo code (last typed wins).
-            let stub = session_stub(env)?;
-            do_post(
-                &stub,
-                "/session/set-promo",
-                &serde_json::json!({ "chatId": chat_id, "promoCode": text }),
-            )
-            .await?;
-            // Verbatim re-prompt text; <код> inserted verbatim.
-            let reply = format!(
-                "Промокод {text} принят. Введите другой промокод, или нажмите кнопку [Оплатить] подписку."
-            );
-            send_message(
-                env,
-                chat_id,
-                &reply,
-                Some(inline_keyboard_callback("Оплатить подписку", "pay")),
-            )
-            .await?;
+        if text == "/start" || !text.is_empty() {
+            // Promo + payment now live in the Mini App; the bot just opens it.
+            send_welcome(env, chat_id).await?;
         }
         return Ok(ok_200());
     }
@@ -261,13 +242,17 @@ async fn webhook_telegram(mut req: Request, env: &Env) -> Result<Response> {
     Ok(ok_200())
 }
 
-/// The promo prompt shown on /start and on the "НАЧАТЬ ПОХУДЕНИЕ" (data:"start") button.
-async fn send_promo_prompt(env: &Env, chat_id: i64) -> Result<()> {
+/// Welcome shown on /start (and any message / the "start" button): open the Mini App,
+/// where the promo code is entered and the payment happens.
+async fn send_welcome(env: &Env, chat_id: i64) -> Result<()> {
     send_message(
         env,
         chat_id,
-        "Введите промокод, или нажмите кнопку [Оплатить].",
-        Some(inline_keyboard_callback("Оплатить", "pay")),
+        "Откройте мини-приложение, чтобы оформить подписку — там вводится промокод и проходит оплата.",
+        Some(miniapp::inline_keyboard_web_app(
+            "Открыть приложение",
+            "https://tg.renorma.app/",
+        )),
     )
     .await
 }

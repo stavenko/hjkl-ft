@@ -274,6 +274,55 @@ async fn notify_push(env: &Env, user_id: &str, body: &str, url_path: &str) {
     }
 }
 
+/// "guest payment succeeded" → notify telegram-worker so it can send the user the
+/// claim-binding link. Best-effort: mirrors `notify_push` resilience — logs on every
+/// failure and NEVER fails the webhook (lava must always get its 200). Over the
+/// TELEGRAM_WORKER service binding, guarded by the shared INTERNAL_PUSH_KEY. The
+/// claimId is the opaque public id (not secret-bearing) so logging it is acceptable;
+/// the claim secret is not in scope here.
+async fn notify_telegram_paid(env: &Env, claim_id: &str) {
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            console_warn!("notifyTelegramPaid: INTERNAL_PUSH_KEY not configured — skipping");
+            return;
+        }
+    };
+    let payload = serde_json::json!({ "claimId": claim_id }).to_string();
+    let headers = Headers::new();
+    let _ = headers.set("Content-Type", "application/json");
+    let _ = headers.set("X-Internal-Key", &key);
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(JsValue::from_str(&payload)));
+    // Host is irrelevant for a service-binding fetch; only the path routes.
+    let request = match Request::new_with_init("https://telegram-worker/internal/paid", &init) {
+        Ok(r) => r,
+        Err(e) => {
+            console_error!("notifyTelegramPaid build request failed: {e}");
+            return;
+        }
+    };
+    let tg = match env.service("TELEGRAM_WORKER") {
+        Ok(s) => s,
+        Err(e) => {
+            console_error!("notifyTelegramPaid: TELEGRAM_WORKER binding error: {e}");
+            return;
+        }
+    };
+    match tg.fetch_request(request).await {
+        Ok(mut res) => {
+            let status = res.status_code();
+            if !(200..300).contains(&status) {
+                let txt = res.text().await.unwrap_or_default();
+                console_error!("notifyTelegramPaid: {status} {txt} claimId={claim_id}");
+            }
+        }
+        Err(e) => console_error!("notifyTelegramPaid failed claimId={claim_id}: {e}"),
+    }
+}
+
 // ── unified admin auth (SUPPORT_WORKER binding + INTERNAL_PUSH_KEY) ────────────
 /// Authorize the caller as an approved admin. Verifies the expert JWT (same
 /// JWT_SECRET / auth-worker) → sub → asks support-worker /internal/is-admin via the
@@ -397,6 +446,23 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         return checkout_guest(req, env).await;
     }
 
+    // ── Public claim-status poll (NO JWT) ──
+    // The pay page polls this by the (non-secret) claimId to know when the lava
+    // webhook has marked the payment paid. Returns only {status}, never the secret.
+    if method == Method::Get && path == "/claim/status" {
+        let url = req.url()?;
+        let claim_id = url
+            .query_pairs()
+            .find(|(k, _)| k == "claimId")
+            .map(|(_, v)| v.into_owned())
+            .unwrap_or_default();
+        if claim_id.is_empty() {
+            return Ok(error_response("missing claimId", 400));
+        }
+        let claim = claim_stub(env)?;
+        return relay(do_post(&claim, "/status", &serde_json::json!({ "claimId": claim_id })).await?).await;
+    }
+
     // ── TEST entitlement (PRODUCTION-IMPOSSIBLE; TEST_ENTITLEMENT-gated) ──
     if method == Method::Post && path == "/test/guest-checkout" {
         return test_guest_checkout(req, env).await;
@@ -423,6 +489,14 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         let stub = claim_stub(env)?;
         let res = do_post(&stub, "/void", &serde_json::json!({ "claimId": claim_id })).await?;
         return relay(res).await;
+    }
+
+    // ── Internal guest checkout (INTERNAL_PUSH_KEY-guarded; PROD-ONLY) ──
+    // Same as /checkout/guest but ALSO returns the claim secret, because the caller
+    // is our trusted telegram-worker (authenticated by INTERNAL_PUSH_KEY). The secret
+    // leaves payment-worker ONLY here, never to a public/unauth caller, never logged.
+    if method == Method::Post && path == "/internal/checkout" {
+        return internal_checkout(req, env).await;
     }
 
     // ── Everything else is app-JWT authed ──
@@ -453,14 +527,24 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
 }
 
 
-// ── POST /checkout/guest (NO JWT; PROD-ONLY) ──────────────────────────────────
-async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
-    // Mutually exclusive with the test path: an env that mints free test subs must
-    // NOT also take real money. On the test env this route looks non-existent (404).
-    if test_entitlement_on(env) {
-        return Ok(error_response("Not found", 404));
-    }
-    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+// ── shared guest-checkout body ────────────────────────────────────────────────
+/// Result of a successful guest checkout. The secret is high-entropy and travels
+/// out ONLY via the lava return fragment (public /checkout/guest) or to our trusted
+/// telegram-worker (internal /internal/checkout); it is NEVER logged.
+struct GuestCheckout {
+    pay_url: String,
+    claim_id: String,
+    secret: String,
+}
+
+/// The shared body of guest checkout: provider resolution, plan lookup, claim-secret
+/// minting, lava checkout creation, ClaimDO /create-pending + contract→claim index.
+/// Returns Err(Response) for every error case (with the SAME statuses as before) so
+/// both callers surface identical errors; the PROD-ONLY guard stays in each caller.
+async fn do_guest_checkout(
+    body: &serde_json::Value,
+    env: &Env,
+) -> std::result::Result<GuestCheckout, Response> {
     let provider_name = body
         .get("provider")
         .and_then(|v| v.as_str())
@@ -469,13 +553,13 @@ async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
     let provider = match provider_for_env(&provider_name, env).await {
         Ok(p) => p,
         Err(reason) => {
-            console_error!("checkout_guest: {reason}");
-            return Ok(error_response_detail("MISCONFIGURED", &reason, 503));
+            console_error!("do_guest_checkout: {reason}");
+            return Err(error_response_detail("MISCONFIGURED", &reason, 503));
         }
     };
     let provider = match provider {
         Some(p) if p.configured() => p,
-        _ => return Ok(error_response("provider_not_configured", 400)),
+        _ => return Err(error_response("provider_not_configured", 400)),
     };
     let plan_id = body.get("planId").and_then(|v| v.as_str()).unwrap_or("");
     let plan = plans(env).into_iter().find(|p| {
@@ -487,21 +571,21 @@ async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
     });
     let plan = match plan {
         Some(p) => p,
-        None => return Ok(error_response("unknown_plan", 400)),
+        None => return Err(error_response("unknown_plan", 400)),
     };
     let offer_id = plan.get("lavaOfferId").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let plan_price = plan.get("price").and_then(|v| v.as_i64());
     let plan_currency = plan.get("currency").and_then(|v| v.as_str()).map(String::from);
     let plan_id_owned = plan.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    // Optional promo code from the landing modal (trimmed; empty → None).
+    // Optional promo code (trimmed; empty → None).
     let promo_code = body
         .get("promoCode")
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    let claim_id = random_claim_secret()?; // opaque public id (≠ contractId; #1)
-    let secret = random_claim_secret()?; // high-entropy claim secret (256-bit)
+    let claim_id = random_claim_secret().map_err(|e| error_response(&e.to_string(), 500))?; // opaque public id (≠ contractId; #1)
+    let secret = random_claim_secret().map_err(|e| error_response(&e.to_string(), 500))?; // high-entropy claim secret (256-bit)
     let secret_hash = sha256_hex(&secret);
     let base = env
         .var("LANDING_RETURN_URL")
@@ -520,11 +604,14 @@ async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
         .await
     {
         Ok(c) => c,
-        Err(e) => return Ok(error_response(&format!("checkout_failed: {e}"), 502)),
+        Err(e) => return Err(error_response(&format!("checkout_failed: {e}"), 502)),
     };
 
-    let claim = claim_stub(env)?;
-    let cp = do_post(
+    let claim = match claim_stub(env) {
+        Ok(s) => s,
+        Err(e) => return Err(error_response(&e.to_string(), 500)),
+    };
+    let cp = match do_post(
         &claim,
         "/create-pending",
         &serde_json::json!({
@@ -537,15 +624,81 @@ async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
             "currency": plan_currency,
         }),
     )
-    .await?;
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return Err(error_response(&e.to_string(), 500)),
+    };
     if cp.status_code() != 200 {
-        return Err(Error::RustError("claim create-pending failed".into()));
+        return Err(error_response("claim create-pending failed", 500));
     }
     // Map contract → claimId so the webhook finds the guest row.
-    index_put(env, &format!("claim-contract:{}", checkout.order_id), &claim_id).await?;
+    if let Err(e) = index_put(env, &format!("claim-contract:{}", checkout.order_id), &claim_id).await {
+        return Err(error_response(&e.to_string(), 500));
+    }
 
+    Ok(GuestCheckout {
+        pay_url: checkout.url,
+        claim_id,
+        secret,
+    })
+}
+
+// ── POST /checkout/guest (NO JWT; PROD-ONLY) ──────────────────────────────────
+async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
+    // Mutually exclusive with the test path: an env that mints free test subs must
+    // NOT also take real money. On the test env this route looks non-existent (404).
+    if test_entitlement_on(env) {
+        return Ok(error_response("Not found", 404));
+    }
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let gc = match do_guest_checkout(&body, env).await {
+        Ok(gc) => gc,
+        Err(resp) => return Ok(resp),
+    };
     // claimId only — NEVER the secret (it travels back via the lava fragment).
-    Response::from_json(&serde_json::json!({ "payUrl": checkout.url, "claimId": claim_id }))
+    Response::from_json(&serde_json::json!({ "payUrl": gc.pay_url, "claimId": gc.claim_id }))
+}
+
+// ── POST /internal/checkout (INTERNAL_PUSH_KEY-guarded; PROD-ONLY) ────────────
+/// Like /checkout/guest but RETURNS the claim secret, because the caller is our
+/// trusted telegram-worker (authenticated by INTERNAL_PUSH_KEY). [SECURITY #4/#5]
+async fn internal_checkout(mut req: Request, env: &Env) -> Result<Response> {
+    // [SECURITY CHECKPOINT #4] internal-key gate FIRST (fail closed).
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) => k,
+        Err(e) => {
+            console_error!("internal_checkout: {e}");
+            return Ok(error_response("internal_not_configured", 500));
+        }
+    };
+    let provided = req
+        .headers()
+        .get("X-Internal-Key")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if provided.is_empty() || provided != key {
+        return Ok(error_response("bad internal key", 403));
+    }
+
+    // PROD-ONLY guard — identical mutual exclusivity with the test path.
+    if test_entitlement_on(env) {
+        return Ok(error_response("Not found", 404));
+    }
+
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let gc = match do_guest_checkout(&body, env).await {
+        Ok(gc) => gc,
+        Err(resp) => return Ok(resp),
+    };
+    // [SECURITY CHECKPOINT #5] secret egress: ONLY here, internal-key gated, to our
+    // own telegram-worker. Never logged.
+    Response::from_json(&serde_json::json!({
+        "payUrl": gc.pay_url,
+        "claimId": gc.claim_id,
+        "secret": gc.secret,
+    }))
 }
 
 // ── POST /test/guest-checkout (PRODUCTION-IMPOSSIBLE) ─────────────────────────
@@ -767,6 +920,12 @@ async fn webhook(mut req: Request, env: &Env, name: &str) -> Result<Response> {
                     console_error!(
                         "webhook: claim-contract index pointed at {gid} but ClaimDO has no row for contract={gcontract}"
                     );
+                } else if rj.get("paid").and_then(|v| v.as_bool()) == Some(true) {
+                    // Genuine pending→paid transition: notify telegram-worker so the
+                    // bot delivers the claim-binding link. Best-effort (never fails
+                    // the webhook); telegram-worker is idempotent regardless.
+                    // duplicate/alreadyPaid/claimed → no re-notify.
+                    notify_telegram_paid(env, gid).await;
                 }
                 return Response::from_json(&serde_json::json!({ "ok": true, "guest": true }));
             }

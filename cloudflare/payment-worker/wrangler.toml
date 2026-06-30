@@ -35,6 +35,12 @@ new_sqlite_classes = ["SubscriptionDO", "PaymentIndexDO", "ClaimDO"]
 binding = "SUPPORT_WORKER"
 service = "support-worker-dev"
 
+# Notify the Telegram-pay bot after a guest claim is marked paid (best-effort,
+# INTERNAL_PUSH_KEY-guarded). Worker→Worker service binding.
+[[services]]
+binding = "TELEGRAM_WORKER"
+service = "telegram-worker-dev"
+
 # NO lava credentials on the default (dev/test) worker — the real lava Secrets
 # Store is bound ONLY under [env.production.*] below. The test env must NEVER be
 # able to take real money (locked decision: payment is PROD-ONLY). With no lava
@@ -87,6 +93,10 @@ class_name = "ClaimDO"
 [[env.production.services]]
 binding = "SUPPORT_WORKER"
 service = "support-worker-prod"
+
+[[env.production.services]]
+binding = "TELEGRAM_WORKER"
+service = "telegram-worker-prod"
 
 [[env.production.secrets_store_secrets]]
 binding = "LAVA_API_KEY"

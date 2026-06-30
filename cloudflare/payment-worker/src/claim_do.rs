@@ -116,6 +116,17 @@ impl ClaimDO {
 
     // ---- ops ----
 
+    /// Public poll: status of a claim by its (non-secret) claimId. Returns only
+    /// the lifecycle status, NEVER the secret hash. Unknown claim → status "none".
+    fn status_of(&self, b: &serde_json::Value) -> Result<Response> {
+        let claim_id = str_field(b, "claimId")?;
+        let status = match self.row_by_claim(&claim_id)? {
+            Some(r) => r.status,
+            None => "none".to_string(),
+        };
+        Response::from_json(&serde_json::json!({ "status": status }))
+    }
+
     fn create_pending(&self, b: &serde_json::Value) -> Result<Response> {
         let claim_id = str_field(b, "claimId")?;
         let secret_hash = str_field(b, "secretHash")?;
@@ -397,6 +408,10 @@ impl DurableObject for ClaimDO {
             (Method::Post, "/claim") => {
                 let b: serde_json::Value = req.json().await?;
                 self.claim(&b)
+            }
+            (Method::Post, "/status") => {
+                let b: serde_json::Value = req.json().await?;
+                self.status_of(&b)
             }
             (Method::Get, "/unbound") => self.unbound(),
             (Method::Post, "/void") => {

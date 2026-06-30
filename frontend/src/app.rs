@@ -32,7 +32,7 @@ fn is_onboard_claim_entry() -> bool {
     let Some(loc) = web_sys::window().map(|w| w.location()) else { return false };
     let path = loc.pathname().unwrap_or_default();
     let hash = loc.hash().unwrap_or_default();
-    path == "/onboard" && hash.starts_with("#claim=")
+    (path == "/onboard" || path == "/onboard-tg") && hash.starts_with("#claim=")
 }
 
 fn initial_state() -> AppState {
@@ -182,6 +182,7 @@ pub fn App() -> impl IntoView {
                         // without a bespoke static route above). Static routes win by specificity.
                         <Route path="/story/:id" view=pages::story_section::StorySectionPage />
                         <Route path="/onboard" view=pages::onboard::OnboardPage />
+                        <Route path="/onboard-tg" view=pages::onboard_tg::OnboardTgPage />
                         <Route path="/progress" view=pages::progress::ProgressPage />
                         <Route path="/diary" view=pages::diary::DiaryPage />
                         <Route path="/diary/add" view=pages::diary_add::DiaryAddPage />
@@ -200,7 +201,10 @@ pub fn App() -> impl IntoView {
                 </div>
             </div>
 
-            <nav style="position: fixed; bottom: 0.75rem; left: 50%; transform: translateX(-50%); z-index: 40; background: var(--bulma-scheme-main); display: flex; justify-content: space-around; align-items: center; height: 3.5rem; width: min(26rem, calc(100% - 2rem)); border-radius: 1rem; box-shadow: 0 4px 24px rgba(0,0,0,0.15);">
+            // Hidden on /onboard: that pre-account page forces AppState::Ready to
+            // bypass the auth overlays, which would otherwise surface this app-shell
+            // nav before the user has registered.
+            <nav style:display=move || { let p = use_location().pathname.get(); if p == "/onboard" || p == "/onboard-tg" { "none" } else { "flex" } } style="position: fixed; bottom: 0.75rem; left: 50%; transform: translateX(-50%); z-index: 40; background: var(--bulma-scheme-main); display: flex; justify-content: space-around; align-items: center; height: 3.5rem; width: min(26rem, calc(100% - 2rem)); border-radius: 1rem; box-shadow: 0 4px 24px rgba(0,0,0,0.15);">
                 <a attr:data-testid="nav-story" href="/" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
                     <span style="position: relative; display: inline-flex;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

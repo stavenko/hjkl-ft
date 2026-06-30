@@ -5,6 +5,7 @@ pub mod diary_add;
 pub mod foods;
 pub mod goals;
 pub mod onboard;
+pub mod onboard_tg;
 pub mod pair_page;
 pub mod privacy;
 pub mod pwa_prompt;

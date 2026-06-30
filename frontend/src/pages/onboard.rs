@@ -164,7 +164,12 @@ pub fn OnboardPage() -> impl IntoView {
 
     let error_view = move || {
         error.get().map(|e| view! {
-            <div class="notification is-danger is-light mb-4" style="text-align: left;">{e}</div>
+            <div class="notification is-danger is-light mb-4" style="text-align: left;">
+                {e}
+                <div class="is-size-7 mt-2 has-text-grey-dark">
+                    "Внутри Telegram регистрация не работает — откройте эту страницу в Safari или Chrome."
+                </div>
+            </div>
         })
     };
 

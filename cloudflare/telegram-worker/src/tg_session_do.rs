@@ -25,6 +25,16 @@ struct ClaimRow {
     notified_at: Option<i64>,
 }
 
+/// One row of the Mini App claimId → {tg_user_id, secret} mapping. The Mini App has no
+/// chat_id, so ownership is keyed by the validated Telegram WebApp user.id.
+#[derive(Debug, Deserialize)]
+struct MiniappClaimRow {
+    #[allow(dead_code)]
+    claim_id: String,
+    tg_user_id: i64,
+    secret: String,
+}
+
 /// SQLite-backed Telegram session store. One global instance (idFromName("global")):
 /// every op runs under the DO's single-threaded input gate, so UPSERTs are atomic.
 #[durable_object]
@@ -52,6 +62,17 @@ impl TgSessionDO {
                 secret      TEXT NOT NULL,
                 created_at  INTEGER NOT NULL,
                 notified_at INTEGER
+            )",
+            None,
+        )?;
+        // Mini App claims keyed by the Telegram WebApp user.id (NOT chat_id; the Mini
+        // App has no chat). Used for the owner-gated /miniapp/status secret release.
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS miniapp_claims (
+                claim_id    TEXT PRIMARY KEY,
+                tg_user_id  INTEGER NOT NULL,
+                secret      TEXT NOT NULL,
+                created_at  INTEGER NOT NULL
             )",
             None,
         )?;
@@ -132,6 +153,46 @@ impl TgSessionDO {
         }
     }
 
+    // ---- mini app claim ops (keyed by tg_user_id) ----
+
+    /// Store the Mini App claimId → {tg_user_id, secret} mapping. Idempotent
+    /// (INSERT OR IGNORE). The plaintext secret lives ONLY here and is NEVER logged.
+    fn put_miniapp_claim(&self, b: &serde_json::Value) -> Result<Response> {
+        let claim_id = str_field(b, "claimId")?;
+        let tg_user_id = i64_field(b, "tgUserId")?;
+        let secret = str_field(b, "secret")?;
+        self.state.storage().sql().exec(
+            "INSERT OR IGNORE INTO miniapp_claims(claim_id, tg_user_id, secret, created_at)
+             VALUES(?, ?, ?, ?)",
+            vec![claim_id.into(), tg_user_id.into(), secret.into(), now_ms().into()],
+        )?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    /// Look up a Mini App claim. Unknown → {found:false}. The secret is returned only
+    /// in-process to the owner-gated /miniapp/status path; never logged here.
+    fn get_miniapp_claim(&self, b: &serde_json::Value) -> Result<Response> {
+        let claim_id = str_field(b, "claimId")?;
+        let row = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT claim_id, tg_user_id, secret FROM miniapp_claims WHERE claim_id = ?",
+                vec![claim_id.into()],
+            )?
+            .to_array::<MiniappClaimRow>()?
+            .into_iter()
+            .next();
+        match row {
+            Some(r) => Response::from_json(&serde_json::json!({
+                "tgUserId": r.tg_user_id,
+                "secret": r.secret,
+            })),
+            None => Response::from_json(&serde_json::json!({ "found": false })),
+        }
+    }
+
     /// Record paid-notification delivery. Idempotent: re-stamping is harmless.
     fn mark_notified(&self, b: &serde_json::Value) -> Result<Response> {
         let claim_id = str_field(b, "claimId")?;
@@ -187,6 +248,14 @@ impl DurableObject for TgSessionDO {
             (Method::Post, "/claims/mark-notified") => {
                 let b: serde_json::Value = req.json().await?;
                 self.mark_notified(&b)
+            }
+            (Method::Post, "/miniapp/claims/put") => {
+                let b: serde_json::Value = req.json().await?;
+                self.put_miniapp_claim(&b)
+            }
+            (Method::Post, "/miniapp/claims/get") => {
+                let b: serde_json::Value = req.json().await?;
+                self.get_miniapp_claim(&b)
             }
             _ => Response::error("Not found", 404),
         }

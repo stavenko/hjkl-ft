@@ -16,8 +16,10 @@
 use wasm_bindgen::JsValue;
 use worker::*;
 
+mod init_data;
+mod miniapp;
 mod tg_session_do;
-mod token;
+pub(crate) mod token;
 mod types;
 
 pub use tg_session_do::TgSessionDO;
@@ -25,14 +27,14 @@ pub use tg_session_do::TgSessionDO;
 use types::Update;
 
 // ── DO-stub helper ─────────────────────────────────────────────────────────────
-fn session_stub(env: &Env) -> Result<worker::durable::Stub> {
+pub(crate) fn session_stub(env: &Env) -> Result<worker::durable::Stub> {
     env.durable_object("TG_SESSION_DO")?
         .id_from_name("global")?
         .get_stub()
 }
 
 /// POST to a DO stub at `https://do{path}` with a JSON body. Returns the raw Response.
-async fn do_post(
+pub(crate) async fn do_post(
     stub: &worker::durable::Stub,
     path: &str,
     body: &serde_json::Value,
@@ -135,7 +137,7 @@ async fn require_secrets(env: &Env) -> std::result::Result<(), Response> {
     Ok(())
 }
 
-fn error_response(message: &str, status: u16) -> Response {
+pub(crate) fn error_response(message: &str, status: u16) -> Response {
     Response::from_json(&serde_json::json!({ "error": message }))
         .expect("serialize error")
         .with_status(status)
@@ -162,6 +164,16 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
     }
     if method == Method::Post && path == "/internal/paid" {
         return internal_paid(req, env).await;
+    }
+    // ── Telegram Mini App pay flow (page + same-origin APIs) ──
+    if method == Method::Get && path == "/" {
+        return miniapp::serve_miniapp_page();
+    }
+    if method == Method::Post && path == "/miniapp/checkout" {
+        return miniapp::miniapp_checkout(req, env).await;
+    }
+    if method == Method::Post && path == "/miniapp/status" {
+        return miniapp::miniapp_status(req, env).await;
     }
     Ok(error_response("Not found", 404))
 }
@@ -322,16 +334,16 @@ async fn handle_pay(env: &Env, chat_id: i64) -> Result<()> {
     .await
 }
 
-struct CheckoutResult {
-    pay_url: String,
-    claim_id: String,
-    secret: String,
+pub(crate) struct CheckoutResult {
+    pub(crate) pay_url: String,
+    pub(crate) claim_id: String,
+    pub(crate) secret: String,
 }
 
 /// POST payment-worker /internal/checkout {planId, promoCode} with X-Internal-Key.
 /// Expects {payUrl, claimId, secret}. Any non-2xx / parse / binding error → Err
 /// (the caller logs + surfaces to the user; never invents success).
-async fn call_internal_checkout(
+pub(crate) async fn call_internal_checkout(
     env: &Env,
     plan_id: &str,
     promo_code: Option<&str>,

@@ -30,6 +30,10 @@ TELEGRAM_WEBHOOK_SECRET = "dev-telegram-webhook-secret"
 INTERNAL_PUSH_KEY = "dev-internal-push-key"
 # App onboarding entry; the worker appends `#claim=<id>.<secret>`.
 ONBOARD_BASE_URL = "https://renorma-fit-dev.pages.dev/onboard-tg"
+# DIRECT app onboarding entry used by the Mini App (Telegram.WebApp.openLink already
+# opens a real Safari, so we want /onboard, NOT the /onboard-tg bridge). Worker appends
+# `#claim=<id>.<secret>`.
+APP_ONBOARD_URL = "https://renorma-fit-dev.pages.dev/onboard"
 # Plan id sent to payment-worker /internal/checkout (mirrors the payment-worker PLANS catalog).
 PLAN_ID = "monthly"
 
@@ -75,4 +79,6 @@ secret_name = "internal-push-key"
 [env.production.vars]
 # The spec's claim-binding link host.
 ONBOARD_BASE_URL = "https://fit.renorma.app/onboard-tg"
+# DIRECT app onboarding entry used by the Mini App (openLink → Safari → /onboard).
+APP_ONBOARD_URL = "https://fit.renorma.app/onboard"
 PLAN_ID = "monthly"

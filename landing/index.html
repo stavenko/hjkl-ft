@@ -389,91 +389,37 @@
 <div id="pay-modal" class="modal-overlay" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pm-title">
     <button class="modal-x" id="pm-close" type="button" aria-label="Закрыть">×</button>
-    <h3 id="pm-title">Переходим к оплате</h3>
-    <p class="modal-lead">Сейчас вы перейдёте в систему оплаты — на защищённую страницу платёжного провайдера. После успешной оплаты вы вернётесь сюда, создадите аккаунт и активируете подписку.</p>
-    <label class="modal-label" for="pm-promo">Промокод <span>— если есть</span></label>
-    <input id="pm-promo" class="modal-input" type="text" placeholder="Введите промокод" autocomplete="off" autocapitalize="off" spellcheck="false" />
-    <button id="pm-go" class="btn btn-primary modal-go" type="button">Перейти к оплате →</button>
-    <p id="pm-error" class="pay-error modal-err" role="alert" hidden></p>
+    <h3 id="pm-title">Переходим в Telegram</h3>
+    <p class="modal-lead">Для оформления подписки мы направим вас в мини-приложение Telegram. Там вы введёте промокод (если есть) и оплатите подписку.</p>
+    <a id="pm-go" class="btn btn-primary modal-go" href="https://t.me/renorma_payment_helper_bot" target="_blank" rel="noopener">Открыть в Telegram →</a>
   </div>
 </div>
 
 <script>
-  // ── Guest checkout (PROD-only by construction) ──────────────────────────────
-  // The landing is unauthenticated: it calls the PROD payment-worker
-  // /checkout/guest, then redirects the buyer to lava's hosted checkout. After a
-  // successful payment lava redirects to LANDING_RETURN_URL#claim=<id>.<secret>
-  // (the app /onboard), where the buyer registers and claims the paid sub.
-  // We receive only {payUrl, claimId} here — NEVER the claim secret (it travels
-  // back solely via the lava redirect fragment). No silent catch: every failure
-  // is surfaced in #pay-error.
+  // ── Subscribe CTA → explainer modal → Telegram Mini App ─────────────────────
+  // Checkout no longer happens on the landing: the whole pay flow (promo code +
+  // payment + post-payment onboarding) lives in the Telegram Mini App. The CTA
+  // opens a short explainer modal, whose button is a plain link to the bot.
   (function () {
-    var PAY_BASE = "https://pay.renorma.app";
-    var PLAN_ID = "monthly";
-
     var modal = document.getElementById("pay-modal");
-    var goBtn = document.getElementById("pm-go");
-    var promo = document.getElementById("pm-promo");
-    var err = document.getElementById("pm-error");
-    if (!modal || !goBtn) return;
+    if (!modal) return;
 
-    function showError(msg) {
-      err.textContent = "Не удалось оформить подписку: " + msg + ". Попробуйте ещё раз.";
-      err.hidden = false;
-    }
     function openModal() {
-      err.hidden = true;
       modal.hidden = false;
       document.body.style.overflow = "hidden";
-      setTimeout(function () { if (promo) promo.focus(); }, 60);
     }
     function closeModal() {
       modal.hidden = true;
       document.body.style.overflow = "";
     }
 
-    // Every "Начать похудение" (header / hero / pay section) opens the explainer
-    // + promo modal instead of going straight to checkout.
     Array.prototype.forEach.call(document.querySelectorAll(".js-pay, #pay-btn"), function (t) {
       t.addEventListener("click", function (e) { e.preventDefault(); openModal(); });
     });
     document.getElementById("pm-close").addEventListener("click", closeModal);
     modal.addEventListener("click", function (e) { if (e.target === modal) closeModal(); });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !modal.hidden) closeModal(); });
-
-    goBtn.addEventListener("click", async function () {
-      err.hidden = true;
-      goBtn.disabled = true;
-      var prev = goBtn.textContent;
-      goBtn.textContent = "Создаём оплату…";
-      try {
-        var payload = { provider: "lava", planId: PLAN_ID };
-        var code = promo ? promo.value.trim() : "";
-        if (code) payload.promoCode = code;
-        var r = await fetch(PAY_BASE + "/checkout/guest", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!r.ok) {
-          showError(await r.text());
-          return;
-        }
-        var data = await r.json();
-        if (!data || !data.payUrl) {
-          showError("сервер не вернул ссылку на оплату");
-          return;
-        }
-        // lava hosted checkout; on success lava redirects to .../onboard#claim=...
-        window.location.href = data.payUrl;
-      } catch (e) {
-        showError(e && e.message ? e.message : String(e));
-      } finally {
-        // If we did NOT navigate away, re-enable the button.
-        goBtn.disabled = false;
-        goBtn.textContent = prev;
-      }
-    });
+    // The "Открыть в Telegram" button is a real <a> link — no JS needed for it.
   })();
 </script>
 

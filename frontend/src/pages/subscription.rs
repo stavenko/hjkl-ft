@@ -120,7 +120,9 @@ pub fn SubscriptionPage() -> impl IntoView {
         spawn_local(async move {
             match subscription::refund_preview().await {
                 Ok(p) => refund.set(Some(p)),
-                Err(e) => refund_err.set(Some(e)),
+                // lava unreachable / no payment found → the server fails loud (no guessed
+                // amount). Show a friendly message; the confirm button stays disabled.
+                Err(_) => refund_err.set(Some(t("settings.sub_refund_error").to_string())),
             }
         });
     };

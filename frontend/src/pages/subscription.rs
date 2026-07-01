@@ -7,6 +7,8 @@ use crate::services::subscription;
 
 const PAGE_BG: &str = "background: var(--bulma-background); min-height: 100vh; padding: 0; margin: -0.75rem;";
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden; padding: 16px;";
+/// Purchase / renewal happens in the Telegram Mini App (opens Telegram → the pay app).
+const MINIAPP_PAY_URL: &str = "https://t.me/renorma_payment_helper_bot/pay";
 
 fn days_left(end_ms: i64) -> i64 {
     let now = js_sys::Date::now() as i64;
@@ -218,24 +220,35 @@ pub fn SubscriptionPage() -> impl IntoView {
                     }}
                 </div>
 
-                // Not subscribed → purchase happens on the website (landing), not in-app.
-                {move || {
-                    let unpaid = status.get().map(|s| !s.is_paid()).unwrap_or(false);
-                    unpaid.then(|| view! {
-                        <p class="is-size-6 has-text-grey" style="margin-top: 16px; line-height: 1.5;">
-                            {move || t("settings.sub_buy_on_site")}
-                        </p>
-                        <a
-                            class="button is-link is-fullwidth is-medium"
-                            style="margin-top: 8px;"
-                            href="https://renorma.app"
-                            target="_blank"
-                            rel="noopener"
-                        >
-                            {move || t("settings.sub_open_site")}
-                        </a>
-                    })
-                }}
+                // Subscription entry points. Renewal / purchase happens in the Telegram
+                // Mini App — never on the website.
+                {move || status.get().map(|s| {
+                    if s.active && s.no_renew == Some(true) {
+                        // Cancelled but access still runs — renewal only after it lapses.
+                        let msg = t("settings.sub_renew_after").replace("{n}", &days_phrase(days_left(s.end)));
+                        view! {
+                            <p class="is-size-6 has-text-grey" style="margin-top: 16px; line-height: 1.5;">{msg}</p>
+                        }.into_view()
+                    } else if !s.is_paid() {
+                        // No active access → subscribe now, in the Telegram Mini App.
+                        view! {
+                            <p class="is-size-6 has-text-grey" style="margin-top: 16px; line-height: 1.5;">
+                                {move || t("settings.sub_buy_in_tg")}
+                            </p>
+                            <a
+                                class="button is-link is-fullwidth is-medium"
+                                style="margin-top: 8px;"
+                                href=MINIAPP_PAY_URL
+                                target="_blank"
+                                rel="noopener"
+                            >
+                                {move || t("settings.sub_open_tg")}
+                            </a>
+                        }.into_view()
+                    } else {
+                        ().into_view()
+                    }
+                })}
             </div>
 
             // ── Refund dialog ──

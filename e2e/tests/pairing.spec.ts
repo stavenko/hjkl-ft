@@ -165,13 +165,13 @@ test.describe('Device pairing (new device side)', () => {
     await page.reload();
     await page.waitForTimeout(3000);
 
-    // "/" boots straight into the login screen — pair options are visible directly.
-    const showQr = page.getByTestId('auth-btn-show-qr');
-    const scanQr = page.getByTestId('auth-btn-scan-qr');
+    // "/" boots straight into the login screen — the device-pairing entry ("Добавить
+    // устройство") and the passkey login are visible directly. (The QR-show / scan
+    // options live on the sub-screen that opens from "Добавить устройство".)
+    const addDevice = page.getByTestId('auth-btn-add-device');
     const tryPasskey = page.getByTestId('auth-btn-try-passkey');
 
-    await expect(showQr).toBeVisible({ timeout: 15_000 });
-    await expect(scanQr).toBeVisible({ timeout: 5_000 });
+    await expect(addDevice).toBeVisible({ timeout: 15_000 });
     await expect(tryPasskey).toBeVisible({ timeout: 5_000 });
   });
 });

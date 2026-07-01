@@ -118,8 +118,9 @@ test.describe('Flow B: New device shows QR → logged-in approves → auto-claim
     await page.reload();
     await page.waitForTimeout(3000);
 
-    // Should see the login screen directly (no-session "/" is login-only).
-    const showQrBtn = page.getByTestId('auth-btn-show-qr');
+    // Should see the login screen directly (no-session "/" is login-only). The QR-show
+    // flow starts from the "Добавить устройство" entry.
+    const showQrBtn = page.getByTestId('auth-btn-add-device');
     await expect(showQrBtn).toBeVisible({ timeout: 15_000 });
 
     // Intercept /pair/request to get pairing data
@@ -136,8 +137,8 @@ test.describe('Flow B: New device shows QR → logged-in approves → auto-claim
     expect(requestData.secret).toBeTruthy();
     expect(requestData.qr_url).toBeTruthy();
 
-    // QR should be visible, waiting text shown
-    await expect(page.getByText('Покажите этот QR-код залогиненному устройству')).toBeVisible({ timeout: 5_000 });
+    // The QR-show screen is up: the QR code itself is rendered.
+    await expect(page.getByTestId('auth-qr-display')).toBeVisible({ timeout: 5_000 });
 
     // -- Step 4: Verify polling started (check requests) --
     let checkCalled = false;

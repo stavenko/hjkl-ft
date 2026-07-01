@@ -1,4 +1,4 @@
-var CACHE_NAME = 'ft-v6';
+var CACHE_NAME = 'ft-v7';
 
 // Fixed-name shell: precached on install so an offline launch works even after
 // only a brief online session (iOS is finicky about lazy runtime caching). The

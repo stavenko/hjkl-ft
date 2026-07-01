@@ -25,11 +25,13 @@ test.describe('PWA install prompt', () => {
 
     await dismissBtn.click();
 
-    // After dismiss: TryingPassKey (brief loading) → Auth page (login-only;
-    // registration lives in /onboard, so the auth screen shows the passkey login).
+    // After dismiss: TryingPassKey (brief loading) → Auth page. Account CREATION lives
+    // in /onboard, so the auth screen shows the passkey login. A "Регистрация" link may
+    // be present (it only routes to the paid landing) — but the inline account-creation
+    // form (name input) must NOT be here.
     const loginBtn = page.getByTestId('auth-btn-try-passkey');
     await expect(loginBtn).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('auth-btn-register')).not.toBeVisible();
+    await expect(page.getByTestId('auth-input-name')).not.toBeVisible();
 
     const dismissed = await page.evaluate(() => localStorage.getItem('pwa_dismissed'));
     expect(dismissed).toBe('true');
@@ -59,11 +61,12 @@ test.describe('No-session "/" entry is login-only', () => {
 
     const loginBtn = page.getByTestId('auth-btn-try-passkey');
     await expect(loginBtn).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('auth-btn-show-qr')).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByTestId('auth-btn-scan-qr')).toBeVisible({ timeout: 5_000 });
+    // Device-pairing is offered via the single "Добавить устройство" entry (the QR /
+    // scan sub-screen opens from there).
+    await expect(page.getByTestId('auth-btn-add-device')).toBeVisible({ timeout: 5_000 });
 
-    // Registration UI must NOT appear at "/".
-    await expect(page.getByTestId('auth-btn-register')).not.toBeVisible();
+    // INLINE account creation must NOT appear at "/". (A "Регистрация" link is allowed —
+    // it only routes to the paid landing — but there is no name-input form here.)
     await expect(page.getByTestId('auth-input-name')).not.toBeVisible();
   });
 });

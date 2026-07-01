@@ -20,6 +20,19 @@ use worker::*;
 use crate::init_data::{validate_init_data, InitDataOk};
 use crate::{call_internal_checkout, do_post, error_response, session_stub, token};
 
+// Telegram WebApp SDK, self-hosted (bundled) so the Mini App loads NO third-party
+// script. It's a client-bridge library (postMessage), makes no telegram.org network
+// calls, so serving a pinned copy is safe. Refresh it if Telegram ships protocol changes.
+const TELEGRAM_WEBAPP_JS: &str = include_str!("telegram-web-app.js");
+
+// ── GET /telegram-web-app.js : the self-hosted Telegram WebApp SDK ───────────────
+pub fn serve_miniapp_sdk() -> Result<Response> {
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/javascript; charset=utf-8")?;
+    headers.set("Cache-Control", "public, max-age=86400")?;
+    Ok(Response::ok(TELEGRAM_WEBAPP_JS)?.with_headers(headers))
+}
+
 // ── GET / : the Mini App page ───────────────────────────────────────────────────
 pub fn serve_miniapp_page() -> Result<Response> {
     let headers = Headers::new();
@@ -29,7 +42,7 @@ pub fn serve_miniapp_page() -> Result<Response> {
     headers.set(
         "Content-Security-Policy",
         "default-src 'self'; \
-         script-src 'self' https://telegram.org 'unsafe-inline'; \
+         script-src 'self' 'unsafe-inline'; \
          connect-src 'self'; \
          img-src 'self' data:; \
          style-src 'self' 'unsafe-inline'",
@@ -320,7 +333,7 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Renorma — оплата</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="/telegram-web-app.js"></script>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }

@@ -174,6 +174,9 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
     if method == Method::Get && path == "/" {
         return miniapp::serve_miniapp_page();
     }
+    if method == Method::Get && path == "/telegram-web-app.js" {
+        return miniapp::serve_miniapp_sdk();
+    }
     if method == Method::Post && path == "/miniapp/checkout" {
         return miniapp::miniapp_checkout(req, env).await;
     }

@@ -30,7 +30,7 @@ pub fn App() -> impl IntoView {
     let view = create_rw_signal(if auth::has_live_session() { View::RequestAccess } else { View::Login });
 
     view! {
-        <div class="wrap">
+        <div class="app">
             {move || match view.get() {
                 View::Login => view! { <Login view=view /> }.into_view(),
                 View::RequestAccess => view! { <RequestAccess view=view /> }.into_view(),
@@ -41,6 +41,33 @@ pub fn App() -> impl IntoView {
                 View::Payments => view! { <Payments view=view /> }.into_view(),
             }}
         </div>
+    }
+}
+
+/// Which main section a bottom-tab targets (for the active highlight).
+#[derive(Clone, Copy, PartialEq)]
+enum Section {
+    Queue,
+    Payments,
+}
+
+/// Persistent bottom navigation shared by the three main authed screens.
+#[component]
+fn TabBar(view: RwSignal<View>, active: Section) -> impl IntoView {
+    let on = move |s: Section| if s == active { "tab tab--on" } else { "tab" };
+    view! {
+        <nav class="tabbar">
+            <button class=move || on(Section::Queue) attr:data-testid="tab-queue"
+                on:click=move |_| view.set(View::Queue)>
+                <svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9l-4 4V7a2 2 0 0 1 0-2z"/></svg>
+                "Очередь"
+            </button>
+            <button class=move || on(Section::Payments) attr:data-testid="tab-payments"
+                on:click=move |_| view.set(View::Payments)>
+                <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M3 10.5h18"/></svg>
+                "Платежи"
+            </button>
+        </nav>
     }
 }
 
@@ -92,19 +119,22 @@ fn Login(view: RwSignal<View>) -> impl IntoView {
     };
 
     view! {
-        <div style="margin: auto; width: 100%; padding: 24px; max-width: 420px;">
-            <h1 style="font-size: 1.4rem; margin: 0 0 4px;">"Renorma — поддержка"</h1>
-            <p style="color: var(--muted); margin: 0 0 24px;">"Консоль экспертов"</p>
+        <div class="center">
+            <div class="brandmark"></div>
+            <h1 class="h1">"re:Norma"</h1>
+            <p class="sub">"Операторская консоль"</p>
 
-            <button class="btn btn-primary" style="width: 100%; margin-bottom: 20px;"
+            <button class="btn btn--primary btn--block" style="margin-bottom: 14px;"
                 disabled=move || busy.get() on:click=sign_in>
                 {move || if busy.get() { "…" } else { "Войти паскеем" }}
             </button>
 
-            <details style="margin-bottom: 16px;">
-                <summary style="color: var(--muted); cursor: pointer;">"Первый вход на этом устройстве"</summary>
+            <details style="margin-top: 6px;">
+                <summary style="color: var(--muted); cursor: pointer; font-size: .9rem; padding: 6px 0;">
+                    "Первый вход на этом устройстве"
+                </summary>
                 <div style="margin-top: 12px; display: flex; gap: 8px;">
-                    <input class="btn" style="flex: 1;" placeholder="Имя эксперта"
+                    <input class="field" style="flex: 1;" placeholder="Имя эксперта"
                         prop:value=move || name.get()
                         on:input=move |e| name.set(event_target_value(&e)) />
                     <button class="btn" disabled=move || busy.get() on:click=register>
@@ -114,7 +144,7 @@ fn Login(view: RwSignal<View>) -> impl IntoView {
             </details>
 
             {move || error.get().map(|e| view! {
-                <p style="color: var(--pink); white-space: pre-wrap;">{e}</p>
+                <p style="color: var(--danger); white-space: pre-wrap; margin-top: 16px;">{e}</p>
             })}
         </div>
     }
@@ -173,45 +203,39 @@ fn RequestAccess(view: RwSignal<View>) -> impl IntoView {
     };
 
     view! {
-        <div style="margin: auto; width: 100%; padding: 24px; max-width: 420px;">
-            <h1 style="font-size: 1.4rem; margin: 0 0 4px;">"Доступ к консоли"</h1>
-            <p style="color: var(--muted); margin: 0 0 24px;">
-                "Запросите код и передайте его оператору."
-            </p>
+        <div class="center">
+            <div class="brandmark"></div>
+            <h1 class="h1">"Доступ к консоли"</h1>
+            <p class="sub">"Запросите код и передайте его оператору."</p>
 
             {move || match code.get() {
                 None => view! {
-                    <button class="btn btn-primary" style="width: 100%;"
+                    <button class="btn btn--primary btn--block"
                         disabled=move || busy.get() on:click=request>
                         {move || if busy.get() { "…" } else { "Запросить доступ" }}
                     </button>
                 }.into_view(),
                 Some(c) => view! {
                     <div>
-                        <p style="margin: 0 0 4px;">"Ваш код доступа:"</p>
-                        <code style="display: block; font-size: 1.6rem; letter-spacing: 2px;
-                            padding: 12px; background: var(--card); border: 1px solid var(--line);
-                            border-radius: 8px; text-align: center;">
-                            {c}
-                        </code>
-                        <p style="color: var(--muted); margin: 12px 0;">
+                        <p style="margin: 0 0 8px; color: var(--muted); font-size: .9rem;">"Ваш код доступа"</p>
+                        <code class="code-box">{c}</code>
+                        <p style="color: var(--muted); margin: 14px 0; font-size: .9rem;">
                             "Передайте этот код оператору. После одобрения нажмите «Проверить доступ»."
                         </p>
-                        <button class="btn btn-primary" style="width: 100%;"
-                            on:click=move |_| recheck()>
+                        <button class="btn btn--primary btn--block" on:click=move |_| recheck()>
                             "Проверить доступ"
                         </button>
                     </div>
                 }.into_view(),
             }}
 
-            <button class="btn" style="width: 100%; margin-top: 16px;"
+            <button class="btn btn--ghost btn--block" style="margin-top: 14px;"
                 on:click=move |_| { auth::logout(); view.set(View::Login); }>
                 "Выйти"
             </button>
 
             {move || error.get().map(|e| view! {
-                <p style="color: var(--pink); white-space: pre-wrap;">{e}</p>
+                <p style="color: var(--danger); white-space: pre-wrap; margin-top: 16px;">{e}</p>
             })}
         </div>
     }
@@ -298,75 +322,74 @@ fn Queue(view: RwSignal<View>) -> impl IntoView {
     on_cleanup(move || { if let Some(h) = handle { h.clear(); } });
 
     view! {
-        <header style="display: flex; align-items: center; gap: 12px; padding: 14px 16px;
-            border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg);">
-            <div style="flex: 1; display: inline-flex; gap: 4px; background: var(--card);
-                border: 1px solid var(--line); border-radius: 8px; padding: 2px;">
-                <button class="btn" on:click=move |_| switch(Tab::Pending)
-                    style:background=move || if tab.get() == Tab::Pending { "var(--link)" } else { "transparent" }
-                    style:color=move || if tab.get() == Tab::Pending { "var(--link-inv)" } else { "inherit" }
-                    style="border: none;">
-                    "Ожидают"
-                </button>
-                <button class="btn" on:click=move |_| switch(Tab::Answered)
-                    style:background=move || if tab.get() == Tab::Answered { "var(--link)" } else { "transparent" }
-                    style:color=move || if tab.get() == Tab::Answered { "var(--link-inv)" } else { "inherit" }
-                    style="border: none;">
-                    "Отвеченные"
-                </button>
-            </div>
-            <button class="btn" on:click=move |_| load()>"Обновить"</button>
-            <button class="btn" attr:data-testid="nav-payments"
-                on:click=move |_| view.set(View::Payments)>"Платежи"</button>
-            <button class="btn" on:click=move |_| { auth::logout(); view.set(View::Login); }>"Выйти"</button>
+        <header class="appbar">
+            <div class="ring"></div>
+            <div class="appbar__title">"Очередь"</div>
+            <button class="btn btn--ghost btn--icon" attr:aria-label="Обновить" on:click=move |_| load()>
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
+            </button>
+            <button class="btn btn--ghost btn--icon" attr:aria-label="Выйти"
+                on:click=move |_| { auth::logout(); view.set(View::Login); }>
+                <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l-5-5 5-5M15 12H5"/></svg>
+            </button>
         </header>
 
-        {move || error.get().map(|e| view! {
-            <p style="color: var(--pink); padding: 12px 16px;">{e}</p>
-        })}
+        <div class="screen">
+            <div class="pad" style="padding-bottom: 4px;">
+                <div class="seg">
+                    <button class=move || if tab.get() == Tab::Pending { "seg__btn seg__btn--on" } else { "seg__btn" }
+                        on:click=move |_| switch(Tab::Pending)>"Ожидают"</button>
+                    <button class=move || if tab.get() == Tab::Answered { "seg__btn seg__btn--on" } else { "seg__btn" }
+                        on:click=move |_| switch(Tab::Answered)>"Отвеченные"</button>
+                </div>
+            </div>
 
-        <div style="flex: 1; overflow-y: auto;">
+            {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+
             {move || {
                 let list = items.get();
-                if list.is_empty() && !loading.get() {
+                if list.is_empty() {
+                    if loading.get() {
+                        return view! { <div class="spinner"></div> }.into_view();
+                    }
                     let empty = match tab.get() {
                         Tab::Pending => "Нет ожидающих обращений",
                         Tab::Answered => "Нет отвеченных обращений",
                     };
                     return view! {
-                        <p style="color: var(--muted); padding: 24px 16px; text-align: center;">
-                            {empty}
-                        </p>
+                        <div class="empty"><div class="empty__ring"></div><p>{empty}</p></div>
                     }.into_view();
                 }
-                list.into_iter().map(|c| {
-                    let label = c.user_id.clone();
-                    let uid = c.user_id.clone();
-                    let label_for_click = label.clone();
-                    let waiting = c.pending_since.as_deref().map(waiting_label).unwrap_or_default();
-                    view! {
-                        <button attr:data-testid="conv" style="display: block; width: 100%; text-align: left; background: var(--card);
-                            border: none; border-bottom: 1px solid var(--line); padding: 14px 16px;"
-                            on:click=move |_| view.set(View::Thread {
-                                user_id: uid.clone(), label: label_for_click.clone(),
-                            })>
-                            <div style="display: flex; gap: 8px; align-items: baseline;">
-                                <strong style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                    {label}
-                                </strong>
-                                <span style="color: var(--warn-text); font-size: 0.82rem; flex-shrink: 0;">
-                                    {waiting}
-                                </span>
-                            </div>
-                            <div style="color: var(--muted); overflow: hidden; text-overflow: ellipsis;
-                                white-space: nowrap; margin-top: 2px;">
-                                {c.preview}
-                            </div>
-                        </button>
-                    }
-                }).collect_view().into_view()
+                view! {
+                    <div class="list">
+                        {list.into_iter().enumerate().map(|(i, c)| {
+                            let label = c.user_id.clone();
+                            let uid = c.user_id.clone();
+                            let label_for_click = label.clone();
+                            let waiting = c.pending_since.as_deref().map(waiting_label).unwrap_or_default();
+                            let has_wait = !waiting.is_empty();
+                            view! {
+                                <button attr:data-testid="conv" class="row reveal"
+                                    style=format!("--i:{i}")
+                                    on:click=move |_| view.set(View::Thread {
+                                        user_id: uid.clone(), label: label_for_click.clone(),
+                                    })>
+                                    <div class="row__top">
+                                        <span class="row__title">{label}</span>
+                                        {has_wait.then(|| view! {
+                                            <span class="badge badge--warn badge--plain">{waiting.clone()}</span>
+                                        })}
+                                    </div>
+                                    <div class="row__sub">{c.preview}</div>
+                                </button>
+                            }
+                        }).collect_view()}
+                    </div>
+                }.into_view()
             }}
         </div>
+
+        <TabBar view=view active=Section::Queue/>
     }
 }
 
@@ -465,44 +488,46 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
     };
 
     view! {
-        <header style="display: flex; align-items: center; gap: 12px; padding: 14px 16px;
-            border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg);">
-            <button class="btn" on:click=move |_| view.set(View::Queue)>"‹ Назад"</button>
-            <strong style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                {label}
-            </strong>
+        <header class="appbar">
+            <button class="btn btn--ghost btn--icon" attr:aria-label="Назад"
+                on:click=move |_| view.set(View::Queue)>
+                <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <div style="flex: 1; min-width: 0;">
+                <div class="appbar__title mono">{label}</div>
+                <div class="appbar__sub">"переписка · обновляется"</div>
+            </div>
         </header>
 
-        {move || error.get().map(|e| view! {
-            <p style="color: var(--pink); padding: 12px 16px;">{e}</p>
-        })}
+        {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
 
-        <div style="flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;">
-            {move || messages.get().into_iter().map(|m| {
-                let is_expert = m.sender == "expert";
-                let bubble = if is_expert {
-                    "background: var(--link); color: var(--link-inv); align-self: flex-end;"
-                } else {
-                    "background: var(--card); border: 1px solid var(--line); align-self: flex-start;"
-                };
-                view! {
-                    <div attr:data-testid="msg" attr:data-sender=m.sender.clone()
-                        style=format!("max-width: 82%; border-radius: 12px; padding: 10px 13px;
-                        white-space: pre-wrap; {bubble}")>
-                        {m.text}
-                    </div>
-                }
-            }).collect_view()}
-        </div>
+        <div class="screen screen--noflow">
+            <div class="msgs">
+                {move || messages.get().into_iter().map(|m| {
+                    let is_expert = m.sender == "expert";
+                    let cls = if is_expert { "bubble bubble--me" } else { "bubble bubble--them" };
+                    view! {
+                        <div attr:data-testid="msg" attr:data-sender=m.sender.clone() class=cls>
+                            {m.text}
+                        </div>
+                    }
+                }).collect_view()}
+            </div>
 
-        <div style="display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line);
-            padding-bottom: calc(12px + var(--kb-inset, 0px));">
-            <textarea attr:data-testid="reply-input" class="btn" rows="1" style="flex: 1; resize: none;" placeholder="Ответ…"
-                prop:value=move || draft.get()
-                on:input=move |e| draft.set(event_target_value(&e)) />
-            <button attr:data-testid="reply-send" class="btn btn-primary" disabled=move || sending.get() on:click=send>
-                {move || if sending.get() { "…" } else { "Отправить" }}
-            </button>
+            <div class="composer">
+                <textarea attr:data-testid="reply-input" class="field" rows="1"
+                    style="flex: 1; resize: none; max-height: 120px;" placeholder="Ответ…"
+                    prop:value=move || draft.get()
+                    on:input=move |e| draft.set(event_target_value(&e)) />
+                <button attr:data-testid="reply-send" class="btn btn--primary btn--icon"
+                    attr:aria-label="Отправить" disabled=move || sending.get() on:click=send>
+                    {move || if sending.get() {
+                        view! { <span>"…"</span> }.into_view()
+                    } else {
+                        view! { <svg viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg> }.into_view()
+                    }}
+                </button>
+            </div>
         </div>
     }
 }
@@ -525,9 +550,10 @@ fn since_label(ms: i64) -> String {
     }
 }
 
-/// Operator worklist: paid-but-unbound payments. lava has no refund API, so the
-/// operator refunds manually in the lava dashboard (using the contract id below),
-/// then marks the row voided here.
+/// Operator worklist: paid-but-unbound payments. The server reconciles this list
+/// against lava on load — contracts lava reports refunded/cancelled (terminatedAt) are
+/// auto-voided and drop off here, so this shows only still-active unbound payments.
+/// (No manual "mark voided" button anymore.)
 #[component]
 fn Payments(view: RwSignal<View>) -> impl IntoView {
     let items = create_rw_signal(Vec::<api::UnboundPayment>::new());
@@ -554,72 +580,61 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
     load.call(());
 
     view! {
-        <header style="display: flex; align-items: center; gap: 12px; padding: 14px 16px;
-            border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg);">
-            <button class="btn" on:click=move |_| view.set(View::Queue)>"‹ Назад"</button>
-            <strong style="flex: 1;">"Непривязанные платежи"</strong>
-            <button class="btn" on:click=move |_| load.call(())>"Обновить"</button>
+        <header class="appbar">
+            <div class="ring"></div>
+            <div style="flex: 1; min-width: 0;">
+                <div class="appbar__title">"Платежи"</div>
+                <div class="appbar__sub">"непривязанные · сверено с lava"</div>
+            </div>
+            <button class="btn btn--ghost btn--icon" attr:aria-label="Обновить" on:click=move |_| load.call(())>
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
+            </button>
         </header>
 
-        {move || error.get().map(|e| view! {
-            <p style="color: var(--pink); padding: 12px 16px;">{e}</p>
-        })}
+        <div class="screen">
+            {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
 
-        <div style="flex: 1; overflow-y: auto;">
             {move || {
                 let list = items.get();
-                if list.is_empty() && !loading.get() {
+                if list.is_empty() {
+                    if loading.get() {
+                        return view! { <div class="spinner"></div> }.into_view();
+                    }
                     return view! {
-                        <p style="color: var(--muted); padding: 24px 16px; text-align: center;">
-                            "Нет непривязанных платежей"
-                        </p>
+                        <div class="empty"><div class="empty__ring"></div>
+                            <p>"Нет непривязанных платежей"</p></div>
                     }.into_view();
                 }
-                list.into_iter().map(|p| {
-                    let claim_id = p.claim_id.clone();
-                    let amount = match (p.amount, p.currency.clone()) {
-                        (Some(a), Some(c)) => format!("{a} {c}"),
-                        (Some(a), None) => a.to_string(),
-                        _ => "—".to_string(),
-                    };
-                    let email = p.email.clone().unwrap_or_else(|| "—".to_string());
-                    let contract = p.contract_id.clone().unwrap_or_else(|| "—".to_string());
-                    let waited = p.paid_at.map(since_label).unwrap_or_default();
-                    let void_claim = claim_id.clone();
-                    let void = move |_| {
-                        let cid = void_claim.clone();
-                        spawn_local(async move {
-                            if let Err(e) = api::void_payment(&cid).await {
-                                if e.is_auth() {
-                                    auth::logout();
-                                    view.set(View::Login);
-                                } else {
-                                    error.set(Some(e.message().to_string()));
-                                    return;
-                                }
+                view! {
+                    <div class="list">
+                        {list.into_iter().enumerate().map(|(i, p)| {
+                            let amount = match (p.amount, p.currency.clone()) {
+                                (Some(a), Some(c)) => format!("{a} {c}"),
+                                (Some(a), None) => a.to_string(),
+                                _ => "—".to_string(),
+                            };
+                            let email = p.email.clone().unwrap_or_else(|| "—".to_string());
+                            let contract = p.contract_id.clone().unwrap_or_else(|| "—".to_string());
+                            let waited = p.paid_at.map(since_label).unwrap_or_default();
+                            let has_wait = !waited.is_empty();
+                            view! {
+                                <div attr:data-testid="payment-row" class="row reveal" style=format!("--i:{i}")>
+                                    <div class="row__top">
+                                        <span class="row__title mono">{amount}</span>
+                                        {has_wait.then(|| view! {
+                                            <span class="badge badge--warn badge--plain">{waited.clone()}</span>
+                                        })}
+                                    </div>
+                                    <div class="row__sub">{email}</div>
+                                    <div class="row__meta">"lava: "<span class="mono">{contract}</span></div>
+                                </div>
                             }
-                            load.call(());
-                        });
-                    };
-                    view! {
-                        <div attr:data-testid="payment-row"
-                            style="border-bottom: 1px solid var(--line); padding: 14px 16px;">
-                            <div style="display: flex; gap: 8px; align-items: baseline;">
-                                <strong style="flex: 1;">{amount}</strong>
-                                <span style="color: var(--warn-text); font-size: 0.82rem;">{waited}</span>
-                            </div>
-                            <div style="color: var(--muted); margin-top: 2px;">{email}</div>
-                            <div style="color: var(--muted); font-size: 0.82rem; margin-top: 2px;">
-                                "lava contract: " <code>{contract}</code>
-                            </div>
-                            <button attr:data-testid="payment-void" class="btn"
-                                style="margin-top: 10px;" on:click=void>
-                                "Возвращено в lava — пометить"
-                            </button>
-                        </div>
-                    }
-                }).collect_view().into_view()
+                        }).collect_view()}
+                    </div>
+                }.into_view()
             }}
         </div>
+
+        <TabBar view=view active=Section::Payments/>
     }
 }

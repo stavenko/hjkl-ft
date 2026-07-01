@@ -273,12 +273,3 @@ pub async fn unbound_payments() -> Result<Vec<UnboundPayment>, ApiError> {
     Ok(r.unbound)
 }
 
-/// POST /admin/void-payment (payment-worker). Marks a guest claim voided/refunded
-/// (after the operator refunded it in lava). Refuses an already-claimed sub.
-pub async fn void_payment(claim_id: &str) -> Result<(), ApiError> {
-    let body = serde_json::to_string(&serde_json::json!({ "claimId": claim_id }))
-        .map_err(|e| ApiError::Other(e.to_string()))?;
-    let _: serde_json::Value =
-        request_to(&payment_base()?, "POST", "/admin/void-payment", Some(body)).await?;
-    Ok(())
-}

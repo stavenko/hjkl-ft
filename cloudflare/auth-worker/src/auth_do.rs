@@ -25,6 +25,13 @@ const STORAGE_KEY_PAIRING_PREFIX: &str = "pairing:";
 const STORAGE_KEY_STATE_PREFIX: &str = "pk_state:";
 const STORAGE_KEY_TOKEN_PREFIX: &str = "token:";
 const STORAGE_KEY_USER_TOKENS_PREFIX: &str = "user_tokens:";
+// Backup-phrase reverse index (normalized phrase → user_id) for username-less login,
+// and a per-normalized-phrase fixed-window brute-force limiter.
+const STORAGE_KEY_PHRASE_PREFIX: &str = "phrase:";
+const STORAGE_KEY_PHRASE_RL_PREFIX: &str = "phrase_rl:";
+// Failed phrase-login attempts allowed per normalized phrase per window before lockout.
+const PHRASE_RL_MAX: i64 = 8;
+const PHRASE_RL_WINDOW_MS: i64 = 3_600_000; // 1 hour
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -49,6 +56,18 @@ pub(crate) struct RecoveryHashData {
 struct UserMetadata {
     recovery_hash_data: Option<RecoveryHashData>,
     created_at: i64,
+    /// Plaintext backup phrase (user explicit: NO hash — it must be re-showable in
+    /// Settings). Paired with the `phrase:{normalized}` → user_id reverse index so login
+    /// needs only the phrase. `serde(default)` so pre-existing records deserialize.
+    #[serde(default)]
+    recovery_phrase: Option<String>,
+}
+
+/// Canonical form of a backup phrase for storage/lookup: lowercased, whitespace
+/// collapsed to single spaces, trimmed. Both `set` and `resolve` normalize identically
+/// so the reverse index round-trips regardless of the user's spacing/casing.
+fn normalize_phrase(phrase: &str) -> String {
+    phrase.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
 fn compute_recovery_hmac(recovery_key: &str, salt: &[u8]) -> Vec<u8> {
@@ -479,6 +498,7 @@ impl AuthDO {
             let meta = UserMetadata {
                 recovery_hash_data: None,
                 created_at: now_ms(),
+                recovery_phrase: None,
             };
             self.save_user_metadata(&user_id, &meta).await?;
         }
@@ -892,10 +912,111 @@ impl AuthDO {
             .unwrap_or_else(|| UserMetadata {
                 recovery_hash_data: None,
                 created_at: now_ms(),
+                recovery_phrase: None,
             });
         meta.recovery_hash_data = Some(hash_data);
         self.save_user_metadata(user_id, &meta).await?;
         Response::from_json(&serde_json::json!({ "status": "ok" }))
+    }
+
+    // ---- Backup-phrase handlers (plaintext + reverse index; username-less login) ----
+
+    /// Set/replace the user's backup phrase. Normalizes, rejects an empty/too-short
+    /// phrase, and enforces global uniqueness via the reverse index (a collision with
+    /// ANOTHER user → `{status:"taken"}` so the caller regenerates). Idempotent for the
+    /// same user re-setting the same phrase. Removes the user's previous index entry.
+    async fn handle_phrase_set(&self, user_id: &str, phrase: &str) -> Result<Response> {
+        let norm = normalize_phrase(phrase);
+        // Require at least 3 words — a real backup phrase, not a stray token.
+        if norm.split(' ').filter(|w| !w.is_empty()).count() < 3 {
+            return Response::from_json(&serde_json::json!({ "status": "too_short" }));
+        }
+        let index_key = format!("{STORAGE_KEY_PHRASE_PREFIX}{norm}");
+        // Uniqueness: reject only if the phrase is already owned by a DIFFERENT user.
+        if let Some(owner) = self.state.storage().get::<String>(&index_key).await.ok().flatten() {
+            if owner != user_id {
+                return Response::from_json(&serde_json::json!({ "status": "taken" }));
+            }
+        }
+        let mut meta = self
+            .load_user_metadata(user_id)
+            .await?
+            .unwrap_or_else(|| UserMetadata {
+                recovery_hash_data: None,
+                created_at: now_ms(),
+                recovery_phrase: None,
+            });
+        // Drop the stale reverse-index entry for a replaced phrase.
+        if let Some(old) = meta.recovery_phrase.as_deref() {
+            let old_norm = normalize_phrase(old);
+            if old_norm != norm {
+                let old_key = format!("{STORAGE_KEY_PHRASE_PREFIX}{old_norm}");
+                self.state.storage().delete(&old_key).await?;
+            }
+        }
+        // Store plaintext on the user (re-showable) + reverse index for lookup.
+        meta.recovery_phrase = Some(phrase.trim().to_string());
+        self.save_user_metadata(user_id, &meta).await?;
+        self.state.storage().put(&index_key, user_id.to_string()).await?;
+        Response::from_json(&serde_json::json!({ "status": "ok" }))
+    }
+
+    /// Resolve a phrase to its user_id for login (worker mints the JWT). Fixed-window
+    /// per-phrase brute-force limiter: too many failures within the window → 429. A
+    /// successful resolve clears the counter. Unknown phrase → `{user_id:null}` (and
+    /// counts against the limiter).
+    async fn handle_phrase_resolve(&self, phrase: &str) -> Result<Response> {
+        let norm = normalize_phrase(phrase);
+        let rl_key = format!("{STORAGE_KEY_PHRASE_RL_PREFIX}{norm}");
+        // Load the fixed-window counter {count, window_start}.
+        let (mut count, mut window_start) = match self
+            .state
+            .storage()
+            .get::<String>(&rl_key)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<(i64, i64)>(&s).ok())
+        {
+            Some((c, w)) => (c, w),
+            None => (0, now_ms()),
+        };
+        let now = now_ms();
+        if now - window_start > PHRASE_RL_WINDOW_MS {
+            count = 0;
+            window_start = now;
+        }
+        if count >= PHRASE_RL_MAX {
+            return Ok(Response::from_json(&serde_json::json!({ "error": "rate_limited" }))?
+                .with_status(429));
+        }
+
+        let index_key = format!("{STORAGE_KEY_PHRASE_PREFIX}{norm}");
+        let user_id = self.state.storage().get::<String>(&index_key).await.ok().flatten();
+
+        match user_id {
+            Some(uid) => {
+                // Success clears the limiter for this phrase.
+                self.state.storage().delete(&rl_key).await?;
+                Response::from_json(&serde_json::json!({ "user_id": uid }))
+            }
+            None => {
+                // Miss → count the attempt.
+                let val = serde_json::to_string(&(count + 1, window_start))
+                    .map_err(|e| Error::RustError(format!("serialize rl: {e}")))?;
+                self.state.storage().put(&rl_key, val).await?;
+                Response::from_json(&serde_json::json!({ "user_id": null }))
+            }
+        }
+    }
+
+    /// Return the user's current plaintext phrase (re-show in Settings). None → not set.
+    async fn handle_phrase_get(&self, user_id: &str) -> Result<Response> {
+        let phrase = self
+            .load_user_metadata(user_id)
+            .await?
+            .and_then(|m| m.recovery_phrase);
+        Response::from_json(&serde_json::json!({ "phrase": phrase }))
     }
 
     async fn handle_recovery_verify(
@@ -1128,6 +1249,34 @@ impl DurableObject for AuthDO {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing recovery_key".into()))?;
                 self.handle_recovery_verify(user_id, recovery_key).await
+            }
+            "/recovery/phrase/set" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let phrase = body
+                    .get("phrase")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing phrase".into()))?;
+                self.handle_phrase_set(user_id, phrase).await
+            }
+            "/recovery/phrase/resolve" => {
+                let body: serde_json::Value = req.json().await?;
+                let phrase = body
+                    .get("phrase")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing phrase".into()))?;
+                self.handle_phrase_resolve(phrase).await
+            }
+            "/recovery/phrase/get" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_phrase_get(user_id).await
             }
             _ => Response::error(format!("unknown DO path: {path}"), 404),
         }

@@ -194,7 +194,11 @@ pub fn ChatInput(
     };
 
     on_cleanup(move || {
-        if recording.get_untracked() {
+        // `recording` is owned by the PARENT (ChatPage). On navigation away, the parent
+        // may dispose it before this child cleanup runs — reading it with get_untracked()
+        // would panic ("already disposed") and abort WASM, so the route never switches
+        // (the chat wouldn't close). try_get_untracked() returns None instead of panicking.
+        if recording.try_get_untracked().unwrap_or(false) {
             if let Some(rec) = recorder.get_value() {
                 let _ = rec.stop();
             }

@@ -257,9 +257,13 @@ pub async fn miniapp_me(mut req: Request, env: &Env) -> Result<Response> {
                 .unwrap_or_else(|_| "https://fit.renorma.app/onboard".into());
             // FRAGMENT (#claim=...) — the secret is NEVER logged.
             let onboard_url = format!("{base}#claim={claim_id}.{secret}");
+            // App root (for an already-registered user → «Открыть приложение», not the
+            // onboard#claim flow). Derived from APP_ONBOARD_URL by dropping "/onboard".
+            let app_url = base.strip_suffix("/onboard").unwrap_or(&base).to_string();
             let mut out = serde_json::json!({
                 "status": status,
                 "onboardUrl": onboard_url,
+                "appUrl": app_url,
             });
             // Live subscription of the bound account (if onboarded) → active/cancelled
             // + days. Best-effort: a lookup error just omits it (the access still works).
@@ -489,6 +493,7 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
 
   var claimId = null;
   var onboardUrl = null;
+  var accessUrl = null;      // what the access button opens (onboard#claim, or the app)
   var pollTimer = null;
   var accessStatusText = ""; // live subscription line for the "active" state
 
@@ -571,6 +576,9 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
         if ((res.status === "paid" || res.status === "claimed") && res.onboardUrl) {
           stopPolling();
           onboardUrl = res.onboardUrl;
+          // Just paid → not registered yet → the button onboards (register + claim).
+          accessUrl = res.onboardUrl;
+          createBtn.textContent = "Получить доступ к re:Norma";
           setState("paid");
         }
         // pending / void / none → keep waiting.
@@ -595,7 +603,8 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
 
   payBtn.addEventListener("click", onPay);
   createBtn.addEventListener("click", function () {
-    if (onboardUrl) { openLink(onboardUrl); }
+    var u = accessUrl || onboardUrl;
+    if (u) { openLink(u); }
   });
 
   // On load: check whether this Telegram user already paid. If so, skip straight to
@@ -605,6 +614,16 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
     api("/miniapp/me", {}).then(function (res) {
       if (res.onboardUrl) {
         onboardUrl = res.onboardUrl;
+        // Button depends on whether the user has already registered/claimed:
+        //  - not yet (claim "paid") → «Получить доступ» → onboard (register + claim)
+        //  - already (claim "claimed") → «Открыть приложение» → the app itself
+        if (res.status === "claimed") {
+          accessUrl = res.appUrl || res.onboardUrl;
+          createBtn.textContent = "Открыть приложение";
+        } else {
+          accessUrl = res.onboardUrl;
+          createBtn.textContent = "Получить доступ к re:Norma";
+        }
         // Reflect the LIVE subscription status of the bound account.
         var days = (typeof res.daysLeft === "number") ? res.daysLeft : null;
         var cancelled = res.subStatus === "cancelled" || res.noRenew === true;

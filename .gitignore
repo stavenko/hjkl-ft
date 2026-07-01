@@ -17,6 +17,8 @@ e2e/test-results/
 
 .env
 renorma-lp.jpeg
+# Abandoned standalone pay app prototype — kept local, superseded by the Telegram Mini App.
+/pay/
 .telegram-webhook-secret
 .lava-hook-api-key
 .admin-approve-secret

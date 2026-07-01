@@ -1,3 +1,5 @@
 node_modules/
 package-lock.json
+# Generated design assets (regenerable via logo-gen.py) — kept local, not versioned.
 *.png
+*.svg

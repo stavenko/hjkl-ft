@@ -103,6 +103,20 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
         });
     };
 
+    // "Регистрация": registration itself only happens in the paid `/onboard` claim
+    // flow, so a new user is sent to the public landing to subscribe first.
+    let on_register = move |_| {
+        let cfg = crate::services::config::get();
+        let url = if cfg.landing_url.is_empty() {
+            "https://renorma.app".to_string()
+        } else {
+            cfg.landing_url.clone()
+        };
+        if let Some(w) = web_sys::window() {
+            let _ = w.location().set_href(&url);
+        }
+    };
+
     let on_scan = Callback::new(move |data: String| {
         error.set(None);
         loading.set(true);
@@ -142,8 +156,8 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                 view! {
                     <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
                         <div style="max-width: 24rem; width: 100%;">
-                            <h1 class="title is-4 mb-4">{move || t("pair.show_qr")}</h1>
-                            <p class="has-text-grey mb-4">{move || t("auth.show_qr_hint")}</p>
+                            <h1 class="title is-4 mb-2">{move || t("auth.add_device")}</h1>
+                            <p class="has-text-grey mb-4" style="line-height: 1.5;">{move || t("auth.add_device_hint")}</p>
                             <div attr:data-testid="auth-qr-display" style="display: flex; justify-content: center; margin-bottom: 1rem;">
                                 <QrCode data=url size=240 />
                             </div>
@@ -164,6 +178,11 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             </button>
                             <p class="has-text-grey is-size-7 mb-4">{move || t("pair.waiting")}</p>
                             <button
+                                attr:data-testid="auth-btn-scan-qr"
+                                class="button is-light is-fullwidth mb-3"
+                                on:click=move |_| step.set(AuthStep::Scanning)
+                            >{move || t("auth.scan_instead")}</button>
+                            <button
                                 attr:data-testid="auth-btn-back"
                                 class="button is-ghost has-text-grey"
                                 style="text-decoration: underline;"
@@ -183,51 +202,41 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
 
             AuthStep::Login => view! {
                 <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
-                    <div style="max-width: 24rem; width: 100%;">
-                        <img src="/icon-192.png" alt="Food Tracker" style="width: 64px; height: 64px; border-radius: 12px; margin-bottom: 1rem;" />
-                        <h1 class="title is-4" style="margin-bottom: 1.5rem;">{move || t("auth.login_title")}</h1>
+                    <div style="max-width: 22rem; width: 100%;">
+                        <img src="/icon-192.png" alt="re:Norma" style="width: 72px; height: 72px; border-radius: 16px; margin-bottom: 1.25rem;" />
+                        <h1 class="title is-3" style="margin-bottom: 0.35rem;">"re:Norma"</h1>
+                        <p class="has-text-grey mb-5">{move || t("auth.tagline")}</p>
 
                         {error_view}
 
-                        // Section 1: pair via another device
-                        <div style="text-align: left; margin-bottom: 1.5rem;">
-                            <p class="has-text-weight-semibold mb-3">{move || t("auth.login_have_device")}</p>
+                        // Primary: the big login CTA (passkey).
+                        <button
+                            attr:data-testid="auth-btn-try-passkey"
+                            class="button is-link is-large is-fullwidth has-text-weight-semibold"
+                            style="margin-bottom: 1rem;"
+                            disabled=move || loading.get()
+                            on:click=on_try_passkey
+                        >
+                            {move || if loading.get() { t("auth.authenticating") } else { t("auth.sign_in") }}
+                        </button>
 
-                            <div class="box mb-3" style="padding: 0.75rem;">
-                                <p class="is-size-7 has-text-grey mb-2">{move || t("auth.login_option1_hint")}</p>
-                                <button
-                                    attr:data-testid="auth-btn-show-qr"
-                                    class="button is-link is-fullwidth"
-                                    disabled=move || loading.get()
-                                    on:click=on_show_qr
-                                >
-                                    {move || t("pair.show_qr")}
-                                </button>
-                            </div>
-
-                            <div class="box" style="padding: 0.75rem;">
-                                <p class="is-size-7 has-text-grey mb-2">{move || t("auth.login_option2_hint")}</p>
-                                <button
-                                    attr:data-testid="auth-btn-scan-qr"
-                                    class="button is-link is-light is-fullwidth"
-                                    disabled=move || loading.get()
-                                    on:click=move |_| step.set(AuthStep::Scanning)
-                                >
-                                    {move || t("pair.scan_qr")}
-                                </button>
-                            </div>
-                        </div>
-
-                        // Section 2: no logged-in device
-                        <div style="text-align: left; margin-bottom: 1.5rem;">
-                            <p class="has-text-weight-semibold mb-3">{move || t("auth.login_no_device")}</p>
+                        // Secondary, smaller actions.
+                        <div style="display: flex; flex-direction: column; gap: 0.6rem;">
                             <button
-                                attr:data-testid="auth-btn-try-passkey"
+                                attr:data-testid="auth-btn-register"
                                 class="button is-fullwidth"
                                 disabled=move || loading.get()
-                                on:click=on_try_passkey
+                                on:click=on_register
                             >
-                                {move || if loading.get() { t("auth.authenticating") } else { t("auth.try_passkey") }}
+                                {move || t("auth.register")}
+                            </button>
+                            <button
+                                attr:data-testid="auth-btn-add-device"
+                                class="button is-light is-fullwidth"
+                                disabled=move || loading.get()
+                                on:click=on_show_qr
+                            >
+                                {move || t("auth.add_device")}
                             </button>
                         </div>
                     </div>

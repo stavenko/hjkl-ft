@@ -28,6 +28,11 @@ pub struct FrontendConfig {
     pub bug_report_base_url: String,
     #[serde(default)]
     pub support_base_url: String,
+    /// Public marketing/subscription site. "Регистрация" on the login screen sends a
+    /// new user here to subscribe (registration itself happens in the paid claim flow).
+    /// Empty → falls back to https://renorma.app.
+    #[serde(default)]
+    pub landing_url: String,
 }
 
 static CONFIG: OnceLock<FrontendConfig> = OnceLock::new();

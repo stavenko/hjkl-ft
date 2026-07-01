@@ -29,10 +29,17 @@ struct ClaimRow {
 /// chat_id, so ownership is keyed by the validated Telegram WebApp user.id.
 #[derive(Debug, Deserialize)]
 struct MiniappClaimRow {
-    #[allow(dead_code)]
     claim_id: String,
     tg_user_id: i64,
     secret: String,
+    notified_at: Option<i64>,
+}
+
+/// Single-column projection of PRAGMA table_info, used to detect whether a column
+/// already exists before an idempotent ALTER (SQLite has no ADD COLUMN IF NOT EXISTS).
+#[derive(Debug, Deserialize)]
+struct PragmaCol {
+    name: String,
 }
 
 /// SQLite-backed Telegram session store. One global instance (idFromName("global")):
@@ -72,10 +79,23 @@ impl TgSessionDO {
                 claim_id    TEXT PRIMARY KEY,
                 tg_user_id  INTEGER NOT NULL,
                 secret      TEXT NOT NULL,
-                created_at  INTEGER NOT NULL
+                created_at  INTEGER NOT NULL,
+                notified_at INTEGER
             )",
             None,
         )?;
+        // Migrate tables created before notified_at existed (paid-push idempotency).
+        let has_notified = sql
+            .exec("PRAGMA table_info(miniapp_claims)", None)?
+            .to_array::<PragmaCol>()?
+            .iter()
+            .any(|c| c.name == "notified_at");
+        if !has_notified {
+            sql.exec(
+                "ALTER TABLE miniapp_claims ADD COLUMN notified_at INTEGER",
+                None,
+            )?;
+        }
         Ok(())
     }
 
@@ -178,7 +198,7 @@ impl TgSessionDO {
             .storage()
             .sql()
             .exec(
-                "SELECT claim_id, tg_user_id, secret FROM miniapp_claims WHERE claim_id = ?",
+                "SELECT claim_id, tg_user_id, secret, notified_at FROM miniapp_claims WHERE claim_id = ?",
                 vec![claim_id.into()],
             )?
             .to_array::<MiniappClaimRow>()?
@@ -188,9 +208,33 @@ impl TgSessionDO {
             Some(r) => Response::from_json(&serde_json::json!({
                 "tgUserId": r.tg_user_id,
                 "secret": r.secret,
+                "notifiedAt": r.notified_at,
             })),
             None => Response::from_json(&serde_json::json!({ "found": false })),
         }
+    }
+
+    /// List a user's Mini App claims, newest first. Used by /miniapp/me to find an
+    /// already-paid subscription on load (so a returning paid user sees "Получить доступ",
+    /// not the pay form). Secrets are returned only in-process; the worker releases an
+    /// onboard URL ONLY after confirming paid/claimed with payment-worker. Never logged.
+    fn list_miniapp_claims_by_user(&self, b: &serde_json::Value) -> Result<Response> {
+        let tg_user_id = i64_field(b, "tgUserId")?;
+        let rows = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT claim_id, tg_user_id, secret, notified_at FROM miniapp_claims
+                 WHERE tg_user_id = ? ORDER BY created_at DESC LIMIT 10",
+                vec![tg_user_id.into()],
+            )?
+            .to_array::<MiniappClaimRow>()?;
+        let claims: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|r| serde_json::json!({ "claimId": r.claim_id, "secret": r.secret }))
+            .collect();
+        Response::from_json(&serde_json::json!({ "claims": claims }))
     }
 
     /// Record paid-notification delivery. Idempotent: re-stamping is harmless.
@@ -198,6 +242,16 @@ impl TgSessionDO {
         let claim_id = str_field(b, "claimId")?;
         self.state.storage().sql().exec(
             "UPDATE claims SET notified_at = ? WHERE claim_id = ?",
+            vec![now_ms().into(), claim_id.into()],
+        )?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    /// Record Mini App paid-notification delivery (idempotency for the bot push).
+    fn mark_miniapp_notified(&self, b: &serde_json::Value) -> Result<Response> {
+        let claim_id = str_field(b, "claimId")?;
+        self.state.storage().sql().exec(
+            "UPDATE miniapp_claims SET notified_at = ? WHERE claim_id = ?",
             vec![now_ms().into(), claim_id.into()],
         )?;
         Response::from_json(&serde_json::json!({ "ok": true }))
@@ -256,6 +310,14 @@ impl DurableObject for TgSessionDO {
             (Method::Post, "/miniapp/claims/get") => {
                 let b: serde_json::Value = req.json().await?;
                 self.get_miniapp_claim(&b)
+            }
+            (Method::Post, "/miniapp/claims/by-user") => {
+                let b: serde_json::Value = req.json().await?;
+                self.list_miniapp_claims_by_user(&b)
+            }
+            (Method::Post, "/miniapp/claims/mark-notified") => {
+                let b: serde_json::Value = req.json().await?;
+                self.mark_miniapp_notified(&b)
             }
             _ => Response::error("Not found", 404),
         }

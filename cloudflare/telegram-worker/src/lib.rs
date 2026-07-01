@@ -175,6 +175,9 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
     if method == Method::Post && path == "/miniapp/status" {
         return miniapp::miniapp_status(req, env).await;
     }
+    if method == Method::Post && path == "/miniapp/me" {
+        return miniapp::miniapp_me(req, env).await;
+    }
     Ok(error_response("Not found", 404))
 }
 
@@ -279,8 +282,9 @@ async fn handle_pay(env: &Env, chat_id: i64) -> Result<()> {
         .map(|v| v.to_string())
         .unwrap_or_else(|_| "monthly".into());
 
-    // Call payment-worker /internal/checkout over the service binding.
-    let checkout = match call_internal_checkout(env, &plan_id, promo_code.as_deref()).await {
+    // Call payment-worker /internal/checkout over the service binding. In a private chat
+    // chat_id == user.id; the bot API has no @username here, so pass None.
+    let checkout = match call_internal_checkout(env, &plan_id, promo_code.as_deref(), chat_id, None).await {
         Ok(c) => c,
         Err(e) => {
             // No silent swallow: log loudly AND surface to the user. Return Ok so
@@ -332,13 +336,18 @@ pub(crate) async fn call_internal_checkout(
     env: &Env,
     plan_id: &str,
     promo_code: Option<&str>,
+    tg_user_id: i64,
+    tg_username: Option<&str>,
 ) -> Result<CheckoutResult> {
     let key = token::secret_or_var(env, "INTERNAL_PUSH_KEY")
         .await
         .map_err(Error::RustError)?;
-    let mut body = serde_json::json!({ "planId": plan_id });
+    let mut body = serde_json::json!({ "planId": plan_id, "tgUserId": tg_user_id });
     if let Some(p) = promo_code {
         body["promoCode"] = serde_json::Value::String(p.to_string());
+    }
+    if let Some(u) = tg_username {
+        body["tgUsername"] = serde_json::Value::String(u.to_string());
     }
     let body_str = serde_json::to_string(&body)?;
     let headers = Headers::new();
@@ -408,8 +417,9 @@ async fn internal_paid(mut req: Request, env: &Env) -> Result<Response> {
     let mut got = do_post(&stub, "/claims/get", &serde_json::json!({ "claimId": claim_id })).await?;
     let cv: serde_json::Value = got.json().await?;
     if cv.get("found").and_then(|v| v.as_bool()) == Some(false) {
-        // Unknown claim (non-bot lava claim, or webhook race) → 200 no-op.
-        return Response::from_json(&serde_json::json!({ "ok": true, "skipped": "unknown_claim" }));
+        // Not a chat-flow claim. Try the Mini App claim (keyed by tg_user_id): notify the
+        // user in the bot that payment went through, with a button reopening the Mini App.
+        return internal_paid_miniapp(env, &stub, claim_id).await;
     }
     // Already delivered → no-op 200. Prevents a second onboard-link message if
     // payment-worker calls /internal/paid more than once for the same claim
@@ -443,6 +453,57 @@ async fn internal_paid(mut req: Request, env: &Env) -> Result<Response> {
 
     // Record delivery (idempotent; re-delivery just re-stamps and re-sends).
     do_post(&stub, "/claims/mark-notified", &serde_json::json!({ "claimId": claim_id })).await?;
+
+    Response::from_json(&serde_json::json!({ "ok": true }))
+}
+
+/// Mini App branch of /internal/paid. The Mini App claim is keyed by the Telegram
+/// WebApp user.id; for a private chat with the bot `chat_id == user.id`, so we message
+/// that id directly. The button is a web_app button that REOPENS the Mini App (NOT a raw
+/// onboard URL): a URL button opens Telegram's in-app browser, where passkey/WebAuthn
+/// fails — the Mini App's openLink → Safari is the working path. Idempotent via
+/// miniapp_claims.notified_at. The claim secret is NEVER sent here or logged.
+async fn internal_paid_miniapp(
+    env: &Env,
+    stub: &worker::durable::Stub,
+    claim_id: &str,
+) -> Result<Response> {
+    let mut got = do_post(
+        stub,
+        "/miniapp/claims/get",
+        &serde_json::json!({ "claimId": claim_id }),
+    )
+    .await?;
+    let cv: serde_json::Value = got.json().await?;
+    if cv.get("found").and_then(|v| v.as_bool()) == Some(false) {
+        // Neither a chat claim nor a Mini App claim → genuinely unknown. 200 no-op.
+        return Response::from_json(&serde_json::json!({ "ok": true, "skipped": "unknown_claim" }));
+    }
+    if cv.get("notifiedAt").and_then(|v| v.as_i64()).is_some() {
+        return Response::from_json(&serde_json::json!({ "ok": true, "skipped": "already_notified" }));
+    }
+    let tg_user_id = match cv.get("tgUserId").and_then(|v| v.as_i64()) {
+        Some(id) => id,
+        None => return Ok(error_response("claim missing tgUserId", 500)),
+    };
+
+    send_message(
+        env,
+        tg_user_id,
+        "Оплата прошла успешно! Откройте приложение, чтобы получить доступ к re:Norma.",
+        Some(miniapp::inline_keyboard_web_app(
+            "Открыть re:Norma",
+            "https://tg.renorma.app/",
+        )),
+    )
+    .await?;
+
+    do_post(
+        stub,
+        "/miniapp/claims/mark-notified",
+        &serde_json::json!({ "claimId": claim_id }),
+    )
+    .await?;
 
     Response::from_json(&serde_json::json!({ "ok": true }))
 }

@@ -5,8 +5,8 @@
 // every privileged /miniapp/* call and NEVER trust a user id from anywhere else.
 //
 // Algorithm (Telegram WebApp, confirmed):
-//   data_check_string = all "key=value" pairs EXCEPT `hash` (and `signature`), sorted
-//                       by key lexicographically, joined by '\n'.
+//   data_check_string = all "key=value" pairs EXCEPT `hash` (the `signature` field, if
+//                       present, is KEPT), sorted by key lexicographically, joined '\n'.
 //   secret_key = HMAC_SHA256(key="WebAppData", msg=bot_token)
 //   computed   = hex_lower( HMAC_SHA256(key=secret_key, msg=data_check_string) )
 //   valid      iff computed == hash  (constant-time compare)
@@ -24,6 +24,10 @@ const MAX_AGE_SECONDS: i64 = 86_400; // 24h freshness window.
 /// Validated identity extracted from a Telegram WebApp initData string.
 pub struct InitDataOk {
     pub tg_user_id: i64,
+    /// Telegram @username, if the user has one (many don't). Trusted (from the
+    /// HMAC-validated `user` blob) — stored on the claim so an operator can reconcile
+    /// «who paid / did they bind an account».
+    pub username: Option<String>,
 }
 
 /// Validate Telegram WebApp initData against the bot token. `now_ms` is the current
@@ -52,10 +56,14 @@ pub fn validate_init_data(
         .map(|(_, v)| v.to_lowercase())
         .ok_or_else(|| "no hash".to_string())?;
 
-    // 3. data_check_string: everything except `hash` (and `signature`), sorted by key.
+    // 3. data_check_string: everything except `hash`, sorted by key. NOTE: `signature`
+    //    (the newer Ed25519 third-party-validation field) MUST be INCLUDED — Telegram
+    //    computes the `hash` HMAC over every field but `hash` itself. Excluding
+    //    `signature` makes the HMAC mismatch on clients that send it (verified against
+    //    real iOS initData).
     let mut check_pairs: Vec<&(String, String)> = pairs
         .iter()
-        .filter(|(k, _)| k != "hash" && k != "signature")
+        .filter(|(k, _)| k != "hash")
         .collect();
     check_pairs.sort_by(|a, b| a.0.cmp(&b.0));
     let data_check_string = check_pairs
@@ -108,8 +116,15 @@ pub fn validate_init_data(
         .get("id")
         .and_then(|v| v.as_i64())
         .ok_or_else(|| "no user.id".to_string())?;
+    let username = user
+        .get("username")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-    Ok(InitDataOk { tg_user_id })
+    Ok(InitDataOk {
+        tg_user_id,
+        username,
+    })
 }
 
 /// Constant-time byte compare (length-check then XOR-accumulate).

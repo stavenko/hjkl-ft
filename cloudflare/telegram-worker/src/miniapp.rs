@@ -17,7 +17,7 @@
 
 use worker::*;
 
-use crate::init_data::validate_init_data;
+use crate::init_data::{validate_init_data, InitDataOk};
 use crate::{call_internal_checkout, do_post, error_response, session_stub, token};
 
 // ── GET / : the Mini App page ───────────────────────────────────────────────────
@@ -52,11 +52,11 @@ fn extract_init_data(body: &serde_json::Value, req: &Request) -> String {
 }
 
 /// Resolve the bot token (fail-loud → 503) and validate initData (→ 401). Returns the
-/// validated tg_user_id. The raw initData and secret_key are NEVER logged.
+/// validated identity. The raw initData and secret_key are NEVER logged.
 async fn require_init_data(
     env: &Env,
     init_data: &str,
-) -> std::result::Result<i64, Response> {
+) -> std::result::Result<InitDataOk, Response> {
     let token = match token::secret_or_var(env, "TELEGRAM_BOT_TOKEN").await {
         Ok(t) => t,
         Err(reason) => {
@@ -66,9 +66,11 @@ async fn require_init_data(
     };
     let now_ms = Date::now().as_millis() as i64;
     match validate_init_data(init_data, &token, now_ms) {
-        Ok(ok) => Ok(ok.tg_user_id),
-        Err(_reason) => {
-            // Do NOT log the raw initData; the reason can reference values from it.
+        Ok(ok) => Ok(ok),
+        Err(reason) => {
+            // Log only the category (first token) — never the raw initData/values.
+            let cat = reason.split(':').next().unwrap_or("err");
+            console_error!("require_init_data: rejected ({cat}); initData_len={}", init_data.len());
             Err(error_response("unauthorized", 401))
         }
     }
@@ -80,10 +82,11 @@ pub async fn miniapp_checkout(mut req: Request, env: &Env) -> Result<Response> {
     let init_data = extract_init_data(&body, &req);
 
     // [SEC #1] initData validation on every /miniapp/* call.
-    let tg_user_id = match require_init_data(env, &init_data).await {
+    let identity = match require_init_data(env, &init_data).await {
         Ok(id) => id,
         Err(resp) => return Ok(resp),
     };
+    let tg_user_id = identity.tg_user_id;
 
     let promo_code = body
         .get("promoCode")
@@ -98,8 +101,17 @@ pub async fn miniapp_checkout(mut req: Request, env: &Env) -> Result<Response> {
         .unwrap_or_else(|_| "monthly".into());
 
     // INTERNAL_PUSH_KEY-gated on the payment side. On failure: log loudly (no secret in
-    // message), 502, store NO claim.
-    let checkout = match call_internal_checkout(env, &plan_id, promo_code.as_deref()).await {
+    // message), 502, store NO claim. The Telegram identity rides along so the claim
+    // records WHO paid (operator reconciliation).
+    let checkout = match call_internal_checkout(
+        env,
+        &plan_id,
+        promo_code.as_deref(),
+        tg_user_id,
+        identity.username.as_deref(),
+    )
+    .await
+    {
         Ok(c) => c,
         Err(e) => {
             console_error!("miniapp_checkout: internal/checkout failed: {e}");
@@ -135,7 +147,7 @@ pub async fn miniapp_status(mut req: Request, env: &Env) -> Result<Response> {
 
     // [SEC #1] initData validation.
     let tg_user_id = match require_init_data(env, &init_data).await {
-        Ok(id) => id,
+        Ok(id) => id.tg_user_id,
         Err(resp) => return Ok(resp),
     };
 
@@ -196,6 +208,68 @@ pub async fn miniapp_status(mut req: Request, env: &Env) -> Result<Response> {
         // pending / void / none → no secret, no onboardUrl.
         Response::from_json(&serde_json::json!({ "status": status }))
     }
+}
+
+// ── POST /miniapp/me ───────────────────────────────────────────────────────────
+/// Per-user persistence: does THIS Telegram user already have a paid subscription?
+/// Looks up the user's claims (newest first) and returns the onboard URL of the first
+/// paid/claimed one — so a returning paid user sees «Получить доступ к re:Norma», not
+/// the pay form. No paid claim → {status:"none"}. Same money/secret-safety model as
+/// /miniapp/status: secret released ONLY after payment-worker confirms paid/claimed.
+pub async fn miniapp_me(mut req: Request, env: &Env) -> Result<Response> {
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let init_data = extract_init_data(&body, &req);
+
+    // [SEC #1] initData validation.
+    let tg_user_id = match require_init_data(env, &init_data).await {
+        Ok(id) => id.tg_user_id,
+        Err(resp) => return Ok(resp),
+    };
+
+    // The user's claims, newest first (secrets stay in-process).
+    let stub = session_stub(env)?;
+    let mut got = do_post(
+        &stub,
+        "/miniapp/claims/by-user",
+        &serde_json::json!({ "tgUserId": tg_user_id }),
+    )
+    .await?;
+    let cv: serde_json::Value = got.json().await?;
+    let empty = vec![];
+    let claims = cv.get("claims").and_then(|v| v.as_array()).unwrap_or(&empty);
+
+    // First paid/claimed claim wins → release its onboard URL.
+    for claim in claims {
+        let claim_id = match claim.get("claimId").and_then(|v| v.as_str()) {
+            Some(c) => c,
+            None => continue,
+        };
+        let secret = match claim.get("secret").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => continue,
+        };
+        let status = match fetch_claim_status(env, claim_id).await {
+            Ok(s) => s,
+            Err(e) => {
+                console_error!("miniapp_me: fetch_claim_status failed: {e}");
+                continue; // a transient lookup error on one claim must not hide the rest
+            }
+        };
+        if status == "paid" || status == "claimed" {
+            let base = env
+                .var("APP_ONBOARD_URL")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|_| "https://fit.renorma.app/onboard".into());
+            // FRAGMENT (#claim=...) — the secret is NEVER logged.
+            let onboard_url = format!("{base}#claim={claim_id}.{secret}");
+            return Response::from_json(&serde_json::json!({
+                "status": status,
+                "onboardUrl": onboard_url,
+            }));
+        }
+    }
+
+    Response::from_json(&serde_json::json!({ "status": "none" }))
 }
 
 /// GET payment-worker /claim/status?claimId=… over the PAYMENT_WORKER service binding.
@@ -301,21 +375,33 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 56px; height: 56px; border-radius: 14px; background: #0E1630;
+    display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .ring { width: 36px; height: 36px; border-radius: 50%;
+    background: conic-gradient(#10B981 0 60%, #F43F5E 60% 90%, #FFF200 90% 100%);
+    -webkit-mask: radial-gradient(circle, transparent 8.5px, #000 9.5px);
+    mask: radial-gradient(circle, transparent 8.5px, #000 9.5px); }
   .hidden { display: none; }
 </style>
 </head>
 <body>
 <div class="card">
-  <div>
-    <h1>Оформление подписки</h1>
-    <p class="sub">Введите промокод, если он у вас есть, и нажмите «Оплатить».</p>
+  <div class="brand">
+    <span class="logo" aria-hidden="true"><span class="ring"></span></span>
+    <div>
+      <h1>Подписка re:Norma</h1>
+    </div>
   </div>
+
+  <p class="sub">re:Norma — приложение для нормализации веса, рациона питания и образа жизни. Подписка открывает полный доступ ко всем функциям.</p>
+  <p id="payHint" class="sub">Введите промокод (если есть) и нажмите «Оплатить». Мы направим вас на защищённую платёжную платформу для оплаты картой.</p>
 
   <input id="promo" type="text" autocomplete="off" autocapitalize="off"
          placeholder="Промокод (необязательно)">
 
   <button id="payBtn">Оплатить</button>
-  <button id="createBtn" class="hidden">Создать аккаунт</button>
+  <button id="createBtn" class="hidden">Получить доступ к re:Norma</button>
 
   <div id="status" class="status"></div>
   <div id="spinner" class="spinner hidden"></div>
@@ -328,10 +414,18 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
   var initData = tg ? tg.initData : "";
 
   var promoInput = document.getElementById("promo");
+  var payHint = document.getElementById("payHint");
   var payBtn = document.getElementById("payBtn");
   var createBtn = document.getElementById("createBtn");
   var statusEl = document.getElementById("status");
   var spinnerEl = document.getElementById("spinner");
+
+  // The pay form (promo field + hint + «Оплатить») is shown ONLY while paying.
+  function showPayForm(on) {
+    show(promoInput, on);
+    show(payHint, on);
+    show(payBtn, on);
+  }
 
   var claimId = null;
   var onboardUrl = null;
@@ -341,27 +435,36 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
 
   function setState(state) {
     statusEl.classList.remove("err");
-    if (state === "idle") {
-      show(payBtn, true); payBtn.disabled = false; payBtn.textContent = "Оплатить";
+    if (state === "checking") {
+      // On load: are we already subscribed? Hide everything but a spinner.
+      showPayForm(false); show(createBtn, false); show(spinnerEl, true);
+      statusEl.textContent = "Проверяем подписку…";
+    } else if (state === "idle") {
+      showPayForm(true); payBtn.disabled = false; payBtn.textContent = "Оплатить";
       show(createBtn, false); show(spinnerEl, false);
       promoInput.disabled = false;
       statusEl.textContent = "";
     } else if (state === "creating") {
-      show(payBtn, true); payBtn.disabled = true; payBtn.textContent = "Создаём оплату…";
+      showPayForm(true); payBtn.disabled = true; payBtn.textContent = "Создаём оплату…";
       show(createBtn, false); show(spinnerEl, false);
       promoInput.disabled = true;
       statusEl.textContent = "";
     } else if (state === "awaiting") {
-      show(payBtn, false); show(createBtn, false); show(spinnerEl, true);
-      promoInput.disabled = true;
+      showPayForm(false); show(createBtn, false); show(spinnerEl, true);
       statusEl.textContent = "Ожидаем оплату…";
     } else if (state === "paid") {
-      show(payBtn, false); show(spinnerEl, false);
+      // Just paid in this session.
+      showPayForm(false); show(spinnerEl, false);
       show(createBtn, true); createBtn.disabled = false;
       statusEl.textContent = "Оплата получена.";
+    } else if (state === "active") {
+      // Already subscribed (found on load) — no pay form, just the access button.
+      showPayForm(false); show(spinnerEl, false);
+      show(createBtn, true); createBtn.disabled = false;
+      statusEl.textContent = "Подписка активна.";
     } else if (state === "error") {
       show(spinnerEl, false); show(createBtn, false);
-      show(payBtn, true); payBtn.disabled = false; payBtn.textContent = "Повторить";
+      showPayForm(true); payBtn.disabled = false; payBtn.textContent = "Повторить";
       promoInput.disabled = false;
       statusEl.classList.add("err");
       statusEl.textContent = "Что-то пошло не так. Попробуйте ещё раз.";
@@ -424,7 +527,24 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
     if (onboardUrl) { openLink(onboardUrl); }
   });
 
-  setState("idle");
+  // On load: check whether this Telegram user already paid. If so, skip straight to
+  // the access button — no second pay offer. Otherwise show the pay form.
+  function init() {
+    setState("checking");
+    api("/miniapp/me", {}).then(function (res) {
+      if (res.onboardUrl) {
+        onboardUrl = res.onboardUrl;
+        setState("active");
+      } else {
+        setState("idle");
+      }
+    }).catch(function () {
+      // Couldn't check (network/validation) — fall back to the pay form.
+      setState("idle");
+    });
+  }
+
+  init();
 })();
 </script>
 </body>

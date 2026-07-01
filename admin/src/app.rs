@@ -557,6 +557,7 @@ fn since_label(ms: i64) -> String {
 #[component]
 fn Payments(view: RwSignal<View>) -> impl IntoView {
     let items = create_rw_signal(Vec::<api::UnboundPayment>::new());
+    let refunds = create_rw_signal(Vec::<api::RefundRequest>::new());
     let error = create_rw_signal(Option::<String>::None);
     let loading = create_rw_signal(true);
 
@@ -568,6 +569,15 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                     items.set(list);
                     error.set(None);
                 }
+                Err(e) if e.is_auth() => {
+                    auth::logout();
+                    view.set(View::Login);
+                }
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            // Refund requests — best-effort; a failure here shouldn't blank the page.
+            match api::refund_requests().await {
+                Ok(list) => refunds.set(list),
                 Err(e) if e.is_auth() => {
                     auth::logout();
                     view.set(View::Login);
@@ -593,6 +603,42 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
 
         <div class="screen">
             {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+
+            // Refund requests: client asked for a refund, access already revoked.
+            // Process each manually in lava (using the contract id / email).
+            {move || {
+                let list = refunds.get();
+                (!list.is_empty()).then(|| view! {
+                    <div style="padding: 16px 16px 2px;">
+                        <span class="badge badge--danger">{format!("Запросы на возврат · {}", list.len())}</span>
+                    </div>
+                    <div class="list">
+                        {list.into_iter().enumerate().map(|(i, r)| {
+                            let cur = if r.currency.is_empty() { "RUB".to_string() } else { r.currency.clone() };
+                            let amount = format!("{} {}", r.amount, cur);
+                            let email = r.email.clone().unwrap_or_else(|| r.user_id.clone());
+                            let contract = r.contract_id.clone().unwrap_or_else(|| "—".to_string());
+                            let mut meta = String::new();
+                            if let Some(d) = r.days_left { meta.push_str(&format!("остаток {d} дн.")); }
+                            if let Some(c) = r.created_at {
+                                if !meta.is_empty() { meta.push_str(" · "); }
+                                meta.push_str(&since_label(c));
+                            }
+                            view! {
+                                <div attr:data-testid="refund-row" class="row reveal" style=format!("--i:{i}")>
+                                    <div class="row__top">
+                                        <span class="row__title mono">{amount}</span>
+                                        <span class="badge badge--danger">"возврат"</span>
+                                    </div>
+                                    <div class="row__sub">{email}</div>
+                                    <div class="row__meta">"lava: "<span class="mono">{contract}</span></div>
+                                    <div class="row__meta">{meta}</div>
+                                </div>
+                            }
+                        }).collect_view()}
+                    </div>
+                })
+            }}
 
             {move || {
                 let list = items.get();

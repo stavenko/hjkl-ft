@@ -273,3 +273,34 @@ pub async fn unbound_payments() -> Result<Vec<UnboundPayment>, ApiError> {
     Ok(r.unbound)
 }
 
+/// A client-requested refund (access already revoked). The operator processes it
+/// manually in lava using contract_id / email.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RefundRequest {
+    #[serde(default)]
+    pub user_id: String,
+    #[serde(default)]
+    pub amount: i64,
+    #[serde(default)]
+    pub currency: String,
+    #[serde(default)]
+    pub contract_id: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub days_left: Option<i64>,
+    #[serde(default)]
+    pub created_at: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct RefundsResp {
+    refunds: Vec<RefundRequest>,
+}
+
+/// GET /admin/refunds (payment-worker). Client refund requests, newest first.
+pub async fn refund_requests() -> Result<Vec<RefundRequest>, ApiError> {
+    let r: RefundsResp = request_to(&payment_base()?, "GET", "/admin/refunds", None).await?;
+    Ok(r.refunds)
+}
+

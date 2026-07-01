@@ -239,11 +239,9 @@ pub fn SummaryBlock(#[prop(into)] date: Signal<String>) -> impl IntoView {
                         }.into_view()
                     }
                 } else {
-                    view! {
-                        <p class="is-size-7 has-text-grey" style="text-align: center; margin-top: 0.5rem;">
-                            {move || format!("{} {}", t("summary.week_pending"), summary::next_monday(&ws))}
-                        </p>
-                    }.into_view()
+                    // Week not ended yet: the "will be computed on <date>" notice is
+                    // hidden for now (per request) — nothing shown until the week is ready.
+                    ().into_view()
                 }
             }}
         </div>

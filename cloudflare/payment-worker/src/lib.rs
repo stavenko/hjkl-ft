@@ -594,6 +594,11 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
     if method == Method::Post && path == "/internal/checkout" {
         return internal_checkout(req, env).await;
     }
+    // The subscription status of the account a claim is bound to — so the Mini App can
+    // show the LIVE status (active / cancelled + days left). INTERNAL_PUSH_KEY-gated.
+    if method == Method::Post && path == "/internal/claim-subscription" {
+        return internal_claim_subscription(req, env).await;
+    }
 
     // ── Everything else is app-JWT authed ──
     let user_id = match validate_from_header(&req, env).await {
@@ -802,6 +807,58 @@ async fn internal_checkout(mut req: Request, env: &Env) -> Result<Response> {
     }))
 }
 
+// ── POST /internal/claim-subscription (INTERNAL_PUSH_KEY-guarded) ─────────────
+/// Given a Mini App claimId, return the LIVE subscription of the account it's bound to,
+/// so the Mini App can show "active / cancelled + N days". `{bound:false}` when the
+/// claim was paid but not yet onboarded (no account/sub yet).
+async fn internal_claim_subscription(mut req: Request, env: &Env) -> Result<Response> {
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) => k,
+        Err(e) => {
+            console_error!("internal_claim_subscription: {e}");
+            return Ok(error_response("internal_not_configured", 500));
+        }
+    };
+    let provided = req
+        .headers()
+        .get("X-Internal-Key")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if provided.is_empty() || provided != key {
+        return Ok(error_response("bad internal key", 403));
+    }
+
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let claim_id = body.get("claimId").and_then(|v| v.as_str()).unwrap_or("");
+    if claim_id.is_empty() {
+        return Ok(error_response("missing claimId", 400));
+    }
+
+    let claim = claim_stub(env)?;
+    let mut cb = do_post(&claim, "/claimed-by", &serde_json::json!({ "claimId": claim_id })).await?;
+    let cbv: serde_json::Value = cb.json().await?;
+    let claimed_by = match cbv.get("claimedBy").and_then(|v| v.as_str()) {
+        Some(u) if !u.is_empty() => u.to_string(),
+        _ => return Response::from_json(&serde_json::json!({ "bound": false })),
+    };
+
+    let sub = sub_stub(env, &claimed_by)?;
+    let mut sr = do_get(&sub, "/subscription").await?;
+    let s: serde_json::Value = sr.json().await?;
+    let end = s.get("end").and_then(|v| v.as_i64()).unwrap_or(0);
+    let now = Date::now().as_millis() as i64;
+    let day = 86_400_000i64;
+    let days_left = (((end - now) + day - 1) / day).max(0);
+    Response::from_json(&serde_json::json!({
+        "bound": true,
+        "subStatus": s.get("status"),
+        "active": s.get("active"),
+        "noRenew": s.get("no_renew"),
+        "daysLeft": days_left,
+    }))
+}
+
 // ── POST /test/guest-checkout (PRODUCTION-IMPOSSIBLE) ─────────────────────────
 async fn test_guest_checkout(mut req: Request, env: &Env) -> Result<Response> {
     if !test_entitlement_on(env) {
@@ -930,8 +987,80 @@ async fn cancel(env: &Env, user_id: &str) -> Result<Response> {
         }
     }
 
-    let out = do_post(&sub, "/cancel", &serde_json::json!({})).await?;
-    relay(out).await
+    let mut out = do_post(&sub, "/cancel", &serde_json::json!({})).await?;
+    let sub_json: serde_json::Value = out.json().await?;
+    // Echo the cancellation to the Telegram bot (best-effort; no-op if not linked).
+    let end = sub_json.get("end").and_then(|v| v.as_i64()).unwrap_or(0);
+    notify_bot_cancelled(env, user_id, end).await;
+    Response::from_json(&sub_json)
+}
+
+/// Best-effort: tell the Telegram bot the user cancelled, so it can echo "cancelled —
+/// access for N more days". Resolves the tg user via a claimed Mini App claim; silently
+/// no-ops if the account isn't linked to Telegram.
+async fn notify_bot_cancelled(env: &Env, user_id: &str, end_ms: i64) {
+    let claim = match claim_stub(env) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let mut r = match do_post(&claim, "/tg-for-user", &serde_json::json!({ "userId": user_id })).await {
+        Ok(r) => r,
+        Err(e) => {
+            console_error!("notify_bot_cancelled: tg-for-user: {e}");
+            return;
+        }
+    };
+    let v: serde_json::Value = match r.json().await {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let tg_user_id = match v.get("tgUserId").and_then(|x| x.as_i64()) {
+        Some(id) => id,
+        None => return, // account not linked to a Telegram user
+    };
+    let now = Date::now().as_millis() as i64;
+    let day = 86_400_000i64;
+    let days_left = (((end_ms - now) + day - 1) / day).max(0);
+
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            console_warn!("notify_bot_cancelled: INTERNAL_PUSH_KEY not configured — skipping");
+            return;
+        }
+    };
+    let payload = serde_json::json!({ "tgUserId": tg_user_id, "daysLeft": days_left }).to_string();
+    let headers = Headers::new();
+    let _ = headers.set("Content-Type", "application/json");
+    let _ = headers.set("X-Internal-Key", &key);
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(JsValue::from_str(&payload)));
+    let request = match Request::new_with_init("https://telegram-worker/internal/cancelled", &init) {
+        Ok(r) => r,
+        Err(e) => {
+            console_error!("notify_bot_cancelled build request failed: {e}");
+            return;
+        }
+    };
+    let tg = match env.service("TELEGRAM_WORKER") {
+        Ok(s) => s,
+        Err(e) => {
+            console_error!("notify_bot_cancelled: TELEGRAM_WORKER binding: {e}");
+            return;
+        }
+    };
+    match tg.fetch_request(request).await {
+        Ok(mut res) => {
+            let sc = res.status_code();
+            if !(200..300).contains(&sc) {
+                let t = res.text().await.unwrap_or_default();
+                console_error!("notify_bot_cancelled: {sc} {t}");
+            }
+        }
+        Err(e) => console_error!("notify_bot_cancelled failed: {e}"),
+    }
 }
 
 /// Prorated refund for the user's ACTIVE subscription, per the agreed formula:

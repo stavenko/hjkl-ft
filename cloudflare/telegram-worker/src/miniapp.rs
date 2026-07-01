@@ -257,10 +257,18 @@ pub async fn miniapp_me(mut req: Request, env: &Env) -> Result<Response> {
                 .unwrap_or_else(|_| "https://fit.renorma.app/onboard".into());
             // FRAGMENT (#claim=...) — the secret is NEVER logged.
             let onboard_url = format!("{base}#claim={claim_id}.{secret}");
-            return Response::from_json(&serde_json::json!({
+            let mut out = serde_json::json!({
                 "status": status,
                 "onboardUrl": onboard_url,
-            }));
+            });
+            // Live subscription of the bound account (if onboarded) → active/cancelled
+            // + days. Best-effort: a lookup error just omits it (the access still works).
+            if let Ok(Some(s)) = fetch_claim_subscription(env, claim_id).await {
+                out["subStatus"] = s.get("subStatus").cloned().unwrap_or(serde_json::Value::Null);
+                out["daysLeft"] = s.get("daysLeft").cloned().unwrap_or(serde_json::Value::Null);
+                out["noRenew"] = s.get("noRenew").cloned().unwrap_or(serde_json::Value::Null);
+            }
+            return Response::from_json(&out);
         }
     }
 
@@ -296,6 +304,40 @@ async fn fetch_claim_status(env: &Env, claim_id: &str) -> Result<String> {
         .unwrap_or("none")
         .to_string();
     Ok(status)
+}
+
+/// POST payment-worker /internal/claim-subscription (INTERNAL_PUSH_KEY) → the LIVE
+/// subscription of the account this claim is bound to (active/cancelled + days), or
+/// None if the claim was paid but not yet onboarded to an account.
+async fn fetch_claim_subscription(env: &Env, claim_id: &str) -> Result<Option<serde_json::Value>> {
+    let key = token::secret_or_var(env, "INTERNAL_PUSH_KEY")
+        .await
+        .map_err(Error::RustError)?;
+    let payload = serde_json::json!({ "claimId": claim_id }).to_string();
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/json")?;
+    headers.set("X-Internal-Key", &key)?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(wasm_bindgen::JsValue::from_str(&payload)));
+    let request =
+        Request::new_with_init("https://payment-worker/internal/claim-subscription", &init)?;
+    let payment = env
+        .service("PAYMENT_WORKER")
+        .map_err(|e| Error::RustError(format!("PAYMENT_WORKER binding: {e}")))?;
+    let mut resp = payment.fetch_request(request).await?;
+    let sc = resp.status_code();
+    if !(200..300).contains(&sc) {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::RustError(format!("claim-subscription {sc}: {txt}")));
+    }
+    let v: serde_json::Value = resp.json().await?;
+    if v.get("bound").and_then(|b| b.as_bool()) == Some(true) {
+        Ok(Some(v))
+    } else {
+        Ok(None)
+    }
 }
 
 // ── helpers shared with lib.rs ──────────────────────────────────────────────────
@@ -448,8 +490,18 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
   var claimId = null;
   var onboardUrl = null;
   var pollTimer = null;
+  var accessStatusText = ""; // live subscription line for the "active" state
 
   function show(el, on) { el.classList.toggle("hidden", !on); }
+
+  // Russian day-count declension: 1 день, 2 дня, 5 дней.
+  function ruDays(n) {
+    n = Math.abs(n); var d = n % 100, e = n % 10;
+    if (d >= 11 && d <= 14) return "дней";
+    if (e === 1) return "день";
+    if (e >= 2 && e <= 4) return "дня";
+    return "дней";
+  }
 
   function setState(state) {
     statusEl.classList.remove("err");
@@ -477,9 +529,10 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
       statusEl.textContent = "Оплата получена.";
     } else if (state === "active") {
       // Already subscribed (found on load) — no pay form, just the access button.
+      // The status line reflects the LIVE subscription (active / cancelled + days).
       showPayForm(false); show(spinnerEl, false);
       show(createBtn, true); createBtn.disabled = false;
-      statusEl.textContent = "Подписка активна.";
+      statusEl.textContent = accessStatusText || "Подписка активна.";
     } else if (state === "error") {
       show(spinnerEl, false); show(createBtn, false);
       showPayForm(true); payBtn.disabled = false; payBtn.textContent = "Повторить";
@@ -552,6 +605,21 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
     api("/miniapp/me", {}).then(function (res) {
       if (res.onboardUrl) {
         onboardUrl = res.onboardUrl;
+        // Reflect the LIVE subscription status of the bound account.
+        var days = (typeof res.daysLeft === "number") ? res.daysLeft : null;
+        var cancelled = res.subStatus === "cancelled" || res.noRenew === true;
+        if (res.subStatus === "expired") {
+          // Access has ended → offer to subscribe again.
+          setState("idle");
+          return;
+        }
+        if (cancelled && days !== null) {
+          accessStatusText = "Подписка отменена · доступ ещё " + days + " " + ruDays(days) + ".";
+        } else if (days !== null) {
+          accessStatusText = "Подписка активна · " + days + " " + ruDays(days) + ".";
+        } else {
+          accessStatusText = "Подписка активна.";
+        }
         setState("active");
       } else {
         setState("idle");

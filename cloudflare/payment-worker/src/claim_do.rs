@@ -163,6 +163,40 @@ impl ClaimDO {
         Response::from_json(&serde_json::json!({ "refunds": rows }))
     }
 
+    /// The account a claim is bound to (its lifecycle status + claimed_by user id), so
+    /// the Mini App can look up that account's live subscription. Unknown → status "none".
+    fn claimed_by(&self, b: &serde_json::Value) -> Result<Response> {
+        let claim_id = str_field(b, "claimId")?;
+        match self.row_by_claim(&claim_id)? {
+            Some(r) => Response::from_json(&serde_json::json!({
+                "status": r.status, "claimedBy": r.claimed_by,
+            })),
+            None => Response::from_json(&serde_json::json!({ "status": "none", "claimedBy": null })),
+        }
+    }
+
+    /// The Telegram user id bound to an app account (via a claimed Mini App claim), so a
+    /// subscription-status change (e.g. cancel) can be echoed to the bot. Newest claim
+    /// wins. {tgUserId: <i64>|null}.
+    fn tg_for_user(&self, b: &serde_json::Value) -> Result<Response> {
+        let user_id = str_field(b, "userId")?;
+        let row = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT tg_user_id FROM claims
+                   WHERE claimed_by = ? AND tg_user_id IS NOT NULL
+                   ORDER BY claimed_at DESC LIMIT 1",
+                vec![user_id.into()],
+            )?
+            .to_array::<serde_json::Value>()?
+            .into_iter()
+            .next();
+        let tg_user_id = row.and_then(|r| r.get("tg_user_id").and_then(|v| v.as_i64()));
+        Response::from_json(&serde_json::json!({ "tgUserId": tg_user_id }))
+    }
+
     fn row_by_claim(&self, claim_id: &str) -> Result<Option<ClaimRow>> {
         Ok(self
             .state
@@ -527,6 +561,14 @@ impl DurableObject for ClaimDO {
                 self.add_refund(&b)
             }
             (Method::Get, "/refunds") => self.list_refunds(),
+            (Method::Post, "/tg-for-user") => {
+                let b: serde_json::Value = req.json().await?;
+                self.tg_for_user(&b)
+            }
+            (Method::Post, "/claimed-by") => {
+                let b: serde_json::Value = req.json().await?;
+                self.claimed_by(&b)
+            }
             (Method::Post, "/by-tg") => {
                 let b: serde_json::Value = req.json().await?;
                 self.by_tg(&b)

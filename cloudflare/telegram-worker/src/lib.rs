@@ -170,6 +170,9 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
     if method == Method::Post && path == "/internal/paid" {
         return internal_paid(req, env).await;
     }
+    if method == Method::Post && path == "/internal/cancelled" {
+        return internal_cancelled(req, env).await;
+    }
     // ── Telegram Mini App pay flow (page + same-origin APIs) ──
     if method == Method::Get && path == "/" {
         return miniapp::serve_miniapp_page();
@@ -510,4 +513,57 @@ async fn internal_paid_miniapp(
 
 fn ok_200() -> Response {
     Response::from_json(&serde_json::json!({ "ok": true })).expect("serialize ok")
+}
+
+/// Russian day-count declension: 1 день, 2 дня, 5 дней.
+pub(crate) fn ru_days(n: i64) -> &'static str {
+    let n100 = n % 100;
+    let n10 = n % 10;
+    if (11..=14).contains(&n100) {
+        "дней"
+    } else if n10 == 1 {
+        "день"
+    } else if (2..=4).contains(&n10) {
+        "дня"
+    } else {
+        "дней"
+    }
+}
+
+// ── POST /internal/cancelled (INTERNAL_PUSH_KEY-guarded) ────────────────────────
+/// payment-worker calls this after the user cancels in the app. We echo it to the bot:
+/// "subscription cancelled — access for N more days". Best-effort (Mini App still shows
+/// the live status on open); a private chat's chat_id == user.id.
+async fn internal_cancelled(mut req: Request, env: &Env) -> Result<Response> {
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) => k,
+        Err(e) => {
+            console_error!("internal_cancelled: {e}");
+            return Ok(error_response("internal_not_configured", 500));
+        }
+    };
+    let provided = req
+        .headers()
+        .get("X-Internal-Key")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if provided.is_empty() || provided != key {
+        return Ok(error_response("bad internal key", 403));
+    }
+
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let tg_user_id = match body.get("tgUserId").and_then(|v| v.as_i64()) {
+        Some(id) => id,
+        None => return Ok(error_response("missing tgUserId", 400)),
+    };
+    let days_left = body.get("daysLeft").and_then(|v| v.as_i64()).unwrap_or(0).max(0);
+
+    let text = format!(
+        "Подписка отменена. Доступ к re:Norma сохранится ещё {} {}.",
+        days_left,
+        ru_days(days_left)
+    );
+    send_message(env, tg_user_id, &text, None).await?;
+    Ok(ok_200())
 }

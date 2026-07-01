@@ -9,11 +9,15 @@ use crate::services::{auth, db, platform, story, subscription, update};
 enum AppState {
     PwaPrompt,
     Auth,
+    /// Session exists and the cache doesn't yet confirm an active sub — we are
+    /// fetching the LIVE status. Shows a spinner, NEVER the "no subscription"
+    /// screen, so that message can't flash before the request resolves.
+    Checking,
     /// Session exists but there is NO active subscription (e.g. the user closed
     /// the PWA mid-claim, or a terminal claim failure left a registered account
     /// with no sub). We must NEVER drop such a user into the app (locked decision:
-    /// "never drop the user into the app unsubscribed"). This is a blocking screen,
-    /// not the app.
+    /// "never drop the user into the app unsubscribed"). Only ever reached AFTER a
+    /// completed status fetch. This is a blocking screen, not the app.
     Locked,
     Ready,
 }
@@ -45,11 +49,13 @@ fn initial_state() -> AppState {
         AppState::PwaPrompt
     } else if auth::get_user_id().is_none() {
         AppState::Auth
-    } else if !has_active_sub() {
-        // Session but no active sub → blocking screen, never the app.
-        AppState::Locked
-    } else {
+    } else if has_active_sub() {
         AppState::Ready
+    } else {
+        // Session but the cache doesn't confirm an active sub. Do NOT assume Locked
+        // (that would flash the "no subscription" screen before we've asked the
+        // server) — show a spinner and verify the live status first.
+        AppState::Checking
     }
 }
 
@@ -95,27 +101,29 @@ pub fn App() -> impl IntoView {
     // no longer an onboarding screen either — the Story (chapter 1) walks the user
     // through it instead.
     let after_auth = move || {
-        // Gate on the subscription: a session with no active sub is blocked, never
-        // dropped into the app (locked decision). The Locked screen re-checks live.
-        if !has_active_sub() {
-            state.set(AppState::Locked);
-        } else {
+        // Gate on the subscription. If the cache already confirms an active sub,
+        // enter immediately; otherwise verify the LIVE status (spinner) before
+        // deciding — never flash the "no subscription" screen from a cold cache.
+        if has_active_sub() {
             state.set(AppState::Ready);
+        } else {
+            state.set(AppState::Checking);
         }
     };
 
-    // On the Locked screen, re-fetch the live subscription status: if it became
-    // active (e.g. a claim completed in another tab, or a renewal landed), proceed
-    // into the app. Otherwise the user stays blocked (must claim / log in).
+    // While Checking, fetch the live subscription status and decide: active → into
+    // the app; confirmed-not-active (or the fetch failed → can't verify) → Locked.
+    // Because this only runs in the Checking state, the Locked screen is reached
+    // ONLY after a completed request — the "no subscription" message never flashes.
     create_effect(move |_| {
-        if state.get() != AppState::Locked {
+        if state.get() != AppState::Checking {
             return;
         }
         spawn_local(async move {
-            if let Ok(s) = subscription::status().await {
-                if s.active {
-                    state.set(AppState::Ready);
-                }
+            match subscription::status().await {
+                Ok(s) if s.active => state.set(AppState::Ready),
+                Ok(_) => state.set(AppState::Locked),
+                Err(_) => state.set(AppState::Locked),
             }
         });
     });
@@ -140,6 +148,14 @@ pub fn App() -> impl IntoView {
                     <pages::auth_page::AuthPage on_authenticated=Callback::new(move |_| {
                         after_auth();
                     }) />
+                </div>
+            }.into_view()),
+
+            // Verifying the live subscription status — spinner only, so the
+            // "no subscription" screen can't appear before the request resolves.
+            AppState::Checking => Some(view! {
+                <div attr:data-testid="app-checking" style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main); display: flex; align-items: center; justify-content: center;">
+                    <div class="ft-spinner"></div>
                 </div>
             }.into_view()),
 

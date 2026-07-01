@@ -220,11 +220,13 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             {move || if loading.get() { t("auth.authenticating") } else { t("auth.sign_in") }}
                         </button>
 
-                        // Secondary, smaller actions.
-                        <div style="display: flex; flex-direction: column; gap: 0.6rem;">
+                        // Secondary actions as text links — clearly tappable but
+                        // visually de-emphasised (accented differently, not buttons).
+                        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
                             <button
                                 attr:data-testid="auth-btn-register"
-                                class="button is-fullwidth"
+                                class="button is-ghost has-text-link"
+                                style="text-decoration: underline; text-underline-offset: 3px;"
                                 disabled=move || loading.get()
                                 on:click=on_register
                             >
@@ -232,7 +234,8 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             </button>
                             <button
                                 attr:data-testid="auth-btn-add-device"
-                                class="button is-light is-fullwidth"
+                                class="button is-ghost has-text-link"
+                                style="text-decoration: underline; text-underline-offset: 3px;"
                                 disabled=move || loading.get()
                                 on:click=on_show_qr
                             >

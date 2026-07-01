@@ -106,6 +106,29 @@ pub async fn cancel() -> Result<Status, String> {
     Ok(s)
 }
 
+/// The prorated refund the user would get (server-computed; no side effects).
+#[derive(Debug, Clone, Deserialize)]
+pub struct RefundPreview {
+    pub amount: i64,
+    #[serde(default)]
+    pub currency: String,
+    #[serde(rename = "daysLeft", default)]
+    pub days_left: i64,
+}
+
+/// Preview the refund amount without touching anything.
+pub async fn refund_preview() -> Result<RefundPreview, String> {
+    request("POST", "/refund/preview", None).await
+}
+
+/// Request the refund: records it for the operator AND revokes access immediately.
+/// Refetches the (now-revoked) status into the cache.
+pub async fn refund_request() -> Result<Status, String> {
+    let _: serde_json::Value = request("POST", "/refund/request", None).await?;
+    let s = status().await?;
+    Ok(s)
+}
+
 async fn request<T: serde::de::DeserializeOwned>(
     method: &str,
     path: &str,

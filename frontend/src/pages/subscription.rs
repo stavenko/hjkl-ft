@@ -171,13 +171,13 @@ pub fn SubscriptionPage() -> impl IntoView {
                                 _ => t("settings.sub_expired"),
                             };
                             let cls = if s.active { "has-text-success" } else { "has-text-danger" };
-                            // Access-until: date + how many days remain (a count).
-                            let expires = format!("{} \u{00b7} {}", fmt_date(s.end), days_phrase(days_left(s.end)));
+                            // Remaining access as a COUNT OF DAYS (never a date).
+                            let access_left = days_phrase(days_left(s.end));
 
                             view! {
                                 <p class=format!("is-size-5 has-text-weight-bold {cls}") style="margin: 0 0 8px 0;">{label}</p>
                                 {(s.start > 0).then(|| info_row(t("settings.sub_since").to_string(), fmt_date(s.start)))}
-                                {info_row(t("settings.sub_until").to_string(), expires)}
+                                {info_row(t("settings.sub_access_left").to_string(), access_left)}
                             }.into_view()
                         }
                     }}

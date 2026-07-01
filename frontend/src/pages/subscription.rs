@@ -164,6 +164,7 @@ pub fn SubscriptionPage() -> impl IntoView {
                         None => view! { <p class="is-size-6 has-text-grey">{move || t("paywall.loading")}</p> }.into_view(),
                         Some(s) => {
                             let label = match s.status.as_deref() {
+                                Some("cancelled") => t("settings.sub_cancelled"),
                                 Some("paid") if s.no_renew == Some(true) => t("settings.sub_cancelled"),
                                 Some("paid") => t("settings.sub_active"),
                                 _ if s.active => t("settings.sub_trial"),
@@ -197,9 +198,10 @@ pub fn SubscriptionPage() -> impl IntoView {
                         })
                     }}
 
-                    // Request a refund — while the paid period is still active.
+                    // Request a refund — ONLY once the subscription is cancelled and
+                    // still within the paid (now unused) period.
                     {move || {
-                        let show = status.get().map(|s| s.active && s.status.as_deref() != Some("expired")).unwrap_or(false);
+                        let show = status.get().map(|s| s.active && s.no_renew == Some(true)).unwrap_or(false);
                         show.then(|| view! {
                             <button
                                 attr:data-testid="sub-btn-refund"

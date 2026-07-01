@@ -37,6 +37,13 @@ struct ClaimRow {
     voided_at: Option<i64>,
 }
 
+/// Single-column projection of PRAGMA table_info — detects whether a column already
+/// exists before an idempotent ALTER (SQLite has no ADD COLUMN IF NOT EXISTS).
+#[derive(Debug, Deserialize)]
+struct PragmaCol {
+    name: String,
+}
+
 /// SQLite-backed guest paid-sub ledger and THE atomic claim compare-and-set point
 /// (MONEY-SAFETY #3, #5). One global instance (idFromName("claims")): every op runs
 /// under the DO's single-threaded input gate, so read+write of a claim is atomic.
@@ -71,16 +78,32 @@ impl ClaimDO {
                 created_at      INTEGER NOT NULL,
                 paid_at         INTEGER,
                 claimed_at      INTEGER,
-                voided_at       INTEGER
+                voided_at       INTEGER,
+                tg_user_id      INTEGER,
+                tg_username     TEXT
             )",
             None,
         )?;
+        // Migrate tables created before the Telegram-identity columns existed.
+        let cols = sql
+            .exec("PRAGMA table_info(claims)", None)?
+            .to_array::<PragmaCol>()?;
+        if !cols.iter().any(|c| c.name == "tg_user_id") {
+            sql.exec("ALTER TABLE claims ADD COLUMN tg_user_id INTEGER", None)?;
+        }
+        if !cols.iter().any(|c| c.name == "tg_username") {
+            sql.exec("ALTER TABLE claims ADD COLUMN tg_username TEXT", None)?;
+        }
         sql.exec(
             "CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status)",
             None,
         )?;
         sql.exec(
             "CREATE INDEX IF NOT EXISTS idx_claims_contract ON claims(contract_id)",
+            None,
+        )?;
+        sql.exec(
+            "CREATE INDEX IF NOT EXISTS idx_claims_tg_user ON claims(tg_user_id)",
             None,
         )?;
         Ok(())
@@ -135,11 +158,13 @@ impl ClaimDO {
         let contract_id = opt_str(b, "contractId");
         let amount = opt_i64(b, "amount");
         let currency = opt_str(b, "currency");
+        let tg_user_id = opt_i64(b, "tgUserId");
+        let tg_username = opt_str(b, "tgUsername");
 
         self.state.storage().sql().exec(
             "INSERT OR IGNORE INTO claims
-               (claim_id, secret_hash, provider, plan_id, status, contract_id, amount, currency, created_at)
-             VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+               (claim_id, secret_hash, provider, plan_id, status, contract_id, amount, currency, created_at, tg_user_id, tg_username)
+             VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
             vec![
                 claim_id.into(),
                 secret_hash.into(),
@@ -149,6 +174,8 @@ impl ClaimDO {
                 amount.into(),
                 currency.into(),
                 now_ms().into(),
+                tg_user_id.into(),
+                tg_username.into(),
             ],
         )?;
         Response::from_json(&serde_json::json!({ "ok": true }))
@@ -290,12 +317,39 @@ impl ClaimDO {
             .storage()
             .sql()
             .exec(
-                "SELECT claim_id, provider, plan_id, status, contract_id, email, amount, currency, created_at, paid_at
+                "SELECT claim_id, provider, plan_id, status, contract_id, email, amount, currency, created_at, paid_at, tg_user_id, tg_username
                    FROM claims WHERE status='paid' ORDER BY paid_at ASC",
                 None,
             )?
             .to_array::<serde_json::Value>()?;
         Response::from_json(&serde_json::json!({ "unbound": rows }))
+    }
+
+    /// Admin: reconcile a Telegram user — «did they pay / did they bind an account?».
+    /// Matches the given token against tg_username (case-insensitive, leading '@'
+    /// stripped) OR the numeric tg_user_id. Returns every matching claim with its
+    /// lifecycle status and claimed_by, newest first. NEVER returns the secret hash.
+    fn by_tg(&self, b: &serde_json::Value) -> Result<Response> {
+        let raw = str_field(b, "tg")?;
+        let needle = raw.trim().trim_start_matches('@').trim().to_string();
+        if needle.is_empty() {
+            return Response::from_json(&serde_json::json!({ "claims": [] }));
+        }
+        let as_id: i64 = needle.parse().unwrap_or(-1);
+        let rows: Vec<serde_json::Value> = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT claim_id, status, claimed_by, provider, plan_id, contract_id, email,
+                        tg_user_id, tg_username, created_at, paid_at, claimed_at, voided_at, period_end
+                   FROM claims
+                  WHERE tg_user_id = ? OR LOWER(tg_username) = LOWER(?)
+                  ORDER BY created_at DESC",
+                vec![as_id.into(), needle.into()],
+            )?
+            .to_array::<serde_json::Value>()?;
+        Response::from_json(&serde_json::json!({ "claims": rows }))
     }
 
     /// Admin: void a guest claim by claim id. Touches ONLY the guest record;
@@ -414,6 +468,10 @@ impl DurableObject for ClaimDO {
                 self.status_of(&b)
             }
             (Method::Get, "/unbound") => self.unbound(),
+            (Method::Post, "/by-tg") => {
+                let b: serde_json::Value = req.json().await?;
+                self.by_tg(&b)
+            }
             (Method::Post, "/void") => {
                 let b: serde_json::Value = req.json().await?;
                 self.void(&b)

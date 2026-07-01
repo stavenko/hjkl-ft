@@ -90,6 +90,38 @@ impl Lava {
         }
     }
 
+    /// Admin reconciliation: GET /api/v2/invoices (ApiKeyAuth) — the contracts for THIS
+    /// API key, across ALL statuses (default is only `completed`). Returns lava's raw
+    /// page JSON verbatim so the admin sees every field (lava has no refund status, so
+    /// this is how we eyeball whether a refunded contract differs at all).
+    pub async fn list_invoices(&self, page: u32, size: u32) -> Result<serde_json::Value> {
+        let api_key = self
+            .api_key
+            .as_deref()
+            .ok_or_else(|| Error::RustError("provider_not_configured".into()))?;
+
+        let url = format!(
+            "{LAVA_API}/api/v2/invoices?page={page}&size={size}\
+             &invoiceStatuses=NEW&invoiceStatuses=IN_PROGRESS\
+             &invoiceStatuses=COMPLETED&invoiceStatuses=FAILED"
+        );
+        let headers = Headers::new();
+        headers
+            .set("X-Api-Key", api_key)
+            .map_err(|e| Error::RustError(format!("set header: {e}")))?;
+        let mut init = RequestInit::new();
+        init.with_method(Method::Get).with_headers(headers);
+        let req = Request::new_with_init(&url, &init)?;
+        let mut res = Fetch::Request(req).send().await?;
+
+        let status = res.status_code();
+        if !(200..300).contains(&status) {
+            let txt = res.text().await.unwrap_or_default();
+            return Err(Error::RustError(format!("lava_invoices_failed_{status}: {txt}")));
+        }
+        res.json().await
+    }
+
     /// lava uses ApiKeyWebhookAuth → header X-Api-Key == the webhook's configured key.
     /// Returns (ok, body). Fails closed (ok=false) when no webhook_secret is configured.
     pub async fn verify_webhook(&self, req: &mut Request) -> (bool, Option<serde_json::Value>) {

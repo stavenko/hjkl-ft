@@ -382,6 +382,101 @@ async fn relay(mut res: Response) -> Result<Response> {
     Ok(Response::ok(text)?.with_status(status).with_headers(headers))
 }
 
+/// Unbound (paid-but-unclaimed) payments, RECONCILED against lava. lava has no refund
+/// webhook, but its GET /api/v2/invoices exposes `subscriptionDetails.terminatedAt` /
+/// `subscriptionStatus=CANCELLED` — so a refunded/cancelled contract is detectable. We
+/// AUTO-VOID such claims (tombstone → non-redeemable, MONEY-SAFETY #4/#7) and drop them
+/// from the worklist. Degrade gracefully: if lava is unreachable OR a claim's contract
+/// isn't in the fetched page, we KEEP the row (never hide an actionable payment on doubt).
+async fn admin_unbound_reconciled(env: &Env) -> Result<Response> {
+    let stub = claim_stub(env)?;
+    let mut r = do_get(&stub, "/unbound").await?;
+    let mut body: serde_json::Value = r.json().await?;
+    let rows = body
+        .get("unbound")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if rows.is_empty() {
+        return Response::from_json(&body);
+    }
+
+    // lava contractIds whose access is terminated (refund/cancel). Absent provider (dev)
+    // or a lava error → no reconcile: return the raw list unchanged.
+    let terminated: std::collections::HashSet<String> = match provider_for_env("lava", env).await {
+        Ok(Some(p)) if p.configured() => match p.list_invoices(1, 100).await {
+            Ok(page) => {
+                let items = page.get("items").and_then(|v| v.as_array());
+                let total = page.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
+                if let Some(items) = items {
+                    if (items.len() as i64) < total {
+                        console_warn!(
+                            "unbound reconcile: lava has {total} contracts but only {} fetched — claims beyond page 1 not reconciled",
+                            items.len()
+                        );
+                    }
+                    items
+                        .iter()
+                        .filter(|it| is_terminated(it))
+                        .filter_map(|it| it.get("id").and_then(|v| v.as_str()).map(String::from))
+                        .collect()
+                } else {
+                    return Response::from_json(&body);
+                }
+            }
+            Err(e) => {
+                console_error!("unbound reconcile: lava list_invoices failed: {e}");
+                return Response::from_json(&body);
+            }
+        },
+        _ => return Response::from_json(&body),
+    };
+
+    let mut kept: Vec<serde_json::Value> = Vec::new();
+    for row in rows {
+        let contract = row.get("contract_id").and_then(|v| v.as_str()).unwrap_or("");
+        let claim_id = row.get("claim_id").and_then(|v| v.as_str()).unwrap_or("");
+        if !contract.is_empty() && !claim_id.is_empty() && terminated.contains(contract) {
+            // Idempotent tombstone. 409 already_claimed is fine (those aren't unbound);
+            // log any other non-2xx loudly (no silent swallow).
+            match do_post(&stub, "/void", &serde_json::json!({ "claimId": claim_id })).await {
+                Ok(mut resp) => {
+                    let sc = resp.status_code();
+                    if (200..300).contains(&sc) {
+                        console_log!(
+                            "unbound reconcile: auto-voided claim {claim_id} (lava contract {contract} terminated)"
+                        );
+                    } else if sc != 409 {
+                        let t = resp.text().await.unwrap_or_default();
+                        console_warn!("unbound reconcile: void {claim_id} → {sc}: {t}");
+                    }
+                }
+                Err(e) => console_error!("unbound reconcile: void {claim_id} failed: {e}"),
+            }
+        } else {
+            kept.push(row);
+        }
+    }
+    body["unbound"] = serde_json::Value::Array(kept);
+    Response::from_json(&body)
+}
+
+/// A lava contract whose access is closed: refunded or the subscription cancelled.
+/// (FAILED first-invoices never became `paid` for us, so they don't appear as unbound.)
+fn is_terminated(it: &serde_json::Value) -> bool {
+    let terminated_at = it
+        .get("subscriptionDetails")
+        .and_then(|d| d.get("terminatedAt"))
+        .and_then(|v| v.as_str());
+    if terminated_at.map(|s| !s.is_empty()).unwrap_or(false) {
+        return true;
+    }
+    matches!(
+        it.get("subscriptionStatus").and_then(|v| v.as_str()),
+        Some("CANCELLED")
+    )
+}
+
 /// Resolve every REQUIRED Store-bound secret at the top of the fetch entry. On the
 /// first failure: log the full reason loudly and return a 503 so ANY request makes
 /// the misconfiguration obvious (Workers have no separate startup — per-request is
@@ -473,8 +568,7 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         if let Err(resp) = require_admin(&req, env).await {
             return Ok(resp);
         }
-        let stub = claim_stub(env)?;
-        return relay(do_get(&stub, "/unbound").await?).await;
+        return admin_unbound_reconciled(env).await;
     }
     if method == Method::Post && path == "/admin/void-payment" {
         if let Err(resp) = require_admin(&req, env).await {
@@ -490,7 +584,25 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         let res = do_post(&stub, "/void", &serde_json::json!({ "claimId": claim_id })).await?;
         return relay(res).await;
     }
-
+    // Reconcile a Telegram user: given ?tg=<username|id>, return their claim(s) with
+    // status (paid? claimed?) and claimed_by. Backs the operator «оплатил / привязал» check.
+    if method == Method::Get && path == "/admin/tg-status" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        let url = req.url()?;
+        let tg = url
+            .query_pairs()
+            .find(|(k, _)| k == "tg")
+            .map(|(_, v)| v.into_owned())
+            .unwrap_or_default();
+        if tg.trim().is_empty() {
+            return Ok(error_response("missing_params", 400));
+        }
+        let stub = claim_stub(env)?;
+        let res = do_post(&stub, "/by-tg", &serde_json::json!({ "tg": tg })).await?;
+        return relay(res).await;
+    }
     // ── Internal guest checkout (INTERNAL_PUSH_KEY-guarded; PROD-ONLY) ──
     // Same as /checkout/guest but ALSO returns the claim secret, because the caller
     // is our trusted telegram-worker (authenticated by INTERNAL_PUSH_KEY). The secret
@@ -583,6 +695,14 @@ async fn do_guest_checkout(
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    // Optional Telegram identity (present only for the Mini App flow) — recorded on the
+    // claim so an operator can reconcile «who paid / did they bind an account».
+    let tg_user_id = body.get("tgUserId").and_then(|v| v.as_i64());
+    let tg_username = body
+        .get("tgUsername")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim_start_matches('@').trim().to_string())
+        .filter(|s| !s.is_empty());
 
     let claim_id = random_claim_secret().map_err(|e| error_response(&e.to_string(), 500))?; // opaque public id (≠ contractId; #1)
     let secret = random_claim_secret().map_err(|e| error_response(&e.to_string(), 500))?; // high-entropy claim secret (256-bit)
@@ -622,6 +742,8 @@ async fn do_guest_checkout(
             "contractId": checkout.order_id,
             "amount": plan_price,
             "currency": plan_currency,
+            "tgUserId": tg_user_id,
+            "tgUsername": tg_username,
         }),
     )
     .await

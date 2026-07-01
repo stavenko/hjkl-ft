@@ -20,19 +20,6 @@ use worker::*;
 use crate::init_data::{validate_init_data, InitDataOk};
 use crate::{call_internal_checkout, do_post, error_response, session_stub, token};
 
-// Telegram WebApp SDK, self-hosted (bundled) so the Mini App loads NO third-party
-// script. It's a client-bridge library (postMessage), makes no telegram.org network
-// calls, so serving a pinned copy is safe. Refresh it if Telegram ships protocol changes.
-const TELEGRAM_WEBAPP_JS: &str = include_str!("telegram-web-app.js");
-
-// ── GET /telegram-web-app.js : the self-hosted Telegram WebApp SDK ───────────────
-pub fn serve_miniapp_sdk() -> Result<Response> {
-    let headers = Headers::new();
-    headers.set("Content-Type", "application/javascript; charset=utf-8")?;
-    headers.set("Cache-Control", "public, max-age=86400")?;
-    Ok(Response::ok(TELEGRAM_WEBAPP_JS)?.with_headers(headers))
-}
-
 // ── GET / : the Mini App page ───────────────────────────────────────────────────
 pub fn serve_miniapp_page() -> Result<Response> {
     let headers = Headers::new();
@@ -42,7 +29,7 @@ pub fn serve_miniapp_page() -> Result<Response> {
     headers.set(
         "Content-Security-Policy",
         "default-src 'self'; \
-         script-src 'self' 'unsafe-inline'; \
+         script-src 'self' https://telegram.org 'unsafe-inline'; \
          connect-src 'self'; \
          img-src 'self' data:; \
          style-src 'self' 'unsafe-inline'",
@@ -333,7 +320,7 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Renorma — оплата</title>
-<script src="/telegram-web-app.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -396,6 +383,10 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
     -webkit-mask: radial-gradient(circle, transparent 8.5px, #000 9.5px);
     mask: radial-gradient(circle, transparent 8.5px, #000 9.5px); }
   .hidden { display: none; }
+  #gate { text-align: center; align-items: center; }
+  .tgbtn { display: block; text-decoration: none; text-align: center; padding: 15px;
+    font-size: 16px; font-weight: 600; border-radius: 12px;
+    background: var(--tg-theme-button-color, #2ea6ff); color: var(--tg-theme-button-text-color, #ffffff); }
 </style>
 </head>
 <body>
@@ -420,11 +411,30 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
   <div id="spinner" class="spinner hidden"></div>
 </div>
 
+<div id="gate" class="card hidden">
+  <div class="brand" style="justify-content: center;">
+    <span class="logo" aria-hidden="true"><span class="ring"></span></span>
+    <div><h1>re:Norma</h1></div>
+  </div>
+  <p class="sub">Оформление подписки доступно только внутри Telegram.</p>
+  <a class="tgbtn" href="https://t.me/renorma_payment_helper_bot/pay">Открыть в Telegram</a>
+</div>
+
 <script>
 (function () {
   var tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { tg.ready(); tg.expand(); }
   var initData = tg ? tg.initData : "";
+
+  // Gate: this Mini App is meant to run ONLY inside Telegram, where a valid launch
+  // carries signed initData. Opened in a plain browser (no initData) → show a notice
+  // and NEVER the pay UI. (The privileged /miniapp/* endpoints already reject empty
+  // initData server-side; this is the matching front-door.)
+  if (!initData) {
+    document.querySelector(".card").classList.add("hidden");
+    document.getElementById("gate").classList.remove("hidden");
+    return;
+  }
 
   var promoInput = document.getElementById("promo");
   var payHint = document.getElementById("payHint");

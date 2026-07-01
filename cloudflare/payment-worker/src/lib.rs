@@ -66,19 +66,25 @@ fn error_response(message: &str, status: u16) -> Response {
 }
 
 // ── DO-stub helpers ───────────────────────────────────────────────────────────
+// Storage epoch: BUMP this to wipe ALL payment DO state in a single deploy. The
+// worker starts addressing fresh (empty) DO instances by name; the old ones simply
+// orphan. This avoids delete-class migrations (Cloudflare rejects those while the
+// binding still references the class). Increment again for the next reset.
+const DO_EPOCH: &str = "v2";
+
 fn sub_stub(env: &Env, user_id: &str) -> Result<worker::durable::Stub> {
     env.durable_object("SUBSCRIPTION_DO")?
-        .id_from_name(user_id)?
+        .id_from_name(&format!("{DO_EPOCH}:{user_id}"))?
         .get_stub()
 }
 fn index_stub(env: &Env) -> Result<worker::durable::Stub> {
     env.durable_object("PAYMENT_INDEX_DO")?
-        .id_from_name("index")?
+        .id_from_name(&format!("index-{DO_EPOCH}"))?
         .get_stub()
 }
 fn claim_stub(env: &Env) -> Result<worker::durable::Stub> {
     env.durable_object("CLAIM_DO")?
-        .id_from_name("claims")?
+        .id_from_name(&format!("claims-{DO_EPOCH}"))?
         .get_stub()
 }
 

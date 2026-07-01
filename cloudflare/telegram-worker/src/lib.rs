@@ -27,9 +27,14 @@ pub use tg_session_do::TgSessionDO;
 use types::Update;
 
 // ── DO-stub helper ─────────────────────────────────────────────────────────────
+// Storage epoch: BUMP to wipe TgSessionDO state (miniapp_claims etc.) in one deploy —
+// the worker addresses a fresh, empty instance; the old one orphans. Avoids
+// delete-class migrations (rejected while the binding references the class).
+const DO_EPOCH: &str = "v2";
+
 pub(crate) fn session_stub(env: &Env) -> Result<worker::durable::Stub> {
     env.durable_object("TG_SESSION_DO")?
-        .id_from_name("global")?
+        .id_from_name(&format!("global-{DO_EPOCH}"))?
         .get_stub()
 }
 

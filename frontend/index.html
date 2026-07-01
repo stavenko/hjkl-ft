@@ -54,6 +54,58 @@
             border-top-color: var(--bulma-link, #485fc7);
             animation: ft-spin 0.8s linear infinite;
         }
+
+        /* Golos Text — self-hosted so the splash wordmark matches the landing
+           (which uses Golos Text). Bundled; font-src 'self', no third-party hosts. */
+        @font-face {
+            font-family: "Golos Text"; font-style: normal; font-weight: 400 900;
+            font-display: swap; src: url("/fonts/golos-cyrillic.woff2") format("woff2");
+            unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+        }
+        @font-face {
+            font-family: "Golos Text"; font-style: normal; font-weight: 400 900;
+            font-display: swap; src: url("/fonts/golos-latin.woff2") format("woff2");
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+        /* ── Splash: shown until the WASM app mounts (which replaces <body>).
+           Palette + wordmark mirror the landing (Golos Text 800, deep-navy ink). ── */
+        #splash {
+            --sp-bg: #F1F4F9; --sp-text: #0E1630; --sp-sub: #39425F;
+            --sp-em: #10B981; --sp-rose: #F4536B; --sp-amber: #F5B301;
+            --sp-glow: rgba(16,185,129,.18);
+            position: fixed; inset: 0; z-index: 9998;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--sp-bg);
+            font-family: "Golos Text", -apple-system, system-ui, sans-serif;
+            animation: sp-fade .45s ease both;
+        }
+        @media (prefers-color-scheme: dark) {
+            #splash { --sp-bg: #0E1630; --sp-text: #EDEFF6; --sp-sub: #9AA3C0; --sp-glow: rgba(16,185,129,.28); }
+        }
+        #splash .splash-inner {
+            display: flex; flex-direction: column; align-items: center; gap: 20px;
+            animation: sp-rise .6s cubic-bezier(.2,.7,.3,1) both;
+        }
+        #splash .splash-logo { position: relative; width: 78px; height: 78px; }
+        #splash .splash-logo::before {
+            content: ""; position: absolute; inset: -22px; border-radius: 50%;
+            background: radial-gradient(circle, var(--sp-glow), transparent 68%);
+            animation: sp-glow 2.6s ease-in-out infinite;
+        }
+        #splash .splash-ring {
+            position: absolute; inset: 0; border-radius: 50%;
+            background: conic-gradient(from -90deg, var(--sp-em) 0 60%, var(--sp-rose) 60% 90%, var(--sp-amber) 90% 100%);
+            -webkit-mask: radial-gradient(circle, transparent 19px, #000 20px);
+            mask: radial-gradient(circle, transparent 19px, #000 20px);
+            animation: sp-spin 5.5s cubic-bezier(.55,.15,.45,.85) infinite;
+        }
+        #splash .splash-word { font-size: 2rem; font-weight: 800; letter-spacing: -.02em; color: var(--sp-text); }
+        #splash .splash-sub { font-size: .9rem; font-weight: 500; letter-spacing: -.01em; color: var(--sp-sub); }
+        @keyframes sp-spin { to { transform: rotate(360deg); } }
+        @keyframes sp-glow { 0%, 100% { opacity: .5; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.08); } }
+        @keyframes sp-fade { from { opacity: 0; } }
+        @keyframes sp-rise { from { opacity: 0; transform: translateY(10px); } }
+        @media (prefers-reduced-motion: reduce) { #splash, #splash * { animation: none !important; } }
     </style>
 </head>
 <body>
@@ -61,8 +113,12 @@
     <div style="font-size: 2.5rem;">&#x1F4F1;&#x21BB;</div>
     <div>Поверните телефон вертикально</div>
 </div>
-<div id="splash" style="display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--bulma-background, #fafafa);">
-    <span style="font-size: 2rem; opacity: 0.5;">Renorma</span>
+<div id="splash">
+    <div class="splash-inner">
+        <div class="splash-logo"><div class="splash-ring"></div></div>
+        <div class="splash-word">re:Norma</div>
+        <div class="splash-sub">Норма веса, питания и образа жизни</div>
+    </div>
 </div>
 <script>
 // Best-effort orientation lock (Android/installed PWA). iOS Safari throws

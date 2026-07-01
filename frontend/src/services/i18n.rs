@@ -475,6 +475,7 @@ fn en(key: &str) -> &'static str {
         "onboard.error_title" => "Couldn't link the subscription",
         "onboard.error_body" => "This payment may already be linked to another account. Contact info@renorma.app if you think this is a mistake.",
         "onboard.link_unavailable" => "This link is no longer valid or has already been used. Please subscribe again.",
+        "onboard.have_account" => "Already have an account? Sign in",
         "onboard.success" => "All set! Opening the app…",
 
         // Auth
@@ -1486,6 +1487,7 @@ fn ru(key: &str) -> &'static str {
         "onboard.error_title" => "Не удалось привязать подписку",
         "onboard.error_body" => "Возможно, этот платёж уже привязан к другому аккаунту. Если это ошибка, напишите на info@renorma.app.",
         "onboard.link_unavailable" => "Ссылка недействительна или уже использована. Оформите подписку заново.",
+        "onboard.have_account" => "Уже есть аккаунт? Войти",
         "onboard.success" => "Готово! Открываем приложение…",
 
         // Авторизация

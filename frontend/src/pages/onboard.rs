@@ -105,6 +105,28 @@ pub fn OnboardPage() -> impl IntoView {
         });
     };
 
+    // F-3: an EXISTING user paid again (e.g. after a lapse). Instead of registering a
+    // second account — which would fragment their data and strand the old history — log
+    // in with the existing passkey, then bind THIS claim to that account under its JWT.
+    // No pre-check needed: the account already exists (no orphan risk), and `do_claim`
+    // surfaces any terminal claim error itself.
+    let on_login = move |_| {
+        loading.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match auth::authenticate().await {
+                Ok(_) => {
+                    loading.set(false);
+                    do_claim();
+                }
+                Err(e) => {
+                    error.set(Some(e));
+                    loading.set(false);
+                }
+            }
+        });
+    };
+
     // Register name + passkey, then claim.
     let on_register = move |_| {
         let name = display_name.get_untracked();
@@ -218,6 +240,19 @@ pub fn OnboardPage() -> impl IntoView {
                                     {move || if loading.get() { t("auth.creating") } else { t("auth.create_account") }}
                                 </button>
                             </div>
+
+                            // F-3: a returning user who paid again binds THIS claim to
+                            // their existing account (passkey login) instead of making a
+                            // second account. Text-link, secondary to registration.
+                            <button
+                                attr:data-testid="onboard-btn-login"
+                                class="button is-ghost has-text-grey is-fullwidth mt-4"
+                                style="text-decoration: underline;"
+                                disabled=move || loading.get()
+                                on:click=on_login
+                            >
+                                {move || t("onboard.have_account")}
+                            </button>
                         </div>
                     }.into_view(),
 

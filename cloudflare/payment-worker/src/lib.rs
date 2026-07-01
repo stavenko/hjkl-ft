@@ -640,6 +640,10 @@ struct GuestCheckout {
     pay_url: String,
     claim_id: String,
     secret: String,
+    /// True when this reused an existing pending invoice for the same Telegram user
+    /// (F-2) instead of minting a new one. On reuse `secret` is empty — the caller must
+    /// NOT overwrite the secret it stored the first time.
+    reused: bool,
 }
 
 /// The shared body of guest checkout: provider resolution, plan lookup, claim-secret
@@ -689,6 +693,58 @@ async fn do_guest_checkout(
         .map(|s| s.trim_start_matches('@').trim().to_string())
         .filter(|s| !s.is_empty());
 
+    let claim = match claim_stub(env) {
+        Ok(s) => s,
+        Err(e) => return Err(error_response(&e.to_string(), 500)),
+    };
+
+    // F-2 idempotency: a repeat checkout for the SAME Telegram user must not mint a second
+    // lava invoice. Look up the user's newest non-terminal claim:
+    //   • pending (with a stored payUrl) → reuse it verbatim (no new invoice, no new claim).
+    //   • paid / claimed → they already have an entitlement; refuse (ALREADY_ACTIVE) so the
+    //     caller routes them to onboarding/app instead of selling a duplicate.
+    // Only the Mini App / bot flow carries tgUserId; the landing guest flow (no identity)
+    // falls through and always mints, as before.
+    if let Some(uid) = tg_user_id {
+        match do_post(&claim, "/active-by-tg", &serde_json::json!({ "tgUserId": uid })).await {
+            Ok(mut resp) if resp.status_code() == 200 => {
+                let v: serde_json::Value = resp.json().await.unwrap_or(serde_json::json!({}));
+                let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("none");
+                match status {
+                    "pending" => {
+                        if let (Some(cid), Some(url)) = (
+                            v.get("claimId").and_then(|s| s.as_str()),
+                            v.get("payUrl").and_then(|s| s.as_str()),
+                        ) {
+                            if !url.is_empty() {
+                                return Ok(GuestCheckout {
+                                    pay_url: url.to_string(),
+                                    claim_id: cid.to_string(),
+                                    secret: String::new(),
+                                    reused: true,
+                                });
+                            }
+                        }
+                        // pending but no stored payUrl (pre-F-2 row) → fall through and mint.
+                    }
+                    "paid" | "claimed" => {
+                        return Err(error_response_detail(
+                            "ALREADY_ACTIVE",
+                            "an active subscription/claim already exists for this Telegram user",
+                            409,
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            Ok(_) => {} // non-200 from the dedup probe → best-effort, mint anyway.
+            Err(e) => {
+                // A dead probe must not block a real purchase — log and mint.
+                console_error!("do_guest_checkout: active-by-tg probe failed: {e}");
+            }
+        }
+    }
+
     let claim_id = random_claim_secret().map_err(|e| error_response(&e.to_string(), 500))?; // opaque public id (≠ contractId; #1)
     let secret = random_claim_secret().map_err(|e| error_response(&e.to_string(), 500))?; // high-entropy claim secret (256-bit)
     let secret_hash = sha256_hex(&secret);
@@ -712,10 +768,6 @@ async fn do_guest_checkout(
         Err(e) => return Err(error_response(&format!("checkout_failed: {e}"), 502)),
     };
 
-    let claim = match claim_stub(env) {
-        Ok(s) => s,
-        Err(e) => return Err(error_response(&e.to_string(), 500)),
-    };
     let cp = match do_post(
         &claim,
         "/create-pending",
@@ -728,6 +780,8 @@ async fn do_guest_checkout(
             // No config price to record — lava owns the amount (webhook/receipt).
             "tgUserId": tg_user_id,
             "tgUsername": tg_username,
+            // Stored so a repeat checkout reuses this same invoice (F-2).
+            "payUrl": checkout.url,
         }),
     )
     .await
@@ -747,6 +801,7 @@ async fn do_guest_checkout(
         pay_url: checkout.url,
         claim_id,
         secret,
+        reused: false,
     })
 }
 
@@ -763,7 +818,11 @@ async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
         Err(resp) => return Ok(resp),
     };
     // claimId only — NEVER the secret (it travels back via the lava fragment).
-    Response::from_json(&serde_json::json!({ "payUrl": gc.pay_url, "claimId": gc.claim_id }))
+    Response::from_json(&serde_json::json!({
+        "payUrl": gc.pay_url,
+        "claimId": gc.claim_id,
+        "reused": gc.reused,
+    }))
 }
 
 // ── POST /internal/checkout (INTERNAL_PUSH_KEY-guarded; PROD-ONLY) ────────────
@@ -804,6 +863,7 @@ async fn internal_checkout(mut req: Request, env: &Env) -> Result<Response> {
         "payUrl": gc.pay_url,
         "claimId": gc.claim_id,
         "secret": gc.secret,
+        "reused": gc.reused,
     }))
 }
 

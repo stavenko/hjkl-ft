@@ -109,24 +109,32 @@ pub async fn miniapp_checkout(mut req: Request, env: &Env) -> Result<Response> {
     {
         Ok(c) => c,
         Err(e) => {
+            // Already paid/claimed for this Telegram user (F-2) → tell the client to
+            // re-render into its access state instead of opening a duplicate invoice.
+            if e.to_string().contains("ALREADY_ACTIVE") {
+                return Response::from_json(&serde_json::json!({ "alreadyActive": true }));
+            }
             console_error!("miniapp_checkout: internal/checkout failed: {e}");
             return Ok(error_response("checkout_failed", 502));
         }
     };
 
     // [SEC #2] Store ownership: claimId → {tg_user_id, secret}. Secret lives only in the
-    // DO, never logged.
-    let stub = session_stub(env)?;
-    do_post(
-        &stub,
-        "/miniapp/claims/put",
-        &serde_json::json!({
-            "claimId": checkout.claim_id,
-            "tgUserId": tg_user_id,
-            "secret": checkout.secret,
-        }),
-    )
-    .await?;
+    // DO, never logged. On a REUSED invoice (F-2) the secret was stored the first time and
+    // comes back empty — skip the put so we don't clobber it.
+    if !checkout.reused {
+        let stub = session_stub(env)?;
+        do_post(
+            &stub,
+            "/miniapp/claims/put",
+            &serde_json::json!({
+                "claimId": checkout.claim_id,
+                "tgUserId": tg_user_id,
+                "secret": checkout.secret,
+            }),
+        )
+        .await?;
+    }
 
     // [SEC #3] Respond with claimId + payUrl ONLY — never the secret.
     Response::from_json(&serde_json::json!({
@@ -592,6 +600,9 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
     setState("creating");
     var promoCode = promoInput.value.trim();
     api("/miniapp/checkout", { promoCode: promoCode }).then(function (res) {
+      // F-2: this user already has an active/paid entitlement — no new invoice. Re-render
+      // into the access state (the same path init() uses for a returning paid user).
+      if (res.alreadyActive) { init(); return; }
       claimId = res.claimId;
       openLink(res.payUrl);
       setState("awaiting");

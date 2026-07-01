@@ -28,6 +28,9 @@ struct ClaimRow {
     period_end: Option<i64>,
     paid_event_key: Option<String>,
     #[allow(dead_code)]
+    #[serde(default)]
+    pay_url: Option<String>,
+    #[allow(dead_code)]
     created_at: i64,
     #[allow(dead_code)]
     paid_at: Option<i64>,
@@ -80,11 +83,12 @@ impl ClaimDO {
                 claimed_at      INTEGER,
                 voided_at       INTEGER,
                 tg_user_id      INTEGER,
-                tg_username     TEXT
+                tg_username     TEXT,
+                pay_url         TEXT
             )",
             None,
         )?;
-        // Migrate tables created before the Telegram-identity columns existed.
+        // Migrate tables created before later columns existed.
         let cols = sql
             .exec("PRAGMA table_info(claims)", None)?
             .to_array::<PragmaCol>()?;
@@ -93,6 +97,12 @@ impl ClaimDO {
         }
         if !cols.iter().any(|c| c.name == "tg_username") {
             sql.exec("ALTER TABLE claims ADD COLUMN tg_username TEXT", None)?;
+        }
+        // pay_url — the lava hosted checkout link, stored so a repeat checkout for the
+        // same Telegram user reuses the SAME pending invoice instead of minting a second
+        // one (F-2 idempotency).
+        if !cols.iter().any(|c| c.name == "pay_url") {
+            sql.exec("ALTER TABLE claims ADD COLUMN pay_url TEXT", None)?;
         }
         sql.exec(
             "CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status)",
@@ -238,6 +248,36 @@ impl ClaimDO {
         Response::from_json(&serde_json::json!({ "status": status }))
     }
 
+    /// F-2 dedup: the newest NON-terminal claim for a Telegram user, so a repeat
+    /// checkout reuses it instead of minting a second lava invoice. Returns the claim's
+    /// lifecycle status + (for a reusable `pending` one) its stored payUrl. A `void`
+    /// claim is terminal → skipped (a fresh checkout is allowed). NEVER returns a secret.
+    fn active_by_tg(&self, b: &serde_json::Value) -> Result<Response> {
+        let tg_user_id = opt_i64(b, "tgUserId")
+            .ok_or_else(|| Error::RustError("missing tgUserId".into()))?;
+        let row = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT claim_id, status, pay_url FROM claims
+                   WHERE tg_user_id = ? AND status IN ('pending','paid','claimed')
+                   ORDER BY created_at DESC LIMIT 1",
+                vec![tg_user_id.into()],
+            )?
+            .to_array::<serde_json::Value>()?
+            .into_iter()
+            .next();
+        match row {
+            Some(r) => Response::from_json(&serde_json::json!({
+                "status": r.get("status").and_then(|v| v.as_str()).unwrap_or("none"),
+                "claimId": r.get("claim_id").and_then(|v| v.as_str()),
+                "payUrl": r.get("pay_url").and_then(|v| v.as_str()),
+            })),
+            None => Response::from_json(&serde_json::json!({ "status": "none" })),
+        }
+    }
+
     fn create_pending(&self, b: &serde_json::Value) -> Result<Response> {
         let claim_id = str_field(b, "claimId")?;
         let secret_hash = str_field(b, "secretHash")?;
@@ -248,11 +288,12 @@ impl ClaimDO {
         let currency = opt_str(b, "currency");
         let tg_user_id = opt_i64(b, "tgUserId");
         let tg_username = opt_str(b, "tgUsername");
+        let pay_url = opt_str(b, "payUrl");
 
         self.state.storage().sql().exec(
             "INSERT OR IGNORE INTO claims
-               (claim_id, secret_hash, provider, plan_id, status, contract_id, amount, currency, created_at, tg_user_id, tg_username)
-             VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
+               (claim_id, secret_hash, provider, plan_id, status, contract_id, amount, currency, created_at, tg_user_id, tg_username, pay_url)
+             VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
             vec![
                 claim_id.into(),
                 secret_hash.into(),
@@ -264,6 +305,7 @@ impl ClaimDO {
                 now_ms().into(),
                 tg_user_id.into(),
                 tg_username.into(),
+                pay_url.into(),
             ],
         )?;
         Response::from_json(&serde_json::json!({ "ok": true }))
@@ -554,6 +596,10 @@ impl DurableObject for ClaimDO {
             (Method::Post, "/status") => {
                 let b: serde_json::Value = req.json().await?;
                 self.status_of(&b)
+            }
+            (Method::Post, "/active-by-tg") => {
+                let b: serde_json::Value = req.json().await?;
+                self.active_by_tg(&b)
             }
             (Method::Get, "/unbound") => self.unbound(),
             (Method::Post, "/refund-add") => {

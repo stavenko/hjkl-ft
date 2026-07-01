@@ -290,6 +290,17 @@ async fn handle_pay(env: &Env, chat_id: i64) -> Result<()> {
     let checkout = match call_internal_checkout(env, promo_code.as_deref(), chat_id, None).await {
         Ok(c) => c,
         Err(e) => {
+            // Already has an active/paid subscription (F-2) → not an error; tell them.
+            if e.to_string().contains("ALREADY_ACTIVE") {
+                send_message(
+                    env,
+                    chat_id,
+                    "У вас уже есть доступ к re:Norma. Откройте приложение из меню бота.",
+                    None,
+                )
+                .await?;
+                return Ok(());
+            }
             // No silent swallow: log loudly AND surface to the user. Return Ok so
             // Telegram doesn't retry-storm; NO claim stored.
             console_error!("handle_pay: internal/checkout failed: {e}");
@@ -305,17 +316,20 @@ async fn handle_pay(env: &Env, chat_id: i64) -> Result<()> {
     };
 
     // [SECURITY CHECKPOINT #2] Store claimId → {chat_id, secret}. The plaintext secret
-    // lives ONLY here and is NEVER logged.
-    do_post(
-        &stub,
-        "/claims/put",
-        &serde_json::json!({
-            "claimId": checkout.claim_id,
-            "chatId": chat_id,
-            "secret": checkout.secret,
-        }),
-    )
-    .await?;
+    // lives ONLY here and is NEVER logged. On a REUSED invoice (F-2) the secret was already
+    // stored the first time and comes back empty — skip the put so we don't clobber it.
+    if !checkout.reused {
+        do_post(
+            &stub,
+            "/claims/put",
+            &serde_json::json!({
+                "claimId": checkout.claim_id,
+                "chatId": chat_id,
+                "secret": checkout.secret,
+            }),
+        )
+        .await?;
+    }
 
     send_message(
         env,
@@ -330,6 +344,10 @@ pub(crate) struct CheckoutResult {
     pub(crate) pay_url: String,
     pub(crate) claim_id: String,
     pub(crate) secret: String,
+    /// True when payment-worker reused an existing pending invoice for this user (F-2).
+    /// On reuse `secret` is empty — the caller must NOT re-store (would clobber the
+    /// secret it saved the first time).
+    pub(crate) reused: bool,
 }
 
 /// POST payment-worker /internal/checkout {promoCode, tg…} with X-Internal-Key. The
@@ -382,12 +400,18 @@ pub(crate) async fn call_internal_checkout(
         .and_then(|x| x.as_str())
         .ok_or_else(|| Error::RustError("checkout response missing claimId".into()))?
         .to_string();
+    let reused = v.get("reused").and_then(|x| x.as_bool()).unwrap_or(false);
+    // On a reused pending invoice the secret is intentionally absent (already stored the
+    // first time) — empty is expected, not an error.
     let secret = v
         .get("secret")
         .and_then(|x| x.as_str())
-        .ok_or_else(|| Error::RustError("checkout response missing secret".into()))?
+        .unwrap_or_default()
         .to_string();
-    Ok(CheckoutResult { pay_url, claim_id, secret })
+    if !reused && secret.is_empty() {
+        return Err(Error::RustError("checkout response missing secret".into()));
+    }
+    Ok(CheckoutResult { pay_url, claim_id, secret, reused })
 }
 
 // ── POST /internal/paid (INTERNAL_PUSH_KEY-guarded, idempotent) ─────────────────

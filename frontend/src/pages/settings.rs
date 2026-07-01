@@ -453,6 +453,18 @@ pub fn SettingsPage() -> impl IntoView {
             // ---- Account ----
             <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.account")}</p>
             <div style=IOS_CARD>
+                // Backup phrase → /settings/backup (username-less recovery).
+                <button
+                    attr:data-testid="settings-btn-backup"
+                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left; border-bottom: 0.5px solid var(--bulma-border-weak);"
+                    on:click={
+                        let nav = navigate.clone();
+                        move |_| { let nav = nav.clone(); nav("/settings/backup", Default::default()); }
+                    }
+                >
+                    <span class="is-size-6">{move || t("settings.backup")}</span>
+                    <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
+                </button>
                 // Sign out: clears the whole localStorage, then reloads — which
                 // resets the app to the auth screen and the active DB to bootstrap.
                 // The per-user IndexedDB stays, so signing back in restores data.

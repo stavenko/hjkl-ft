@@ -19,6 +19,22 @@ pub fn PrivacyPage() -> impl IntoView {
     let show_pair = create_rw_signal(false);
     let navigate = use_navigate();
 
+    // Enroll a passkey on THIS device (natural next step after a backup-phrase login).
+    let passkey_busy = create_rw_signal(false);
+    let passkey_done = create_rw_signal(false);
+    let passkey_err = create_rw_signal(None::<String>);
+    let on_add_passkey = move |_| {
+        passkey_busy.set(true);
+        passkey_err.set(None);
+        spawn_local(async move {
+            match auth::add_passkey().await {
+                Ok(()) => passkey_done.set(true),
+                Err(e) => passkey_err.set(Some(e)),
+            }
+            passkey_busy.set(false);
+        });
+    };
+
     view! {
         {move || if show_pair.get() {
             view! {
@@ -151,6 +167,33 @@ pub fn PrivacyPage() -> impl IntoView {
                                 <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
                             </div>
                         </div>
+                    </div>
+
+                    // Passkey on THIS device (e.g. after signing in with the backup phrase).
+                    <div style="padding: 0 16px; margin-top: 12px;">
+                        <div style="background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden;">
+                            <div
+                                attr:data-testid="privacy-btn-add-passkey"
+                                style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer;"
+                                on:click=on_add_passkey
+                            >
+                                <span class="is-size-6 has-text-link">
+                                    {move || if passkey_busy.get() {
+                                        t("privacy.add_passkey_busy")
+                                    } else if passkey_done.get() {
+                                        t("privacy.add_passkey_done")
+                                    } else {
+                                        t("privacy.add_passkey")
+                                    }}
+                                </span>
+                                {move || (!passkey_done.get()).then(|| view! {
+                                    <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
+                                })}
+                            </div>
+                        </div>
+                        {move || passkey_err.get().map(|e| view! {
+                            <p class="is-size-7 has-text-danger" style="margin: 6px 4px 0;">{e}</p>
+                        })}
                     </div>
 
                 </div>

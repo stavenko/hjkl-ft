@@ -64,6 +64,21 @@ fn extract_token_id_from_jwt(token: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Extract the `sub` (user_id) claim from a JWT payload. Used after a phrase login,
+/// whose token response carries only the token (no explicit user_id).
+fn extract_sub_from_jwt(token: &str) -> Option<String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[1])
+        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(parts[1]))
+        .ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+    json.get("sub").and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
 pub fn get_token() -> Option<String> {
     storage().get_item(KEY_AUTH_TOKEN).ok().flatten()
 }
@@ -385,6 +400,110 @@ pub async fn register(display_name: &str) -> Result<String, String> {
     establish_session(&user_id, finish_resp.get("token").and_then(|v| v.as_str())).await;
 
     Ok(user_id)
+}
+
+// ---- Backup phrase (username-less recovery) ----
+
+/// Set/replace this account's backup phrase. Returns the server status:
+/// `"ok"` | `"taken"` (phrase collides with another account → regenerate) |
+/// `"too_short"`.
+pub async fn set_backup_phrase(phrase: &str) -> Result<String, String> {
+    let resp = post_json_auth("/recovery/phrase/set", &serde_json::json!({ "phrase": phrase })).await?;
+    Ok(resp.get("status").and_then(|v| v.as_str()).unwrap_or("").to_string())
+}
+
+/// Generate a fresh 5-word backup phrase in the user's language via the model
+/// (ai-worker, subscription-gated). Sanitizes the model output to exactly five simple
+/// words (lowercase, alphabetic, ≥2 chars). Err if the model returned fewer than five.
+pub async fn generate_backup_phrase() -> Result<String, String> {
+    use crate::services::i18n::{get_lang, Lang};
+    let prompt = match get_lang() {
+        Lang::Ru => "Придумай 5 простых, не связанных между собой нарицательных существительных \
+                     в единственном числе на русском языке. Ответь ТОЛЬКО пятью словами через \
+                     пробел: без нумерации, без запятых, без кавычек, строчными буквами.",
+        Lang::En => "Invent 5 simple, unrelated common nouns in English. Reply with ONLY the five \
+                     words separated by spaces: no numbering, no commas, no quotes, lowercase.",
+    };
+    let raw = crate::services::ai::summarize(prompt).await?;
+    let words: Vec<String> = raw
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()).to_lowercase())
+        .filter(|w| w.chars().count() >= 2 && w.chars().all(|c| c.is_alphabetic()))
+        .take(5)
+        .collect();
+    if words.len() < 5 {
+        return Err("model returned too few words".to_string());
+    }
+    Ok(words.join(" "))
+}
+
+/// The account's current plaintext backup phrase (re-showable), or None if unset.
+pub async fn get_backup_phrase() -> Result<Option<String>, String> {
+    let resp = get_json("/recovery/phrase").await?;
+    Ok(resp.get("phrase").and_then(|v| v.as_str()).map(|s| s.to_string()))
+}
+
+/// Username-less login with only the backup phrase. Establishes the session on success.
+/// Err carries the HTTP status (`401` invalid phrase, `429` too many attempts).
+pub async fn login_with_phrase(phrase: &str) -> Result<String, String> {
+    let fingerprint = generate_fingerprint();
+    let resp = post_json("/recovery/phrase/login", &serde_json::json!({
+        "phrase": phrase,
+        "fingerprint": fingerprint,
+    })).await?;
+    let token = resp
+        .get("token")
+        .and_then(|v| v.as_str())
+        .ok_or("server did not return token")?;
+    let user_id = extract_sub_from_jwt(token).ok_or("token missing sub")?;
+    establish_session(&user_id, Some(token)).await;
+    Ok(user_id)
+}
+
+/// Enroll a passkey on THIS device for the already-logged-in account (offered after a
+/// phrase login so next time the user can use the passkey). Mirrors `register()` but
+/// hits the JWT-gated `/add-device/*` endpoints (origin derived server-side).
+pub async fn add_passkey() -> Result<(), String> {
+    let fingerprint = generate_fingerprint();
+    let begin_resp = post_json_auth("/add-device/begin", &serde_json::json!({
+        "fingerprint": fingerprint
+    })).await?;
+
+    let user_id = begin_resp
+        .get("user_id")
+        .and_then(|v| v.as_str())
+        .ok_or("missing user_id")?
+        .to_string();
+    let public_key = begin_resp.get("publicKey").ok_or("missing publicKey")?;
+    let pk_js = build_create_options(public_key)?;
+
+    let create_opts = js_sys::Object::new();
+    js_sys::Reflect::set(&create_opts, &"publicKey".into(), &pk_js)
+        .map_err(|e| format!("{:?}", e))?;
+
+    let cred_promise = web_sys::window().expect("no window")
+        .navigator()
+        .credentials()
+        .create_with_options(create_opts.unchecked_ref())
+        .map_err(|e| {
+            leptos::logging::error!("add-device create error: {:?}", e);
+            crate::services::i18n::t("auth.error_passkey").to_string()
+        })?;
+
+    let credential = JsFuture::from(cred_promise)
+        .await
+        .map_err(|e| {
+            leptos::logging::error!("add-device create rejected: {:?}", e);
+            crate::services::i18n::t("auth.error_cancelled").to_string()
+        })?;
+
+    let credential_json = serialize_credential(&credential)?;
+    post_json_auth("/add-device/finish", &serde_json::json!({
+        "user_id": user_id,
+        "credential": credential_json,
+        "fingerprint": fingerprint
+    })).await?;
+    Ok(())
 }
 
 /// Authenticate with existing PassKey (discoverable credential)

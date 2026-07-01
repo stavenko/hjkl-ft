@@ -1,4 +1,5 @@
 pub mod auth_page;
+pub mod backup;
 pub mod chat;
 pub mod diary;
 pub mod diary_add;

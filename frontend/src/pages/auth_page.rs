@@ -7,6 +7,7 @@ use crate::components::qr_scanner::QrScanner;
 #[derive(Clone, PartialEq)]
 enum AuthStep {
     Login,
+    Phrase,
     ShowQr { qr_url: String, pairing_id: String },
     Scanning,
 }
@@ -19,6 +20,34 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
     let step = create_rw_signal(AuthStep::Login);
     let loading = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);
+    let phrase_input = create_rw_signal(String::new());
+
+    // Username-less login with the backup phrase.
+    let on_phrase_login = move |_| {
+        let phrase = phrase_input.get_untracked();
+        if phrase.trim().is_empty() {
+            return;
+        }
+        loading.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match auth::login_with_phrase(phrase.trim()).await {
+                Ok(_) => on_authenticated.call(()),
+                Err(e) => {
+                    // Map the HTTP status to a friendly message.
+                    let msg = if e.contains("429") {
+                        t("auth.phrase_rate_limited").to_string()
+                    } else if e.contains("401") {
+                        t("auth.phrase_invalid").to_string()
+                    } else {
+                        e
+                    };
+                    error.set(Some(msg));
+                    loading.set(false);
+                }
+            }
+        });
+    };
 
     let on_try_passkey = move |_| {
         loading.set(true);
@@ -241,7 +270,55 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             >
                                 {move || t("auth.add_device")}
                             </button>
+                            <button
+                                attr:data-testid="auth-btn-phrase"
+                                class="button is-ghost has-text-link"
+                                style="text-decoration: underline; text-underline-offset: 3px;"
+                                disabled=move || loading.get()
+                                on:click=move |_| { error.set(None); step.set(AuthStep::Phrase); }
+                            >
+                                {move || t("auth.phrase_login")}
+                            </button>
                         </div>
+                    </div>
+                </div>
+            }.into_view(),
+
+            AuthStep::Phrase => view! {
+                <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
+                    <div style="max-width: 22rem; width: 100%;">
+                        <h1 class="title is-4" style="margin-bottom: 0.35rem;">{move || t("auth.phrase_title")}</h1>
+                        <p class="has-text-grey mb-4" style="line-height: 1.5;">{move || t("auth.phrase_hint")}</p>
+
+                        {error_view}
+
+                        <textarea
+                            attr:data-testid="auth-phrase-input"
+                            class="textarea"
+                            rows="2"
+                            style="margin-bottom: 1rem; text-align: center; font-size: 1.1rem;"
+                            placeholder=move || t("auth.phrase_placeholder")
+                            prop:value=move || phrase_input.get()
+                            on:input=move |ev| phrase_input.set(event_target_value(&ev))
+                        ></textarea>
+
+                        <button
+                            attr:data-testid="auth-btn-phrase-submit"
+                            class="button is-link is-medium is-fullwidth has-text-weight-semibold"
+                            style="margin-bottom: 0.75rem;"
+                            disabled=move || loading.get() || phrase_input.get().trim().is_empty()
+                            on:click=on_phrase_login
+                        >
+                            {move || if loading.get() { t("auth.authenticating") } else { t("auth.sign_in") }}
+                        </button>
+                        <button
+                            class="button is-ghost has-text-grey is-fullwidth"
+                            style="text-decoration: underline;"
+                            disabled=move || loading.get()
+                            on:click=move |_| { error.set(None); step.set(AuthStep::Login); }
+                        >
+                            {move || t("auth.phrase_back")}
+                        </button>
                     </div>
                 </div>
             }.into_view(),

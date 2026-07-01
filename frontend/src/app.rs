@@ -210,6 +210,7 @@ pub fn App() -> impl IntoView {
                         <Route path="/settings/goals" view=pages::goals::GoalsPage />
                         <Route path="/settings/privacy" view=pages::privacy::PrivacyPage />
                         <Route path="/settings/subscription" view=pages::subscription::SubscriptionPage />
+                        <Route path="/settings/backup" view=pages::backup::BackupPage />
                         <Route path="/weight" view=pages::weight::WeightPage />
                         <Route path="/steps" view=pages::steps::StepsPage />
                         <Route path="/chat" view=pages::chat::ChatPage />

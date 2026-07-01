@@ -526,7 +526,7 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     add_cors(resp, &origin)
 }
 
-async fn handle(mut req: Request, env: &Env) -> Result<Response> {
+async fn handle(req: Request, env: &Env) -> Result<Response> {
     let url = req.url()?;
     let path = url.path().to_string();
     let method = req.method();
@@ -569,20 +569,6 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
             return Ok(resp);
         }
         return admin_unbound_reconciled(env).await;
-    }
-    if method == Method::Post && path == "/admin/void-payment" {
-        if let Err(resp) = require_admin(&req, env).await {
-            return Ok(resp);
-        }
-        let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
-        let claim_id = body.get("claimId").and_then(|v| v.as_str());
-        let claim_id = match claim_id {
-            Some(c) if !c.is_empty() => c.to_string(),
-            _ => return Ok(error_response("missing_params", 400)),
-        };
-        let stub = claim_stub(env)?;
-        let res = do_post(&stub, "/void", &serde_json::json!({ "claimId": claim_id })).await?;
-        return relay(res).await;
     }
     // Reconcile a Telegram user: given ?tg=<username|id>, return their claim(s) with
     // status (paid? claimed?) and claimed_by. Backs the operator «оплатил / привязал» check.

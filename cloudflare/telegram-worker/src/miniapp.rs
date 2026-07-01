@@ -95,17 +95,12 @@ pub async fn miniapp_checkout(mut req: Request, env: &Env) -> Result<Response> {
         .filter(|s| !s.is_empty())
         .map(String::from);
 
-    let plan_id = env
-        .var("PLAN_ID")
-        .map(|v| v.to_string())
-        .unwrap_or_else(|_| "monthly".into());
-
     // INTERNAL_PUSH_KEY-gated on the payment side. On failure: log loudly (no secret in
     // message), 502, store NO claim. The Telegram identity rides along so the claim
-    // records WHO paid (operator reconciliation).
+    // records WHO paid (operator reconciliation). Which lava offer to sell is decided by
+    // payment-worker (LAVA_OFFER_ID) — no plan id passed from here.
     let checkout = match call_internal_checkout(
         env,
-        &plan_id,
         promo_code.as_deref(),
         tg_user_id,
         identity.username.as_deref(),

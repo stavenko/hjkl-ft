@@ -282,14 +282,9 @@ async fn handle_pay(env: &Env, chat_id: i64) -> Result<()> {
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    let plan_id = env
-        .var("PLAN_ID")
-        .map(|v| v.to_string())
-        .unwrap_or_else(|_| "monthly".into());
-
     // Call payment-worker /internal/checkout over the service binding. In a private chat
     // chat_id == user.id; the bot API has no @username here, so pass None.
-    let checkout = match call_internal_checkout(env, &plan_id, promo_code.as_deref(), chat_id, None).await {
+    let checkout = match call_internal_checkout(env, promo_code.as_deref(), chat_id, None).await {
         Ok(c) => c,
         Err(e) => {
             // No silent swallow: log loudly AND surface to the user. Return Ok so
@@ -334,12 +329,12 @@ pub(crate) struct CheckoutResult {
     pub(crate) secret: String,
 }
 
-/// POST payment-worker /internal/checkout {planId, promoCode} with X-Internal-Key.
+/// POST payment-worker /internal/checkout {promoCode, tg…} with X-Internal-Key. The
+/// offer to sell is decided by payment-worker (LAVA_OFFER_ID) — no planId sent.
 /// Expects {payUrl, claimId, secret}. Any non-2xx / parse / binding error → Err
 /// (the caller logs + surfaces to the user; never invents success).
 pub(crate) async fn call_internal_checkout(
     env: &Env,
-    plan_id: &str,
     promo_code: Option<&str>,
     tg_user_id: i64,
     tg_username: Option<&str>,
@@ -347,7 +342,7 @@ pub(crate) async fn call_internal_checkout(
     let key = token::secret_or_var(env, "INTERNAL_PUSH_KEY")
         .await
         .map_err(Error::RustError)?;
-    let mut body = serde_json::json!({ "planId": plan_id, "tgUserId": tg_user_id });
+    let mut body = serde_json::json!({ "tgUserId": tg_user_id });
     if let Some(p) = promo_code {
         body["promoCode"] = serde_json::Value::String(p.to_string());
     }

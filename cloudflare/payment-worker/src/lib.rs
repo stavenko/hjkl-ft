@@ -144,22 +144,6 @@ fn test_entitlement_on(env: &Env) -> bool {
         .unwrap_or(false)
 }
 
-// ── plan catalog ──────────────────────────────────────────────────────────────
-fn plans(env: &Env) -> Vec<serde_json::Value> {
-    let raw = match env.var("PLANS") {
-        Ok(v) => v.to_string(),
-        Err(_) => return vec![],
-    };
-    serde_json::from_str::<Vec<serde_json::Value>>(&raw).unwrap_or_default()
-}
-/// Strip the server-side-only `lavaOfferId` for the public /plans listing.
-fn public_plan(p: &serde_json::Value) -> serde_json::Value {
-    let mut out = p.clone();
-    if let Some(obj) = out.as_object_mut() {
-        obj.remove("lavaOfferId");
-    }
-    out
-}
 
 // ── claim-secret crypto (MONEY-SAFETY #1) ─────────────────────────────────────
 /// 256-bit (>=128-bit) random secret, base64url, no padding. Used both for the
@@ -622,11 +606,6 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         return relay(do_get(&stub, "/subscription").await?).await;
     }
 
-    if method == Method::Get && path == "/plans" {
-        let public: Vec<serde_json::Value> = plans(env).iter().map(public_plan).collect();
-        return Response::from_json(&serde_json::json!({ "plans": public }));
-    }
-
     if method == Method::Post && path == "/claim" {
         return claim(req, env, &user_id).await;
     }
@@ -682,22 +661,14 @@ async fn do_guest_checkout(
         Some(p) if p.configured() => p,
         _ => return Err(error_response("provider_not_configured", 400)),
     };
-    let plan_id = body.get("planId").and_then(|v| v.as_str()).unwrap_or("");
-    let plan = plans(env).into_iter().find(|p| {
-        p.get("id").and_then(|v| v.as_str()) == Some(plan_id)
-            && p.get("lavaOfferId")
-                .and_then(|v| v.as_str())
-                .map(|s| !s.is_empty())
-                .unwrap_or(false)
-    });
-    let plan = match plan {
-        Some(p) => p,
-        None => return Err(error_response("unknown_plan", 400)),
-    };
-    let offer_id = plan.get("lavaOfferId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let plan_price = plan.get("price").and_then(|v| v.as_i64());
-    let plan_currency = plan.get("currency").and_then(|v| v.as_str()).map(String::from);
-    let plan_id_owned = plan.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    // The lava offer to sell. There is NO plan catalog in config — lava owns the plans
+    // and the pricing; we keep only this single provider pointer. Fail loud if unset.
+    let offer_id = env.var("LAVA_OFFER_ID").map(|v| v.to_string()).unwrap_or_default();
+    if offer_id.is_empty() {
+        console_error!("do_guest_checkout: LAVA_OFFER_ID not configured");
+        return Err(error_response("provider_not_configured", 400));
+    }
+    let plan_id_owned = offer_id.clone();
     // Optional promo code (trimmed; empty → None).
     let promo_code = body
         .get("promoCode")
@@ -749,8 +720,7 @@ async fn do_guest_checkout(
             "provider": provider_name,
             "planId": plan_id_owned,
             "contractId": checkout.order_id,
-            "amount": plan_price,
-            "currency": plan_currency,
+            // No config price to record — lava owns the amount (webhook/receipt).
             "tgUserId": tg_user_id,
             "tgUsername": tg_username,
         }),
@@ -838,17 +808,14 @@ async fn test_guest_checkout(mut req: Request, env: &Env) -> Result<Response> {
         return Ok(error_response("Not found", 404));
     }
     let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
-    let plan_id = body.get("planId").and_then(|v| v.as_str()).unwrap_or("");
-    let all = plans(env);
-    let plan = all
-        .iter()
-        .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(plan_id))
-        .or_else(|| all.first());
-    let plan = match plan {
-        Some(p) => p,
-        None => return Ok(error_response("unknown_plan", 400)),
-    };
-    let plan_id_owned = plan.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    // No plan catalog anymore — the test path just tags the claim with whatever planId
+    // the test passes (or "test"); it never touches lava.
+    let plan_id_owned = body
+        .get("planId")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("test")
+        .to_string();
 
     let claim_id = random_claim_secret()?;
     let secret = random_claim_secret()?;

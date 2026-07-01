@@ -27,6 +27,7 @@ pub struct Checkout {
     pub order_id: String,
 }
 
+
 impl Lava {
     pub fn new(api_key: Option<String>, webhook_secret: Option<String>) -> Self {
         Self {

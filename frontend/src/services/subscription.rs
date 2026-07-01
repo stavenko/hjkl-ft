@@ -30,16 +30,6 @@ impl Status {
     }
 }
 
-/// A purchasable plan (from the payment-worker catalog; offer ids stay server-side).
-#[derive(Debug, Clone, Deserialize)]
-pub struct Plan {
-    pub id: String,
-    pub title: String,
-    pub price: f64,
-    pub currency: String,
-    pub period: String,
-}
-
 /// Last-known subscription status, cached in localStorage. Lets the Story page
 /// gate chapter 2 while briefly offline; refreshed on every successful fetch.
 pub fn cached() -> Option<Status> {
@@ -56,16 +46,6 @@ pub async fn status() -> Result<Status, String> {
     let s: Status = request("GET", "/subscription", None).await?;
     cache(&s);
     Ok(s)
-}
-
-/// Available subscription plans for the paywall.
-pub async fn plans() -> Result<Vec<Plan>, String> {
-    #[derive(Deserialize)]
-    struct Resp {
-        plans: Vec<Plan>,
-    }
-    let r: Resp = request("GET", "/plans", None).await?;
-    Ok(r.plans)
 }
 
 /// Claim a paid guest subscription (post-registration). Binds it to this account.

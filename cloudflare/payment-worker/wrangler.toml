@@ -62,9 +62,10 @@ TEST_ENTITLEMENT = "1"
 # and in support-worker's wrangler.toml.
 PUSH_NOTIFY_URL = "https://main-flow-dev.vg-stavenko.workers.dev/push/notify"
 INTERNAL_PUSH_KEY = "dev-internal-push-key"
-# Plan catalog. `lavaOfferId` empty until the real lava offer ids are set →
-# /checkout returns unknown_plan until then; /plans still lists them for display.
-PLANS = '[{"id":"monthly","title":"Подписка Renorma","price":4900,"currency":"RUB","period":"month","lavaOfferId":"4d02bebe-badd-4600-8313-7f1c10a10844"}]'
+# The single lava offer to sell. NO plan catalog / price in config — lava owns plans
+# and pricing; the price is shown (manually) only on the landing. This is just the
+# provider pointer used as the checkout offerId.
+LAVA_OFFER_ID = "4d02bebe-badd-4600-8313-7f1c10a10844"
 
 # ── Production (separate worker on pay.renorma.app, clean DO data) ──
 # Deploy: wrangler deploy --env production
@@ -130,4 +131,5 @@ LANDING_RETURN_URL = "https://fit.renorma.app/onboard"
 # INTERNAL_PUSH_KEY is a SECRET in prod: `wrangler secret put INTERNAL_PUSH_KEY
 # --env production` (same value as support-worker-prod / main-flow-prod).
 PUSH_NOTIFY_URL = "https://push.renorma.app/push/notify"
-PLANS = '[{"id":"monthly","title":"Подписка Renorma","price":4900,"currency":"RUB","period":"month","lavaOfferId":"4d02bebe-badd-4600-8313-7f1c10a10844"}]'
+# Single lava offer pointer (no plan catalog/price in config — see dev [vars] note).
+LAVA_OFFER_ID = "4d02bebe-badd-4600-8313-7f1c10a10844"

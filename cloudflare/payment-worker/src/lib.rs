@@ -988,30 +988,54 @@ async fn compute_refund(env: &Env, user_id: &str) -> Result<Option<RefundCalc>> 
         return Ok(None);
     }
     let end = s.get("end").and_then(|v| v.as_i64()).unwrap_or(0);
+    let contract_id = s.get("contractId").and_then(|v| v.as_str()).map(String::from);
+
+    // Price = what the buyer ACTUALLY paid last (promo applied), read from lava for
+    // this contract. Fall back to the plan's list price only if lava can't be reached.
+    let (price, currency) = last_paid_amount(env, contract_id.as_deref()).await;
+
+    let now = Date::now().as_millis() as i64;
+    let day = 86_400_000i64;
+    let days_left = (((end - now) + day - 1) / day).max(0);
+    let daily = price * 0.92 / 30.0;
+    let amount = (daily * days_left as f64).round() as i64;
+    Ok(Some(RefundCalc {
+        amount,
+        currency,
+        days_left,
+        contract_id,
+        email: s.get("email").and_then(|v| v.as_str()).map(String::from),
+    }))
+}
+
+/// The buyer's actual last-payment amount (promo applied) from lava for their contract.
+/// Falls back to the plan's config list price if there's no contract or lava is down —
+/// logged loudly, so an operator can spot a refund computed off the list price.
+async fn last_paid_amount(env: &Env, contract_id: Option<&str>) -> (f64, String) {
+    if let Some(cid) = contract_id {
+        match provider_for_env("lava", env).await {
+            Ok(Some(p)) if p.configured() => match p.last_payment(cid).await {
+                Ok(Some((amt, cur))) => return (amt, cur),
+                Ok(None) => console_warn!("refund: no completed lava invoice for contract {cid} — using plan price"),
+                Err(e) => console_error!("refund: lava last_payment({cid}) failed: {e} — using plan price"),
+            },
+            Ok(_) => {}
+            Err(reason) => console_error!("refund: lava provider unavailable: {reason} — using plan price"),
+        }
+    }
     let plan = plans(env).into_iter().next();
     let price = plan
         .as_ref()
         .and_then(|p| p.get("price"))
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
     let currency = plan
         .as_ref()
         .and_then(|p| p.get("currency"))
         .and_then(|v| v.as_str())
         .unwrap_or("RUB")
         .to_string();
-    let now = Date::now().as_millis() as i64;
-    let day = 86_400_000i64;
-    let days_left = (((end - now) + day - 1) / day).max(0);
-    let daily = (price as f64) * 0.92 / 30.0;
-    let amount = (daily * days_left as f64).round() as i64;
-    Ok(Some(RefundCalc {
-        amount,
-        currency,
-        days_left,
-        contract_id: s.get("contractId").and_then(|v| v.as_str()).map(String::from),
-        email: s.get("email").and_then(|v| v.as_str()).map(String::from),
-    }))
+    (price, currency)
 }
 
 async fn refund_preview(env: &Env, user_id: &str) -> Result<Response> {

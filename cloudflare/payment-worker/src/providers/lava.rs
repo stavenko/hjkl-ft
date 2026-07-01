@@ -122,6 +122,56 @@ impl Lava {
         res.json().await
     }
 
+    /// The buyer's most recent COMPLETED payment amount for a contract (the parent
+    /// contract id OR any recurring child of it), read from lava's invoices. This is
+    /// what they ACTUALLY paid (promo applied) — unlike the plan's list price. Returns
+    /// (amount, currency); None if no matching completed invoice is found.
+    pub async fn last_payment(&self, contract_id: &str) -> Result<Option<(f64, String)>> {
+        let page = self.list_invoices(1, 100).await?;
+        let items = match page.get("items").and_then(|v| v.as_array()) {
+            Some(a) => a.clone(),
+            None => return Ok(None),
+        };
+        let mut best_dt = String::new();
+        let mut best: Option<(f64, String)> = None;
+        for it in &items {
+            if it.get("status").and_then(|v| v.as_str()) != Some("COMPLETED") {
+                continue;
+            }
+            let id = it.get("id").and_then(|v| v.as_str());
+            let parent = it
+                .get("parentInvoice")
+                .and_then(|p| p.get("id"))
+                .and_then(|v| v.as_str());
+            if id != Some(contract_id) && parent != Some(contract_id) {
+                continue;
+            }
+            let amount = it
+                .get("receipt")
+                .and_then(|r| r.get("amount"))
+                .and_then(|v| v.as_f64());
+            let currency = it
+                .get("receipt")
+                .and_then(|r| r.get("currency"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("RUB")
+                .to_string();
+            let dt = it
+                .get("datetime")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if let Some(a) = amount {
+                // ISO-8601 datetimes sort lexically → keep the latest.
+                if best.is_none() || dt > best_dt {
+                    best_dt = dt;
+                    best = Some((a, currency));
+                }
+            }
+        }
+        Ok(best)
+    }
+
     /// lava uses ApiKeyWebhookAuth → header X-Api-Key == the webhook's configured key.
     /// Returns (ok, body). Fails closed (ok=false) when no webhook_secret is configured.
     pub async fn verify_webhook(&self, req: &mut Request) -> (bool, Option<serde_json::Value>) {

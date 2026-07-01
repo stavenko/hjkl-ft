@@ -62,6 +62,19 @@ pub async fn claim(claim_id: &str, secret: &str) -> Result<Status, String> {
     Ok(s)
 }
 
+/// Claim lifecycle status (public, no auth): `none | pending | paid | claimed | void`.
+/// Used to PRE-CHECK before registering (F-1): if the claim can't be bound (terminal
+/// `claimed`/`void`/`none`), we don't create an account, so no orphan account is left.
+pub async fn claim_status(claim_id: &str) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct Resp {
+        status: String,
+    }
+    // claim_id is URL-safe base64url — no encoding needed.
+    let r: Resp = request_unauthed("GET", &format!("/claim/status?claimId={claim_id}"), None).await?;
+    Ok(r.status)
+}
+
 /// Test-only entitlement path used by e2e: mints a deterministically-paid guest
 /// claim WITHOUT taking real money. Reachable only when the worker has
 /// `TEST_ENTITLEMENT=1` (absent in production, where `/test/*` returns 404), so

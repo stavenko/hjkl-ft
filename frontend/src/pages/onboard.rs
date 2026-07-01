@@ -114,6 +114,21 @@ pub fn OnboardPage() -> impl IntoView {
         loading.set(true);
         error.set(None);
         spawn_local(async move {
+            // F-1 pre-check: do NOT register if the claim can't be bound. Register runs
+            // BEFORE claim (claim binds to a user_id), so a terminal claim state would
+            // otherwise leave an orphan account with no subscription. We check the public
+            // claim status first; terminal states (`claimed`/`void`/`none`) → stop here,
+            // no account created. `paid`/`pending` are fine (pending → claim retries).
+            // A transient network error on the check → proceed (claim() surfaces the real
+            // error); a rare race after this check is accepted (no destructive rollback).
+            let cid = claim_id.get_value();
+            if let Ok(st) = subscription::claim_status(&cid).await {
+                if st != "paid" && st != "pending" {
+                    error.set(Some(t("onboard.link_unavailable").to_string()));
+                    loading.set(false);
+                    return;
+                }
+            }
             match auth::register(&name).await {
                 Ok(_) => {
                     loading.set(false);

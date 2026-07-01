@@ -106,7 +106,61 @@ impl ClaimDO {
             "CREATE INDEX IF NOT EXISTS idx_claims_tg_user ON claims(tg_user_id)",
             None,
         )?;
+        // Refund requests (client asked for a refund; access already revoked). The
+        // operator processes each manually in lava. One open request per user (PK).
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS refunds (
+                user_id      TEXT PRIMARY KEY,
+                amount       INTEGER NOT NULL,
+                currency     TEXT NOT NULL,
+                contract_id  TEXT,
+                email        TEXT,
+                days_left    INTEGER,
+                created_at   INTEGER NOT NULL,
+                status       TEXT NOT NULL DEFAULT 'requested'
+            )",
+            None,
+        )?;
         Ok(())
+    }
+
+    /// Record a refund request (client-initiated; access already revoked on the sub).
+    /// One open request per user — a repeat replaces the prior row.
+    fn add_refund(&self, b: &serde_json::Value) -> Result<Response> {
+        let user_id = str_field(b, "userId")?;
+        let amount = opt_i64(b, "amount").unwrap_or(0);
+        let currency = opt_str(b, "currency").unwrap_or_else(|| "RUB".into());
+        let contract_id = opt_str(b, "contractId");
+        let email = opt_str(b, "email");
+        let days_left = opt_i64(b, "daysLeft");
+        self.state.storage().sql().exec(
+            "INSERT INTO refunds(user_id, amount, currency, contract_id, email, days_left, created_at, status)
+             VALUES(?, ?, ?, ?, ?, ?, ?, 'requested')
+             ON CONFLICT(user_id) DO UPDATE SET
+               amount=excluded.amount, currency=excluded.currency,
+               contract_id=excluded.contract_id, email=excluded.email,
+               days_left=excluded.days_left, created_at=excluded.created_at, status='requested'",
+            vec![
+                user_id.into(), amount.into(), currency.into(),
+                contract_id.into(), email.into(), days_left.into(), now_ms().into(),
+            ],
+        )?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    /// Admin: all refund requests, newest first.
+    fn list_refunds(&self) -> Result<Response> {
+        let rows: Vec<serde_json::Value> = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT user_id, amount, currency, contract_id, email, days_left, created_at, status
+                   FROM refunds ORDER BY created_at DESC",
+                None,
+            )?
+            .to_array::<serde_json::Value>()?;
+        Response::from_json(&serde_json::json!({ "refunds": rows }))
     }
 
     fn row_by_claim(&self, claim_id: &str) -> Result<Option<ClaimRow>> {
@@ -468,6 +522,11 @@ impl DurableObject for ClaimDO {
                 self.status_of(&b)
             }
             (Method::Get, "/unbound") => self.unbound(),
+            (Method::Post, "/refund-add") => {
+                let b: serde_json::Value = req.json().await?;
+                self.add_refund(&b)
+            }
+            (Method::Get, "/refunds") => self.list_refunds(),
             (Method::Post, "/by-tg") => {
                 let b: serde_json::Value = req.json().await?;
                 self.by_tg(&b)

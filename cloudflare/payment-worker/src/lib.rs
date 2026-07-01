@@ -576,6 +576,14 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         }
         return admin_unbound_reconciled(env).await;
     }
+    // Client-requested refunds (access already revoked); operator processes each in lava.
+    if method == Method::Get && path == "/admin/refunds" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        let stub = claim_stub(env)?;
+        return relay(do_get(&stub, "/refunds").await?).await;
+    }
     // Reconcile a Telegram user: given ?tg=<username|id>, return their claim(s) with
     // status (paid? claimed?) and claimed_by. Backs the operator «оплатил / привязал» check.
     if method == Method::Get && path == "/admin/tg-status" {
@@ -625,6 +633,15 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
 
     if method == Method::Post && path == "/cancel" {
         return cancel(env, &user_id).await;
+    }
+
+    // Refund: preview the prorated amount (no side effects) …
+    if method == Method::Post && path == "/refund/preview" {
+        return refund_preview(env, &user_id).await;
+    }
+    // … and the actual request — records it for the operator AND revokes access now.
+    if method == Method::Post && path == "/refund/request" {
+        return refund_request(env, &user_id).await;
     }
 
     Ok(error_response("Not found", 404))
@@ -948,6 +965,90 @@ async fn cancel(env: &Env, user_id: &str) -> Result<Response> {
 
     let out = do_post(&sub, "/cancel", &serde_json::json!({})).await?;
     relay(out).await
+}
+
+/// Prorated refund for the user's ACTIVE subscription, per the agreed formula:
+///   last-payment price − 8% commission → /30 = daily rate → × days-left-to-`end`,
+///   rounded. Price is the (single) plan's config price (the sub record drops the
+///   planId, and the stored claim amount == plan price, so this matches the charge).
+///   Returns None when there's nothing to refund (no active sub).
+struct RefundCalc {
+    amount: i64,
+    currency: String,
+    days_left: i64,
+    contract_id: Option<String>,
+    email: Option<String>,
+}
+
+async fn compute_refund(env: &Env, user_id: &str) -> Result<Option<RefundCalc>> {
+    let sub = sub_stub(env, user_id)?;
+    let mut r = do_get(&sub, "/subscription").await?;
+    let s: serde_json::Value = r.json().await?;
+    if !s.get("active").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return Ok(None);
+    }
+    let end = s.get("end").and_then(|v| v.as_i64()).unwrap_or(0);
+    let plan = plans(env).into_iter().next();
+    let price = plan
+        .as_ref()
+        .and_then(|p| p.get("price"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let currency = plan
+        .as_ref()
+        .and_then(|p| p.get("currency"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("RUB")
+        .to_string();
+    let now = Date::now().as_millis() as i64;
+    let day = 86_400_000i64;
+    let days_left = (((end - now) + day - 1) / day).max(0);
+    let daily = (price as f64) * 0.92 / 30.0;
+    let amount = (daily * days_left as f64).round() as i64;
+    Ok(Some(RefundCalc {
+        amount,
+        currency,
+        days_left,
+        contract_id: s.get("contractId").and_then(|v| v.as_str()).map(String::from),
+        email: s.get("email").and_then(|v| v.as_str()).map(String::from),
+    }))
+}
+
+async fn refund_preview(env: &Env, user_id: &str) -> Result<Response> {
+    match compute_refund(env, user_id).await? {
+        Some(c) => Response::from_json(&serde_json::json!({
+            "amount": c.amount, "currency": c.currency, "daysLeft": c.days_left,
+        })),
+        None => Ok(error_response("no_active_subscription", 400)),
+    }
+}
+
+async fn refund_request(env: &Env, user_id: &str) -> Result<Response> {
+    let calc = match compute_refund(env, user_id).await? {
+        Some(c) => c,
+        None => return Ok(error_response("no_active_subscription", 400)),
+    };
+    // 1) Record the request for the operator (lava has no refund API → manual in lava).
+    let claim = claim_stub(env)?;
+    do_post(
+        &claim,
+        "/refund-add",
+        &serde_json::json!({
+            "userId": user_id,
+            "amount": calc.amount,
+            "currency": calc.currency,
+            "contractId": calc.contract_id,
+            "email": calc.email,
+            "daysLeft": calc.days_left,
+        }),
+    )
+    .await?;
+    // 2) Revoke access immediately.
+    let sub = sub_stub(env, user_id)?;
+    do_post(&sub, "/refund", &serde_json::json!({})).await?;
+    Response::from_json(&serde_json::json!({
+        "ok": true, "amount": calc.amount, "currency": calc.currency,
+    }))
 }
 
 fn error_response_detail(message: &str, detail: &str, status: u16) -> Response {

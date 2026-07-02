@@ -133,3 +133,8 @@ LANDING_RETURN_URL = "https://fit.renorma.app/onboard"
 PUSH_NOTIFY_URL = "https://push.renorma.app/push/notify"
 # Single lava offer pointer (no plan catalog/price in config — see dev [vars] note).
 LAVA_OFFER_ID = "4d02bebe-badd-4600-8313-7f1c10a10844"
+
+# Retain console logs (Workers Logs) so the payment→bot-notify path is diagnosable.
+[env.production.observability]
+enabled = true
+head_sampling_rate = 1

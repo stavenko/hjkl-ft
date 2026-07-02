@@ -79,3 +79,8 @@ secret_name = "internal-push-key"
 ONBOARD_BASE_URL = "https://fit.renorma.app/onboard-tg"
 # DIRECT app onboarding entry used by the Mini App (openLink → Safari → /onboard).
 APP_ONBOARD_URL = "https://fit.renorma.app/onboard"
+
+# Retain console logs (Workers Logs) so the bot-notify path is diagnosable.
+[env.production.observability]
+enabled = true
+head_sampling_rate = 1

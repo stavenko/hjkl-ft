@@ -582,12 +582,25 @@ pub fn SetupControls() -> impl IntoView {
     let lang_done = create_rw_signal(false);
     let notif_done = create_rw_signal(false);
     let sex_done = create_rw_signal(false);
+    let age_done = create_rw_signal(false);
+    let height_done = create_rw_signal(false);
     create_effect(move |_| {
         story_ver.get();
         spawn_local(async move {
             lang_done.set(story::get_flag(story::LANGUAGE_CONFIGURED).await);
             notif_done.set(story::get_flag(story::NOTIFICATION_RECEIVED).await);
             sex_done.set(story::get_flag(story::SEX_SELECTED).await);
+            // Backfill: users who set birth_year / height BEFORE this feature have
+            // the profile value but never fired the story flag. Reflect the real
+            // profile value so they can complete the section.
+            if !story::get_flag(story::BIRTH_YEAR_SET).await && profile::get_birth_year().is_some() {
+                story::set_flag(story::BIRTH_YEAR_SET, true).await;
+            }
+            if !story::get_flag(story::HEIGHT_SET).await && profile::get_height_cm().is_some() {
+                story::set_flag(story::HEIGHT_SET, true).await;
+            }
+            age_done.set(story::get_flag(story::BIRTH_YEAR_SET).await);
+            height_done.set(story::get_flag(story::HEIGHT_SET).await);
         });
     });
 
@@ -635,8 +648,22 @@ pub fn SetupControls() -> impl IntoView {
                         {move || if sex_done.get() { t("story.setup.sex_status_done") } else { t("story.setup.sex_status_pending") }}
                     </span>
                 </div>
+                <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
+                <div style="display: flex; align-items: center; gap: 12px; padding: 14px 16px;">
+                    <span style="font-size: 22px; width: 22px; text-align: center;">{move || if age_done.get() { "\u{2705}" } else { "\u{23f3}" }}</span>
+                    <span class="is-size-6 has-text-weight-semibold" style="flex: 1;">
+                        {move || if age_done.get() { t("story.setup.age_status_done") } else { t("story.setup.age_status_pending") }}
+                    </span>
+                </div>
+                <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
+                <div style="display: flex; align-items: center; gap: 12px; padding: 14px 16px;">
+                    <span style="font-size: 22px; width: 22px; text-align: center;">{move || if height_done.get() { "\u{2705}" } else { "\u{23f3}" }}</span>
+                    <span class="is-size-6 has-text-weight-semibold" style="flex: 1;">
+                        {move || if height_done.get() { t("story.setup.height_status_done") } else { t("story.setup.height_status_pending") }}
+                    </span>
+                </div>
             </div>
-            {move || (lang_done.get() && notif_done.get()).then(|| view! {
+            {move || (lang_done.get() && notif_done.get() && sex_done.get() && age_done.get() && height_done.get()).then(|| view! {
                 <p class="is-size-6 has-text-weight-semibold has-text-success" style="margin-top: 16px;">
                     {move || t("story.setup.next_unlocked")}
                 </p>

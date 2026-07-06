@@ -48,6 +48,9 @@ pub const SEX_SELECTED: &str = "sex_selected";
 /// Set once the user saves a valid year of birth in settings (accounting section
 /// task `age`). A STORY flag — distinct from the synced profile.birth_year value.
 pub const BIRTH_YEAR_SET: &str = "birth_year_set";
+/// Set once the user saves a valid height in settings (setup section task
+/// `height`). A STORY flag — distinct from the synced profile.height_cm value.
+pub const HEIGHT_SET: &str = "height_set";
 /// Chapter 2 / s6: set when the meal-split section is opened. While set, the
 /// diary page groups the day's entries by derived meal instead of a flat list.
 pub const MEAL_SPLIT_UNLOCKED: &str = "meal_split_unlocked";
@@ -119,6 +122,7 @@ pub async fn engine_snapshot() -> crate::services::story_dsl::EngineSnapshot {
         ("photos", PROGRESS_PHOTOS_TAKEN),
         ("sex", SEX_SELECTED),
         ("age", BIRTH_YEAR_SET),
+        ("height", HEIGHT_SET),
         ("lang", LANGUAGE_CONFIGURED),
         ("notif", NOTIFICATION_RECEIVED),
         ("weigh_in", WEIGH_IN_REMINDER),

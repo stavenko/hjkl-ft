@@ -49,15 +49,19 @@ pub fn SettingsPage() -> impl IntoView {
     };
 
     // Height (cm, localStorage) + the latest logged weight → BMI. Lets us read how
-    // much of the body mass is fat.
+    // much of the body mass is fat. Saving a valid height also marks the
+    // setup-section `height` story task (like sex/birth_year).
     let height = create_rw_signal(profile::get_height_cm());
     let set_height = move |raw: String| {
         let cm = raw.trim().replace(',', ".").parse::<f64>().ok().filter(|h| *h > 0.0);
         profile::set_height_cm(cm.unwrap_or(0.0));
         height.set(cm);
+        if cm.is_some() {
+            spawn_local(async { story::set_flag(story::HEIGHT_SET, true).await; });
+        }
     };
     // Year of birth (synced profile). Saving a valid year also marks the
-    // accounting-section `age` story task. Only a valid year completes the task —
+    // setup-section `age` story task. Only a valid year completes the task —
     // a cleared/garbage entry must not.
     let birth_year = create_rw_signal(profile::get_birth_year());
     let set_birth_year = move |raw: String| {

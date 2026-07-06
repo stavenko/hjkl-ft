@@ -460,7 +460,7 @@ mod tests {
     #[test]
     fn yaml_parses_and_has_three_chapters() {
         assert_eq!(story().chapters.len(), 3);
-        assert_eq!(story().tasks.len(), 25);
+        assert_eq!(story().tasks.len(), 26);
     }
 
     #[test]
@@ -569,16 +569,19 @@ mod tests {
     }
 
     #[test]
-    fn setup_completes_only_when_all_three_done() {
+    fn setup_completes_only_when_all_five_done() {
         let ch1 = chapter("ch1");
         let setup = ch1.sections.iter().find(|s| s.id == "setup").unwrap();
         let mut s = snap();
         s.opened.insert("setup".to_string()); // must be opened first
         s.evt_closed.insert("lang".to_string());
         s.evt_closed.insert("notif".to_string());
-        assert!(!eng(&s).section_complete(setup)); // sex still open → not complete
         s.evt_closed.insert("sex".to_string());
-        assert!(eng(&s).section_complete(setup)); // sex + lang + notif all done
+        assert!(!eng(&s).section_complete(setup)); // age + height still open → not complete
+        s.evt_closed.insert("age".to_string());
+        assert!(!eng(&s).section_complete(setup)); // height still open → not complete
+        s.evt_closed.insert("height".to_string());
+        assert!(eng(&s).section_complete(setup)); // sex + lang + notif + age + height all done
     }
 
     #[test]

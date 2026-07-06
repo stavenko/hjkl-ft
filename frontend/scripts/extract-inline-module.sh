@@ -81,8 +81,16 @@ fi
 # `globalThis.__APP_VERSION__` and publish the same id at /version.json, which
 # the app polls (on resume) to detect a new deploy and reload itself.
 VERSION=$(python3 -c "
-import hashlib
-print(hashlib.sha256(open('$DIST/init.js','rb').read()).hexdigest()[:12])
+import hashlib, os
+# Hash init.js (changes with the WASM/JS bundle) PLUS the shell files that change
+# independently of the WASM — sw.js and index.html (the SW-registration script).
+# Without this a shell-only fix (e.g. an iOS PWA sw.js change) leaves the build id
+# unchanged, so version.json never moves and the in-app updater never offers «Обновить».
+h = hashlib.sha256()
+for f in ['$DIST/init.js', '$DIST/sw.js', '$DIST/index.html']:
+    if os.path.exists(f):
+        h.update(open(f, 'rb').read())
+print(h.hexdigest()[:12])
 ")
 python3 -c "
 p = '$DIST/init.js'

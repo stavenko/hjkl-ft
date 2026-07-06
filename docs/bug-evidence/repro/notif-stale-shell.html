@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bug 3 — STALE cached shell (RED)</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 32px; background: #111; color: #eee; }
+  h1 { font-size: 18px; font-weight: 600; }
+  p.desc { color: #999; font-size: 14px; line-height: 1.5; max-width: 640px; }
+  button { font-size: 16px; padding: 12px 20px; border: 0; border-radius: 8px; background: #444; color: #fff; cursor: pointer; }
+  #result { margin-top: 28px; padding: 22px; border-radius: 10px; font-size: 20px; font-weight: 700; text-align: center; }
+  .red { background: #3a0d0d; color: #ff5a5a; border: 2px solid #ff5a5a; }
+  code { background: #000; padding: 2px 6px; border-radius: 4px; color: #7fd; }
+</style>
+</head>
+<body>
+  <h1>Bug 3 — STALE cached shell (old index.html)</h1>
+  <p class="desc">
+    This harness represents the <b>old cached PWA shell</b> that was served before the fix.
+    It deliberately does <b>NOT</b> register the <code>navigator.serviceWorker 'message'</code>
+    listener from index.html. When the service worker forwards a tapped notification via
+    <code>postMessage({type:'notificationclick', url:'/story/setup?notif=1'})</code>,
+    the message arrives at a page with no handler — so it is dropped and the tap does nothing.
+  </p>
+
+  <button id="dispatch">Simulate SW notificationclick postMessage</button>
+  <div id="result" class="red">waiting…</div>
+
+  <script>
+    // ---- index.html listener contract isolation --------------------------------
+    // The REAL fix lives in frontend/index.html lines 145-150:
+    //
+    //   navigator.serviceWorker.addEventListener('message', function(event) {
+    //     var d = event.data || {};
+    //     if (d.type === 'notificationclick' && d.url) {
+    //       window.location.href = d.url;
+    //     }
+    //   });
+    //
+    // This STALE-shell harness INTENTIONALLY omits that listener to reproduce the
+    // defect. Nothing consumes the message, so no navigation is ever triggered.
+    //
+    // Navigation is intercepted (recorded into #result) instead of actually
+    // navigating, because these are static file:// pages. Only the sink differs;
+    // the presence/absence of the listener is the variable under test.
+    // ---------------------------------------------------------------------------
+
+    var navTarget = null; // records the intended navigation (the sink)
+
+    // NOTE: no navigator.serviceWorker 'message' listener is installed here.
+    //       (This is the bug: the old cached shell had no such handler.)
+
+    document.getElementById('dispatch').addEventListener('click', function() {
+      // Dispatch the EXACT message the service worker sends. We use a real
+      // MessageEvent on window so the contract is identical to the fixed harness.
+      var evt = new MessageEvent('message', {
+        data: { type: 'notificationclick', url: '/story/setup?notif=1' }
+      });
+      window.dispatchEvent(evt);
+
+      // After dispatch, check whether any listener converted it into a navigation.
+      var out = document.getElementById('result');
+      if (navTarget) {
+        out.textContent = 'navigate → ' + navTarget;
+      } else {
+        out.textContent = 'RED: navigation NOT triggered — tap lost';
+      }
+    });
+  </script>
+</body>
+</html>

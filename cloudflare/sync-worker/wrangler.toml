@@ -1,0 +1,44 @@
+name = "sync-worker-dev"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-12-01"
+
+[build]
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
+# an unpinned `cargo install worker-build` pulls a newer build that passes
+# wasm-bindgen flags the locked CLI doesn't support.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "SYNC_DO"
+class_name = "SyncDO"
+
+# Fresh DO: the worker is deleted + recreated to wipe old (KV-API) data, so a
+# single v1 SQLite migration applies cleanly to the brand-new namespace.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SyncDO"]
+
+[vars]
+JWT_SECRET = "dev-secret-change-in-production"
+
+# ── Production (separate worker on sync.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+[env.production]
+name = "sync-worker-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "sync.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "SYNC_DO"
+class_name = "SyncDO"
+
+# JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
+# [vars] value above). The binding name MUST equal the env name the code reads.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"

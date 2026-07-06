@@ -28,7 +28,39 @@ const MIGRATIONS: &[Migration] = &[
         name: "goal: add key column",
         kind: MigrationKind::Code(migrate_003),
     },
+    Migration {
+        version: 4,
+        name: "story: progress flags table",
+        kind: MigrationKind::Code(migrate_004),
+    },
+    Migration {
+        version: 5,
+        name: "food.is_restaurant + diary.waste_grams",
+        kind: MigrationKind::Code(migrate_005),
+    },
 ];
+
+fn migrate_005(conn: &Connection) {
+    if !has_column(conn, "food", "is_restaurant") {
+        conn.execute_batch("ALTER TABLE food ADD COLUMN is_restaurant INTEGER NOT NULL DEFAULT 0")
+            .expect("failed to add is_restaurant");
+    }
+    if !has_column(conn, "diary", "waste_grams") {
+        conn.execute_batch("ALTER TABLE diary ADD COLUMN waste_grams REAL NOT NULL DEFAULT 0")
+            .expect("failed to add waste_grams");
+    }
+}
+
+fn migrate_004(conn: &Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS story (
+            key        TEXT PRIMARY KEY,
+            value      INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT ''
+        )",
+    )
+    .expect("failed to create story table");
+}
 
 fn migrate_002(conn: &Connection) {
     if !has_column(conn, "food", "package_weight") {

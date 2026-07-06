@@ -1,20 +1,32 @@
 use leptos::*;
 use api_types::*;
 use crate::services::i18n::t;
+use super::waste_field::WasteField;
+use super::restaurant_field::RestaurantField;
 
 #[component]
 pub fn FoodWeightModal(
     food: Food,
     goals: Signal<Vec<Goal>>,
     initial_grams: f64,
+    #[prop(default = 0.0)]
+    initial_waste: f64,
+    #[prop(default = false)]
+    initial_restaurant: bool,
     submit_label: &'static str,
-    on_save: Callback<f64>,
+    on_save: Callback<(f64, f64, bool)>,
     on_close: Callback<()>,
 ) -> impl IntoView {
     let grams = create_rw_signal(format!("{}", initial_grams));
+    let waste = create_rw_signal(if initial_waste > 0.0 { format!("{:.0}", initial_waste) } else { String::new() });
+    let restaurant = create_rw_signal(initial_restaurant);
     let show_details = create_rw_signal(false);
 
-    let current_val = move || -> f64 { grams.get().parse().unwrap_or(0.0) };
+    // Normalise ',' → '.' : mobile keyboards emit a comma decimal separator.
+    let current_val = move || -> f64 { grams.get().replace(',', ".").parse().unwrap_or(0.0) };
+    let waste_val = move || -> f64 { waste.get().replace(',', ".").parse().unwrap_or(0.0) };
+    // Restaurant food carries a +20% calorie surcharge (mirrors Food::effective_kcal).
+    let kcal_mult = move || -> f64 { if restaurant.get() { 1.2 } else { 1.0 } };
 
     let adjust = move |delta: f64| {
         let new = (current_val() + delta).max(0.0);
@@ -27,7 +39,7 @@ pub fn FoodWeightModal(
         ev.prevent_default();
         let v = current_val();
         if v > 0.0 {
-            on_save.call(v);
+            on_save.call((v, waste_val(), restaurant.get()));
         }
     };
 
@@ -54,8 +66,8 @@ pub fn FoodWeightModal(
                 <section class="modal-card-body">
                     // Food details panel
                     <Show when=move || show_details.get()>
-                        <div class="notification is-light mb-3">
-                            <p class="has-text-weight-medium is-size-7 mb-1">{t("weight.per_100g")}</p>
+                        <div class="notification mb-3">
+                            <p class="has-text-weight-medium is-size-7 mb-1">{move || t("weight.per_100g")}</p>
                             <div class="tags">
                                 <span class="tag is-small">{format!("{:.1} kcal", food_for_details.kcal)}</span>
                                 <span class="tag is-small">{format!("P {:.1}g", food_for_details.protein)}</span>
@@ -69,7 +81,7 @@ pub fn FoodWeightModal(
                                 view! { <p class="is-size-7">{items.join(", ")}</p> }
                             })}
                             {food_for_details.package_weight.filter(|w| *w > 0.0).map(|w| {
-                                view! { <p class="is-size-7">{format!("{}: {w:.0}{}", t("weight.package"), t("common.unit.g"))}</p> }
+                                view! { <p class="is-size-7">{move || format!("{}: {w:.0}{}", t("weight.package"), t("common.unit.g"))}</p> }
                             })}
                         </div>
                     </Show>
@@ -78,13 +90,13 @@ pub fn FoodWeightModal(
                     <div class="tags mb-3">
                         {move || {
                             let gs = goals.get();
-                            let factor = current_val() / 100.0;
+                            let factor = (current_val() - waste_val()).max(0.0) / 100.0;
                             let f = &food_for_nutrients;
                             gs.iter()
                                 .filter(|g| g.period == GoalPeriod::Day)
                                 .map(|goal| {
                                     let val = match goal.nutrient.as_str() {
-                                        "Calories" => f.kcal * factor,
+                                        "Calories" => f.kcal * factor * kcal_mult(),
                                         "Protein" => f.protein * factor,
                                         "Fat" => f.fat * factor,
                                         "Carbs" => f.carbs * factor,
@@ -99,7 +111,7 @@ pub fn FoodWeightModal(
                                         _ => &goal.nutrient,
                                     };
                                     view! {
-                                        <span class="tag is-light is-small">
+                                        <span class="tag is-small">
                                             {format!("{label} {val:.0}{unit}")}
                                         </span>
                                     }
@@ -120,37 +132,41 @@ pub fn FoodWeightModal(
                                 />
                             </div>
                             <div class="control">
-                                <a class="button is-static">{t("common.unit.g")}</a>
+                                <a class="button is-static">{move || t("common.unit.g")}</a>
                             </div>
                         </div>
 
                         <div class="buttons is-centered mb-3">
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(-100.0)>"-100"</button>
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(-10.0)>"-10"</button>
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(10.0)>"+10"</button>
-                            <button type="button" class="button is-small is-light" on:click=move |_| adjust(100.0)>"+100"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(-100.0)>"-100"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(-10.0)>"-10"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(10.0)>"+10"</button>
+                            <button type="button" class="button is-small" on:click=move |_| adjust(100.0)>"+100"</button>
                         </div>
 
                         {pkg.map(|pw| {
                             view! {
                                 <div class="buttons is-centered mb-3">
-                                    <button type="button" class="button is-small is-light" on:click=move |_| adjust(-pw)>
+                                    <button type="button" class="button is-small" on:click=move |_| adjust(-pw)>
                                         {format!("-{:.0}g", pw)}
                                     </button>
-                                    <button type="button" class="button is-small is-light" on:click=move |_| grams.set(format!("{pw}"))>
+                                    <button type="button" class="button is-small" on:click=move |_| grams.set(format!("{pw}"))>
                                         {format!("={:.0}g", pw)}
                                     </button>
-                                    <button type="button" class="button is-small is-light" on:click=move |_| adjust(pw)>
+                                    <button type="button" class="button is-small" on:click=move |_| adjust(pw)>
                                         {format!("+{:.0}g", pw)}
                                     </button>
                                 </div>
                             }
                         })}
 
+                        <WasteField grams=Signal::derive(current_val) waste=waste />
+
+                        <RestaurantField value=restaurant />
+
                         <div class="field is-grouped is-grouped-right mt-4">
                             <div class="control">
                                 <button type="button" class="button is-small"
-                                    on:click=move |_| on_close.call(())>{t("weight.cancel")}</button>
+                                    on:click=move |_| on_close.call(())>{move || t("weight.cancel")}</button>
                             </div>
                             <div class="control">
                                 <button type="submit" class="button is-small is-link">{submit_label}</button>

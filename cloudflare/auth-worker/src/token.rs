@@ -8,6 +8,41 @@ use crate::{auth_do_stub, do_request};
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Resolve a secret, preferring the Cloudflare Secrets Store binding (prod) and
+/// falling back to a per-worker secret / [vars] value (dev/test). In dev there is
+/// NO Store binding → `env.secret_store` errs → we fall back to the [vars] value,
+/// so nothing dev-side changes. In prod the Store binding returns the global value.
+/// Returns Err with a clear MISCONFIGURED message when the Store binding is
+/// present but unresolvable, or when the secret is configured nowhere.
+pub async fn secret_or_var(env: &Env, name: &str) -> std::result::Result<String, String> {
+    match env.secret_store(name) {
+        Ok(store) => match store.get().await {
+            Ok(Some(v)) if !v.is_empty() => Ok(v),
+            Ok(_) => Err(format!(
+                "MISCONFIGURED: Secrets Store binding '{name}' is empty/unset"
+            )),
+            Err(e) => Err(format!(
+                "MISCONFIGURED: Secrets Store binding '{name}' get() failed: {e:?}"
+            )),
+        },
+        Err(_) => env
+            .secret(name)
+            .map(|s| s.to_string())
+            .ok()
+            .or_else(|| env.var(name).map(|v| v.to_string()).ok())
+            .ok_or_else(|| {
+                format!("MISCONFIGURED: '{name}' not set (no Secrets Store binding and no var/secret)")
+            }),
+    }
+}
+
+/// JWT signing/verification secret. Fails loudly (Err) when not configured anywhere.
+pub async fn jwt_secret(env: &Env) -> Result<String> {
+    secret_or_var(env, "JWT_SECRET")
+        .await
+        .map_err(Error::RustError)
+}
+
 const JWT_HEADER: &str = r#"{"alg":"HS256","typ":"JWT"}"#;
 
 /// Far-future expiry: year 2100 (epoch seconds).
@@ -104,7 +139,7 @@ pub fn create_token(
         iat: now,
         exp: FAR_FUTURE_EXP,
         caps: capabilities,
-        token_id: token_id.clone(),
+        token_id: Some(token_id.clone()),
     };
 
     let token = sign_jwt(&claims, secret)?;
@@ -152,7 +187,7 @@ pub fn create_ephemeral_token(
         iat: now,
         exp,
         caps: vec![capability.to_string()],
-        token_id: uuid::Uuid::new_v4().to_string(),
+        token_id: Some(uuid::Uuid::new_v4().to_string()),
     };
 
     let jwt = sign_jwt(&claims, secret)?;
@@ -184,11 +219,8 @@ pub fn validate_token_from_request(req: &Request, secret: &str) -> Result<TokenC
 /// Validate a session token from the Authorization header using JWT_SECRET from env.
 /// This only verifies the JWT signature -- it does NOT check DO storage.
 /// For full validation (including revocation check), use `validate_from_header_full`.
-pub fn validate_from_header(req: &Request, env: &Env) -> Result<String> {
-    let secret = env
-        .secret("JWT_SECRET")
-        .map(|s| s.to_string())
-        .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
+pub async fn validate_from_header(req: &Request, env: &Env) -> Result<String> {
+    let secret = jwt_secret(env).await?;
     let claims = validate_token_from_request(req, &secret)?;
     Ok(claims.sub)
 }
@@ -196,19 +228,17 @@ pub fn validate_from_header(req: &Request, env: &Env) -> Result<String> {
 /// Full async validation: verify JWT signature AND check that the token still
 /// exists in DO storage (not revoked). Updates `last_used_at`.
 pub async fn validate_from_header_full(req: &Request, env: &Env) -> Result<String> {
-    let secret = env
-        .secret("JWT_SECRET")
-        .map(|s| s.to_string())
-        .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
+    let secret = jwt_secret(env).await?;
     let claims = validate_token_from_request(req, &secret)?;
 
-    // Check token exists in DO storage
-    let stub = auth_do_stub(env)?;
-    let do_body = serde_json::json!({ "token_id": claims.token_id });
-    let internal_req = do_request("/token/validate", &do_body)?;
-    let resp = stub.fetch_with_request(internal_req).await?;
-    if resp.status_code() != 200 {
-        return Err(Error::RustError("token has been revoked".into()));
+    if let Some(ref tid) = claims.token_id {
+        let stub = auth_do_stub(env)?;
+        let do_body = serde_json::json!({ "token_id": tid });
+        let internal_req = do_request("/token/validate", &do_body)?;
+        let resp = stub.fetch_with_request(internal_req).await?;
+        if resp.status_code() != 200 {
+            return Err(Error::RustError("token has been revoked".into()));
+        }
     }
 
     Ok(claims.sub)
@@ -216,11 +246,7 @@ pub async fn validate_from_header_full(req: &Request, env: &Env) -> Result<Strin
 
 /// POST /token/validate -- checks JWT signature and DO storage existence.
 pub async fn validate_token(req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let secret = ctx
-        .env
-        .secret("JWT_SECRET")
-        .map(|s| s.to_string())
-        .map_err(|_| Error::RustError("JWT_SECRET not configured".into()))?;
+    let secret = jwt_secret(&ctx.env).await?;
 
     let claims = match validate_token_from_request(&req, &secret) {
         Ok(c) => c,
@@ -232,16 +258,17 @@ pub async fn validate_token(req: Request, ctx: RouteContext<()>) -> Result<Respo
         }
     };
 
-    // Verify token exists in DO storage (not revoked) and update last_used_at
-    let stub = auth_do_stub(&ctx.env)?;
-    let do_body = serde_json::json!({ "token_id": claims.token_id });
-    let internal_req = do_request("/token/validate", &do_body)?;
-    let resp = stub.fetch_with_request(internal_req).await?;
-    if resp.status_code() != 200 {
-        let body = ErrorResponse {
-            error: "token has been revoked".into(),
-        };
-        return Ok(Response::from_json(&body)?.with_status(401));
+    if let Some(ref tid) = claims.token_id {
+        let stub = auth_do_stub(&ctx.env)?;
+        let do_body = serde_json::json!({ "token_id": tid });
+        let internal_req = do_request("/token/validate", &do_body)?;
+        let resp = stub.fetch_with_request(internal_req).await?;
+        if resp.status_code() != 200 {
+            let body = ErrorResponse {
+                error: "token has been revoked".into(),
+            };
+            return Ok(Response::from_json(&body)?.with_status(401));
+        }
     }
 
     Response::from_json(&claims)
@@ -249,7 +276,7 @@ pub async fn validate_token(req: Request, ctx: RouteContext<()>) -> Result<Respo
 
 /// GET /tokens -- returns all active tokens for the authenticated user.
 pub async fn list_tokens(req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let user_id = match validate_from_header(&req, &ctx.env) {
+    let user_id = match validate_from_header(&req, &ctx.env).await {
         Ok(sub) => sub,
         Err(e) => {
             let body = ErrorResponse {
@@ -292,7 +319,7 @@ mod tests {
 
         assert_eq!(claims.sub, user_id);
         assert_eq!(claims.caps, caps);
-        assert_eq!(claims.token_id, token_id);
+        assert_eq!(claims.token_id, Some(token_id));
         assert!(claims.iat <= current_timestamp());
         assert_eq!(claims.exp, FAR_FUTURE_EXP);
     }
@@ -305,7 +332,7 @@ mod tests {
             iat: now - 7200,
             exp: now - 3600, // expired 1 hour ago
             caps: vec!["auth".to_string()],
-            token_id: "tok-test".to_string(),
+            token_id: Some("tok-test".to_string()),
         };
 
         let token = sign_jwt(&claims, TEST_SECRET).expect("sign_jwt should succeed");

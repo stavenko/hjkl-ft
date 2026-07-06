@@ -1,0 +1,18 @@
+services:
+  poller:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    # Reaches the host's llama-swap over the LAN (LLAMA_URL in .env).
+    # All Cloudflare traffic honors ALL_PROXY (set it to the v2ray SOCKS5 to
+    # egress via the Italy VPN); the local LLM is excluded via NO_PROXY.
+
+  # Always-on SOCKS5 egress (Italy VPN). Disabled by default — drop your config
+  # into ./v2ray/config.json and start with:  docker compose --profile proxy up -d
+  v2ray:
+    image: v2fly/v2fly-core:latest
+    restart: unless-stopped
+    command: ["run", "-c", "/etc/v2ray/config.json"]
+    volumes:
+      - ./v2ray/config.json:/etc/v2ray/config.json:ro
+    profiles: ["proxy"]

@@ -1,4 +1,4 @@
-@import "https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css";
+/* Bulma is prepended by pre_build hook */
 
 @font-face {
   font-family: "Inter";
@@ -38,12 +38,38 @@
 
 :root {
   --bulma-body-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Translucent dark scrim for captions overlaid on imagery (e.g. progress
+     photos). Derived from Bulma's dark scheme component vars. */
+  --overlay-scrim: hsla(var(--bulma-dark-h), var(--bulma-dark-s), var(--bulma-dark-l), 0.55);
+}
+
+html {
+  /* iOS auto-inflates text based on viewport width ("text autosizing"). On a
+     rotate to landscape and back, the list fonts ballooned and stayed huge until
+     a reflow. Pinning the adjust to 100% disables that inflation. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
   font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  overscroll-behavior: none;
+  background-color: var(--bulma-background);
+}
+
+* {
+  touch-action: manipulation;
 }
 
 .modal-background {
   background-color: rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  input[type="date"],
+  input[type="text"],
+  input[type="number"],
+  textarea {
+    color-scheme: dark;
+  }
 }

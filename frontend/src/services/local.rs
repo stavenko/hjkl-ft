@@ -36,6 +36,20 @@ pub async fn archive_food(id: &str, archived: bool) -> Option<Food> {
 
 // --- Diary ---
 
+pub async fn latest_diary_time_per_food() -> std::collections::BTreeMap<String, String> {
+    let entries: Vec<DiaryEntry> = db::list_all("diary").await;
+    let mut map = std::collections::BTreeMap::new();
+    for e in entries {
+        if e.deleted { continue; }
+        map.entry(e.food_id)
+            .and_modify(|existing: &mut String| {
+                if e.created_at > *existing { *existing = e.created_at.clone(); }
+            })
+            .or_insert(e.created_at);
+    }
+    map
+}
+
 pub async fn list_diary_range(dates: &[String]) -> Vec<DiaryEntry> {
     let mut all = Vec::new();
     for d in dates {
@@ -50,29 +64,318 @@ pub async fn list_diary(date: &str) -> Vec<DiaryEntry> {
     entries.into_iter().filter(|e| !e.deleted).collect()
 }
 
-pub async fn save_food_to_diary(food: &Food, grams: f64) -> DiaryEntry {
-    db::put("foods", food).await;
+/// All distinct dates with at least one non-deleted diary entry.
+pub async fn list_diary_dates() -> Vec<String> {
+    let entries: Vec<DiaryEntry> = db::list_all("diary").await;
+    entries
+        .into_iter()
+        .filter(|e| !e.deleted)
+        .map(|e| e.date)
+        .collect()
+}
+
+/// Average daily effective kcal over the last `window_days` calendar days,
+/// counting ONLY days that have diary entries. Per-day kcal is the sum of each
+/// entry's `effective_kcal() * (grams - waste_grams).max(0) / 100` — exactly how
+/// the diary/summary computes calories (honouring waste and the restaurant
+/// surcharge). Returns `None` when no day in the window has any diary entry.
+pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
+    let foods = food_map().await;
+    let today = chrono::Local::now().date_naive();
+    let dates: Vec<String> = (0..window_days)
+        .map(|i| (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string())
+        .collect();
+
+    let mut day_totals: Vec<f64> = Vec::new();
+    for d in &dates {
+        let diary = list_diary(d).await;
+        if diary.is_empty() {
+            continue;
+        }
+        let mut kc = 0.0;
+        for e in &diary {
+            if let Some(food) = foods.get(&e.food_id) {
+                let eaten = (e.grams - e.waste_grams).max(0.0);
+                kc += food.effective_kcal() * eaten / 100.0;
+            }
+        }
+        day_totals.push(kc);
+    }
+
+    if day_totals.is_empty() {
+        return None;
+    }
+    let sum: f64 = day_totals.iter().sum();
+    Some(sum / day_totals.len() as f64)
+}
+
+/// Compute the daily calorie planka from the average daily kcal and the weight
+/// balance. In a deficit the planka is the average itself; for maintenance or a
+/// surplus it is 5% below the average. The result is rounded to the nearest
+/// 10 kcal. Pure (no I/O) so it is unit-testable.
+pub fn calorie_planka(avg_kcal: f64, balance: crate::services::weight_trend::BalanceState) -> f64 {
+    use crate::services::weight_trend::BalanceState;
+    let raw = if balance == BalanceState::Deficit { avg_kcal } else { avg_kcal * 0.95 };
+    (raw / 10.0).round() * 10.0
+}
+
+/// The suggested daily calorie planka shown (and accepted) in ch3: average intake
+/// over the last 7 logged days, adjusted for the current weight balance via
+/// [`calorie_planka`] (deficit → keep; maintenance/surplus → −5%, rounded to 10).
+/// `None` when there are no logged days yet. Single source of truth so the widget's
+/// displayed figure and the value it accepts cannot drift apart.
+pub async fn calorie_planka_suggestion() -> Option<f64> {
+    use crate::services::weight_trend::{self, DEFAULT_WINDOW_DAYS};
+    let avg = avg_daily_kcal(7).await?;
+    let balance = weight_trend::weight_trend(&list_weight_entries().await, DEFAULT_WINDOW_DAYS).balance();
+    Some(calorie_planka(avg, balance))
+}
+
+// --- Chapter 2 detection helpers ---
+//
+// Case-insensitive substring name-matching on `food.name.to_lowercase()`. These
+// back the chapter-2 section tasks and the daily report's per-day facts.
+
+/// Substrings that mark a DRINK food (chapter 2 / s5).
+const DRINK_SUBSTRINGS: &[&str] = &[
+    "сок", "газиров", "кола", "лимонад", "морс", "квас", "компот", "нектар",
+    "энергетик", "пепси", "фанта", "спрайт", "cola", "pepsi", "sprite", "fanta",
+];
+
+fn name_matches(name: &str, needles: &[&str]) -> bool {
+    let lower = name.to_lowercase();
+    needles.iter().any(|n| lower.contains(n))
+}
+
+/// True if `food` is a low-calorie snack — by the cached AI tag (language-
+/// independent). `None` (not yet classified) counts as not-a-snack until tagged
+/// in the background while preparing the daily summary. See [`cache_snack_tags`].
+pub fn is_snack_food(food: &Food) -> bool {
+    food.is_snack == Some(true)
+}
+
+/// Persist AI snack verdicts onto foods by id (`(food_id, is_snack)`), then push
+/// once so the tags propagate across devices. Used by the summary's background
+/// tagging step; foods not found are skipped.
+pub async fn cache_snack_tags(verdicts: &[(String, bool)]) {
+    if verdicts.is_empty() {
+        return;
+    }
+    for (id, is_snack) in verdicts {
+        if let Some(mut food) = db::get::<Food>("foods", id).await {
+            food.is_snack = Some(*is_snack);
+            food.updated_at = now();
+            db::put("foods", &food).await;
+        }
+    }
+    crate::services::sync::push_background();
+}
+
+/// True if `food` is a drink by name.
+pub fn is_drink_food(food: &Food) -> bool {
+    name_matches(&food.name, DRINK_SUBSTRINGS)
+}
+
+/// A drink is HIGH-CAL ("liquid calories") if its per-100g kcal > 10 — the
+/// threshold the ch2 "soda & juice" lesson teaches.
+pub fn is_high_cal_drink(food: &Food) -> bool {
+    is_drink_food(food) && food.kcal > 10.0
+}
+
+/// A drink is ZERO-CAL if its per-100g kcal <= 5.
+pub fn is_zero_cal_drink(food: &Food) -> bool {
+    is_drink_food(food) && food.kcal <= 5.0
+}
+
+/// Build a food-id → Food lookup over all stored foods.
+async fn food_map() -> BTreeMap<String, Food> {
+    list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect()
+}
+
+/// True if the diary for `date` contains at least one SNACK food.
+pub async fn snack_logged_on(date: &str) -> bool {
+    let foods = food_map().await;
+    list_diary(date).await.iter().any(|e| {
+        foods.get(&e.food_id).map_or(false, is_snack_food)
+    })
+}
+
+/// True if the diary for `date` contains at least one HIGH-CAL drink.
+pub async fn high_cal_drink_on(date: &str) -> bool {
+    let foods = food_map().await;
+    list_diary(date).await.iter().any(|e| {
+        foods.get(&e.food_id).map_or(false, is_high_cal_drink)
+    })
+}
+
+/// True if the diary for `date` contains at least one ZERO-CAL drink.
+pub async fn zero_cal_drink_on(date: &str) -> bool {
+    let foods = food_map().await;
+    list_diary(date).await.iter().any(|e| {
+        foods.get(&e.food_id).map_or(false, is_zero_cal_drink)
+    })
+}
+
+/// Evening protein (grams) on `date`: sum of `protein * eaten_grams / 100`
+/// (honouring waste, like the diary) over entries whose derived meal bucket is
+/// Dinner or NightSnack.
+pub async fn evening_protein_on(date: &str) -> f64 {
+    let foods = food_map().await;
+    let diary = list_diary(date).await;
+    let groups = crate::services::meal_split::group_by_meal(&diary);
+    use crate::services::meal_split::MealType;
+    let mut total = 0.0;
+    for g in groups {
+        if g.meal != MealType::Dinner && g.meal != MealType::NightSnack {
+            continue;
+        }
+        for e in &g.entries {
+            if let Some(food) = foods.get(&e.food_id) {
+                let eaten = (e.grams - e.waste_grams).max(0.0);
+                total += food.protein * eaten / 100.0;
+            }
+        }
+    }
+    total
+}
+
+/// True once a daily report has been generated for `date` (a `summaries`
+/// record with id `day:<date>` exists).
+pub async fn report_ready_on(date: &str) -> bool {
+    crate::services::summary::get_day(date).await.is_some()
+}
+
+/// Local "yesterday" (today - 1 day) as "YYYY-MM-DD".
+pub fn yesterday() -> String {
+    (chrono::Local::now().date_naive() - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
+/// Resolve a food whose `is_restaurant` flag matches `want`. If `food` already
+/// matches it's stored and returned as-is. Otherwise we Copy-on-Write: reuse an
+/// existing identical variant carrying the wanted flag, or create a fresh Food —
+/// leaving the original untouched so other (e.g. past) diary entries keep it.
+async fn food_with_restaurant_flag(food: &Food, want: bool) -> Food {
+    if food.is_restaurant == want {
+        db::put("foods", food).await;
+        return food.clone();
+    }
+    let existing = list_foods().await.into_iter().find(|f| {
+        f.id != food.id
+            && f.is_restaurant == want
+            && f.name == food.name
+            && f.is_recipe == food.is_recipe
+            && f.recipe_id == food.recipe_id
+            && f.kcal == food.kcal
+            && f.protein == food.protein
+            && f.fat == food.fat
+            && f.carbs == food.carbs
+            && f.package_weight == food.package_weight
+            && f.nutrients == food.nutrients
+    });
+    if let Some(variant) = existing {
+        return variant;
+    }
+    let variant = Food {
+        id: new_id(),
+        is_restaurant: want,
+        created_at: now(),
+        updated_at: now(),
+        ..food.clone()
+    };
+    db::put("foods", &variant).await;
+    variant
+}
+
+pub async fn save_food_to_diary(
+    food: &Food,
+    grams: f64,
+    waste_grams: f64,
+    is_restaurant: bool,
+) -> DiaryEntry {
+    let food = food_with_restaurant_flag(food, is_restaurant).await;
     let entry = DiaryEntry {
         id: new_id(),
         food_id: food.id.clone(),
         date: today(),
         time: Some(time_now()),
         grams,
+        waste_grams,
         meal_label: None,
         deleted: false,
         created_at: now(),
         updated_at: now(),
     };
     db::put("diary", &entry).await;
+    // Adding any food to the diary fires the "first food entries" story task.
+    crate::services::story::fire_first_food_if_armed().await;
+    // Adding a cooked dish (recipe) to the diary — the "I cook" task 2 milestone.
+    if food.is_recipe {
+        crate::services::story::set_flag(crate::services::story::COOKING_DISH_IN_DIARY, true).await;
+    }
+    // Recording inedible waste — the "food with bones" task milestone.
+    if waste_grams > 0.0 {
+        crate::services::story::set_flag(crate::services::story::BONES_WASTE_ENTERED, true).await;
+    }
+    // Logging restaurant food — the "party or restaurant" task milestone.
+    if is_restaurant {
+        crate::services::story::set_flag(crate::services::story::RESTAURANT_FOOD_ENTERED, true).await;
+    }
     entry
 }
 
-pub async fn update_diary_entry(id: &str, grams: f64) -> Option<DiaryEntry> {
+pub async fn update_diary_entry(
+    id: &str,
+    grams: f64,
+    waste_grams: f64,
+    is_restaurant: bool,
+) -> Option<DiaryEntry> {
     let mut entry: DiaryEntry = db::get("diary", id).await?;
+    let food: Food = db::get("foods", &entry.food_id).await?;
+    let food = food_with_restaurant_flag(&food, is_restaurant).await;
+    entry.food_id = food.id.clone();
     entry.grams = grams;
+    entry.waste_grams = waste_grams;
     entry.updated_at = now();
     db::put("diary", &entry).await;
+    if waste_grams > 0.0 {
+        crate::services::story::set_flag(crate::services::story::BONES_WASTE_ENTERED, true).await;
+    }
+    if is_restaurant {
+        crate::services::story::set_flag(crate::services::story::RESTAURANT_FOOD_ENTERED, true).await;
+    }
     Some(entry)
+}
+
+/// Stores whose rows can be deleted via the deletion log (kind == store name).
+const DELETABLE_STORES: &[&str] = &[
+    "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries", "step_entries",
+];
+
+/// Record an explicit deletion (tombstone) for `target_id` in store `kind`. The
+/// record is synced and re-applied on every device; the local row is removed by
+/// the caller (and re-removed by [`apply_deletions`] after each pull, since the
+/// server never hard-deletes the entity — it only accumulates these records).
+pub async fn record_deletion(kind: &str, target_id: &str) {
+    let rec = api_types::DeletionRecord {
+        id: new_id(),
+        kind: kind.to_string(),
+        target_id: target_id.to_string(),
+        created_at: now(),
+    };
+    db::put("deletions", &rec).await;
+}
+
+/// Apply every known deletion record: remove the target row from its store. Run
+/// after each pull so deletions made on other devices take effect locally.
+pub async fn apply_deletions() {
+    let dels: Vec<api_types::DeletionRecord> = db::list_all("deletions").await;
+    for d in dels {
+        if DELETABLE_STORES.contains(&d.kind.as_str()) {
+            db::delete(&d.kind, &d.target_id).await;
+        }
+    }
 }
 
 pub async fn remove_food_diary(entry_id: &str) -> Result<(), String> {
@@ -82,16 +385,150 @@ pub async fn remove_food_diary(entry_id: &str) -> Result<(), String> {
     if entry.date != today() {
         return Err("can only delete today's entries".to_string());
     }
-    let mut entry = entry;
-    entry.deleted = true;
-    entry.updated_at = now();
-    db::put("diary", &entry).await;
+    record_deletion("diary", entry_id).await;
+    db::delete("diary", entry_id).await;
     Ok(())
+}
+
+/// Danger zone — reset story progress. Sets every flag to `false` with a fresh
+/// `updated_at` (rather than hard-clearing) so the reset is a last-writer-wins
+/// update that PROPAGATES across devices via sync — a plain `db::clear` would be
+/// re-populated from the server on the next pull. Caller pushes afterwards.
+pub async fn delete_story_progress() {
+    let flags: Vec<api_types::StoryFlag> = db::list_all("story").await;
+    let ts = now();
+    for mut f in flags {
+        f.value = false;
+        f.updated_at = ts.clone();
+        db::put("story", &f).await;
+    }
+    // Also drop the attached progress photos (a local-only, un-synced store):
+    // resetting the story must clear the "before" photos too.
+    db::clear("progress_photos").await;
+}
+
+/// Danger zone — delete diary food entries (and their cached day-summaries).
+/// `cutoff` (YYYY-MM-DD): entries with `date < cutoff` are removed; `None`
+/// removes ALL. Uses a SOFT delete (`deleted=true`, bumped `updated_at`) — that's
+/// the ONLY form the server honours (`/sync/push` upserts and only tombstones via
+/// `deleted`; absent rows are left intact), so the caller must `sync::push_*`
+/// afterwards for it to propagate. Day/week summaries are a local-only derived
+/// cache, so they're hard-deleted (keeping the `meta:` markers).
+pub async fn delete_diary_data(cutoff: Option<&str>) {
+    let entries: Vec<DiaryEntry> = db::list_all("diary").await;
+    for e in entries {
+        if e.deleted {
+            continue;
+        }
+        if cutoff.map_or(true, |c| e.date.as_str() < c) {
+            record_deletion("diary", &e.id).await;
+            db::delete("diary", &e.id).await;
+        }
+    }
+    let summaries: Vec<crate::services::summary::Summary> = db::list_all("summaries").await;
+    for s in summaries {
+        if s.id.starts_with("meta:") {
+            continue;
+        }
+        if cutoff.map_or(true, |c| s.date.as_str() < c) {
+            db::delete("summaries", &s.id).await;
+        }
+    }
+}
+
+/// Duplicate a diary entry as a NEW entry today with a fresh time (food and
+/// grams/waste copied). Used by the diary-row long-press "Duplicate" action.
+pub async fn duplicate_diary_entry(entry_id: &str) -> Option<DiaryEntry> {
+    let src: DiaryEntry = db::get("diary", entry_id).await?;
+    let entry = DiaryEntry {
+        id: new_id(),
+        food_id: src.food_id.clone(),
+        date: today(),
+        time: Some(time_now()),
+        grams: src.grams,
+        waste_grams: src.waste_grams,
+        meal_label: src.meal_label.clone(),
+        deleted: false,
+        created_at: now(),
+        updated_at: now(),
+    };
+    db::put("diary", &entry).await;
+    Some(entry)
+}
+
+/// Edit the product (name + KBJU + custom nutrients) behind a diary entry.
+/// Copy-on-write: if the product is referenced ONLY by this entry, edit it in
+/// place; if it's shared (any other non-deleted diary entry, or any recipe
+/// ingredient), create a copy with the edits and repoint just this entry — so
+/// other usages keep the original values.
+pub async fn edit_food_for_entry(
+    entry_id: &str,
+    name: String,
+    kcal: f64,
+    protein: f64,
+    fat: f64,
+    carbs: f64,
+    nutrients: BTreeMap<String, f64>,
+) -> Option<()> {
+    let mut entry: DiaryEntry = db::get("diary", entry_id).await?;
+    let food: Food = db::get("foods", &entry.food_id).await?;
+
+    let all_diary: Vec<DiaryEntry> = db::list_all("diary").await;
+    let other_diary = all_diary
+        .iter()
+        .any(|e| e.food_id == food.id && e.id != entry.id && !e.deleted);
+    let recipe_refs: Vec<RecipeIngredient> =
+        db::list_by_index("recipe_ingredients", "food_id", &food.id).await;
+    let shared = other_diary || !recipe_refs.is_empty();
+
+    if shared {
+        let copy = Food {
+            id: new_id(),
+            name, kcal, protein, fat, carbs, nutrients,
+            created_at: now(),
+            updated_at: now(),
+            ..food.clone()
+        };
+        db::put("foods", &copy).await;
+        entry.food_id = copy.id.clone();
+        entry.updated_at = now();
+        db::put("diary", &entry).await;
+    } else {
+        let updated = Food {
+            name, kcal, protein, fat, carbs, nutrients,
+            updated_at: now(),
+            ..food.clone()
+        };
+        db::put("foods", &updated).await;
+    }
+    Some(())
 }
 
 // --- Food Drafts ---
 
 pub async fn save_draft(food: &Food) -> FoodDraft {
+    let new_keys: std::collections::BTreeSet<&str> =
+        food.nutrients.keys().map(|k| k.as_str()).collect();
+
+    let existing: Vec<FoodDraft> = db::list_all("food_drafts").await;
+    let matched = existing.into_iter().find(|d| {
+        d.name == food.name
+            && d.nutrients.len() == new_keys.len()
+            && d.nutrients.keys().all(|k| new_keys.contains(k.as_str()))
+    });
+
+    if let Some(mut draft) = matched {
+        draft.kcal = food.kcal;
+        draft.protein = food.protein;
+        draft.fat = food.fat;
+        draft.carbs = food.carbs;
+        draft.nutrients = food.nutrients.clone();
+        draft.package_weight = food.package_weight;
+        draft.created_at = now();
+        db::put("food_drafts", &draft).await;
+        return draft;
+    }
+
     let draft = FoodDraft {
         id: new_id(),
         name: food.name.clone(),
@@ -106,6 +543,44 @@ pub async fn save_draft(food: &Food) -> FoodDraft {
     };
     db::put("food_drafts", &draft).await;
     draft
+}
+
+pub async fn update_draft_fields(draft_id: &str, food: &Food) {
+    if let Some(mut draft) = db::get::<FoodDraft>("food_drafts", draft_id).await {
+        draft.name = food.name.clone();
+        draft.kcal = food.kcal;
+        draft.protein = food.protein;
+        draft.fat = food.fat;
+        draft.carbs = food.carbs;
+        draft.nutrients = food.nutrients.clone();
+        draft.package_weight = food.package_weight;
+        let linked_food_id = draft.food_id.clone();
+        db::put("food_drafts", &draft).await;
+
+        // Keep the Food created from this draft in sync — editing the name (or
+        // КБЖУ) of a recognized product must update both the draft AND its Food.
+        // Only the editable fields change; id / flags / timestamps are preserved.
+        if let Some(fid) = linked_food_id {
+            if let Some(mut f) = db::get::<Food>("foods", &fid).await {
+                f.name = food.name.clone();
+                f.kcal = food.kcal;
+                f.protein = food.protein;
+                f.fat = food.fat;
+                f.carbs = food.carbs;
+                f.nutrients = food.nutrients.clone();
+                f.package_weight = food.package_weight;
+                f.updated_at = now();
+                db::put("foods", &f).await;
+            }
+        }
+    }
+}
+
+pub async fn set_draft_food_id(draft_id: &str, food_id: &str) {
+    if let Some(mut draft) = db::get::<FoodDraft>("food_drafts", draft_id).await {
+        draft.food_id = Some(food_id.to_string());
+        db::put("food_drafts", &draft).await;
+    }
 }
 
 pub async fn list_drafts() -> Vec<FoodDraft> {
@@ -133,6 +608,8 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
             is_recipe: false,
             recipe_id: None,
             archived: false,
+            is_restaurant: false,
+            is_snack: None,
             created_at: now(),
             updated_at: now(),
         };
@@ -149,12 +626,16 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
         date: today(),
         time: Some(time_now()),
         grams,
+        waste_grams: 0.0,
         meal_label: None,
         deleted: false,
         created_at: now(),
         updated_at: now(),
     };
     db::put("diary", &entry).await;
+    // Entering a food into the diary fires the "first food entries" story task
+    // (only counts if its trigger was armed by opening that section).
+    crate::services::story::fire_first_food_if_armed().await;
     Some(entry)
 }
 
@@ -259,6 +740,7 @@ pub async fn update_ingredient(id: &str, grams: f64) -> Option<RecipeIngredient>
 }
 
 pub async fn remove_ingredient(id: &str) {
+    record_deletion("recipe_ingredients", id).await;
     db::delete("recipe_ingredients", id).await;
 }
 
@@ -305,6 +787,8 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         is_recipe: true,
         recipe_id: Some(recipe_id.to_string()),
         archived: false,
+        is_restaurant: false,
+        is_snack: None,
         created_at: now(),
         updated_at: now(),
     };
@@ -316,6 +800,9 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
     updated_recipe.food_id = Some(food.id.clone());
     updated_recipe.updated_at = now();
     db::put("recipes", &updated_recipe).await;
+
+    // Finishing a recipe creates a dish — the "I cook" task 1 milestone.
+    crate::services::story::set_flag(crate::services::story::COOKING_DISH_CREATED, true).await;
 
     Some(food)
 }
@@ -348,5 +835,208 @@ pub async fn update_goal(goal: &Goal) {
 }
 
 pub async fn delete_goal(id: &str) {
+    record_deletion("goals", id).await;
     db::delete("goals", id).await;
+}
+
+/// Create or update the hidden daily-Calories `AtMost` goal (the "planka") to
+/// `amount` kcal. Used when the user accepts the calorie planka in ch3.
+pub async fn set_calorie_goal(amount: f64) {
+    match list_goals().await.into_iter().find(|g| g.nutrient == "Calories") {
+        Some(mut g) => {
+            g.direction = GoalDirection::AtMost;
+            g.amount = amount;
+            g.unit = GoalUnit::Kcal;
+            g.period = GoalPeriod::Day;
+            g.updated_at = now();
+            update_goal(&g).await;
+        }
+        None => {
+            create_goal(CreateGoalInput {
+                nutrient: "Calories".to_string(),
+                direction: GoalDirection::AtMost,
+                amount,
+                unit: GoalUnit::Kcal,
+                period: GoalPeriod::Day,
+            })
+            .await;
+        }
+    }
+}
+
+/// Create or update the daily Steps `AtLeast` goal to `amount` steps. A real
+/// persisted goal (same machinery as nutrient goals), set when the user accepts
+/// the weekly card's steps lever; backs the steps_planka source threshold.
+pub async fn set_steps_goal(amount: f64) {
+    match list_goals().await.into_iter().find(|g| g.nutrient == "Steps") {
+        Some(mut g) => {
+            g.direction = GoalDirection::AtLeast;
+            g.amount = amount;
+            g.unit = GoalUnit::Steps;
+            g.period = GoalPeriod::Day;
+            g.updated_at = now();
+            update_goal(&g).await;
+        }
+        None => {
+            create_goal(CreateGoalInput {
+                nutrient: "Steps".to_string(),
+                direction: GoalDirection::AtLeast,
+                amount,
+                unit: GoalUnit::Steps,
+                period: GoalPeriod::Day,
+            })
+            .await;
+        }
+    }
+}
+
+/// The current daily steps target from the Steps `AtLeast` goal, if set.
+pub async fn steps_goal_amount() -> Option<f64> {
+    list_goals()
+        .await
+        .into_iter()
+        .find(|g| g.nutrient == "Steps" && g.direction == GoalDirection::AtLeast && g.amount > 0.0)
+        .map(|g| g.amount)
+}
+
+// --- Weight Entries ---
+
+pub async fn save_weight(weight_kg: f64, no_water: bool, no_food: bool, no_wash: bool, used_toilet: bool, morning: bool) -> WeightEntry {
+    let date = today();
+    if let Some(mut existing) = get_weight_for_date(&date).await {
+        existing.weight_kg = weight_kg;
+        existing.no_water = no_water;
+        existing.no_food = no_food;
+        existing.no_wash = no_wash;
+        existing.used_toilet = used_toilet;
+        existing.morning = morning;
+        existing.updated_at = now();
+        db::put("weight_entries", &existing).await;
+        return existing;
+    }
+    let entry = WeightEntry {
+        id: new_id(),
+        date,
+        weight_kg,
+        no_water,
+        no_food,
+        no_wash,
+        used_toilet,
+        morning,
+        created_at: now(),
+        updated_at: now(),
+    };
+    db::put("weight_entries", &entry).await;
+    entry
+}
+
+pub async fn get_weight_for_date(date: &str) -> Option<WeightEntry> {
+    let entries: Vec<WeightEntry> = db::list_by_index("weight_entries", "date", date).await;
+    entries.into_iter().next()
+}
+
+pub async fn list_weight_entries() -> Vec<WeightEntry> {
+    let mut entries: Vec<WeightEntry> = db::list_all("weight_entries").await;
+    entries.sort_by(|a, b| a.date.cmp(&b.date));
+    entries
+}
+
+// --- Step Entries ---
+
+pub async fn save_steps(date: &str, steps: u32) -> api_types::StepEntry {
+    let entry = if let Some(mut existing) = get_steps_for_date(date).await {
+        existing.steps = steps;
+        existing.updated_at = now();
+        db::put("step_entries", &existing).await;
+        existing
+    } else {
+        let entry = api_types::StepEntry {
+            id: new_id(),
+            date: date.to_string(),
+            steps,
+            created_at: now(),
+            updated_at: now(),
+        };
+        db::put("step_entries", &entry).await;
+        entry
+    };
+    // Recording steps is the milestone event for the activity section's task 2.
+    crate::services::story::set_flag(crate::services::story::FIRST_STEPS, true).await;
+    entry
+}
+
+pub async fn get_steps_for_date(date: &str) -> Option<api_types::StepEntry> {
+    let entries: Vec<api_types::StepEntry> = db::list_by_index("step_entries", "date", date).await;
+    entries.into_iter().next()
+}
+
+pub async fn list_step_entries() -> Vec<api_types::StepEntry> {
+    let mut entries: Vec<api_types::StepEntry> = db::list_all("step_entries").await;
+    entries.sort_by(|a, b| a.date.cmp(&b.date));
+    entries
+}
+
+// --- Progress photos (client-only: front / side / back, for tracking) ---
+
+/// One of the three required poses.
+pub const POSES: [&str; 3] = ["front", "side", "back"];
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProgressPhoto {
+    pub id: String,
+    pub pose: String,
+    pub date: String,
+    /// Image as a data URL (base64).
+    pub image: String,
+    pub created_at: String,
+}
+
+pub async fn save_progress_photo(pose: &str, image: &str) -> ProgressPhoto {
+    let photo = ProgressPhoto {
+        id: new_id(),
+        pose: pose.to_string(),
+        date: today(),
+        image: image.to_string(),
+        created_at: now(),
+    };
+    db::put("progress_photos", &photo).await;
+    // The intro task completes once all three poses have at least one photo.
+    let all: Vec<ProgressPhoto> = db::list_all("progress_photos").await;
+    let have: std::collections::BTreeSet<&str> = all.iter().map(|p| p.pose.as_str()).collect();
+    if POSES.iter().all(|p| have.contains(p)) {
+        crate::services::story::set_flag(crate::services::story::PROGRESS_PHOTOS_TAKEN, true).await;
+    }
+    photo
+}
+
+pub async fn list_progress_photos() -> Vec<ProgressPhoto> {
+    let mut photos: Vec<ProgressPhoto> = db::list_all("progress_photos").await;
+    photos.sort_by(|a, b| b.created_at.cmp(&a.created_at)); // newest first
+    photos
+}
+
+#[cfg(test)]
+mod tests {
+    use super::calorie_planka;
+    use crate::services::weight_trend::BalanceState;
+
+    #[test]
+    fn calorie_planka_deficit_is_avg_rounded_to_10() {
+        // Deficit -> avg itself, rounded to nearest 10.
+        assert_eq!(calorie_planka(2000.0, BalanceState::Deficit), 2000.0);
+        assert_eq!(calorie_planka(1994.0, BalanceState::Deficit), 1990.0);
+        assert_eq!(calorie_planka(1996.0, BalanceState::Deficit), 2000.0);
+    }
+
+    #[test]
+    fn calorie_planka_non_deficit_is_minus_5pct_rounded_to_10() {
+        // Maintenance / Surplus -> avg * 0.95, rounded to nearest 10.
+        // 2000 * 0.95 = 1900.0
+        assert_eq!(calorie_planka(2000.0, BalanceState::Maintenance), 1900.0);
+        assert_eq!(calorie_planka(2000.0, BalanceState::Surplus), 1900.0);
+        // 2100 * 0.95 = 1995.0 -> rounds to 2000.
+        assert_eq!(calorie_planka(2100.0, BalanceState::Maintenance), 2000.0);
+        // 2050 * 0.95 = 1947.5 -> rounds to 1950.
+        assert_eq!(calorie_planka(2050.0, BalanceState::Surplus), 1950.0);
+    }
 }

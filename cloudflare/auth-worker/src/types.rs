@@ -14,7 +14,8 @@ pub struct TokenClaims {
     pub iat: i64,
     pub exp: i64,
     pub caps: Vec<String>,
-    pub token_id: String,
+    #[serde(default)]
+    pub token_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,19 +99,6 @@ pub struct PairStatusResponse {
     pub status: PairingStatus,
 }
 
-// ---- Push subscription types ----
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PushSubscription {
-    pub endpoint: String,
-    pub keys: PushSubscriptionKeys,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PushSubscriptionKeys {
-    pub p256dh: String, // base64url
-    pub auth: String,   // base64url
-}
 
 #[cfg(test)]
 mod tests {
@@ -138,7 +126,7 @@ mod tests {
             iat: 1700000000,
             exp: 1700003600,
             caps: vec!["write".to_string()],
-            token_id: "tok-abc".to_string(),
+            token_id: Some("tok-abc".to_string()),
         };
         let json = serde_json::to_string(&claims).expect("serialize TokenClaims");
         let decoded: TokenClaims = serde_json::from_str(&json).expect("deserialize TokenClaims");

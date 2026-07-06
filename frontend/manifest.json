@@ -1,6 +1,6 @@
 {
-  "name": "Food Tracker",
-  "short_name": "FT",
+  "name": "Renorma",
+  "short_name": "Renorma",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

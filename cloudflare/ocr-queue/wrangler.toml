@@ -1,0 +1,69 @@
+name = "ocr-queue-dev"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-12-01"
+
+[build]
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
+# an unpinned `cargo install worker-build` pulls a newer build that passes
+# wasm-bindgen flags the locked CLI doesn't support.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
+
+# Job queue, status AND the image blob (chunked) live in a single Durable Object,
+# pinned to Western Europe (closest region CF offers to Italy, where the poller's
+# VPN egresses).
+[[durable_objects.bindings]]
+name = "QUEUE_DO"
+class_name = "QueueDO"
+
+# Fresh DO: the worker is deleted + recreated to wipe old (KV-API) data, so a
+# single v1 SQLite migration applies cleanly to the brand-new namespace.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["QueueDO"]
+
+# Cross-script binding to the subscription DO owned by payment-worker, so we can
+# refuse to enqueue jobs for users without an active Trial/Paid plan.
+[[durable_objects.bindings]]
+name = "SUBSCRIPTION_DO"
+class_name = "SubscriptionDO"
+script_name = "payment-worker-dev"
+
+[vars]
+# Client requests are authenticated with the shared app JWT.
+JWT_SECRET = "dev-secret-change-in-production"
+# The on-prem poller authenticates with this bearer secret.
+POLLER_SECRET = "dev-poller-secret-change-in-production"
+# Region hint for the queue DO.
+QUEUE_REGION = "weur"
+
+# ── Production (separate worker on ocr.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+#          wrangler secret put POLLER_SECRET --env production
+[env.production]
+name = "ocr-queue-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "ocr.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "QUEUE_DO"
+class_name = "QueueDO"
+
+# Cross-script: the prod subscription DO owned by payment-worker-prod.
+[[env.production.durable_objects.bindings]]
+name = "SUBSCRIPTION_DO"
+class_name = "SubscriptionDO"
+script_name = "payment-worker-prod"
+
+# JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
+# [vars] value above). The binding name MUST equal the env name the code reads.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"
+
+[env.production.vars]
+QUEUE_REGION = "weur"

@@ -46,8 +46,28 @@ pub struct Food {
     pub is_recipe: bool,
     pub recipe_id: Option<String>,
     pub archived: bool,
+    /// Restaurant / eaten-out food: excluded from recipe ingredients, carries a
+    /// +20% calorie surcharge, and is shown with a dashed marker in lists.
+    #[serde(default)]
+    pub is_restaurant: bool,
+    /// AI-assigned tag: low-calorie snack (raw vegetable/fruit to nibble between
+    /// meals). `None` = not yet classified; `Some(_)` = cached AI verdict. Tagged
+    /// lazily in the background while preparing the daily summary (NOT at food
+    /// creation), then cached here. Drives the chapter-2 snack mechanic and the
+    /// summary's "snack logged" fact. Language-independent (replaces the old
+    /// Russian name-substring match).
+    #[serde(default)]
+    pub is_snack: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl Food {
+    /// Calories accounted for this food. Restaurant meals carry a +20% surcharge
+    /// (kitchens add hidden fats/oils to almost any dish).
+    pub fn effective_kcal(&self) -> f64 {
+        if self.is_restaurant { self.kcal * 1.2 } else { self.kcal }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +100,9 @@ pub struct DiaryEntry {
     pub date: String,
     pub time: Option<String>,
     pub grams: f64,
+    /// Inedible waste (bones, pits, …) in grams. Calories count `grams - waste_grams`.
+    #[serde(default)]
+    pub waste_grams: f64,
     pub meal_label: Option<String>,
     #[serde(default)]
     pub deleted: bool,
@@ -102,6 +125,28 @@ pub struct FoodDraft {
     /// Once added to diary, points to the created Food
     pub food_id: Option<String>,
     pub created_at: String,
+}
+
+impl FoodDraft {
+    pub fn to_food(&self) -> Food {
+        Food {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            kcal: self.kcal,
+            protein: self.protein,
+            fat: self.fat,
+            carbs: self.carbs,
+            nutrients: self.nutrients.clone(),
+            package_weight: self.package_weight,
+            is_recipe: false,
+            recipe_id: None,
+            archived: false,
+            is_restaurant: false,
+            is_snack: None,
+            created_at: self.created_at.clone(),
+            updated_at: String::new(),
+        }
+    }
 }
 
 // --- Request/Response DTOs ---
@@ -291,6 +336,7 @@ pub enum GoalUnit {
     G,
     Mg,
     Mcg,
+    Steps,
 }
 
 impl GoalUnit {
@@ -300,6 +346,7 @@ impl GoalUnit {
             GoalUnit::G => "g",
             GoalUnit::Mg => "mg",
             GoalUnit::Mcg => "µg",
+            GoalUnit::Steps => "steps",
         }
     }
 }
@@ -374,7 +421,79 @@ pub struct ListGoalOutput {
     pub goals: Vec<Goal>,
 }
 
+// --- Weight tracking ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeightEntry {
+    pub id: String,
+    pub date: String,
+    pub weight_kg: f64,
+    pub no_water: bool,
+    pub no_food: bool,
+    pub no_wash: bool,
+    pub used_toilet: bool,
+    pub morning: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+// --- Step tracking ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepEntry {
+    pub id: String,
+    pub date: String,
+    pub steps: u32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 // --- Sync types ---
+
+/// A story-progress flag, synced last-writer-wins by `updated_at` (like foods/goals).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoryFlag {
+    pub key: String,
+    pub value: bool,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
+/// The synced user profile, modelled as a keyed singleton (one row, key
+/// "profile") so it rides the same array-of-keyed-rows, LWW-by-`updated_at`
+/// machinery as story flags. All fields `#[serde(default)]` so old clients and
+/// servers stay compatible.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileRow {
+    pub key: String, // always "profile"
+    #[serde(default)]
+    pub sex: Option<String>, // "male" | "female" | None
+    #[serde(default)]
+    pub height_cm: Option<f64>,
+    #[serde(default)]
+    pub birth_year: Option<i32>,
+    /// The course goal: "lose" | "maintain". None ⇒ default "lose".
+    #[serde(default)]
+    pub goal: Option<String>,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
+/// An explicit deletion record (tombstone). Deleting an entity on the client
+/// produces one of these; it is synced like any other row and APPLIED on every
+/// device (remove the target locally). The backend never hard-deletes entities —
+/// it only accumulates these records — so a deletion always propagates and can't
+/// be undone by a stale copy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeletionRecord {
+    /// Unique id of this deletion record.
+    pub id: String,
+    /// Store/entity kind of the deleted target (e.g. "diary", "goals").
+    pub kind: String,
+    /// Id of the deleted entity.
+    pub target_id: String,
+    pub created_at: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncDumpResponse {
@@ -383,6 +502,16 @@ pub struct SyncDumpResponse {
     pub recipes: Vec<Recipe>,
     pub recipe_ingredients: Vec<RecipeIngredient>,
     pub goals: Vec<Goal>,
+    #[serde(default)]
+    pub story: Vec<StoryFlag>,
+    #[serde(default)]
+    pub profile: Vec<ProfileRow>,
+    #[serde(default)]
+    pub weight_entries: Vec<WeightEntry>,
+    #[serde(default)]
+    pub step_entries: Vec<StepEntry>,
+    #[serde(default)]
+    pub deletions: Vec<DeletionRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -392,6 +521,16 @@ pub struct SyncPushPayload {
     pub recipes: Vec<Recipe>,
     pub recipe_ingredients: Vec<RecipeIngredient>,
     pub goals: Vec<Goal>,
+    #[serde(default)]
+    pub story: Vec<StoryFlag>,
+    #[serde(default)]
+    pub profile: Vec<ProfileRow>,
+    #[serde(default)]
+    pub weight_entries: Vec<WeightEntry>,
+    #[serde(default)]
+    pub step_entries: Vec<StepEntry>,
+    #[serde(default)]
+    pub deletions: Vec<DeletionRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

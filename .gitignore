@@ -9,6 +9,17 @@ frontend/styles/output.css
 frontend/dist
 .playwright-mcp/
 screenshot-*.png
+/*.png
+.wrangler/
 *.tgz
 test-results/
 e2e/test-results/
+
+.env
+renorma-lp.jpeg
+# Abandoned standalone pay app prototype — kept local, superseded by the Telegram Mini App.
+/pay/
+.telegram-webhook-secret
+.lava-hook-api-key
+.admin-approve-secret
+.lava-api-key

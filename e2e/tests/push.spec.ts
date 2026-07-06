@@ -1,11 +1,13 @@
 import { test, expect, type CDPSession } from '@playwright/test';
 import { registerAccount } from './helpers';
 
-const AUTH_BASE = 'https://auth-worker.vg-stavenko.workers.dev';
+// Push lives on the main-flow worker (push.renorma.app /
+// main-flow-dev.vg-stavenko.workers.dev), NOT auth-worker.
+const PUSH_BASE = 'https://main-flow-dev.vg-stavenko.workers.dev';
 
 test.describe('Push notification flow', () => {
   test('VAPID public key endpoint works', async ({ request }) => {
-    const resp = await request.get(`${AUTH_BASE}/push/vapid-key`);
+    const resp = await request.get(`${PUSH_BASE}/push/vapid-key`);
     expect(resp.status()).toBe(200);
 
     const body = await resp.json();
@@ -22,7 +24,7 @@ test.describe('Push notification flow', () => {
   });
 
   test('Push subscribe endpoint requires auth', async ({ request }) => {
-    const resp = await request.post(`${AUTH_BASE}/push/subscribe`, {
+    const resp = await request.post(`${PUSH_BASE}/push/subscribe`, {
       data: {
         endpoint: 'https://fake-push.example.com/sub/123',
         keys: {
@@ -48,7 +50,7 @@ test.describe('Push notification flow', () => {
     expect(token).toBeTruthy();
 
     // POST /push/subscribe with Bearer token and mock subscription data
-    const resp = await page.request.post(`${AUTH_BASE}/push/subscribe`, {
+    const resp = await page.request.post(`${PUSH_BASE}/push/subscribe`, {
       data: {
         endpoint: 'https://fcm.googleapis.com/fcm/send/test-e2e-fake',
         keys: {
@@ -81,16 +83,20 @@ test.describe('Push notification flow', () => {
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    // Verify "Уведомления" / "Notifications" section heading exists
-    const notifHeader = page.locator('h2', { hasText: /Уведомления|Notifications/ });
+    // Verify the "Уведомления" / "Notifications" section label exists. In the
+    // redesigned iOS-style settings list this is a section <p>, not an <h2>.
+    const notifHeader = page.locator('p', { hasText: /^Уведомления$|^Notifications$/ });
     await expect(notifHeader).toBeVisible({ timeout: 5_000 });
 
-    // Verify the enable/disable button is present
-    // The button text depends on push support; in headless Chromium without
-    // a service worker the page shows "not supported" text instead of a button.
-    // We check for either the button OR the "not supported" message.
-    const enableBtn = page.locator('button', { hasText: /Включить|Enable|Отключить|Disable/ });
-    const notSupported = page.locator('text=/не поддерживаются|not supported/');
+    // Verify the notification control is present. The push button renders only
+    // when push is supported; otherwise the section shows a "not supported"
+    // note. We accept either: the subscribe/check button (testid
+    // settings-btn-notifications, label "Включить и проверить"/"Проверить"/
+    // "Enable and check"/"Check") OR the not-supported message.
+    const enableBtn = page.getByTestId('settings-btn-notifications');
+    const notSupported = page.locator(
+      'text=/не поддерживаются в этом браузере|not supported in this browser/',
+    );
     const hasButton = await enableBtn.isVisible().catch(() => false);
     const hasNotSupported = await notSupported.isVisible().catch(() => false);
     expect(hasButton || hasNotSupported).toBe(true);

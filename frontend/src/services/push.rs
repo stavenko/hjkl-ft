@@ -3,51 +3,59 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 
 const KEY_PUSH_SUBSCRIBED: &str = "push_subscribed";
+const KEY_PUSH_ONBOARDING_DISMISSED: &str = "push_onboarding_dismissed";
+
+use super::app_flags;
 
 fn window() -> web_sys::Window {
     web_sys::window().expect("no window")
 }
 
-fn storage() -> web_sys::Storage {
-    window()
-        .local_storage()
-        .ok()
-        .flatten()
-        .expect("no localStorage")
-}
-
-/// Check whether the Push API is available in this browser.
+/// Check whether the Push API is available in this browser. Requires a service
+/// worker AND the `Notification` + `PushManager` globals — on iOS Safari those
+/// exist only in a home-screen (standalone) PWA, not a regular tab, so without
+/// this guard the onboarding's `Notification.requestPermission()` throws
+/// "Can't find variable: Notification".
 pub fn is_supported() -> bool {
-    let nav = window().navigator();
-    let sw = js_sys::Reflect::get(&nav, &"serviceWorker".into());
-    match sw {
-        Ok(val) => !val.is_undefined() && !val.is_null(),
-        Err(_) => false,
-    }
+    let win = window();
+    let present = |obj: &wasm_bindgen::JsValue, key: &str| {
+        js_sys::Reflect::get(obj, &wasm_bindgen::JsValue::from_str(key))
+            .map(|v| !v.is_undefined() && !v.is_null())
+            .unwrap_or(false)
+    };
+    present(win.navigator().as_ref(), "serviceWorker")
+        && present(win.as_ref(), "Notification")
+        && present(win.as_ref(), "PushManager")
 }
 
-/// Check localStorage flag indicating an active subscription.
+/// Whether this device has an active push subscription (per-user flag).
 pub fn is_subscribed() -> bool {
-    storage()
-        .get_item(KEY_PUSH_SUBSCRIBED)
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false)
+    app_flags::get_bool(KEY_PUSH_SUBSCRIBED)
 }
 
 fn set_subscribed(val: bool) {
-    if val {
-        storage()
-            .set_item(KEY_PUSH_SUBSCRIBED, "true")
-            .expect("write push_subscribed");
-    } else {
-        let _ = storage().remove_item(KEY_PUSH_SUBSCRIBED);
-    }
+    app_flags::set_bool(KEY_PUSH_SUBSCRIBED, val);
+}
+
+pub fn needs_push_onboarding() -> bool {
+    is_supported() && !is_subscribed() && !onboarding_dismissed()
+}
+
+fn onboarding_dismissed() -> bool {
+    app_flags::get_bool(KEY_PUSH_ONBOARDING_DISMISSED)
+}
+
+pub fn dismiss_onboarding() {
+    app_flags::set_bool(KEY_PUSH_ONBOARDING_DISMISSED, true);
 }
 
 /// Request notification permission. Returns `true` if granted.
 pub async fn request_permission() -> Result<bool, String> {
+    // Guard: `Notification` may be absent (iOS Safari outside a standalone PWA);
+    // touching web_sys::Notification then throws a ReferenceError.
+    if !is_supported() {
+        return Err("notifications_unsupported".to_string());
+    }
     let promise = web_sys::Notification::request_permission()
         .map_err(|e| format!("{:?}", e))?;
     let result = JsFuture::from(promise)
@@ -71,17 +79,21 @@ pub async fn subscribe() -> Result<(), String> {
         return Err("Notification permission denied".to_string());
     }
 
-    let auth_base = {
+    let push_base = {
         let cfg = crate::services::config::get();
-        if cfg.auth_base_url.is_empty() {
-            cfg.api_base_url.clone()
+        if cfg.push_base_url.is_empty() {
+            if cfg.auth_base_url.is_empty() {
+                cfg.api_base_url.clone()
+            } else {
+                cfg.auth_base_url.clone()
+            }
         } else {
-            cfg.auth_base_url.clone()
+            cfg.push_base_url.clone()
         }
     };
 
     // 1. Fetch VAPID public key
-    let vapid_key = fetch_vapid_key(&auth_base).await?;
+    let vapid_key = fetch_vapid_key(&push_base).await?;
 
     // 2. Get service worker registration
     let registration = get_sw_registration().await?;
@@ -91,9 +103,10 @@ pub async fn subscribe() -> Result<(), String> {
 
     // 4. Extract subscription JSON and POST to server
     let sub_json = subscription_to_json(&subscription)?;
-    post_subscription(&auth_base, &sub_json).await?;
+    post_subscription(&push_base, &sub_json).await?;
 
     set_subscribed(true);
+    dismiss_onboarding();
     Ok(())
 }
 
@@ -134,6 +147,115 @@ pub async fn unsubscribe() -> Result<(), String> {
     }
 
     set_subscribed(false);
+    Ok(())
+}
+
+/// Ask the server to send a test push notification to the current user's
+/// devices. The caller decides the body and the deep-link `url` (where tapping
+/// the notification should take the user) based on story progress.
+pub async fn send_test(body: &str, url: &str) -> Result<(), String> {
+    let push_base = {
+        let cfg = crate::services::config::get();
+        if cfg.push_base_url.is_empty() {
+            if cfg.auth_base_url.is_empty() {
+                cfg.api_base_url.clone()
+            } else {
+                cfg.auth_base_url.clone()
+            }
+        } else {
+            cfg.push_base_url.clone()
+        }
+    };
+
+    let token = crate::services::auth::get_token()
+        .ok_or_else(|| "not authenticated".to_string())?;
+
+    let endpoint = format!("{}/push/test", push_base);
+    let body_str = serde_json::json!({ "body": body, "url": url }).to_string();
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    opts.set_body(&JsValue::from_str(&body_str));
+
+    let headers = web_sys::Headers::new().map_err(|e| format!("{:?}", e))?;
+    headers
+        .set("Content-Type", "application/json")
+        .map_err(|e| format!("{:?}", e))?;
+    headers
+        .set("Authorization", &format!("Bearer {}", token))
+        .map_err(|e| format!("{:?}", e))?;
+    opts.set_headers(&headers);
+
+    let request = web_sys::Request::new_with_str_and_init(&endpoint, &opts)
+        .map_err(|e| format!("{:?}", e))?;
+
+    let resp_val = JsFuture::from(window().fetch_with_request(&request))
+        .await
+        .map_err(|e| format!("{:?}", e))?;
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
+
+    if !resp.ok() {
+        let text = JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
+            .await
+            .map_err(|e| format!("{:?}", e))?;
+        let text = text.as_string().unwrap_or_default();
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+
+    Ok(())
+}
+
+pub async fn sync_notification_schedule(schedule: serde_json::Value) -> Result<(), String> {
+    let push_base = {
+        let cfg = crate::services::config::get();
+        if cfg.push_base_url.is_empty() {
+            if cfg.auth_base_url.is_empty() {
+                cfg.api_base_url.clone()
+            } else {
+                cfg.auth_base_url.clone()
+            }
+        } else {
+            cfg.push_base_url.clone()
+        }
+    };
+
+    let token = match crate::services::auth::get_token() {
+        Some(t) => t,
+        None => return Ok(()),
+    };
+
+    let url = format!("{}/schedule", push_base);
+    let body_str = serde_json::to_string(&schedule).map_err(|e| e.to_string())?;
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    opts.set_body(&JsValue::from_str(&body_str));
+
+    let headers = web_sys::Headers::new().map_err(|e| format!("{:?}", e))?;
+    headers
+        .set("Content-Type", "application/json")
+        .map_err(|e| format!("{:?}", e))?;
+    headers
+        .set("Authorization", &format!("Bearer {}", token))
+        .map_err(|e| format!("{:?}", e))?;
+    opts.set_headers(&headers);
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts)
+        .map_err(|e| format!("{:?}", e))?;
+
+    let resp_val = JsFuture::from(window().fetch_with_request(&request))
+        .await
+        .map_err(|e| format!("{:?}", e))?;
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
+
+    if !resp.ok() {
+        let text = JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
+            .await
+            .map_err(|e| format!("{:?}", e))?;
+        let text = text.as_string().unwrap_or_default();
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+
     Ok(())
 }
 

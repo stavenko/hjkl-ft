@@ -1,0 +1,13 @@
+# Production worker URLs (fit.renorma.app app → *.renorma.app workers).
+# Swapped into dist/config/frontend.toml by scripts/deploy-prod.sh; the dev
+# config under config/ is used for the renorma-fit-dev.pages.dev test env.
+api_base_url = ""
+auth_base_url = "https://auth.renorma.app"
+push_base_url = "https://push.renorma.app"
+ai_base_url = "https://ai.renorma.app"
+payment_base_url = "https://pay.renorma.app"
+ocr_queue_base_url = "https://ocr.renorma.app"
+sync_base_url = "https://sync.renorma.app"
+bug_report_base_url = "https://bug.renorma.app"
+support_base_url = "https://support.renorma.app"
+landing_url = "https://renorma.app"

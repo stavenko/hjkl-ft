@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use wasm_bindgen::JsCast;
 use worker::*;
 
-use crate::types::{PairingSession, PairingStatus, PushSubscription};
+use crate::types::{PairingSession, PairingStatus};
 
 use crate::types::{TokenListResponse, TokenMetadata};
 
@@ -25,10 +25,24 @@ const STORAGE_KEY_PAIRING_PREFIX: &str = "pairing:";
 const STORAGE_KEY_STATE_PREFIX: &str = "pk_state:";
 const STORAGE_KEY_TOKEN_PREFIX: &str = "token:";
 const STORAGE_KEY_USER_TOKENS_PREFIX: &str = "user_tokens:";
-const STORAGE_KEY_PUSH_SUB_PREFIX: &str = "push_sub:";
-const STORAGE_KEY_USER_PUSH_SUBS_PREFIX: &str = "user_push_subs:";
+// Backup-phrase reverse index (normalized phrase → user_id) for username-less login,
+// and a per-normalized-phrase fixed-window brute-force limiter.
+const STORAGE_KEY_PHRASE_PREFIX: &str = "phrase:";
+const STORAGE_KEY_PHRASE_RL_PREFIX: &str = "phrase_rl:";
+// Failed phrase-login attempts allowed per normalized phrase per window before lockout.
+const PHRASE_RL_MAX: i64 = 8;
+const PHRASE_RL_WINDOW_MS: i64 = 3_600_000; // 1 hour
 
 type HmacSha256 = Hmac<Sha256>;
+
+/// Inputs are the FIXED env-derived configs plus the ceremony origin.
+/// Returns true => use ADMIN config, false => use APP config.
+/// Selection is pure string equality against the configured admin origin;
+/// a client-supplied origin is ONLY ever used as a selector, never copied
+/// into the returned config.
+fn select_is_admin(origin: &str, admin_rp_origin: &str) -> bool {
+    !origin.is_empty() && origin == admin_rp_origin
+}
 
 // ---- Recovery hash helpers (HMAC-SHA256 based) ----
 
@@ -42,6 +56,18 @@ pub(crate) struct RecoveryHashData {
 struct UserMetadata {
     recovery_hash_data: Option<RecoveryHashData>,
     created_at: i64,
+    /// Plaintext backup phrase (user explicit: NO hash — it must be re-showable in
+    /// Settings). Paired with the `phrase:{normalized}` → user_id reverse index so login
+    /// needs only the phrase. `serde(default)` so pre-existing records deserialize.
+    #[serde(default)]
+    recovery_phrase: Option<String>,
+}
+
+/// Canonical form of a backup phrase for storage/lookup: lowercased, whitespace
+/// collapsed to single spaces, trimmed. Both `set` and `resolve` normalize identically
+/// so the reverse index round-trips regardless of the user's spacing/casing.
+fn normalize_phrase(phrase: &str) -> String {
+    phrase.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
 fn compute_recovery_hmac(recovery_key: &str, salt: &[u8]) -> Vec<u8> {
@@ -205,23 +231,66 @@ pub struct AuthDO {
 }
 
 impl AuthDO {
-    fn passkey_config(&self) -> PasskeyConfig {
-        let rp_id = self
+    /// The fixed app RP_ORIGIN env value (used to resolve app-only flows like
+    /// pairing to the app config). Falls back to https://{RP_ID} like the
+    /// original config logic.
+    fn app_rp_origin(&self) -> String {
+        self.env
+            .var("RP_ORIGIN")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|_| {
+                format!(
+                    "https://{}",
+                    self.env
+                        .var("RP_ID")
+                        .map(|v| v.to_string())
+                        .unwrap_or_default()
+                )
+            })
+    }
+
+    fn passkey_config(&self, origin: &str) -> Result<PasskeyConfig> {
+        // Read all four FIXED env values up front (vars only, never the client origin).
+        let app_rp_id = self
             .env
             .var("RP_ID")
             .map(|v| v.to_string())
-            .unwrap_or_else(|_| "localhost".to_string());
-        let rp_origin = self
+            .map_err(|_| Error::RustError("RP_ID not configured".into()))?;
+        let app_rp_origin = self
             .env
             .var("RP_ORIGIN")
             .map(|v| v.to_string())
-            .unwrap_or_else(|_| format!("https://{rp_id}"));
-        PasskeyConfig {
+            .unwrap_or_else(|_| format!("https://{app_rp_id}"));
+        let admin_rp_id = self
+            .env
+            .var("ADMIN_RP_ID")
+            .map(|v| v.to_string())
+            .map_err(|_| Error::RustError("ADMIN_RP_ID not configured".into()))?;
+        let admin_rp_origin = self
+            .env
+            .var("ADMIN_RP_ORIGIN")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|_| format!("https://{admin_rp_id}"));
+
+        // Fail loudly on empty origin: do NOT silently fall back to a scope.
+        if origin.is_empty() {
+            return Err(Error::RustError("missing ceremony origin".into()));
+        }
+
+        let (rp_id, rp_origin) = if select_is_admin(origin, &admin_rp_origin) {
+            (admin_rp_id, admin_rp_origin)
+        } else {
+            // App path selects EXACTLY the existing app config — no behavior change,
+            // no downgrade, and the client origin is discarded here.
+            (app_rp_id, app_rp_origin)
+        };
+
+        Ok(PasskeyConfig {
             rp_id,
             rp_name: "Food Tracker".to_string(),
-            origin: rp_origin,
+            origin: rp_origin, // FIXED env value, never the client-supplied origin
             state_ttl: 300,
-        }
+        })
     }
 
     // ---- Storage helpers ----
@@ -242,9 +311,9 @@ impl AuthDO {
                 let arr: js_sys::Array = entry.unchecked_into();
                 let val = arr.get(1);
                 if let Ok(json_str) = serde_wasm_bindgen::from_value::<String>(val) {
-                    if let Ok(cred) = serde_json::from_str::<StoredPasskey>(&json_str) {
-                        result.push(cred);
-                    }
+                    let cred: StoredPasskey = serde_json::from_str(&json_str)
+                        .map_err(|e| Error::RustError(format!("parse credential: {e}")))?;
+                    result.push(cred);
                 }
             }
         }
@@ -258,9 +327,9 @@ impl AuthDO {
             let key = format!("{STORAGE_KEY_CRED_PREFIX}{cred_id}");
             let stored: Option<String> = self.state.storage().get(&key).await?;
             if let Some(json) = stored {
-                if let Ok(cred) = serde_json::from_str::<StoredPasskey>(&json) {
-                    result.push(cred);
-                }
+                let cred: StoredPasskey = serde_json::from_str(&json)
+                    .map_err(|e| Error::RustError(format!("parse credential: {e}")))?;
+                result.push(cred);
             }
         }
         Ok(result)
@@ -408,7 +477,7 @@ impl AuthDO {
 
     // ---- Registration handlers ----
 
-    async fn handle_register_begin(&self, user_id: Option<&str>, display_name: Option<&str>) -> Result<Response> {
+    async fn handle_register_begin(&self, user_id: Option<&str>, display_name: Option<&str>, origin: &str) -> Result<Response> {
         let user_id = match user_id {
             Some(id) if !id.is_empty() => id.to_string(),
             _ => uuid::Uuid::new_v4().to_string(),
@@ -419,7 +488,7 @@ impl AuthDO {
             _ => user_id.clone(),
         };
 
-        let config = self.passkey_config();
+        let config = self.passkey_config(origin)?;
         let credentials = self.load_user_credentials(&user_id).await?;
         let states = self.load_states().await?;
         let store = DoPasskeyStore::new(credentials, states);
@@ -429,6 +498,7 @@ impl AuthDO {
             let meta = UserMetadata {
                 recovery_hash_data: None,
                 created_at: now_ms(),
+                recovery_phrase: None,
             };
             self.save_user_metadata(&user_id, &meta).await?;
         }
@@ -444,8 +514,8 @@ impl AuthDO {
         Response::from_json(&body)
     }
 
-    async fn handle_register_finish(&self, credential: serde_json::Value, user_id: &str) -> Result<Response> {
-        let config = self.passkey_config();
+    async fn handle_register_finish(&self, credential: serde_json::Value, user_id: &str, origin: &str) -> Result<Response> {
+        let config = self.passkey_config(origin)?;
         let credentials = self.load_user_credentials(user_id).await?;
         let states = self.load_states().await?;
         let store = DoPasskeyStore::new(credentials, states);
@@ -471,8 +541,8 @@ impl AuthDO {
 
     // ---- Authentication handlers (discoverable, no username) ----
 
-    async fn handle_authenticate_begin(&self) -> Result<Response> {
-        let config = self.passkey_config();
+    async fn handle_authenticate_begin(&self, origin: &str) -> Result<Response> {
+        let config = self.passkey_config(origin)?;
         // Load ALL credentials for discoverable auth
         let credentials = self.load_all_credentials().await?;
         let states = self.load_states().await?;
@@ -491,8 +561,9 @@ impl AuthDO {
     async fn handle_authenticate_finish(
         &self,
         credential: serde_json::Value,
+        origin: &str,
     ) -> Result<Response> {
-        let config = self.passkey_config();
+        let config = self.passkey_config(origin)?;
         // Load ALL credentials so we can look up by credential ID
         let credentials = self.load_all_credentials().await?;
         let states = self.load_states().await?;
@@ -664,7 +735,8 @@ impl AuthDO {
             Some(_) => user_id.clone(), // existing user, use user_id as fallback
             None => user_id.clone(),
         };
-        let config = self.passkey_config();
+        // Pairing is an app-only flow; resolve to the app config explicitly.
+        let config = self.passkey_config(&self.app_rp_origin())?;
         let credentials = self.load_user_credentials(&user_id).await?;
         let states = self.load_states().await?;
         let store = DoPasskeyStore::new(credentials, states);
@@ -698,8 +770,8 @@ impl AuthDO {
 
         let user_id = session.user_id.clone();
 
-        // Complete passkey registration
-        let config = self.passkey_config();
+        // Complete passkey registration. Pairing is an app-only flow.
+        let config = self.passkey_config(&self.app_rp_origin())?;
         let credentials = self.load_user_credentials(&user_id).await?;
         let states = self.load_states().await?;
         let store = DoPasskeyStore::new(credentials, states);
@@ -827,120 +899,6 @@ impl AuthDO {
         Response::from_json(&resp)
     }
 
-    // ---- Push subscription handlers ----
-
-    fn subscription_hash(endpoint: &str) -> String {
-        use sha2::Digest;
-        let hash = sha2::Sha256::digest(endpoint.as_bytes());
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&hash[..16])
-    }
-
-    async fn handle_push_subscribe(
-        &self,
-        user_id: &str,
-        subscription: PushSubscription,
-    ) -> Result<Response> {
-        let sub_hash = Self::subscription_hash(&subscription.endpoint);
-
-        // Store the subscription
-        let sub_key = format!("{STORAGE_KEY_PUSH_SUB_PREFIX}{user_id}:{sub_hash}");
-        let sub_json = serde_json::to_string(&subscription)
-            .map_err(|e| Error::RustError(format!("serialize push subscription: {e}")))?;
-        self.state.storage().put(&sub_key, sub_json).await?;
-
-        // Add to user's subscription list
-        let list_key = format!("{STORAGE_KEY_USER_PUSH_SUBS_PREFIX}{user_id}");
-        let stored: Option<String> = self.state.storage().get(&list_key).await?;
-        let mut sub_hashes: Vec<String> = match stored {
-            Some(json) => serde_json::from_str(&json)
-                .map_err(|e| Error::RustError(format!("parse user_push_subs: {e}")))?,
-            None => Vec::new(),
-        };
-        if !sub_hashes.contains(&sub_hash) {
-            sub_hashes.push(sub_hash);
-            let list_json = serde_json::to_string(&sub_hashes)
-                .map_err(|e| Error::RustError(format!("serialize sub hash list: {e}")))?;
-            self.state.storage().put(&list_key, list_json).await?;
-        }
-
-        Response::from_json(&serde_json::json!({ "ok": true }))
-    }
-
-    async fn handle_push_unsubscribe(
-        &self,
-        user_id: &str,
-        endpoint: &str,
-    ) -> Result<Response> {
-        let sub_hash = Self::subscription_hash(endpoint);
-
-        // Delete the subscription
-        let sub_key = format!("{STORAGE_KEY_PUSH_SUB_PREFIX}{user_id}:{sub_hash}");
-        self.state.storage().delete(&sub_key).await?;
-
-        // Remove from user's subscription list
-        let list_key = format!("{STORAGE_KEY_USER_PUSH_SUBS_PREFIX}{user_id}");
-        let stored: Option<String> = self.state.storage().get(&list_key).await?;
-        if let Some(json) = stored {
-            let mut sub_hashes: Vec<String> = serde_json::from_str(&json)
-                .map_err(|e| Error::RustError(format!("parse user_push_subs: {e}")))?;
-            sub_hashes.retain(|h| h != &sub_hash);
-            let list_json = serde_json::to_string(&sub_hashes)
-                .map_err(|e| Error::RustError(format!("serialize sub hash list: {e}")))?;
-            self.state.storage().put(&list_key, list_json).await?;
-        }
-
-        Response::from_json(&serde_json::json!({ "ok": true }))
-    }
-
-    async fn handle_push_list(&self, user_id: &str) -> Result<Response> {
-        let list_key = format!("{STORAGE_KEY_USER_PUSH_SUBS_PREFIX}{user_id}");
-        let stored: Option<String> = self.state.storage().get(&list_key).await?;
-        let sub_hashes: Vec<String> = match stored {
-            Some(json) => serde_json::from_str(&json)
-                .map_err(|e| Error::RustError(format!("parse user_push_subs: {e}")))?,
-            None => Vec::new(),
-        };
-
-        let mut subscriptions = Vec::new();
-        for hash in &sub_hashes {
-            let sub_key = format!("{STORAGE_KEY_PUSH_SUB_PREFIX}{user_id}:{hash}");
-            let stored: Option<String> = self.state.storage().get(&sub_key).await?;
-            if let Some(json) = stored {
-                if let Ok(sub) = serde_json::from_str::<PushSubscription>(&json) {
-                    subscriptions.push(sub);
-                }
-            }
-        }
-
-        Response::from_json(&serde_json::json!({ "subscriptions": subscriptions }))
-    }
-
-    async fn handle_push_list_all(&self) -> Result<Response> {
-        // List all push subscriptions across all users
-        let map = self.state.storage()
-            .list_with_options(
-                worker::durable::ListOptions::new().prefix(STORAGE_KEY_PUSH_SUB_PREFIX),
-            )
-            .await?;
-
-        let mut subscriptions = Vec::new();
-        let iter = js_sys::try_iter(&map).ok().flatten();
-        if let Some(iter) = iter {
-            for entry in iter {
-                let entry = entry.map_err(Error::from)?;
-                let arr: js_sys::Array = entry.unchecked_into();
-                let val = arr.get(1);
-                if let Ok(json_str) = serde_wasm_bindgen::from_value::<String>(val) {
-                    if let Ok(sub) = serde_json::from_str::<PushSubscription>(&json_str) {
-                        subscriptions.push(sub);
-                    }
-                }
-            }
-        }
-
-        Response::from_json(&subscriptions)
-    }
-
     // ---- Recovery handlers ----
 
     async fn handle_recovery_set(
@@ -954,10 +912,111 @@ impl AuthDO {
             .unwrap_or_else(|| UserMetadata {
                 recovery_hash_data: None,
                 created_at: now_ms(),
+                recovery_phrase: None,
             });
         meta.recovery_hash_data = Some(hash_data);
         self.save_user_metadata(user_id, &meta).await?;
         Response::from_json(&serde_json::json!({ "status": "ok" }))
+    }
+
+    // ---- Backup-phrase handlers (plaintext + reverse index; username-less login) ----
+
+    /// Set/replace the user's backup phrase. Normalizes, rejects an empty/too-short
+    /// phrase, and enforces global uniqueness via the reverse index (a collision with
+    /// ANOTHER user → `{status:"taken"}` so the caller regenerates). Idempotent for the
+    /// same user re-setting the same phrase. Removes the user's previous index entry.
+    async fn handle_phrase_set(&self, user_id: &str, phrase: &str) -> Result<Response> {
+        let norm = normalize_phrase(phrase);
+        // Require at least 3 words — a real backup phrase, not a stray token.
+        if norm.split(' ').filter(|w| !w.is_empty()).count() < 3 {
+            return Response::from_json(&serde_json::json!({ "status": "too_short" }));
+        }
+        let index_key = format!("{STORAGE_KEY_PHRASE_PREFIX}{norm}");
+        // Uniqueness: reject only if the phrase is already owned by a DIFFERENT user.
+        if let Some(owner) = self.state.storage().get::<String>(&index_key).await.ok().flatten() {
+            if owner != user_id {
+                return Response::from_json(&serde_json::json!({ "status": "taken" }));
+            }
+        }
+        let mut meta = self
+            .load_user_metadata(user_id)
+            .await?
+            .unwrap_or_else(|| UserMetadata {
+                recovery_hash_data: None,
+                created_at: now_ms(),
+                recovery_phrase: None,
+            });
+        // Drop the stale reverse-index entry for a replaced phrase.
+        if let Some(old) = meta.recovery_phrase.as_deref() {
+            let old_norm = normalize_phrase(old);
+            if old_norm != norm {
+                let old_key = format!("{STORAGE_KEY_PHRASE_PREFIX}{old_norm}");
+                self.state.storage().delete(&old_key).await?;
+            }
+        }
+        // Store plaintext on the user (re-showable) + reverse index for lookup.
+        meta.recovery_phrase = Some(phrase.trim().to_string());
+        self.save_user_metadata(user_id, &meta).await?;
+        self.state.storage().put(&index_key, user_id.to_string()).await?;
+        Response::from_json(&serde_json::json!({ "status": "ok" }))
+    }
+
+    /// Resolve a phrase to its user_id for login (worker mints the JWT). Fixed-window
+    /// per-phrase brute-force limiter: too many failures within the window → 429. A
+    /// successful resolve clears the counter. Unknown phrase → `{user_id:null}` (and
+    /// counts against the limiter).
+    async fn handle_phrase_resolve(&self, phrase: &str) -> Result<Response> {
+        let norm = normalize_phrase(phrase);
+        let rl_key = format!("{STORAGE_KEY_PHRASE_RL_PREFIX}{norm}");
+        // Load the fixed-window counter {count, window_start}.
+        let (mut count, mut window_start) = match self
+            .state
+            .storage()
+            .get::<String>(&rl_key)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<(i64, i64)>(&s).ok())
+        {
+            Some((c, w)) => (c, w),
+            None => (0, now_ms()),
+        };
+        let now = now_ms();
+        if now - window_start > PHRASE_RL_WINDOW_MS {
+            count = 0;
+            window_start = now;
+        }
+        if count >= PHRASE_RL_MAX {
+            return Ok(Response::from_json(&serde_json::json!({ "error": "rate_limited" }))?
+                .with_status(429));
+        }
+
+        let index_key = format!("{STORAGE_KEY_PHRASE_PREFIX}{norm}");
+        let user_id = self.state.storage().get::<String>(&index_key).await.ok().flatten();
+
+        match user_id {
+            Some(uid) => {
+                // Success clears the limiter for this phrase.
+                self.state.storage().delete(&rl_key).await?;
+                Response::from_json(&serde_json::json!({ "user_id": uid }))
+            }
+            None => {
+                // Miss → count the attempt.
+                let val = serde_json::to_string(&(count + 1, window_start))
+                    .map_err(|e| Error::RustError(format!("serialize rl: {e}")))?;
+                self.state.storage().put(&rl_key, val).await?;
+                Response::from_json(&serde_json::json!({ "user_id": null }))
+            }
+        }
+    }
+
+    /// Return the user's current plaintext phrase (re-show in Settings). None → not set.
+    async fn handle_phrase_get(&self, user_id: &str) -> Result<Response> {
+        let phrase = self
+            .load_user_metadata(user_id)
+            .await?
+            .and_then(|m| m.recovery_phrase);
+        Response::from_json(&serde_json::json!({ "phrase": phrase }))
     }
 
     async fn handle_recovery_verify(
@@ -991,7 +1050,11 @@ impl DurableObject for AuthDO {
                 let body: serde_json::Value = req.json().await.unwrap_or_default();
                 let user_id = body.get("user_id").and_then(|v| v.as_str());
                 let display_name = body.get("display_name").and_then(|v| v.as_str());
-                self.handle_register_begin(user_id, display_name).await
+                let origin = body
+                    .get("origin")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing origin".into()))?;
+                self.handle_register_begin(user_id, display_name, origin).await
             }
             "/register/finish" => {
                 let body: serde_json::Value = req.json().await?;
@@ -1003,16 +1066,31 @@ impl DurableObject for AuthDO {
                     .get("user_id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing user_id".into()))?;
-                self.handle_register_finish(credential, user_id).await
+                let origin = body
+                    .get("origin")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing origin".into()))?;
+                self.handle_register_finish(credential, user_id, origin).await
             }
-            "/authenticate/begin" => self.handle_authenticate_begin().await,
+            "/authenticate/begin" => {
+                let body: serde_json::Value = req.json().await.unwrap_or_default();
+                let origin = body
+                    .get("origin")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing origin".into()))?;
+                self.handle_authenticate_begin(origin).await
+            }
             "/authenticate/finish" => {
                 let body: serde_json::Value = req.json().await?;
                 let credential = body
                     .get("credential")
                     .cloned()
                     .ok_or_else(|| Error::RustError("missing credential".into()))?;
-                self.handle_authenticate_finish(credential).await
+                let origin = body
+                    .get("origin")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing origin".into()))?;
+                self.handle_authenticate_finish(credential, origin).await
             }
             "/pair/create" => {
                 let body: serde_json::Value = req.json().await?;
@@ -1146,43 +1224,6 @@ impl DurableObject for AuthDO {
                     .ok_or_else(|| Error::RustError("missing user_id".into()))?;
                 self.handle_token_list(user_id).await
             }
-            "/push/subscribe" => {
-                let body: serde_json::Value = req.json().await?;
-                let user_id = body
-                    .get("user_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
-                let subscription: PushSubscription = serde_json::from_value(
-                    body.get("subscription")
-                        .cloned()
-                        .ok_or_else(|| Error::RustError("missing subscription".into()))?,
-                )
-                .map_err(|e| Error::RustError(format!("parse subscription: {e}")))?;
-                self.handle_push_subscribe(user_id, subscription).await
-            }
-            "/push/unsubscribe" => {
-                let body: serde_json::Value = req.json().await?;
-                let user_id = body
-                    .get("user_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
-                let endpoint = body
-                    .get("endpoint")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| Error::RustError("missing endpoint".into()))?;
-                self.handle_push_unsubscribe(user_id, endpoint).await
-            }
-            "/push/list-all" => {
-                self.handle_push_list_all().await
-            }
-            "/push/list" => {
-                let body: serde_json::Value = req.json().await?;
-                let user_id = body
-                    .get("user_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
-                self.handle_push_list(user_id).await
-            }
             "/recovery/set" => {
                 let body: serde_json::Value = req.json().await?;
                 let user_id = body
@@ -1209,7 +1250,67 @@ impl DurableObject for AuthDO {
                     .ok_or_else(|| Error::RustError("missing recovery_key".into()))?;
                 self.handle_recovery_verify(user_id, recovery_key).await
             }
+            "/recovery/phrase/set" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let phrase = body
+                    .get("phrase")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing phrase".into()))?;
+                self.handle_phrase_set(user_id, phrase).await
+            }
+            "/recovery/phrase/resolve" => {
+                let body: serde_json::Value = req.json().await?;
+                let phrase = body
+                    .get("phrase")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing phrase".into()))?;
+                self.handle_phrase_resolve(phrase).await
+            }
+            "/recovery/phrase/get" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_phrase_get(user_id).await
+            }
             _ => Response::error(format!("unknown DO path: {path}"), 404),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_is_admin;
+    const ADMIN_DEV: &str = "https://renorma-admin-dev.pages.dev";
+    const ADMIN_PROD: &str = "https://admin.renorma.app";
+
+    #[test]
+    fn admin_origin_selects_admin_dev() {
+        assert!(select_is_admin("https://renorma-admin-dev.pages.dev", ADMIN_DEV));
+    }
+    #[test]
+    fn admin_origin_selects_admin_prod() {
+        assert!(select_is_admin("https://admin.renorma.app", ADMIN_PROD));
+    }
+    #[test]
+    fn app_origin_selects_app_dev() {
+        assert!(!select_is_admin("https://renorma-fit-dev.pages.dev", ADMIN_DEV));
+    }
+    #[test]
+    fn app_origin_selects_app_prod() {
+        assert!(!select_is_admin("https://fit.renorma.app", ADMIN_PROD));
+    }
+    #[test]
+    fn empty_origin_is_not_admin() {
+        assert!(!select_is_admin("", ADMIN_DEV));
+    }
+    #[test]
+    fn unknown_origin_is_not_admin() {
+        assert!(!select_is_admin("https://evil.example", ADMIN_DEV));
     }
 }

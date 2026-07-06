@@ -1,0 +1,46 @@
+name = "ai-worker-dev"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-12-01"
+
+[build]
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
+
+[ai]
+binding = "AI"
+
+# Cross-script binding to the subscription DO owned by payment-worker, so AI
+# requests can be gated on an active Trial/Paid plan.
+[[durable_objects.bindings]]
+name = "SUBSCRIPTION_DO"
+class_name = "SubscriptionDO"
+script_name = "payment-worker-dev"
+
+[vars]
+JWT_SECRET = "dev-secret-change-in-production"
+
+# ── Production (separate worker on ai.renorma.app) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+[env.production]
+name = "ai-worker-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "ai.renorma.app"
+custom_domain = true
+
+[env.production.ai]
+binding = "AI"
+
+# Cross-script: the prod subscription DO owned by payment-worker-prod.
+[[env.production.durable_objects.bindings]]
+name = "SUBSCRIPTION_DO"
+class_name = "SubscriptionDO"
+script_name = "payment-worker-prod"
+
+# JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
+# [vars] value above). The binding name MUST equal the env name the code reads.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"

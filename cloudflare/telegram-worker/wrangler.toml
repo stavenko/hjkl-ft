@@ -1,0 +1,86 @@
+name = "telegram-worker-dev"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-12-01"
+
+[build]
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions — an unpinned
+# `cargo install worker-build` pulls a newer build that passes wasm-bindgen flags
+# the locked CLI doesn't support.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "TG_SESSION_DO"
+class_name = "TgSessionDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TgSessionDO"]
+
+# Reach payment-worker /internal/checkout over a service binding (Worker→Worker;
+# a workers.dev URL would 404 — same reason support-worker / payment-worker note).
+[[services]]
+binding = "PAYMENT_WORKER"
+service = "payment-worker-dev"
+
+[vars]
+# Dev placeholders ONLY. require_secrets checks the first three at the top of fetch.
+TELEGRAM_BOT_TOKEN = "dev-telegram-bot-token"
+TELEGRAM_WEBHOOK_SECRET = "dev-telegram-webhook-secret"
+# SAME shared dev value as payment-worker (guards /internal/paid; auths /internal/checkout).
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
+# App onboarding entry; the worker appends `#claim=<id>.<secret>`.
+ONBOARD_BASE_URL = "https://renorma-fit-dev.pages.dev/onboard-tg"
+# DIRECT app onboarding entry used by the Mini App (Telegram.WebApp.openLink already
+# opens a real Safari, so we want /onboard, NOT the /onboard-tg bridge). Worker appends
+# `#claim=<id>.<secret>`.
+APP_ONBOARD_URL = "https://renorma-fit-dev.pages.dev/onboard"
+
+# ── Production (separate worker; clean DO data) ──
+# Deploy: wrangler deploy --env production. Prod secret VALUES are provisioned in the
+# Secrets Store out-of-band — NEVER invented or committed here.
+[env.production]
+name = "telegram-worker-prod"
+workers_dev = false
+
+# Public HTTPS endpoint for the Telegram webhook (setWebhook needs a real URL).
+[[env.production.routes]]
+pattern = "tg.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "TG_SESSION_DO"
+class_name = "TgSessionDO"
+
+[[env.production.services]]
+binding = "PAYMENT_WORKER"
+service = "payment-worker-prod"
+
+# Shared/global secrets mounted from the global Secrets Store in prod. The store_id
+# reuses the same store as payment-worker-prod. INTERNAL_PUSH_KEY is the SAME shared
+# key as payment-worker-prod. secret_name values are declared bindings only — no
+# prod secret VALUES are written anywhere.
+[[env.production.secrets_store_secrets]]
+binding = "TELEGRAM_BOT_TOKEN"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "telegram-bot-token"
+
+[[env.production.secrets_store_secrets]]
+binding = "TELEGRAM_WEBHOOK_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "telegram-webhook-secret"
+
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"
+
+[env.production.vars]
+# The spec's claim-binding link host.
+ONBOARD_BASE_URL = "https://fit.renorma.app/onboard-tg"
+# DIRECT app onboarding entry used by the Mini App (openLink → Safari → /onboard).
+APP_ONBOARD_URL = "https://fit.renorma.app/onboard"
+
+# Retain console logs (Workers Logs) so the bot-notify path is diagnosable.
+[env.production.observability]
+enabled = true
+head_sampling_rate = 1

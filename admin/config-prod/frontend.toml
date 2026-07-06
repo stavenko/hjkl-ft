@@ -1,0 +1,3 @@
+auth_base_url = "https://auth.renorma.app"
+support_base_url = "https://support.renorma.app"
+payment_base_url = "https://pay.renorma.app"

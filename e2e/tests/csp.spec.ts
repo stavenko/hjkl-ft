@@ -45,24 +45,55 @@ test.describe('Content Security Policy', () => {
     expect(cspBlocked).toBe(true);
   });
 
-  test('WASM still loads with CSP', async ({ browser }) => {
-    // Use a fresh context with bypassCSP to verify WASM loading works
-    // independent of CSP hash mismatches (the module script hash changes
-    // per build; the _headers file must be redeployed after each trunk build).
+  test('App renders with CSP enabled (no bypass)', async ({ browser }) => {
+    // This test does NOT bypass CSP — it verifies the real user experience
     const context = await browser.newContext({
-      baseURL: 'https://hjkl-ft.pages.dev',
+      baseURL: 'https://renorma-fit-dev.pages.dev',
       serviceWorkers: 'block',
-      bypassCSP: true,
+      bypassCSP: false,
     });
     const page = await context.newPage();
-    await page.goto('/');
-    await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
-    await page.reload();
-    await page.waitForTimeout(3000);
 
-    // If WASM loaded, the app renders the register button on the auth page
-    const registerBtn = page.getByTestId('auth-btn-register');
-    await expect(registerBtn).toBeVisible({ timeout: 15_000 });
+    const cspErrors: string[] = [];
+    page.on('console', msg => {
+      const text = msg.text();
+      if (text.includes('Content-Security-Policy') || text.includes('Refused')) {
+        cspErrors.push(text);
+      }
+    });
+    page.on('pageerror', err => cspErrors.push(`PAGE ERROR: ${err.message}`));
+
+    await page.goto('/');
+
+    // Wait for actual WASM-rendered content — not just HTML skeleton.
+    // Either the PWA prompt dismiss button OR the login (try-passkey) button must
+    // appear. (Registration lives at /onboard now; "/" shows login only.)
+    const rendered = await Promise.race([
+      page.getByTestId('pwa-btn-dismiss').waitFor({ timeout: 15_000 }).then(() => 'pwa'),
+      page.getByTestId('auth-btn-try-passkey').waitFor({ timeout: 15_000 }).then(() => 'auth'),
+    ]).catch(() => 'nothing');
+
+    // Log ALL console messages for debugging
+    const allConsole: string[] = [];
+    page.on('console', msg => allConsole.push(`[${msg.type()}] ${msg.text()}`));
+
+    if (rendered === 'nothing') {
+      // Capture more debug info
+      await page.waitForTimeout(2000);
+      const bodyText = await page.textContent('body');
+      console.log('CSP errors:', cspErrors);
+      console.log('All console:', allConsole);
+      console.log('Body text length:', bodyText?.length);
+      console.log('Body text:', bodyText?.substring(0, 300));
+
+      const pageErrors: string[] = [];
+      page.on('pageerror', err => pageErrors.push(err.message));
+      await page.waitForTimeout(1000);
+      console.log('Page errors:', pageErrors);
+    }
+
+    expect(rendered).not.toBe('nothing');
+
     await context.close();
   });
 });

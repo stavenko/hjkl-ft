@@ -1,7 +1,7 @@
 import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import { registerAccount } from './helpers';
 
-const AUTH_WORKER = 'https://auth-worker.vg-stavenko.workers.dev';
+const AUTH_WORKER = 'https://auth-worker-dev.vg-stavenko.workers.dev';
 
 // =========================================================================
 // Flow A: Logged-in device shows QR → new device scans and gets account
@@ -16,12 +16,18 @@ test.describe('Flow A: Logged-in shows QR → new device claims', () => {
     await page.waitForTimeout(3000);
     const { cdpSession } = await registerAccount(page);
 
-    // -- Step 2: Navigate to Settings → Connect device → Show QR --
+    // -- Step 2: Navigate to Settings → Privacy → Connect device → Show QR --
     await page.getByTestId('nav-settings').click();
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
+    // Navigate to Privacy page where "Add device" now lives
+    const privacyBtn = page.getByTestId('settings-btn-privacy');
+    await expect(privacyBtn).toBeVisible({ timeout: 10_000 });
+    await privacyBtn.click();
+    await page.waitForTimeout(1000);
+
+    const addDeviceBtn = page.getByTestId('privacy-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click({ timeout: 15_000 });
 
@@ -62,7 +68,7 @@ test.describe('Flow A: Logged-in shows QR → new device claims', () => {
     expect(claimResult.body.publicKey).toBeTruthy();
     expect(claimResult.body.publicKey.challenge).toBeTruthy();
     expect(claimResult.body.publicKey.rp).toBeTruthy();
-    expect(claimResult.body.publicKey.rp.id).toBe('hjkl-ft.pages.dev');
+    expect(claimResult.body.publicKey.rp.id).toBe('renorma-fit-dev.pages.dev');
     expect(claimResult.body.publicKey.user).toBeTruthy();
     expect(claimResult.body.user_id).toBeTruthy();
 
@@ -112,14 +118,10 @@ test.describe('Flow B: New device shows QR → logged-in approves → auto-claim
     await page.reload();
     await page.waitForTimeout(3000);
 
-    // Should see auth page (onboarding)
-    const loginBtn = page.getByTestId('auth-btn-login');
-    await expect(loginBtn).toBeVisible({ timeout: 15_000 });
-    await loginBtn.click();
-
-    // -- Step 3: Click "Показать QR-код" on login screen --
-    const showQrBtn = page.getByTestId('auth-btn-show-qr');
-    await expect(showQrBtn).toBeVisible({ timeout: 5_000 });
+    // Should see the login screen directly (no-session "/" is login-only). The QR-show
+    // flow starts from the "Добавить устройство" entry.
+    const showQrBtn = page.getByTestId('auth-btn-add-device');
+    await expect(showQrBtn).toBeVisible({ timeout: 15_000 });
 
     // Intercept /pair/request to get pairing data
     const [requestResp] = await Promise.all([
@@ -135,8 +137,8 @@ test.describe('Flow B: New device shows QR → logged-in approves → auto-claim
     expect(requestData.secret).toBeTruthy();
     expect(requestData.qr_url).toBeTruthy();
 
-    // QR should be visible, waiting text shown
-    await expect(page.getByText('Покажите этот QR-код залогиненному устройству')).toBeVisible({ timeout: 5_000 });
+    // The QR-show screen is up: the QR code itself is rendered.
+    await expect(page.getByTestId('auth-qr-display')).toBeVisible({ timeout: 5_000 });
 
     // -- Step 4: Verify polling started (check requests) --
     let checkCalled = false;
@@ -221,6 +223,10 @@ test.describe('Pairing error handling', () => {
   });
 
   test('wrong secret returns 403 with clean error', async ({ page }) => {
+    // fetch() must run from the app origin (renorma-fit-dev.pages.dev) so the
+    // auth-worker CORS check passes — about:blank has no allowed origin.
+    await page.goto('/');
+
     const requestResult = await page.evaluate(async (url) => {
       const resp = await fetch(`${url}/pair/request`, {
         method: 'POST',

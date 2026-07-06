@@ -1,9 +1,12 @@
-name = "auth-worker"
+name = "auth-worker-dev"
 main = "build/worker/shim.mjs"
-compatibility_date = "2024-01-01"
+compatibility_date = "2024-12-01"
 
 [build]
-command = "cargo install -q worker-build && worker-build --release"
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
+# an unpinned `cargo install worker-build` pulls a newer build that passes
+# wasm-bindgen flags the locked CLI doesn't support.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
 
 [[durable_objects.bindings]]
 name = "USER_DO"
@@ -23,11 +26,47 @@ new_sqlite_classes = ["AuthDO"]
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
-RP_ID = "hjkl-ft.pages.dev"
-RP_ORIGIN = "https://hjkl-ft.pages.dev"
-VAPID_PUBLIC_KEY = "BPxkM-mpShM42XvwL4CJ953bWIJbP5fDjSBXh_RMZItBLqO28gmzo4Y4xx2jrSabDxwgjIEUf2-YPkV7gW2_Cn4"
-VAPID_PRIVATE_KEY = "LqO28gmzo4Y4xx2jrSabDxwgjIEUf2-YPkV7gW2_Cn4"
-VAPID_SUBJECT = "mailto:admin@hjkl.pro"
+RP_ID = "renorma-fit-dev.pages.dev"
+RP_ORIGIN = "https://renorma-fit-dev.pages.dev"
+ADMIN_RP_ID = "renorma-admin-dev.pages.dev"
+ADMIN_RP_ORIGIN = "https://renorma-admin-dev.pages.dev"
 
-[triggers]
-crons = ["0 * * * *"]
+# ── Production (separate worker on auth.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+# Bindings/vars are NOT inherited by named environments — redeclared here.
+[env.production]
+name = "auth-worker-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "auth.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "USER_DO"
+class_name = "UserDO"
+
+[[env.production.durable_objects.bindings]]
+name = "AUTH_DO"
+class_name = "AuthDO"
+
+# JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
+# [vars] value above). The binding name MUST equal the env name the code reads.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"
+
+[env.production.vars]
+RP_ID = "renorma.app"
+RP_ORIGIN = "https://fit.renorma.app"
+# Admin must use a DISTINCT registrable rp_id so the WebAuthn rp_id-hash gate
+# (and the platform authenticator's per-RP credential scoping) separates admin
+# from app credentials. If admin shared rp_id="renorma.app" it would be a valid
+# registrable suffix of BOTH fit.renorma.app and admin.renorma.app, making an
+# admin passkey structurally usable on the app (and vice versa) — origin-only
+# isolation with no defense in depth. "admin.renorma.app" is NOT a registrable
+# suffix of "fit.renorma.app", so the scopes cannot cross.
+ADMIN_RP_ID = "admin.renorma.app"
+ADMIN_RP_ORIGIN = "https://admin.renorma.app"

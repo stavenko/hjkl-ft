@@ -118,7 +118,7 @@ pub fn QrScanner(on_scan: Callback<String>, on_close: Callback<()>) -> impl Into
             <div class="modal-background" on:click=close></div>
             <div class="modal-card" style="max-width: 28rem;">
                 <header class="modal-card-head">
-                    <p class="modal-card-title is-size-6">{t("pair.scan_qr")}</p>
+                    <p class="modal-card-title is-size-6">{move || t("pair.scan_qr")}</p>
                     <button attr:data-testid="qr-scanner-btn-close" class="delete" on:click=close></button>
                 </header>
                 <section class="modal-card-body" style="padding: 0; position: relative;">
@@ -134,10 +134,10 @@ pub fn QrScanner(on_scan: Callback<String>, on_close: Callback<()>) -> impl Into
                     ></video>
                 </section>
                 <footer class="modal-card-foot" style="justify-content: space-between;">
-                    <button attr:data-testid="qr-scanner-btn-cancel" class="button" on:click=close>{t("common.cancel")}</button>
+                    <button attr:data-testid="qr-scanner-btn-cancel" class="button" on:click=close>{move || t("common.cancel")}</button>
                     <button
                         attr:data-testid="qr-scanner-btn-paste"
-                        class="button is-light"
+                        class="button"
                         on:click=move |_| {
                             let on_scan = on_scan.clone();
                             spawn_local(async move {
@@ -148,7 +148,7 @@ pub fn QrScanner(on_scan: Callback<String>, on_close: Callback<()>) -> impl Into
                                 }
                             });
                         }
-                    >{t("qr.paste_link")}</button>
+                    >{move || t("qr.paste_link")}</button>
                 </footer>
             </div>
         </div>

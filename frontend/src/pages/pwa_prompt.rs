@@ -60,18 +60,18 @@ fn render_steps(platform: &str) -> View {
                 <div class="step">
                     <span class="step-num">"1"</span>
                     <div class="step-body">
-                        {t("pwa.inst.ios_safari.1")} " " <IosShareIcon />
+                        {move || t("pwa.inst.ios_safari.1")} " " <IosShareIcon />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
                     <div class="step-body">
-                        {t("pwa.inst.ios_safari.2")} " " <AddToHomeIcon />
+                        {move || t("pwa.inst.ios_safari.2")} " " <AddToHomeIcon />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"3"</span>
-                    <div class="step-body">{t("pwa.inst.ios_safari.3")}</div>
+                    <div class="step-body">{move || t("pwa.inst.ios_safari.3")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -79,10 +79,10 @@ fn render_steps(platform: &str) -> View {
         "ios_chrome" | "ios_firefox" => view! {
             <div class="steps">
                 <div class="step">
-                    <div class="step-body has-text-warning-dark">{t("pwa.inst.ios_other.1")}</div>
+                    <div class="step-body has-text-warning-dark">{move || t("pwa.inst.ios_other.1")}</div>
                 </div>
                 <div class="step">
-                    <div class="step-body">{t("pwa.inst.ios_other.2")}</div>
+                    <div class="step-body">{move || t("pwa.inst.ios_other.2")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -92,18 +92,18 @@ fn render_steps(platform: &str) -> View {
                 <div class="step">
                     <span class="step-num">"1"</span>
                     <div class="step-body">
-                        {t("pwa.inst.android_chrome.1")} " " <ThreeDotsIcon />
+                        {move || t("pwa.inst.android_chrome.1")} " " <ThreeDotsIcon />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
                     <div class="step-body">
-                        {t("pwa.inst.android_chrome.2")} " " <AddToHomeIcon />
+                        {move || t("pwa.inst.android_chrome.2")} " " <AddToHomeIcon />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"3"</span>
-                    <div class="step-body">{t("pwa.inst.android_chrome.3")}</div>
+                    <div class="step-body">{move || t("pwa.inst.android_chrome.3")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -113,12 +113,12 @@ fn render_steps(platform: &str) -> View {
                 <div class="step">
                     <span class="step-num">"1"</span>
                     <div class="step-body">
-                        {t("pwa.inst.android_samsung.1")} " " <HamburgerIcon />
+                        {move || t("pwa.inst.android_samsung.1")} " " <HamburgerIcon />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
-                    <div class="step-body">{t("pwa.inst.android_samsung.2")}</div>
+                    <div class="step-body">{move || t("pwa.inst.android_samsung.2")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -128,16 +128,16 @@ fn render_steps(platform: &str) -> View {
                 <div class="step">
                     <span class="step-num">"1"</span>
                     <div class="step-body">
-                        {t("pwa.inst.android_firefox.1")} " " <ThreeDotsIcon />
+                        {move || t("pwa.inst.android_firefox.1")} " " <ThreeDotsIcon />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
-                    <div class="step-body">{t("pwa.inst.android_firefox.2")}</div>
+                    <div class="step-body">{move || t("pwa.inst.android_firefox.2")}</div>
                 </div>
                 <div class="step">
                     <span class="step-num">"3"</span>
-                    <div class="step-body">{t("pwa.inst.android_firefox.3")}</div>
+                    <div class="step-body">{move || t("pwa.inst.android_firefox.3")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -147,12 +147,12 @@ fn render_steps(platform: &str) -> View {
                 <div class="step">
                     <span class="step-num">"1"</span>
                     <div class="step-body">
-                        {t("pwa.inst.android_yandex.1")} " " <ThreeDotsIcon />
+                        {move || t("pwa.inst.android_yandex.1")} " " <ThreeDotsIcon />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
-                    <div class="step-body">{t("pwa.inst.android_yandex.2")}</div>
+                    <div class="step-body">{move || t("pwa.inst.android_yandex.2")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -161,11 +161,11 @@ fn render_steps(platform: &str) -> View {
             <div class="steps">
                 <div class="step">
                     <span class="step-num">"1"</span>
-                    <div class="step-body">{t("pwa.inst.macos_safari.1")}</div>
+                    <div class="step-body">{move || t("pwa.inst.macos_safari.1")}</div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
-                    <div class="step-body">{t("pwa.inst.macos_safari.2")}</div>
+                    <div class="step-body">{move || t("pwa.inst.macos_safari.2")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -175,12 +175,12 @@ fn render_steps(platform: &str) -> View {
                 <div class="step">
                     <span class="step-num">"1"</span>
                     <div class="step-body">
-                        {t("pwa.inst.chrome.1")} " " <InstallIcon />
+                        {move || t("pwa.inst.chrome.1")} " " <InstallIcon />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
-                    <div class="step-body">{t("pwa.inst.chrome.2")}</div>
+                    <div class="step-body">{move || t("pwa.inst.chrome.2")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -190,12 +190,12 @@ fn render_steps(platform: &str) -> View {
                 <div class="step">
                     <span class="step-num">"1"</span>
                     <div class="step-body">
-                        {t("pwa.inst.edge.1")} " " <ThreeDotsIcon />
+                        {move || t("pwa.inst.edge.1")} " " <ThreeDotsIcon />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
-                    <div class="step-body">{t("pwa.inst.edge.2")}</div>
+                    <div class="step-body">{move || t("pwa.inst.edge.2")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -203,7 +203,7 @@ fn render_steps(platform: &str) -> View {
         "macos_firefox" | "desktop_firefox" => view! {
             <div class="steps">
                 <div class="step">
-                    <div class="step-body has-text-warning-dark">{t("pwa.inst.firefox.1")}</div>
+                    <div class="step-body has-text-warning-dark">{move || t("pwa.inst.firefox.1")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -213,12 +213,12 @@ fn render_steps(platform: &str) -> View {
                 <div class="step">
                     <span class="step-num">"1"</span>
                     <div class="step-body">
-                        {t("pwa.inst.chrome.1")} " " <InstallIcon />
+                        {move || t("pwa.inst.chrome.1")} " " <InstallIcon />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
-                    <div class="step-body">{t("pwa.inst.chrome.2")}</div>
+                    <div class="step-body">{move || t("pwa.inst.chrome.2")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -242,18 +242,18 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
             .step { display: flex; align-items: flex-start; gap: 0.75rem; }
             .step-num {
                 flex-shrink: 0; width: 1.75rem; height: 1.75rem;
-                border-radius: 50%; background: #485fc7; color: white;
+                border-radius: 50%; background: var(--bulma-link); color: var(--bulma-link-invert);
                 display: flex; align-items: center; justify-content: center;
                 font-size: 0.85rem; font-weight: 600;
             }
             .step-body { font-size: 0.95rem; line-height: 1.5; padding-top: 0.15rem; }
         "</style>
-        <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: white;">
+        <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
             <div style="max-width: 24rem;">
                 <img src="/icon-192.png" alt="Food Tracker" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
                 <h1 class="title is-3" style="margin-bottom: 0.5rem;">"Food Tracker"</h1>
                 <p class="has-text-grey mb-5" style="font-size: 1.05rem; line-height: 1.6;">
-                    {t("pwa.description")}
+                    {move || t("pwa.description")}
                 </p>
 
                 <div class="box" style="text-align: left; margin-bottom: 2rem;">
@@ -267,7 +267,7 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                     style="text-decoration: underline; font-size: 0.85rem;"
                     on:click=dismiss
                 >
-                    {t("pwa.use_browser")}
+                    {move || t("pwa.use_browser")}
                 </button>
             </div>
         </div>

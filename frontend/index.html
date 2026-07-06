@@ -2,12 +2,13 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="FT" />
-    <meta name="theme-color" content="#ffffff" />
-    <title>Food Tracker</title>
+    <meta name="apple-mobile-web-app-title" content="Renorma" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1a2e" media="(prefers-color-scheme: dark)" />
+    <title>Renorma</title>
     <link rel="manifest" href="manifest.json" />
     <link data-trunk rel="css" href="styles/output.css" />
     <link data-trunk rel="rust" data-wasm-opt="z" />
@@ -16,17 +17,120 @@
     <link data-trunk rel="copy-dir" href="fonts" />
     <link data-trunk rel="copy-file" href="icon-192.png" />
     <link data-trunk rel="copy-file" href="icon-512.png" />
+    <link data-trunk rel="copy-file" href="favicon.png" />
+    <link data-trunk rel="copy-file" href="progress-poses.jpg" />
     <link data-trunk rel="copy-dir" href="config" />
     <link data-trunk rel="copy-file" href="_redirects" />
     <link data-trunk rel="copy-file" href="_headers" />
+    <link rel="icon" type="image/png" href="favicon.png" />
     <link rel="apple-touch-icon" href="icon-192.png" />
+    <style>
+        /* Portrait-only. iOS ignores the manifest's "orientation": "portrait"
+           and has no JS lock API, so block landscape on phones with an overlay.
+           Gated by max-height so desktop/tablet landscape isn't affected. */
+        #rotate-overlay { display: none; }
+        @media (orientation: landscape) and (max-height: 600px) {
+            #rotate-overlay {
+                display: flex;
+                position: fixed;
+                inset: 0;
+                z-index: 99999;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+                padding: 24px;
+                text-align: center;
+                background: var(--bulma-background, #f3f4f6);
+                color: #374151;
+                font: 600 1.1rem/1.4 -apple-system, system-ui, sans-serif;
+            }
+        }
+        /* Generic spinner (e.g. the paywall "contacting the payment system" state). */
+        @keyframes ft-spin { to { transform: rotate(360deg); } }
+        .ft-spinner {
+            width: 44px; height: 44px; border-radius: 50%;
+            border: 4px solid var(--bulma-border, #dbdbdb);
+            border-top-color: var(--bulma-link, #485fc7);
+            animation: ft-spin 0.8s linear infinite;
+        }
+
+        /* Golos Text — self-hosted so the splash wordmark matches the landing
+           (which uses Golos Text). Bundled; font-src 'self', no third-party hosts. */
+        @font-face {
+            font-family: "Golos Text"; font-style: normal; font-weight: 400 900;
+            font-display: swap; src: url("/fonts/golos-cyrillic.woff2") format("woff2");
+            unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+        }
+        @font-face {
+            font-family: "Golos Text"; font-style: normal; font-weight: 400 900;
+            font-display: swap; src: url("/fonts/golos-latin.woff2") format("woff2");
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+        /* ── Splash: shown until the WASM app mounts (which replaces <body>).
+           Palette + wordmark mirror the landing (Golos Text 800, deep-navy ink). ── */
+        #splash {
+            --sp-bg: #F1F4F9; --sp-text: #0E1630; --sp-sub: #39425F;
+            --sp-em: #10B981; --sp-rose: #F4536B; --sp-amber: #F5B301;
+            --sp-glow: rgba(16,185,129,.18);
+            position: fixed; inset: 0; z-index: 9998;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--sp-bg);
+            font-family: "Golos Text", -apple-system, system-ui, sans-serif;
+            animation: sp-fade .45s ease both;
+        }
+        @media (prefers-color-scheme: dark) {
+            #splash { --sp-bg: #0E1630; --sp-text: #EDEFF6; --sp-sub: #9AA3C0; --sp-glow: rgba(16,185,129,.28); }
+        }
+        #splash .splash-inner {
+            display: flex; flex-direction: column; align-items: center; gap: 20px;
+            animation: sp-rise .6s cubic-bezier(.2,.7,.3,1) both;
+        }
+        #splash .splash-logo { position: relative; width: 78px; height: 78px; }
+        #splash .splash-logo::before {
+            content: ""; position: absolute; inset: -22px; border-radius: 50%;
+            background: radial-gradient(circle, var(--sp-glow), transparent 68%);
+            animation: sp-glow 2.6s ease-in-out infinite;
+        }
+        #splash .splash-ring {
+            position: absolute; inset: 0; border-radius: 50%;
+            background: conic-gradient(from -90deg, var(--sp-em) 0 60%, var(--sp-rose) 60% 90%, var(--sp-amber) 90% 100%);
+            -webkit-mask: radial-gradient(circle, transparent 19px, #000 20px);
+            mask: radial-gradient(circle, transparent 19px, #000 20px);
+            animation: sp-spin 5.5s cubic-bezier(.55,.15,.45,.85) infinite;
+        }
+        #splash .splash-word { font-size: 2rem; font-weight: 800; letter-spacing: -.02em; color: var(--sp-text); }
+        @keyframes sp-spin { to { transform: rotate(360deg); } }
+        @keyframes sp-glow { 0%, 100% { opacity: .5; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.08); } }
+        @keyframes sp-fade { from { opacity: 0; } }
+        @keyframes sp-rise { from { opacity: 0; transform: translateY(10px); } }
+        @media (prefers-reduced-motion: reduce) { #splash, #splash * { animation: none !important; } }
+    </style>
 </head>
 <body>
+<div id="rotate-overlay">
+    <div style="font-size: 2.5rem;">&#x1F4F1;&#x21BB;</div>
+    <div>Поверните телефон вертикально</div>
+</div>
+<div id="splash">
+    <div class="splash-inner">
+        <div class="splash-logo"><div class="splash-ring"></div></div>
+        <div class="splash-word">re:Norma</div>
+    </div>
+</div>
 <script>
+// Best-effort orientation lock (Android/installed PWA). iOS Safari throws
+// (no support / needs fullscreen) — caught; the CSS overlay handles iOS.
+try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(function(){}); } catch (e) {}
+
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').then(function(reg) {
+        // `reg` and `reg.installing` can both be absent depending on the browser/state —
+        // guard each before addEventListener, else it throws "undefined.addEventListener".
+        if (!reg || !reg.addEventListener) return;
         reg.addEventListener('updatefound', function() {
             var newWorker = reg.installing;
+            if (!newWorker) return;
             newWorker.addEventListener('statechange', function() {
                 if (newWorker.state === 'activated') {
                     window.location.reload();
@@ -34,11 +138,91 @@ if ('serviceWorker' in navigator) {
             });
         });
     });
+    // Notification deep-link: the service worker hands the tapped notification's
+    // URL to the running page (client.navigate is a no-op on a focused iOS PWA).
+    // A full navigation guarantees the target route re-mounts and consumes its
+    // query (e.g. `/story/setup?notif=1` completing the setup task).
+    navigator.serviceWorker.addEventListener('message', function(event) {
+        var d = event.data || {};
+        if (d.type === 'notificationclick' && d.url) {
+            window.location.href = d.url;
+        }
+    });
 }
 window.addEventListener('appinstalled', function() {
     // Force reload after PWA install so the new window gets fresh content
     window.location.reload();
 });
+
+// iOS WebKit bug: an `overflow-y:auto` scroll area INSIDE a `position:fixed`
+// shell stops accepting touch-scroll after the PWA is backgrounded and resumed
+// (taps still work — only the pan gesture dies). Re-arm it by forcing a reflow
+// on the marked containers whenever the page becomes visible again. Cheap, runs
+// only on resume. Containers opt in with `data-ios-scroll`.
+function kickIosScroll() {
+    document.querySelectorAll('[data-ios-scroll]').forEach(function(el) {
+        el.style.overflowY = 'hidden';
+        void el.offsetHeight; // force synchronous reflow
+        el.style.overflowY = 'auto';
+    });
+}
+window.addEventListener('pageshow', kickIosScroll);
+document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) kickIosScroll();
+});
+
+// A floating SYSTEM overlay moving over the PWA (e.g. the Plex picture-in-picture
+// player) disrupts the compositor and freezes inner touch-scroll WITHOUT firing
+// pageshow/visibilitychange — the app never backgrounds. Re-arm the touched
+// container at the very start of a gesture: a synchronous reflow (throttled,
+// scrollTop preserved) makes the container re-arm before the pan (touchmove) runs.
+var _lastScrollKick = 0;
+function _reflowKick(el) {
+    var top = el.scrollTop;
+    el.style.overflowY = 'hidden';
+    void el.offsetHeight; // force synchronous reflow
+    el.style.overflowY = 'auto';
+    el.scrollTop = top;   // the overflow toggle can clamp; restore position
+}
+// Walk up from the touched node to the nearest ACTUALLY-SCROLLABLE ancestor and
+// re-arm it. Covers every overflow container — Bulma `.modal-card-body` (which
+// carries -webkit-overflow-scrolling:touch), chat, food picker, and any future
+// dialog — without needing a per-element data-ios-scroll marker. Form controls
+// are skipped (their native scroll must not be toggled).
+document.addEventListener('touchstart', function(e) {
+    var now = Date.now();
+    if (now - _lastScrollKick < 400) return;
+    var el = e.target;
+    while (el && el.nodeType === 1 && el !== document.body) {
+        var tag = el.tagName;
+        if (tag !== 'TEXTAREA' && tag !== 'INPUT' && tag !== 'SELECT') {
+            var oy = getComputedStyle(el).overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) {
+                _lastScrollKick = now;
+                _reflowKick(el);
+                return;
+            }
+        }
+        el = el.parentElement;
+    }
+}, { passive: true });
+
+// Expose the on-screen keyboard height as `--kb-inset`. iOS doesn't shrink the
+// layout viewport for the keyboard, so a scroll list's tail ends up UNDER the
+// keyboard and can't be scrolled into view. Scroll containers add
+// `padding-bottom: var(--kb-inset)` to gain exactly that much extra scroll room
+// (0 when the keyboard is closed → no wasted space).
+function updateKbInset() {
+    var vv = window.visualViewport;
+    if (!vv) return;
+    var inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.documentElement.style.setProperty('--kb-inset', inset + 'px');
+}
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', updateKbInset);
+    window.visualViewport.addEventListener('scroll', updateKbInset);
+    updateKbInset();
+}
 
 </script>
 </body>

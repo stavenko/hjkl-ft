@@ -17,12 +17,15 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
     "Window",
+    "Location",
     "Navigator",
     "Request",
     "RequestInit",
     "RequestMode",
     "Response",
     "Headers",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
     "File",
     "FileList",
     "HtmlInputElement",
@@ -38,9 +41,17 @@ web-sys = { version = "0.3", features = [
     "MediaStream",
     "MediaStreamConstraints",
     "MediaStreamTrack",
+    "MediaRecorder",
+    "MediaRecorderOptions",
+    "BlobEvent",
+    "BlobPropertyBag",
+    "Event",
+    "Url",
+    "HtmlAudioElement",
     "HtmlVideoElement",
     "HtmlCanvasElement",
     "CanvasRenderingContext2d",
+    "ImageBitmap",
     "ImageData",
     "Clipboard",
     "Screen",
@@ -64,3 +75,13 @@ serde-wasm-bindgen = "0.6"
 fast_qr = { version = "0.12", features = ["svg"] }
 rqrr = "0.8"
 sha2 = "0.10"
+arti-pipes = { git = "https://github.com/stavenko/arti-pipes" }
+schemars = { version = "1", features = ["preserve_order"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# Build-time only: the Story DSL is authored in YAML and converted to JSON in
+# build.rs, so the wasm bundle never carries a YAML parser.
+[build-dependencies]
+serde_yaml = "0.9"
+serde_json = "1"

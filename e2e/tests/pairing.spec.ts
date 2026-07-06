@@ -1,5 +1,5 @@
 import { test, expect, type CDPSession } from '@playwright/test';
-import { patchRegisterFinish } from './helpers';
+import { registerAccount } from './helpers';
 
 // ---------------------------------------------------------------------------
 // Logged-in device: Settings → Add device → Show QR
@@ -12,49 +12,10 @@ test.describe('Device pairing (logged-in device)', () => {
     await page.goto('/');
     await page.evaluate(() => localStorage.clear());
 
-    // Set up virtual authenticator BEFORE reload
-    cdpSession = await page.context().newCDPSession(page);
-    await cdpSession.send('WebAuthn.enable');
-    await cdpSession.send('WebAuthn.addVirtualAuthenticator', {
-      options: {
-        protocol: 'ctap2',
-        transport: 'internal',
-        hasResidentKey: true,
-        hasUserVerification: true,
-        isUserVerified: true,
-        automaticPresenceSimulation: true,
-      },
-    });
+    // Register + claim a paid sub via /onboard, landing in the app.
+    ({ cdpSession } = await registerAccount(page));
 
-    // Patch register/finish to include user_id
-    await patchRegisterFinish(page);
-
-    await page.evaluate(() => localStorage.setItem('pwa_dismissed', 'true'));
-    await page.reload();
-    await page.waitForTimeout(3000);
-
-    // TryingPassKey will fail (no credential), then shows auth page
-    const createBtn = page.getByTestId('auth-btn-register');
-    await expect(createBtn).toBeVisible({ timeout: 15_000 });
-
-    // Fill in display name (required for registration)
-    const nameInput = page.getByTestId('auth-input-name');
-    await nameInput.fill('Test User');
-    await expect(createBtn).toBeEnabled({ timeout: 2_000 });
-
-    await createBtn.click();
-
-    // Wait for registration to fully complete and verify it worked
-    let registered = false;
-    for (let i = 0; i < 40; i++) {
-      const uid = await page.evaluate(() => localStorage.getItem('user_id'));
-      if (uid) { registered = true; break; }
-      await page.waitForTimeout(500);
-    }
-    expect(registered).toBe(true);
-
-    // Wait for auth overlay to fully unmount
-    await page.waitForTimeout(1000);
+    // Wait for any overlay to fully unmount.
     await expect(page.locator('[style*="position: fixed"][style*="z-index: 100"]')).toHaveCount(0, { timeout: 10_000 });
   });
 
@@ -69,7 +30,13 @@ test.describe('Device pairing (logged-in device)', () => {
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
+    // Navigate to Privacy page where "Add device" now lives
+    const privacyBtn = page.getByTestId('settings-btn-privacy');
+    await expect(privacyBtn).toBeVisible({ timeout: 10_000 });
+    await privacyBtn.click();
+    await page.waitForTimeout(1000);
+
+    const addDeviceBtn = page.getByTestId('privacy-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
   });
 
@@ -78,7 +45,13 @@ test.describe('Device pairing (logged-in device)', () => {
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
+    // Navigate to Privacy page where "Add device" now lives
+    const privacyBtn = page.getByTestId('settings-btn-privacy');
+    await expect(privacyBtn).toBeVisible({ timeout: 10_000 });
+    await privacyBtn.click();
+    await page.waitForTimeout(1000);
+
+    const addDeviceBtn = page.getByTestId('privacy-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click({ timeout: 15_000 });
 
@@ -94,7 +67,13 @@ test.describe('Device pairing (logged-in device)', () => {
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(1000);
 
-    const addDeviceBtn = page.getByTestId('settings-btn-add-device');
+    // Navigate to Privacy page where "Add device" now lives
+    const privacyBtn = page.getByTestId('settings-btn-privacy');
+    await expect(privacyBtn).toBeVisible({ timeout: 10_000 });
+    await privacyBtn.click();
+    await page.waitForTimeout(1000);
+
+    const addDeviceBtn = page.getByTestId('privacy-btn-add-device');
     await expect(addDeviceBtn).toBeVisible({ timeout: 10_000 });
     await addDeviceBtn.click({ timeout: 15_000 });
 
@@ -137,7 +116,7 @@ test.describe('Device pairing (logged-in device)', () => {
   test('New device Show QR creates data parseable as 2-part format', async ({ page }) => {
     // Test the /pair/request endpoint directly (new device, no auth)
     const resp = await page.evaluate(async () => {
-      const r = await fetch('https://auth-worker.vg-stavenko.workers.dev/pair/request', {
+      const r = await fetch('https://auth-worker-dev.vg-stavenko.workers.dev/pair/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
@@ -176,8 +155,9 @@ test.describe('Device pairing (new device side)', () => {
     await expect(dismissBtn).toBeVisible({ timeout: 10_000 });
     await dismissBtn.click();
 
-    const loginBtn = page.getByTestId('auth-btn-login');
-    await expect(loginBtn).toBeVisible({ timeout: 10_000 });
+    // The no-session "/" entry IS the login screen (login-only; no register).
+    const tryPasskey = page.getByTestId('auth-btn-try-passkey');
+    await expect(tryPasskey).toBeVisible({ timeout: 10_000 });
   });
 
   test('Login screen shows pair options', async ({ page }) => {
@@ -185,16 +165,13 @@ test.describe('Device pairing (new device side)', () => {
     await page.reload();
     await page.waitForTimeout(3000);
 
-    const loginBtn = page.getByTestId('auth-btn-login');
-    await expect(loginBtn).toBeVisible({ timeout: 15_000 });
-    await loginBtn.click();
-
-    const showQr = page.getByTestId('auth-btn-show-qr');
-    const scanQr = page.getByTestId('auth-btn-scan-qr');
+    // "/" boots straight into the login screen — the device-pairing entry ("Добавить
+    // устройство") and the passkey login are visible directly. (The QR-show / scan
+    // options live on the sub-screen that opens from "Добавить устройство".)
+    const addDevice = page.getByTestId('auth-btn-add-device');
     const tryPasskey = page.getByTestId('auth-btn-try-passkey');
 
-    await expect(showQr).toBeVisible({ timeout: 5_000 });
-    await expect(scanQr).toBeVisible({ timeout: 5_000 });
+    await expect(addDevice).toBeVisible({ timeout: 15_000 });
     await expect(tryPasskey).toBeVisible({ timeout: 5_000 });
   });
 });

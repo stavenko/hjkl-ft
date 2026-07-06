@@ -111,9 +111,9 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
     });
 
     view! {
-        <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: white;">
+        <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
             <div style="max-width: 24rem; width: 100%;">
-                <h1 class="title is-4 mb-4">{t("pair.title")}</h1>
+                <h1 class="title is-4 mb-4">{move || t("pair.title")}</h1>
 
                 {move || error.get().map(|e| view! {
                     <div class="notification is-danger is-light mb-4" style="text-align: left;">
@@ -131,22 +131,22 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
                                 disabled=move || loading.get()
                                 on:click=open_scanner
                             >
-                                {t("pair.scan_qr")}
+                                {move || t("pair.scan_qr")}
                             </button>
                             <button
                                 attr:data-testid="pair-new-btn-show"
-                                class="button is-light is-medium is-fullwidth"
+                                class="button is-medium is-fullwidth"
                                 disabled=move || loading.get()
                                 on:click=show_qr
                             >
-                                {t("pair.show_qr")}
+                                {move || t("pair.show_qr")}
                             </button>
                             <button
                                 attr:data-testid="pair-new-btn-back"
                                 class="button is-text is-medium is-fullwidth"
                                 on:click=move |_| on_back.call(())
                             >
-                                {t("pair.back")}
+                                {move || t("pair.back")}
                             </button>
                         </div>
                     }.into_view(),
@@ -156,13 +156,13 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
                         let url_for_copy = qr_url.clone();
                         let copied = create_rw_signal(false);
                         view! {
-                            <p class="mb-4 has-text-grey">{t("pair.show_hint_new")}</p>
+                            <p class="mb-4 has-text-grey">{move || t("pair.show_hint_new")}</p>
                             <div attr:data-testid="pair-new-qr-display" style="display: flex; justify-content: center; margin-bottom: 1rem;">
                                 <QrCode data=url size=240 />
                             </div>
                             <button
                                 attr:data-testid="pair-new-btn-copy-link"
-                                class="button is-small is-light is-fullwidth mb-3"
+                                class="button is-small is-fullwidth mb-3"
                                 on:click=move |_| {
                                     let u = url_for_copy.clone();
                                     spawn_local(async move {
@@ -173,13 +173,13 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
                             >
                                 {move || if copied.get() { t("qr.copied") } else { t("qr.copy_link") }}
                             </button>
-                            <p class="has-text-grey is-size-7 mb-4">{t("pair.waiting")}</p>
+                            <p class="has-text-grey is-size-7 mb-4">{move || t("pair.waiting")}</p>
                             <button
                                 attr:data-testid="pair-new-btn-back"
                                 class="button is-text"
                                 on:click=move |_| step.set(PairStep::Menu)
                             >
-                                {t("pair.back")}
+                                {move || t("pair.back")}
                             </button>
                         }.into_view()
                     }
@@ -189,7 +189,7 @@ pub fn PairPageNew(on_done: Callback<()>, on_back: Callback<()>) -> impl IntoVie
                     }.into_view(),
 
                     PairStep::Done => view! {
-                        <p class="has-text-success is-size-5 mb-4">{t("pair.success")}</p>
+                        <p class="has-text-success is-size-5 mb-4">{move || t("pair.success")}</p>
                     }.into_view(),
                 }}
             </div>
@@ -276,7 +276,7 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
 
     view! {
         <div style="max-width: 24rem; width: 100%; margin: 0 auto; text-align: center;">
-            <h2 class="title is-4 mb-4">{t("pair.title")}</h2>
+            <h2 class="title is-4 mb-4">{move || t("pair.title")}</h2>
 
             {move || error.get().map(|e| view! {
                 <div class="notification is-danger is-light mb-4" style="text-align: left;">
@@ -294,22 +294,22 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
                             disabled=move || loading.get()
                             on:click=show_qr
                         >
-                            {t("pair.show_qr")}
+                            {move || t("pair.show_qr")}
                         </button>
                         <button
                             attr:data-testid="pair-logged-btn-scan"
-                            class="button is-light is-medium is-fullwidth"
+                            class="button is-medium is-fullwidth"
                             disabled=move || loading.get()
                             on:click=open_scanner
                         >
-                            {t("pair.scan_qr")}
+                            {move || t("pair.scan_qr")}
                         </button>
                         <button
                             attr:data-testid="pair-logged-btn-back"
                             class="button is-text is-medium is-fullwidth"
                             on:click=move |_| on_close.call(())
                         >
-                            {t("pair.back")}
+                            {move || t("pair.back")}
                         </button>
                     </div>
                 }.into_view(),
@@ -319,13 +319,13 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
                     let url_for_copy = qr_url.clone();
                     let copied = create_rw_signal(false);
                     view! {
-                        <p class="mb-4 has-text-grey">{t("pair.show_hint_logged")}</p>
+                        <p class="mb-4 has-text-grey">{move || t("pair.show_hint_logged")}</p>
                         <div attr:data-testid="pair-logged-qr-display" style="display: flex; justify-content: center; margin-bottom: 1rem;">
                             <QrCode data=url size=240 />
                         </div>
                         <button
                             attr:data-testid="pair-logged-btn-copy-link"
-                            class="button is-small is-light is-fullwidth mb-3"
+                            class="button is-small is-fullwidth mb-3"
                             on:click=move |_| {
                                 let u = url_for_copy.clone();
                                 spawn_local(async move {
@@ -336,13 +336,13 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
                         >
                             {move || if copied.get() { t("qr.copied") } else { t("qr.copy_link") }}
                         </button>
-                        <p class="has-text-grey is-size-7 mb-4">{t("pair.waiting")}</p>
+                        <p class="has-text-grey is-size-7 mb-4">{move || t("pair.waiting")}</p>
                         <button
                             attr:data-testid="pair-logged-btn-back"
                             class="button is-text"
                             on:click=move |_| step.set(PairStep::Menu)
                         >
-                            {t("pair.back")}
+                            {move || t("pair.back")}
                         </button>
                     }.into_view()
                 }
@@ -353,13 +353,13 @@ pub fn PairPageLoggedIn(on_close: Callback<()>) -> impl IntoView {
 
                 PairStep::Done => view! {
                     <div>
-                        <p class="has-text-success is-size-5 mb-4">{t("pair.success")}</p>
+                        <p class="has-text-success is-size-5 mb-4">{move || t("pair.success")}</p>
                         <button
                             attr:data-testid="pair-logged-btn-back"
                             class="button is-link"
                             on:click=move |_| on_close.call(())
                         >
-                            {t("pair.back")}
+                            {move || t("pair.back")}
                         </button>
                     </div>
                 }.into_view(),

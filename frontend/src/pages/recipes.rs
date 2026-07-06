@@ -32,7 +32,7 @@ pub fn RecipesPage() -> impl IntoView {
 
     let on_create = move |_| {
         spawn_local(async move {
-            let recipe = local::new_recipe("Новый рецепт").await;
+            let recipe = local::new_recipe("").await;
             let id = recipe.id.clone();
             invalidate();
             sync::push_background();
@@ -59,8 +59,8 @@ pub fn RecipesPage() -> impl IntoView {
     view! {
         <div>
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
-                <h1 class="title is-4" style="margin-bottom: 0;">{t("recipes.title")}</h1>
-                <button attr:data-testid="recipes-btn-new" class="button is-link" on:click=on_create>{t("recipes.new")}</button>
+                <h1 class="title is-4" style="margin-bottom: 0;">{move || t("recipes.title")}</h1>
+                <button attr:data-testid="recipes-btn-new" class="button is-link" on:click=on_create>{move || t("recipes.new")}</button>
             </div>
 
             <div class="field mb-4">
@@ -97,7 +97,7 @@ pub fn RecipesPage() -> impl IntoView {
                                     <a href=format!("/recipes/{id}") style="text-decoration: none; color: inherit;">
                                         <FoodListItem food=food goals=Signal::derive(goals)>
                                             <button
-                                                class="button is-small is-light"
+                                                class="button is-small"
                                                 style="white-space: nowrap;"
                                                 on:click=move |ev| {
                                                     ev.prevent_default();
@@ -113,16 +113,16 @@ pub fn RecipesPage() -> impl IntoView {
                                                         }
                                                     });
                                                 }
-                                            >{t("recipes.cook_again")}</button>
+                                            >{move || t("recipes.cook_again")}</button>
                                         </FoodListItem>
                                     </a>
                                 }.into_view()
                             } else {
                                 view! {
                                     <a href=format!("/recipes/{id}") style="text-decoration: none; color: inherit;">
-                                        <div style="padding: 0.5rem 0; border-bottom: 1px solid #f0f0f0;">
+                                        <div style="padding: 0.5rem 0; border-bottom: 1px solid var(--bulma-border-weak);">
                                             <span class="is-size-6 has-text-weight-medium">{&recipe.name}</span>
-                                            <span class="tag is-success is-light ml-2">{t("recipes.complete")}</span>
+                                            <span class="tag is-success is-light ml-2">{move || t("recipes.complete")}</span>
                                         </div>
                                     </a>
                                 }.into_view()
@@ -131,9 +131,9 @@ pub fn RecipesPage() -> impl IntoView {
                             // In progress: simple row with status
                             view! {
                                 <a href=format!("/recipes/{id_nav}") style="text-decoration: none; color: inherit;">
-                                    <div style="display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #f0f0f0;">
+                                    <div style="display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--bulma-border-weak);">
                                         <span class="is-size-6 has-text-weight-medium" style="flex: 1;">{&recipe.name}</span>
-                                        <span class="tag is-warning is-light">{t("recipes.in_progress")}</span>
+                                        <span class="tag is-warning is-light">{move || t("recipes.in_progress")}</span>
                                     </div>
                                 </a>
                             }.into_view()

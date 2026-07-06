@@ -1,0 +1,74 @@
+name = "main-flow-dev"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-12-01"
+
+[build]
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
+# an unpinned `cargo install worker-build` pulls a newer build that passes
+# wasm-bindgen flags the locked CLI doesn't support.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "PUSH_DO"
+class_name = "PushDO"
+
+[[durable_objects.bindings]]
+name = "SCHEDULE_DO"
+class_name = "ScheduleDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PushDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ScheduleDO"]
+
+[vars]
+JWT_SECRET = "dev-secret-change-in-production"
+# Shared key for the internal /push/notify endpoint (payment-worker calls it on
+# payment success). Prod: `wrangler secret put INTERNAL_PUSH_KEY --env production`
+# with the SAME value set on payment-worker-prod.
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
+VAPID_PUBLIC_KEY = "BHmCtJcYZNsO-xMLccKyWYSWTlxbILgd1HrRtSD4jy97PILpvdVaHadrt9anNmgdRDVWI5mIfkpSRkxSTL0AdsM"
+VAPID_PRIVATE_KEY = "2CX-Ehz-V8m_lysbW7az17KksEUlUcPRT0DS-5qfolY"
+VAPID_SUBJECT = "mailto:admin@hjkl.pro"
+
+# ── Production (separate worker on push.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+# Secrets: wrangler secret put JWT_SECRET --env production
+# VAPID keypair reused from dev (push subscriptions are per-endpoint); rotate later if wanted.
+[env.production]
+name = "main-flow-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "push.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "PUSH_DO"
+class_name = "PushDO"
+
+[[env.production.durable_objects.bindings]]
+name = "SCHEDULE_DO"
+class_name = "ScheduleDO"
+
+# Shared secrets mounted from the global Secrets Store in prod (dev keeps the
+# [vars] values above). Each binding name MUST equal the env name the code reads.
+# INTERNAL_PUSH_KEY is the SAME shared key as payment-worker-prod / support-worker-prod.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"
+
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"
+
+[env.production.vars]
+VAPID_PUBLIC_KEY = "BHmCtJcYZNsO-xMLccKyWYSWTlxbILgd1HrRtSD4jy97PILpvdVaHadrt9anNmgdRDVWI5mIfkpSRkxSTL0AdsM"
+VAPID_PRIVATE_KEY = "2CX-Ehz-V8m_lysbW7az17KksEUlUcPRT0DS-5qfolY"
+VAPID_SUBJECT = "mailto:admin@renorma.app"
+

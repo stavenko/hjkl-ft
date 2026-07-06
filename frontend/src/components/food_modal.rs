@@ -15,13 +15,15 @@ pub fn FoodModal(
             <div class="modal-background" on:click=move |_| on_close.call(())></div>
             <div class="modal-card" style="max-width: 28rem;">
                 <header class="modal-card-head">
-                    <p class="modal-card-title">{t("food_modal.title")}</p>
+                    <p class="modal-card-title">{move || t("food_modal.title")}</p>
                     <button class="delete" on:click=move |_| on_close.call(())></button>
                 </header>
                 <section class="modal-card-body">
                     <FoodEditor
                         custom_nutrients=custom_nutrients
-                        on_draft=on_created
+                        on_draft=Callback::new(move |(food, _d_id): (Food, Option<String>)| {
+                            on_created.call(food);
+                        })
                     />
                 </section>
             </div>

@@ -119,6 +119,10 @@ pub fn FoodEditor(
     let photos_base64 = create_rw_signal(Vec::<String>::new());
     let photo_count = create_rw_signal(0usize);
 
+    // Paywall modal: shown (instead of silently navigating away) when recognition
+    // is blocked by an inactive subscription — proactively, or on a backend 402.
+    let show_paywall = create_rw_signal(false);
+
     let build_food = move || -> Food {
         // Normalise the decimal separator: mobile keyboards emit ',', so "25,0"
         // must parse as 25.0 (not fail → 0).
@@ -244,7 +248,6 @@ pub fn FoodEditor(
             return;
         }
 
-        let navigate = navigate.clone();
         loading.set(true);
         error_sig.set(None);
         phase.set(0);
@@ -276,7 +279,7 @@ pub fn FoodEditor(
                     interval.set(None);
                 }
             };
-            let finish = move |err: Option<String>, nav: &dyn Fn(&str)| {
+            let finish = move |err: Option<String>| {
                 stop_timer();
                 // Only clear the vision status line from the vision channel — the
                 // text channel must not wipe a photo job's message running in
@@ -284,18 +287,21 @@ pub fn FoodEditor(
                 if use_vision { vision_msg.set(String::new()); }
                 loading.set(false);
                 if let Some(e) = err {
-                    if e.contains("HTTP 402") { nav("/settings/subscription"); } else { error_sig.set(Some(e)); }
+                    // A backend 402 means the subscription lapsed between the
+                    // proactive check and the job — explain it in a modal rather
+                    // than dumping a raw error or navigating away silently.
+                    if e.contains("HTTP 402") { show_paywall.set(true); } else { error_sig.set(Some(e)); }
                 }
             };
 
-            // Proactive gate: if the subscription is known to be inactive, send
-            // the user to the paywall instead of starting a doomed job. (On a
-            // network error we proceed and let it fail downstream.)
+            // Proactive gate: if the subscription is known to be inactive, show the
+            // paywall modal instead of starting a doomed job. (On a network error we
+            // proceed and let it fail downstream.)
             if let Ok(s) = subscription::status().await {
                 if !s.active {
                     stop_timer();
                     loading.set(false);
-                    navigate("/settings/subscription", Default::default());
+                    show_paywall.set(true);
                     return;
                 }
             }
@@ -309,7 +315,7 @@ pub fn FoodEditor(
                 vision_msg.set(t("food_editor.ai_uploading").to_string());
                 let job_id = match ai::submit_vision(&input).await {
                     Ok(id) => id,
-                    Err(e) => { finish(Some(e), &|p| { navigate(p, Default::default()); }); return; }
+                    Err(e) => { finish(Some(e)); return; }
                 };
 
                 // State QUEUED: poll for position until processing/done/error
@@ -320,10 +326,10 @@ pub fn FoodEditor(
                         Ok(ai::QueuePhase::Done(out)) => {
                             apply_result(&out);
                             persist_result();
-                            finish(None, &|p| { navigate(p, Default::default()); });
+                            finish(None);
                             return;
                         }
-                        Ok(ai::QueuePhase::Error(e)) => { finish(Some(e), &|p| { navigate(p, Default::default()); }); return; }
+                        Ok(ai::QueuePhase::Error(e)) => { finish(Some(e)); return; }
                         Ok(ai::QueuePhase::Processing { since_ms }) => {
                             if since_ms > 0.0 { vision_start.set(since_ms); }
                             processing = true;
@@ -343,7 +349,7 @@ pub fn FoodEditor(
                     ai::sleep_ms(1500).await;
                 }
                 if !processing {
-                    finish(Some(t("food_editor.ai_timeout").to_string()), &|p| { navigate(p, Default::default()); });
+                    finish(Some(t("food_editor.ai_timeout").to_string()));
                     return;
                 }
 
@@ -359,9 +365,9 @@ pub fn FoodEditor(
                     Ok(out) => {
                         apply_result(&out);
                         persist_result();
-                        finish(None, &|p| { navigate(p, Default::default()); });
+                        finish(None);
                     }
-                    Err(e) => finish(Some(e), &|p| { navigate(p, Default::default()); }),
+                    Err(e) => finish(Some(e)),
                 }
             } else {
                 // Text lookup: streaming, blocking await (no queue).
@@ -381,9 +387,9 @@ pub fn FoodEditor(
                     Ok(output) => {
                         apply_result(&output);
                         persist_result();
-                        finish(None, &|p| { navigate(p, Default::default()); });
+                        finish(None);
                     }
-                    Err(e) => finish(Some(e), &|p| { navigate(p, Default::default()); }),
+                    Err(e) => finish(Some(e)),
                 }
             }
         });
@@ -679,6 +685,40 @@ pub fn FoodEditor(
             >
                 {move || t("food_editor.add")}
             </button>
+
+            // Paywall modal — recognition blocked by an inactive subscription.
+            // "Оплатить подписку" routes to the subscription management page (its
+            // own subscribe action leads to checkout); "Не сейчас" just dismisses.
+            <Show when=move || show_paywall.get()>
+                <div class="modal is-active">
+                    <div class="modal-background" on:click=move |_| show_paywall.set(false)></div>
+                    <div class="modal-card" style="max-width: 22rem; margin: 0 1rem;">
+                        <section class="modal-card-body" style="border-radius: 12px; text-align: center;">
+                            <p class="is-size-5 has-text-weight-semibold mb-2">
+                                {move || t("food_editor.paywall_title")}
+                            </p>
+                            <p class="mb-4" style="color: var(--bulma-text-weak);">{move || t("food_editor.paywall_body")}</p>
+                            <button type="button"
+                                class="button is-link is-fullwidth has-text-weight-semibold mb-2"
+                                on:click={
+                                    let navigate = navigate.clone();
+                                    move |_| {
+                                        show_paywall.set(false);
+                                        navigate("/settings/subscription", Default::default());
+                                    }
+                                }
+                            >
+                                {move || t("food_editor.paywall_pay")}
+                            </button>
+                            <button type="button" class="button is-text is-fullwidth"
+                                on:click=move |_| show_paywall.set(false)
+                            >
+                                {move || t("food_editor.paywall_dismiss")}
+                            </button>
+                        </section>
+                    </div>
+                </div>
+            </Show>
         </div>
     }
 }

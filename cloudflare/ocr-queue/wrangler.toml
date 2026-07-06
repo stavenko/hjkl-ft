@@ -21,12 +21,14 @@ class_name = "QueueDO"
 tag = "v1"
 new_sqlite_classes = ["QueueDO"]
 
-# Cross-script binding to the subscription DO owned by payment-worker, so we can
-# refuse to enqueue jobs for users without an active Trial/Paid plan.
-[[durable_objects.bindings]]
-name = "SUBSCRIPTION_DO"
-class_name = "SubscriptionDO"
-script_name = "payment-worker-dev"
+# Service binding to payment-worker (the OWNER of the subscription): the enqueue
+# gate asks it `GET /subscription` over this binding, forwarding the caller's
+# bearer token. payment-worker resolves its own SubscriptionDO by its private
+# epoch, so this worker holds no knowledge of the DO's name/epoch — that coupling
+# drifted once (reader stuck on an old epoch) and caused spurious 402 paywalls.
+[[services]]
+binding = "PAYMENT"
+service = "payment-worker-dev"
 
 [vars]
 # Client requests are authenticated with the shared app JWT.
@@ -52,11 +54,10 @@ custom_domain = true
 name = "QUEUE_DO"
 class_name = "QueueDO"
 
-# Cross-script: the prod subscription DO owned by payment-worker-prod.
-[[env.production.durable_objects.bindings]]
-name = "SUBSCRIPTION_DO"
-class_name = "SubscriptionDO"
-script_name = "payment-worker-prod"
+# Service binding to the prod owner (payment-worker-prod).
+[[env.production.services]]
+binding = "PAYMENT"
+service = "payment-worker-prod"
 
 # JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
 # [vars] value above). The binding name MUST equal the env name the code reads.

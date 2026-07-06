@@ -398,6 +398,10 @@ fn en(key: &str) -> &'static str {
         "food_editor.fat" => "Fat",
         "food_editor.carbs" => "Carbs",
         "food_editor.add" => "Add",
+        "food_editor.paywall_title" => "Subscription inactive",
+        "food_editor.paywall_body" => "Automatic calorie & macro detection needs an active subscription.",
+        "food_editor.paywall_pay" => "Subscribe",
+        "food_editor.paywall_dismiss" => "Not now",
 
         // New food panel
         "new_food.title" => "New food",
@@ -1440,6 +1444,10 @@ fn ru(key: &str) -> &'static str {
         "food_editor.fat" => "Жиры",
         "food_editor.carbs" => "Углеводы",
         "food_editor.add" => "Добавить",
+        "food_editor.paywall_title" => "Подписка не активна",
+        "food_editor.paywall_body" => "Автоматическое распознавание КБЖУ доступно по активной подписке.",
+        "food_editor.paywall_pay" => "Оплатить подписку",
+        "food_editor.paywall_dismiss" => "Не сейчас",
 
         // Панель нового продукта
         "new_food.title" => "Новый продукт",

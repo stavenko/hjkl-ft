@@ -72,15 +72,22 @@ async fn require_secrets(env: &Env) -> std::result::Result<(), Response> {
     Ok(())
 }
 
-/// True if the user's paid subscription is still active. Reads the per-user
-/// SubscriptionDO owned by payment-worker. There is no trial: a never-paid
-/// account reports active:false until it claims a paid guest subscription.
-async fn subscription_active(env: &Env, user_id: &str) -> Result<bool> {
-    let stub = env
-        .durable_object("SUBSCRIPTION_DO")?
-        .id_from_name(user_id)?
-        .get_stub()?;
-    let mut res = stub.fetch_with_str("https://do/subscription").await?;
+/// True if the user's subscription is active (Trial not expired, or Paid).
+///
+/// Delegates to payment-worker — the OWNER of the SubscriptionDO — over the
+/// PAYMENT service binding, forwarding the caller's `Authorization` header (the
+/// same JWT payment-worker validates). payment-worker resolves the DO by its own
+/// private epoch, so this worker holds NO knowledge of the DO's name/epoch. That
+/// coupling drifted once (this reader stuck on an old epoch → empty DO →
+/// active:false → spurious 402 paywall); delegating removes it entirely.
+async fn subscription_active(env: &Env, authorization: &str) -> Result<bool> {
+    let headers = Headers::new();
+    headers.set("Authorization", authorization)?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Get).with_headers(headers);
+    // Host is irrelevant for a service-binding fetch; only the path routes.
+    let req = Request::new_with_init("https://payment-worker/subscription", &init)?;
+    let mut res = env.service("PAYMENT")?.fetch_request(req).await?;
     if res.status_code() < 200 || res.status_code() >= 300 {
         return Ok(false);
     }
@@ -122,10 +129,9 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
 async fn handle(req: Request, env: &Env) -> Result<Response> {
     // JWT verify (Authorization: Bearer). 401 on missing/invalid.
-    let user_id = match validate_from_header(&req, env).await {
-        Ok(sub) => sub,
-        Err(_) => return Ok(error_response("Unauthorized", 401)),
-    };
+    if validate_from_header(&req, env).await.is_err() {
+        return Ok(error_response("Unauthorized", 401));
+    }
 
     let url = req.url()?;
     let path = url.path().to_string();
@@ -136,8 +142,10 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
     }
 
     if path == "/chat/completions" {
-        // Gate AI on an active subscription (Trial not expired, or Paid).
-        if !subscription_active(env, &user_id).await? {
+        // Gate AI on an active subscription (Trial not expired, or Paid). The
+        // bearer is forwarded to payment-worker, which owns the subscription.
+        let authorization = req.headers().get("Authorization")?.unwrap_or_default();
+        if !subscription_active(env, &authorization).await? {
             return Ok(error_response("subscription_required", 402));
         }
         return handle_chat_completions(req, env).await;

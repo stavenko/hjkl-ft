@@ -550,6 +550,22 @@ fn since_label(ms: i64) -> String {
     }
 }
 
+/// Format a minor-unit (×100) amount as major units + currency, e.g. 5000/"RUB" → "50 RUB".
+fn fmt_money(amount: Option<i64>, currency: Option<&str>) -> String {
+    match amount {
+        Some(a) => {
+            let cur = currency.unwrap_or("");
+            let s = if a % 100 == 0 {
+                format!("{} {}", a / 100, cur)
+            } else {
+                format!("{}.{:02} {}", a / 100, (a % 100).abs(), cur)
+            };
+            s.trim().to_string()
+        }
+        None => "—".into(),
+    }
+}
+
 /// Operator worklist: paid-but-unbound payments. The server reconciles this list
 /// against lava on load — contracts lava reports refunded/cancelled (terminatedAt) are
 /// auto-voided and drop off here, so this shows only still-active unbound payments.
@@ -558,6 +574,10 @@ fn since_label(ms: i64) -> String {
 fn Payments(view: RwSignal<View>) -> impl IntoView {
     let items = create_rw_signal(Vec::<api::UnboundPayment>::new());
     let refunds = create_rw_signal(Vec::<api::RefundRequest>::new());
+    let no_access = create_rw_signal(Vec::<api::PaidNoAccess>::new());
+    let receipts = create_rw_signal(Vec::<api::Receipt>::new());
+    // The receipt whose full body is open in the modal (fetched on demand).
+    let selected = create_rw_signal(Option::<api::ReceiptFull>::None);
     let error = create_rw_signal(Option::<String>::None);
     let loading = create_rw_signal(true);
 
@@ -584,6 +604,24 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                 }
                 Err(e) => error.set(Some(e.message().to_string())),
             }
+            // Paid-but-no-access — best-effort.
+            match api::paid_no_access().await {
+                Ok(list) => no_access.set(list),
+                Err(e) if e.is_auth() => {
+                    auth::logout();
+                    view.set(View::Login);
+                }
+                Err(_) => {}
+            }
+            // Caught receipts — best-effort.
+            match api::receipts().await {
+                Ok(list) => receipts.set(list),
+                Err(e) if e.is_auth() => {
+                    auth::logout();
+                    view.set(View::Login);
+                }
+                Err(_) => {}
+            }
             loading.set(false);
         });
     });
@@ -603,6 +641,40 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
 
         <div class="screen">
             {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+
+            // Paid but no access yet (no passkey) — nudge them to finish onboarding.
+            {move || {
+                let list = no_access.get();
+                (!list.is_empty()).then(|| view! {
+                    <div style="padding: 16px 16px 2px;">
+                        <span class="badge badge--danger">{format!("Оплатили, нет доступа · {}", list.len())}</span>
+                    </div>
+                    <div class="list">
+                        {list.into_iter().enumerate().map(|(i, r)| {
+                            let who = r.tg_username.clone()
+                                .map(|u| format!("@{u}"))
+                                .or_else(|| r.tg_user_id.map(|id| format!("tg:{id}")))
+                                .or_else(|| r.user_id.clone())
+                                .unwrap_or_else(|| "—".into());
+                            let amount = match (r.amount, r.currency.clone()) {
+                                (Some(a), Some(c)) => format!("{a} {c}"),
+                                _ => "—".into(),
+                            };
+                            let when = r.paid_at.or(r.created_at).map(since_label).unwrap_or_default();
+                            view! {
+                                <div attr:data-testid="no-access-row" class="row reveal" style=format!("--i:{i}")>
+                                    <div class="row__top">
+                                        <span class="row__title">{who}</span>
+                                        <span class="badge badge--danger">"нет ключа"</span>
+                                    </div>
+                                    <div class="row__sub mono">{amount}</div>
+                                    <div class="row__meta">{when}</div>
+                                </div>
+                            }
+                        }).collect_view()}
+                    </div>
+                })
+            }}
 
             // Refund requests: client asked for a refund, access already revoked.
             // Process each manually in lava (using the contract id / email).
@@ -633,6 +705,47 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                                     <div class="row__sub">{email}</div>
                                     <div class="row__meta">"lava: "<span class="mono">{contract}</span></div>
                                     <div class="row__meta">{meta}</div>
+                                </div>
+                            }
+                        }).collect_view()}
+                    </div>
+                })
+            }}
+
+            // Caught receipts (bound to a payment). Tap a row → full text in a modal.
+            {move || {
+                let list = receipts.get();
+                (!list.is_empty()).then(|| view! {
+                    <div style="padding: 16px 16px 2px;">
+                        <span class="badge">{format!("Чеки · {}", list.len())}</span>
+                    </div>
+                    <div class="list">
+                        {list.into_iter().enumerate().map(|(i, r)| {
+                            let who = r.tg_username.clone().map(|u| format!("@{u}"))
+                                .or_else(|| r.tg_user_id.map(|id| format!("tg:{id}")))
+                                .or_else(|| r.user_id.clone())
+                                .or_else(|| r.email.clone())
+                                .unwrap_or_else(|| "—".into());
+                            let amount = fmt_money(r.amount, r.currency.as_deref());
+                            let when = r.received_at.map(since_label).unwrap_or_default();
+                            let id = r.id.clone();
+                            let open = move |_| {
+                                let id = id.clone();
+                                spawn_local(async move {
+                                    if let Ok(Some(full)) = api::receipt_detail(&id).await {
+                                        selected.set(Some(full));
+                                    }
+                                });
+                            };
+                            view! {
+                                <div attr:data-testid="receipt-row" class="row reveal"
+                                     style=format!("--i:{i}; cursor:pointer;") on:click=open>
+                                    <div class="row__top">
+                                        <span class="row__title mono">{amount}</span>
+                                        <span class="badge">"чек"</span>
+                                    </div>
+                                    <div class="row__sub">{who}</div>
+                                    <div class="row__meta">{when}</div>
                                 </div>
                             }
                         }).collect_view()}
@@ -679,6 +792,29 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                     </div>
                 }.into_view()
             }}
+
+            // Receipt detail: the full rendered receipt body.
+            {move || selected.get().map(|full| {
+                let body = full.body_text.clone().unwrap_or_default();
+                let amount = fmt_money(full.amount, full.currency.as_deref());
+                let when = full.received_at.map(since_label).unwrap_or_default();
+                view! {
+                    <div on:click=move |_| selected.set(None)
+                         style="position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:60; \
+                                display:flex; align-items:center; justify-content:center; padding:16px;">
+                        <div on:click=move |ev: leptos::ev::MouseEvent| ev.stop_propagation()
+                             style="background:#fff; color:#111; max-width:660px; width:100%; \
+                                    max-height:86vh; overflow:auto; border-radius:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; \
+                                        padding:12px 16px; border-bottom:1px solid #eee; position:sticky; top:0; background:#fff;">
+                                <div><b>"Чек"</b>" · "<span class="mono">{amount}</span>" · "{when}</div>
+                                <button class="btn btn--ghost" on:click=move |_| selected.set(None)>"✕"</button>
+                            </div>
+                            <div inner_html=body style="padding:12px 16px;"></div>
+                        </div>
+                    </div>
+                }
+            })}
         </div>
 
         <TabBar view=view active=Section::Payments/>

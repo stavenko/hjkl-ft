@@ -273,6 +273,38 @@ pub async fn unbound_payments() -> Result<Vec<UnboundPayment>, ApiError> {
     Ok(r.unbound)
 }
 
+/// A paid user who hasn't set up durable access (no passkey) — «paid but can't get in yet».
+#[derive(Debug, Clone, Deserialize)]
+pub struct PaidNoAccess {
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub tg_user_id: Option<i64>,
+    #[serde(default)]
+    pub tg_username: Option<String>,
+    #[serde(default)]
+    pub amount: Option<i64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub paid_at: Option<i64>,
+    #[serde(default)]
+    pub created_at: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct PaidNoAccessResp {
+    users: Vec<PaidNoAccess>,
+}
+
+/// GET /admin/paid-no-access (payment-worker). Paid users with no passkey — the operator
+/// nudges them to finish setting up access.
+pub async fn paid_no_access() -> Result<Vec<PaidNoAccess>, ApiError> {
+    let r: PaidNoAccessResp =
+        request_to(&payment_base()?, "GET", "/admin/paid-no-access", None).await?;
+    Ok(r.users)
+}
+
 /// A client-requested refund (access already revoked). The operator processes it
 /// manually in lava using contract_id / email.
 #[derive(Debug, Clone, Deserialize)]
@@ -302,5 +334,80 @@ struct RefundsResp {
 pub async fn refund_requests() -> Result<Vec<RefundRequest>, ApiError> {
     let r: RefundsResp = request_to(&payment_base()?, "GET", "/admin/refunds", None).await?;
     Ok(r.refunds)
+}
+
+/// A receipt email caught at the buyer address (Email Routing → receipt-worker) and bound to
+/// its payment. `amount` is minor units (×100). List view — no body text (see [`receipt_detail`]).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Receipt {
+    pub id: String,
+    #[serde(default)]
+    pub claim_id: Option<String>,
+    #[serde(default)]
+    pub amount: Option<i64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub received_at: Option<i64>,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub tg_user_id: Option<i64>,
+    #[serde(default)]
+    pub tg_username: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub pdf_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ReceiptsResp {
+    receipts: Vec<Receipt>,
+}
+
+/// GET /admin/receipts (payment-worker). Caught receipts bound to payments, newest first.
+pub async fn receipts() -> Result<Vec<Receipt>, ApiError> {
+    let r: ReceiptsResp = request_to(&payment_base()?, "GET", "/admin/receipts", None).await?;
+    Ok(r.receipts)
+}
+
+/// The FULL receipt (incl. `body_text`) by id — for the detail view.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReceiptFull {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub amount: Option<i64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub received_at: Option<i64>,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub body_text: Option<String>,
+    #[serde(default)]
+    pub pdf_key: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ReceiptDetailResp {
+    #[serde(default)]
+    found: bool,
+    #[serde(default)]
+    receipt: Option<ReceiptFull>,
+}
+
+/// GET /admin/receipt?id= (payment-worker) → the full receipt with its body, or None.
+pub async fn receipt_detail(id: &str) -> Result<Option<ReceiptFull>, ApiError> {
+    let enc = js_sys::encode_uri_component(id).as_string().unwrap_or_default();
+    let r: ReceiptDetailResp =
+        request_to(&payment_base()?, "GET", &format!("/admin/receipt?id={enc}"), None).await?;
+    Ok(if r.found { r.receipt } else { None })
 }
 

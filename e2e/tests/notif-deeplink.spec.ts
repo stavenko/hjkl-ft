@@ -1,35 +1,27 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Regression guard for the notification deep-link CONSUMPTION contract.
+ * Regression guard for the notification RECEIPT contract (docs/notification-receipt.md).
  *
- * The Chapter-1 "setup" section (`SetupControls` in story_widgets.rs) shows a
- * notification task row that is completed ONLY by opening the page with the
- * `?notif=1` deep-link (the test-push target). That handler:
+ * The setup «notification» task completes when a push carrying
+ * `ntf=<kind>.<section>.<task>.<rand>` (e.g. `tc.setup.notif.a4f2`) is RECEIVED —
+ * no tap, no navigation. The service worker writes the code to IndexedDB
+ * (`rn-notif`/kv, the iOS-safe live channel) and a Cache marker; the page
+ * (index.html) bridges either into `localStorage['rn_notif_received']`; a WASM
+ * poll (lib.rs, install_notif_receipt_poll) consumes it, resolves the task via
+ * story::flag_for_task and sets NOTIFICATION_RECEIVED — the row flips reactively.
  *
- *     if search.contains("notif=1") {
- *         spawn_local(async move { story::set_flag(story::NOTIFICATION_RECEIVED, true).await; });
- *     }
+ * A real push can't be injected here (serviceWorkers are blocked in this config),
+ * so each test seeds the channel one hop downstream of the SW and asserts the
+ * SAME task row flips PENDING → DONE:
+ *   1. localStorage seed  → covers the WASM poll + flag resolution + reactive UI;
+ *   2. IndexedDB seed     → additionally covers the page-side bridge (idbTakeNotif).
  *
- * is the single seam a future routing change could silently break — and until
- * this spec there was NO test for it, which is exactly how the regression
- * (tap-does-not-complete) landed green.
- *
- * The pair below IS the documentary contract: SAME page, DIFFERENT result driven
- * only by the presence of the `?notif=1` query param.
- *   - no param  → row shows ⏳ "Уведомление ещё не приходило" (PENDING)
- *   - ?notif=1  → row shows ✅ "Уведомление получено"        (DONE)
- *
- * Why this renders for a fresh, unauthenticated visitor:
- * In frontend/src/app.rs the <Router>/<Routes> (which serve `/story/:id` →
- * StorySectionPage → SetupControls) are ALWAYS mounted; the Auth / PWA / Checking
- * / Locked screens are just fixed-position z-index:100 OVERLAYS drawn on top. The
- * setup DOM therefore exists behind the overlay, and Playwright's toBeVisible()
- * (which checks CSS visibility/size, not occlusion by another element) can read
- * it. We set `pwa_dismissed` so the PWA-install overlay doesn't take a different
- * (needs_pwa_prompt) branch. Each test gets a fresh Playwright context, and
- * serviceWorkers:'block' + a fresh per-user IndexedDB mean the NOTIFICATION_RECEIVED
- * flag starts unset — so the PENDING state is deterministic.
+ * Why this renders for a fresh, unauthenticated visitor: in frontend/src/app.rs
+ * the <Router>/<Routes> (`/story/:id` → StorySectionPage → SetupControls) are
+ * ALWAYS mounted; Auth / PWA overlays are drawn on top, and toBeVisible() checks
+ * CSS visibility, not occlusion. `pwa_dismissed` keeps the PWA overlay branch
+ * inert; a fresh context per test means NOTIFICATION_RECEIVED starts unset.
  */
 
 const PENDING = 'Уведомление ещё не приходило';
@@ -45,18 +37,49 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test.describe('Notification deep-link consumption', () => {
-  test('setup notif task completes only via the ?notif=1 deep-link', async ({ page }) => {
-    // 1. CONTROL — "before the link". Fresh visit, no query param: the notif row
-    //    must show the PENDING (⏳) status and NOT the DONE status.
+test.describe('Notification receipt completes the setup task', () => {
+  test('ntf code in localStorage (WASM poll channel)', async ({ page }) => {
+    // CONTROL — fresh visit: the notif row must be PENDING (⏳), not DONE.
     await page.goto('/story/setup');
     await expect(page.getByText(PENDING)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(DONE)).toHaveCount(0);
 
-    // 2. LINK TAPPED — same page, opened with the `?notif=1` deep-link. The flag
-    //    write is async (spawn_local → IndexedDB), so rely on toBeVisible's
-    //    auto-wait for the row to flip to DONE (✅).
-    await page.goto('/story/setup?notif=1');
+    // RECEIPT — what the page bridge writes when the SW delivers a push. The
+    // 1s WASM poll consumes it, sets the flag, and the row flips reactively —
+    // same page, no navigation.
+    await page.evaluate(() => {
+      localStorage.setItem('rn_notif_received', 'tc.setup.notif.e2e1');
+    });
+    await expect(page.getByText(DONE)).toBeVisible({ timeout: 15_000 });
+    // Consumed exactly once: the poll removes the code after processing.
+    expect(await page.evaluate(() => localStorage.getItem('rn_notif_received'))).toBeNull();
+  });
+
+  test('ntf code in IndexedDB (SW live channel + page bridge)', async ({ page }) => {
+    await page.goto('/story/setup');
+    await expect(page.getByText(PENDING)).toBeVisible({ timeout: 15_000 });
+
+    // RECEIPT — what the SW's push handler writes (idbPutNotif in sw.js). The
+    // page's idbTakeNotif (index.html, 1s tick) must bridge it to localStorage,
+    // then the WASM poll completes the task.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const req = indexedDB.open('rn-notif', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('kv');
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction('kv', 'readwrite');
+            tx.objectStore('kv').put('tc.setup.notif.e2e2', 'notif_received');
+            tx.oncomplete = () => {
+              db.close();
+              resolve();
+            };
+            tx.onabort = () => reject(tx.error);
+          };
+          req.onerror = () => reject(req.error);
+        }),
+    );
     await expect(page.getByText(DONE)).toBeVisible({ timeout: 15_000 });
   });
 });

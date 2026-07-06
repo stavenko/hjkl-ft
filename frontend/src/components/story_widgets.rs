@@ -604,15 +604,6 @@ pub fn SetupControls() -> impl IntoView {
         });
     });
 
-    // Test-push deep link: ?notif=1 marks the notification task done.
-    let search = web_sys::window()
-        .map(|w| w.location())
-        .and_then(|l| l.search().ok())
-        .unwrap_or_default();
-    if search.contains("notif=1") {
-        spawn_local(async move { story::set_flag(story::NOTIFICATION_RECEIVED, true).await; });
-    }
-
     let toggle_lang = move |_| {
         let v = !lang_done.get_untracked();
         lang_done.set(v);

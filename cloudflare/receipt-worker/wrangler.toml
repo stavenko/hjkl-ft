@@ -1,0 +1,54 @@
+name = "receipt-worker-dev"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-12-01"
+
+[build]
+# Pin worker-build to the worker/wasm-bindgen versions in Cargo.lock (same pin as the
+# other Rust workers) so an unpinned install can't pull an incompatible CLI.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
+
+# Archive bucket for raw receipt emails + header sidecars. The Worker is triggered by an
+# Email Routing rule (no HTTP route needed); it writes captures to R2.
+[[r2_buckets]]
+binding = "RECEIPTS"
+bucket_name = "renorma-receipts-dev"
+
+# Bind a caught receipt to its payment via payment-worker /internal/receipt.
+[[services]]
+binding = "PAYMENT_WORKER"
+service = "payment-worker-dev"
+
+[vars]
+# Shared cross-worker key guarding payment-worker /internal/*; dev placeholder must match
+# payment-worker-dev's INTERNAL_PUSH_KEY. Prod reads it from the Secrets Store below.
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
+
+# Retain logs so a caught email (console_log) is visible while measuring.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# ── Production (renorma.app zone — the only place real receipts can arrive) ──
+# Deploy: wrangler deploy --env production
+[env.production]
+name = "receipt-worker-prod"
+workers_dev = false
+
+[[env.production.r2_buckets]]
+binding = "RECEIPTS"
+bucket_name = "renorma-receipts-prod"
+
+[[env.production.services]]
+binding = "PAYMENT_WORKER"
+service = "payment-worker-prod"
+
+# Same shared key as payment-worker-prod / support-worker-prod, mounted from the global
+# Secrets Store (binding name MUST equal the env name the code reads).
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"
+
+[env.production.observability]
+enabled = true
+head_sampling_rate = 1

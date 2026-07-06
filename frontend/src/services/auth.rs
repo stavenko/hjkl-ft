@@ -6,6 +6,11 @@ use wasm_bindgen_futures::JsFuture;
 const KEY_USER_ID: &str = "user_id";
 const KEY_AUTH_TOKEN: &str = "auth_token";
 const KEY_TOKEN_ID: &str = "token_id";
+/// Which display context minted the current token: "browser" or "pwa". On Android the installed
+/// PWA SHARES localStorage with the browser, so an onboarding token minted in the browser would
+/// otherwise silently authorize the PWA. The PWA must require its OWN login (like iOS, where
+/// storage is separate) — so a "browser" token never authorizes a standalone launch.
+const KEY_AUTH_CTX: &str = "auth_ctx";
 
 fn storage() -> web_sys::Storage {
     web_sys::window()
@@ -30,6 +35,29 @@ fn set_token(token: &str) {
     if let Some(token_id) = extract_token_id_from_jwt(token) {
         storage().set_item(KEY_TOKEN_ID, &token_id).expect("write token_id");
     }
+    // Stamp the context this token was minted in, so a browser-onboarding token can't
+    // silently authorize the installed PWA (shared localStorage on Android). See KEY_AUTH_CTX.
+    let ctx = if crate::services::platform::is_pwa() { "pwa" } else { "browser" };
+    storage().set_item(KEY_AUTH_CTX, ctx).expect("write auth_ctx");
+}
+
+/// Is there a usable session FOR THE CURRENT display context? A token is required, and in the
+/// installed PWA a token minted in the browser (onboarding) does NOT count — the PWA must be
+/// logged into on its own (passkey or Telegram code). Legacy tokens with no context are
+/// accepted (backward-compat). This is the app-entry gate.
+pub fn session_valid_here() -> bool {
+    if get_token().is_none() {
+        return false;
+    }
+    if crate::services::platform::is_pwa() {
+        // In the installed PWA ONLY a token minted here (ctx "pwa") counts. A browser/onboarding
+        // token (ctx "browser") — or a legacy token with no ctx — must NOT authorize the PWA:
+        // require an explicit login (passkey or Telegram code). On Android the PWA shares
+        // localStorage with the browser, so this is the boundary that forces the PWA login.
+        let ctx = storage().get_item(KEY_AUTH_CTX).ok().flatten();
+        return ctx.as_deref() == Some("pwa");
+    }
+    true
 }
 
 /// Finalize a sign-in / registration / pairing: record the identity, switch to
@@ -47,6 +75,108 @@ async fn establish_session(user_id: &str, token: Option<&str>) {
         set_token(token);
     }
     crate::services::sync::sync_now_background();
+}
+
+/// Establish a session from a token minted OUTSIDE the WebAuthn flow (the Telegram-code
+/// fallback: payment-worker → auth-worker mints the JWT). Same session bootstrap as a
+/// passkey login, so the rest of the app is oblivious to how the user got in.
+pub async fn establish_external_session(user_id: &str, token: &str) {
+    establish_session(user_id, Some(token)).await;
+}
+
+/// Ask the auth-worker to deliver a one-time login code to the user's channel (Telegram → our
+/// payment bot). `user_id` is the non-secret account id carried in the URL / manifest. A 429
+/// error means the per-user cooldown is still active (caller shows the countdown).
+pub async fn code_request(user_id: &str) -> Result<(), String> {
+    post_json("/code/request", &serde_json::json!({ "userId": user_id })).await?;
+    Ok(())
+}
+
+/// Submit the code from Telegram → verify + mint a session for `user_id` and establish it
+/// locally. On success the user is logged in (same session bootstrap as any login path).
+pub async fn code_verify(user_id: &str, code: &str) -> Result<(), String> {
+    let v = post_json(
+        "/code/verify",
+        &serde_json::json!({ "userId": user_id, "code": code }),
+    )
+    .await?;
+    let uid = v
+        .get("userId")
+        .and_then(|x| x.as_str())
+        .ok_or("no userId in response")?;
+    let token = v
+        .get("token")
+        .and_then(|x| x.as_str())
+        .ok_or("no token in response")?;
+    establish_session(uid, Some(token)).await;
+    Ok(())
+}
+
+/// Record — from the RUNNING app — that a story chapter became available in the UI (stored next
+/// to the persona). The first chapter unlocking marks «entered the system». Authenticated.
+pub async fn record_chapter_available(chapter_id: &str) -> Result<(), String> {
+    post_json_auth("/chapters/available", &serde_json::json!({ "chapter": chapter_id })).await?;
+    Ok(())
+}
+
+/// Fire-and-forget report that a chapter is AVAILABLE in the UI, deduped per chapter per device.
+/// Sets an optimistic guard before the call (so re-renders don't re-POST) and CLEARS it on
+/// failure so the report retries later. A failure is logged, never silently swallowed.
+pub fn report_chapter_available(chapter_id: &str) {
+    let key = format!("ch_avail_reported:{chapter_id}");
+    if storage().get_item(&key).ok().flatten().is_some() {
+        return;
+    }
+    let _ = storage().set_item(&key, "1");
+    let chapter_id = chapter_id.to_string();
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(e) = record_chapter_available(&chapter_id).await {
+            leptos::logging::error!("report_chapter_available({chapter_id}): {e}");
+            let _ = storage().remove_item(&format!("ch_avail_reported:{chapter_id}"));
+        }
+    });
+}
+
+/// True ONLY when this device is Android AND cannot create a passkey (no WebAuthn API, or no
+/// user-verifying platform authenticator). Gates the Telegram-code fallback. iOS/desktop
+/// always return false → they keep the passkey flow. See the on-device probe findings:
+/// `window.PublicKeyCredential === undefined` is the hard signal (fired on waydroid), with
+/// IUVPAA as the secondary check when the API is present.
+pub async fn passkey_unavailable() -> bool {
+    let win = match web_sys::window() {
+        Some(w) => w,
+        None => return false,
+    };
+    let ua = win.navigator().user_agent().unwrap_or_default();
+    if !ua.contains("Android") {
+        return false; // only Android is gated
+    }
+    // WebAuthn API present at all?
+    let pkc = match js_sys::Reflect::get(&win, &JsValue::from_str("PublicKeyCredential")) {
+        Ok(v) if !v.is_undefined() && !v.is_null() => v,
+        _ => return true, // no PublicKeyCredential → passkey is impossible
+    };
+    // Platform authenticator available? (isUserVerifyingPlatformAuthenticatorAvailable)
+    let f = match js_sys::Reflect::get(
+        &pkc,
+        &JsValue::from_str("isUserVerifyingPlatformAuthenticatorAvailable"),
+    ) {
+        Ok(v) => v,
+        _ => return false, // can't determine → don't gate (keep passkey)
+    };
+    let func: js_sys::Function = match f.dyn_into() {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let promise: js_sys::Promise = match func.call0(&pkc).and_then(|p| p.dyn_into()) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    match JsFuture::from(promise).await {
+        // available == true → passkey works → NOT unavailable.
+        Ok(v) => !v.as_bool().unwrap_or(false),
+        Err(_) => false,
+    }
 }
 
 fn extract_token_id_from_jwt(token: &str) -> Option<String> {
@@ -464,10 +594,18 @@ pub async fn login_with_phrase(phrase: &str) -> Result<String, String> {
 /// phrase login so next time the user can use the passkey). Mirrors `register()` but
 /// hits the JWT-gated `/add-device/*` endpoints (origin derived server-side).
 pub async fn add_passkey() -> Result<(), String> {
+    add_passkey_named("").await
+}
+
+/// Like [`add_passkey`] but carries a display name (the onboarding «create key» screen asks
+/// for one). Adds a passkey to the CURRENT session's account.
+pub async fn add_passkey_named(display_name: &str) -> Result<(), String> {
     let fingerprint = generate_fingerprint();
-    let begin_resp = post_json_auth("/add-device/begin", &serde_json::json!({
-        "fingerprint": fingerprint
-    })).await?;
+    let mut begin_body = serde_json::json!({ "fingerprint": fingerprint });
+    if !display_name.trim().is_empty() {
+        begin_body["display_name"] = serde_json::Value::String(display_name.trim().to_string());
+    }
+    let begin_resp = post_json_auth("/add-device/begin", &begin_body).await?;
 
     let user_id = begin_resp
         .get("user_id")

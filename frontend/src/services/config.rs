@@ -30,9 +30,15 @@ pub struct FrontendConfig {
     pub support_base_url: String,
     /// Public marketing/subscription site. "Регистрация" on the login screen sends a
     /// new user here to subscribe (registration itself happens in the paid claim flow).
-    /// Empty → falls back to https://renorma.app.
     #[serde(default)]
     pub landing_url: String,
+    /// Telegram deep-link to the payment bot's Mini App (the «оформить подписку» entry).
+    #[serde(default)]
+    pub miniapp_pay_url: String,
+    /// This app's own origin (used as a fallback when `window.location.origin` is
+    /// unavailable). Differs per env (renorma-fit-dev.pages.dev vs fit.renorma.app).
+    #[serde(default)]
+    pub app_origin: String,
 }
 
 static CONFIG: OnceLock<FrontendConfig> = OnceLock::new();

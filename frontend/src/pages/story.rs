@@ -57,6 +57,20 @@ pub fn StoryPage() -> impl IntoView {
         spawn_local(async move { seen.set(story::seen_routes().await); });
     });
 
+    // Report to the backend (next to the persona) which chapters are AVAILABLE in the UI. The
+    // first chapter unlocking = the user «entered the system» — the Mini App's access signal.
+    // Deduped per chapter per device inside `report_chapter_available`.
+    create_effect(move |_| {
+        let Some(s) = snap.get() else { return };
+        let st = story_dsl::story();
+        let e = Engine::new(st, &s);
+        for ch in &st.chapters {
+            if e.chapter_open(ch) {
+                crate::services::auth::report_chapter_available(&ch.id);
+            }
+        }
+    });
+
     let new_dot = || view! {
         <span attr:data-testid="story-section-new-dot"
             style="width: 8px; height: 8px; border-radius: 50%; background: var(--bulma-danger); flex: none;"></span>

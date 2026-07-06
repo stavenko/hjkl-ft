@@ -15,6 +15,10 @@ PROJECT="${1:-renorma-fit-prod}"
 
 trunk build --release
 
+# 0) Pages advanced-mode worker: serves the per-user dynamic manifest, passes the rest to
+#    static assets. Presence of dist/_worker.js switches Pages into advanced mode.
+cp pwa-worker.js dist/_worker.js
+
 # 1) prod worker URLs
 cp config-prod/frontend.toml dist/config/frontend.toml
 

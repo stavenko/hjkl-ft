@@ -21,7 +21,8 @@ fn parse_claim_fragment() -> Option<(String, String)> {
 fn origin() -> String {
     web_sys::window()
         .and_then(|w| w.location().origin().ok())
-        .unwrap_or_else(|| "https://fit.renorma.app".into())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| crate::services::config::get().app_origin.clone())
 }
 
 #[component]

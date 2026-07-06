@@ -2,13 +2,12 @@ use leptos::*;
 use leptos_router::*;
 use wasm_bindgen::JsValue;
 
+use crate::services::config;
 use crate::services::i18n::{get_lang, t, Lang};
 use crate::services::subscription;
 
 const PAGE_BG: &str = "background: var(--bulma-background); min-height: 100vh; padding: 0; margin: -0.75rem;";
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden; padding: 16px;";
-/// Purchase / renewal happens in the Telegram Mini App (opens Telegram → the pay app).
-const MINIAPP_PAY_URL: &str = "https://t.me/renorma_payment_helper_bot/pay";
 
 fn days_left(end_ms: i64) -> i64 {
     let now = js_sys::Date::now() as i64;
@@ -238,7 +237,7 @@ pub fn SubscriptionPage() -> impl IntoView {
                             <a
                                 class="button is-link is-fullwidth is-medium"
                                 style="margin-top: 8px;"
-                                href=MINIAPP_PAY_URL
+                                href=config::get().miniapp_pay_url.clone()
                                 target="_blank"
                                 rel="noopener"
                             >

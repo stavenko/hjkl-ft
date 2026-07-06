@@ -29,25 +29,26 @@ fn has_active_sub() -> bool {
     subscription::cached().map(|s| s.active).unwrap_or(false)
 }
 
-/// True when the current URL is the paid-landing claim entry (`/onboard#claim=…`).
-/// Registration happens ONLY here, so we must let OnboardPage render with no
-/// session instead of dropping the Auth (login) overlay over it.
-fn is_onboard_claim_entry() -> bool {
+/// True when the current URL is an onboarding page (`/onboard`, `/onboard-tg`). These pages
+/// drive their OWN auth flow (code-verify → passkey → PWA install), so they must render with
+/// no session instead of the Auth/PwaPrompt overlays dropping over them.
+fn is_onboard_entry() -> bool {
     let Some(loc) = web_sys::window().map(|w| w.location()) else { return false };
     let path = loc.pathname().unwrap_or_default();
-    let hash = loc.hash().unwrap_or_default();
-    (path == "/onboard" || path == "/onboard-tg") && hash.starts_with("#claim=")
+    path == "/onboard" || path == "/onboard-tg"
 }
 
 fn initial_state() -> AppState {
-    // `/onboard#claim=` drives its own register→claim flow; bypass all overlays so
-    // the Auth (login-only) screen doesn't cover it.
-    if is_onboard_claim_entry() {
+    // Onboarding drives its own flow; bypass all overlays so neither the Auth (login) nor the
+    // PWA-install overlay covers it.
+    if is_onboard_entry() {
         return AppState::Ready;
     }
     if platform::needs_pwa_prompt() {
         AppState::PwaPrompt
-    } else if auth::get_user_id().is_none() {
+    } else if !auth::session_valid_here() {
+        // No usable session for this context. In the installed PWA a browser-onboarding token
+        // does NOT count — the PWA requires its own login (passkey or Telegram code).
         AppState::Auth
     } else if has_active_sub() {
         AppState::Ready
@@ -134,7 +135,7 @@ pub fn App() -> impl IntoView {
             AppState::PwaPrompt => Some(view! {
                 <div style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main); overflow-y: auto;">
                     <pages::pwa_prompt::PwaPrompt on_dismiss=Callback::new(move |_| {
-                        if auth::get_user_id().is_some() {
+                        if auth::session_valid_here() {
                             after_auth();
                         } else {
                             state.set(AppState::Auth);

@@ -1,133 +1,139 @@
 use leptos::*;
 
+use crate::pages::pwa_prompt::PwaPrompt;
 use crate::services::auth;
 use crate::services::i18n::t;
-use crate::services::subscription;
 
-/// The flow this page drives. Registration happens ONLY here (a new user only
-/// ever arrives via a paid landing link with a `#claim=` fragment).
-#[derive(Clone, PartialEq)]
-enum Step {
-    /// Register first: name + passkey.
-    Register,
-    /// Binding the paid subscription to the just-created account.
-    Claiming,
-    /// The webhook hasn't confirmed payment yet — auto-retry + manual retry.
-    Pending,
-    /// Terminal failure (claimed by another account, bad/void secret, …).
-    Failed,
-    /// Subscription bound — entering the app.
-    Done,
+/// Read the `?u=<user_id>` query param (the non-secret universal account id the Mini App /
+/// dynamic manifest carries into this page). None → not a valid entry.
+fn param_user_id() -> Option<String> {
+    let search = web_sys::window()?.location().search().ok()?;
+    let params = web_sys::UrlSearchParams::new_with_str(&search).ok()?;
+    params.get("u").filter(|s| !s.is_empty())
 }
 
-/// Parse `#claim=claimId.secret` from the current URL fragment.
-/// The secret travels ONLY in the fragment (never a query param), so it is not
-/// sent to any server in the redirect and not written to access logs.
-fn parse_claim_fragment() -> Option<(String, String)> {
+/// Read the one-time code from the URL FRAGMENT (`#code=…`) — the Mini App minted it (it's the
+/// trusted Telegram owner) and embedded it here so we auto-authorize without asking the user to
+/// copy it. Fragment (not query) so it isn't sent to the server. None → ask for the code.
+fn param_code() -> Option<String> {
     let hash = web_sys::window()?.location().hash().ok()?;
-    // hash includes the leading '#'
-    let rest = hash.strip_prefix("#claim=")?;
-    let (claim_id, secret) = rest.split_once('.')?;
-    if claim_id.is_empty() || secret.is_empty() {
-        return None;
-    }
-    Some((claim_id.to_string(), secret.to_string()))
+    let rest = hash.strip_prefix("#code=")?;
+    (!rest.is_empty()).then(|| rest.to_string())
 }
 
-/// Strip the `#claim=...` secret from the URL bar once it's been consumed, so it
-/// isn't left visible. Best-effort (history API).
-fn clear_claim_fragment() {
-    if let Some(history) = web_sys::window().and_then(|w| w.history().ok()) {
-        let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/onboard"));
+/// Point the page's `<link rel="manifest">` at this user so ANY install captures a manifest
+/// whose `start_url=/?u=<user_id>` — the installed PWA then launches knowing its account.
+fn set_manifest_user(user_id: &str) {
+    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        if let Ok(Some(link)) = doc.query_selector("link[rel=manifest]") {
+            let _ = link.set_attribute("href", &format!("/manifest.json?u={user_id}"));
+        }
     }
 }
 
-/// A claim error is retryable ONLY while the webhook hasn't confirmed payment
-/// (`not_paid_yet`, which the server returns as HTTP 409). Everything else is
-/// terminal — including `claim_void` (also HTTP 409, set after a manual refund),
-/// `bad_secret`/`claimed_by_other` (403) and `claim_not_found` (404). Matching the
-/// error CODE (not the bare HTTP 409 status) keeps a voided claim from looping
-/// forever in the pending/retry state.
-fn is_pending_err(e: &str) -> bool {
-    e.contains("not_paid_yet")
+/// Onboarding always arrives with the one-time code in the link (the Mini App minted it), so
+/// we auto-authorize. Steps: Verifying → (capable devices) Passkey → InstallPwa (the app's own
+/// `PwaPrompt`, rendered here as an onboarding step) → into the app "/". A bad/expired code →
+/// Failed. No ask-for-a-code screen here — that lives in the installed PWA (no code in the URL).
+#[derive(Clone, Copy, PartialEq)]
+enum Step {
+    Verifying,
+    Failed,
+    Passkey,
+    InstallPwa,
+}
+
+/// Enter the app — the app itself shows the existing PWA-install prompt when appropriate.
+fn go_app() {
+    if let Some(w) = web_sys::window() {
+        let _ = w.location().set_href("/");
+    }
+}
+
+/// Drop the one-time `#code=` fragment from the address bar after a successful verify, so a
+/// forced reload (index.html reloads on SW activation and on `appinstalled`) can't try to
+/// re-verify the already-consumed code. Keeps the `?u=` query.
+fn strip_code_from_url() {
+    if let Some(win) = web_sys::window() {
+        if let Ok(history) = win.history() {
+            let loc = win.location();
+            let path = loc.pathname().unwrap_or_else(|_| "/onboard".to_string());
+            let search = loc.search().unwrap_or_default();
+            let new_url = format!("{path}{search}");
+            let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&new_url));
+        }
+    }
 }
 
 #[component]
 pub fn OnboardPage() -> impl IntoView {
-    let claim = parse_claim_fragment();
-
-    // No `#claim=` fragment → this isn't a paid entry. Send them to the login
-    // dialog ("/"); registration lives only here, behind a paid claim.
-    if claim.is_none() {
+    let user_id = param_user_id();
+    if user_id.is_none() {
         if let Some(w) = web_sys::window() {
             let _ = w.location().set_href("/");
         }
     }
+    let user_id = store_value(user_id.unwrap_or_default());
+    set_manifest_user(&user_id.get_value());
 
-    let (claim_id, secret) = claim.unwrap_or_default();
-    let claim_id = store_value(claim_id);
-    let secret = store_value(secret);
+    // The one-time code lives in the URL, and index.html force-reloads this page on SW
+    // activation and on PWA install — each reload would otherwise re-verify an ALREADY-CONSUMED
+    // code and falsely show «stale». A code proves auth exactly ONCE; after that the session
+    // (get_user_id) is the source of truth. So: already signed in → we're in, never «stale».
+    let authed_at_mount = auth::get_user_id().is_some();
 
-    let step = create_rw_signal(Step::Register);
+    let step = create_rw_signal(if authed_at_mount || param_code().is_some() {
+        Step::Verifying
+    } else {
+        Step::Failed
+    });
+
+    let can_passkey = create_rw_signal(false);
+    // Detect passkey capability, then decide. Onboarding NEVER auto-redirects into the app — it
+    // always lands on «create key» (capable devices) or the PWA-install screen; the user leaves
+    // ONLY via that screen. Already signed in (a prior load verified the code, then index.html
+    // force-reloaded on SW-activation / appinstalled) → continue the flow, DON'T re-verify the
+    // consumed code, DON'T show «stale». A verify failure with NO session → genuinely stale link.
+    create_effect(move |_| {
+        spawn_local(async move {
+            let cp = !auth::passkey_unavailable().await;
+            can_passkey.set(cp);
+            let onboarding_step = move || step.set(if cp { Step::Passkey } else { Step::InstallPwa });
+
+            // Reloaded / already signed in → continue onboarding, no re-verify.
+            if authed_at_mount {
+                onboarding_step();
+                return;
+            }
+
+            if let Some(code) = param_code() {
+                match auth::code_verify(&user_id.get_value(), &code).await {
+                    Ok(()) => {
+                        strip_code_from_url();
+                        onboarding_step();
+                    }
+                    // A concurrent load may have consumed the code and signed us in first — if
+                    // we're signed in now, that's success, not a stale link.
+                    Err(_) => {
+                        if auth::get_user_id().is_some() {
+                            onboarding_step();
+                        } else {
+                            step.set(Step::Failed);
+                        }
+                    }
+                }
+            } else if auth::get_user_id().is_some() {
+                onboarding_step();
+            } else {
+                step.set(Step::Failed);
+            }
+        });
+    });
+
+    // «Create key» screen state (the original register screen, restored).
     let display_name = create_rw_signal(String::new());
     let loading = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);
-
-    // Attempt the claim (used after register and on each retry). Idempotent
-    // server-side, so re-running after a half-done claim is safe.
-    let do_claim = move || {
-        step.set(Step::Claiming);
-        error.set(None);
-        spawn_local(async move {
-            let cid = claim_id.get_value();
-            let sec = secret.get_value();
-            match subscription::claim(&cid, &sec).await {
-                Ok(s) if s.is_paid() => {
-                    clear_claim_fragment();
-                    step.set(Step::Done);
-                    // Enter the app.
-                    if let Some(w) = web_sys::window() {
-                        let _ = w.location().set_href("/");
-                    }
-                }
-                Ok(_) => {
-                    // Claimed but not active yet — treat as pending and retry.
-                    step.set(Step::Pending);
-                }
-                Err(e) if is_pending_err(&e) => {
-                    step.set(Step::Pending);
-                }
-                Err(e) => {
-                    error.set(Some(e));
-                    step.set(Step::Failed);
-                }
-            }
-        });
-    };
-
-    // F-3: an EXISTING user paid again (e.g. after a lapse). Instead of registering a
-    // second account — which would fragment their data and strand the old history — log
-    // in with the existing passkey, then bind THIS claim to that account under its JWT.
-    // No pre-check needed: the account already exists (no orphan risk), and `do_claim`
-    // surfaces any terminal claim error itself.
-    let on_login = move |_| {
-        loading.set(true);
-        error.set(None);
-        spawn_local(async move {
-            match auth::authenticate().await {
-                Ok(_) => {
-                    loading.set(false);
-                    do_claim();
-                }
-                Err(e) => {
-                    error.set(Some(e));
-                    loading.set(false);
-                }
-            }
-        });
-    };
-
-    // Register name + passkey, then claim.
     let on_register = move |_| {
         let name = display_name.get_untracked();
         if name.trim().is_empty() {
@@ -136,26 +142,8 @@ pub fn OnboardPage() -> impl IntoView {
         loading.set(true);
         error.set(None);
         spawn_local(async move {
-            // F-1 pre-check: do NOT register if the claim can't be bound. Register runs
-            // BEFORE claim (claim binds to a user_id), so a terminal claim state would
-            // otherwise leave an orphan account with no subscription. We check the public
-            // claim status first; terminal states (`claimed`/`void`/`none`) → stop here,
-            // no account created. `paid`/`pending` are fine (pending → claim retries).
-            // A transient network error on the check → proceed (claim() surfaces the real
-            // error); a rare race after this check is accepted (no destructive rollback).
-            let cid = claim_id.get_value();
-            if let Ok(st) = subscription::claim_status(&cid).await {
-                if st != "paid" && st != "pending" {
-                    error.set(Some(t("onboard.link_unavailable").to_string()));
-                    loading.set(false);
-                    return;
-                }
-            }
-            match auth::register(&name).await {
-                Ok(_) => {
-                    loading.set(false);
-                    do_claim();
-                }
+            match auth::add_passkey_named(name.trim()).await {
+                Ok(()) => step.set(Step::InstallPwa),
                 Err(e) => {
                     error.set(Some(e));
                     loading.set(false);
@@ -163,60 +151,57 @@ pub fn OnboardPage() -> impl IntoView {
             }
         });
     };
-
-    // Auto-retry the claim while in Pending: poll every 2s for up to ~60s. The
-    // loop self-cancels once the step leaves Pending (success / terminal error).
-    create_effect(move |_| {
-        if step.get() != Step::Pending {
-            return;
-        }
+    let on_login = move |_| {
+        loading.set(true);
+        error.set(None);
         spawn_local(async move {
-            for _ in 0..30 {
-                sleep_ms(2000).await;
-                if step.get_untracked() != Step::Pending {
-                    return;
-                }
-                let cid = claim_id.get_value();
-                let sec = secret.get_value();
-                match subscription::claim(&cid, &sec).await {
-                    Ok(s) if s.is_paid() => {
-                        clear_claim_fragment();
-                        step.set(Step::Done);
-                        if let Some(w) = web_sys::window() {
-                            let _ = w.location().set_href("/");
-                        }
-                        return;
-                    }
-                    Ok(_) => { /* still not active — keep polling */ }
-                    Err(e) if is_pending_err(&e) => { /* keep polling */ }
-                    Err(e) => {
-                        error.set(Some(e));
-                        step.set(Step::Failed);
-                        return;
-                    }
+            match auth::authenticate().await {
+                Ok(_) => step.set(Step::InstallPwa),
+                Err(e) => {
+                    error.set(Some(e));
+                    loading.set(false);
                 }
             }
         });
-    });
-
+    };
     let error_view = move || {
         error.get().map(|e| view! {
-            <div class="notification is-danger is-light mb-4" style="text-align: left;">
-                {e}
-                <div class="is-size-7 mt-2 has-text-grey-dark">
-                    "Внутри Telegram регистрация не работает — откройте эту страницу в Safari или Chrome."
-                </div>
-            </div>
+            <div class="notification is-danger is-light mb-4" style="text-align: left;">{e}</div>
         })
     };
 
-    view! {
+    move || match step.get() {
+        // ── Screen 3 (its own full screen): install the PWA — the app's own PwaPrompt ──
+        Step::InstallPwa => view! {
+            <PwaPrompt on_dismiss=Callback::new(|_| go_app()) />
+        }.into_view(),
+
+        // ── Verifying / Failed / Passkey share the onboarding chrome ──
+        _ => view! {
         <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
             <div style="max-width: 24rem; width: 100%;">
+                <img src="/icon-192.png" alt="re:Norma" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
+
                 {move || match step.get() {
-                    Step::Register => view! {
+                    // ── Auto-authorizing with the code from the link ──
+                    Step::Verifying => view! {
+                        <div attr:data-testid="onboard-verifying" style="display: flex; flex-direction: column; align-items: center; gap: 18px;">
+                            <div class="ft-spinner"></div>
+                            <p class="is-size-6 has-text-grey">"Входим…"</p>
+                        </div>
+                    }.into_view(),
+
+                    // ── Stale/failed link — send them back to the bot ──
+                    Step::Failed => view! {
+                        <div attr:data-testid="onboard-failed">
+                            <h1 class="title is-4" style="margin-bottom: 0.5rem;">"Ссылка устарела"</h1>
+                            <p class="has-text-grey mb-4" style="line-height: 1.6;">"Код входа не подошёл или истёк. Откройте нашего Telegram-бота и снова нажмите «Получить доступ»."</p>
+                        </div>
+                    }.into_view(),
+
+                    // ── Screen 2 (its own screen): create the passkey — original screen ──
+                    Step::Passkey => view! {
                         <div>
-                            <img src="/icon-192.png" alt="re:Norma" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
                             <h1 class="title is-4" style="margin-bottom: 0.5rem;">{move || t("onboard.title")}</h1>
                             <p class="has-text-grey mb-5" style="line-height: 1.6;">{move || t("onboard.subtitle")}</p>
 
@@ -241,9 +226,6 @@ pub fn OnboardPage() -> impl IntoView {
                                 </button>
                             </div>
 
-                            // F-3: a returning user who paid again binds THIS claim to
-                            // their existing account (passkey login) instead of making a
-                            // second account. Text-link, secondary to registration.
                             <button
                                 attr:data-testid="onboard-btn-login"
                                 class="button is-ghost has-text-grey is-fullwidth mt-4"
@@ -256,71 +238,11 @@ pub fn OnboardPage() -> impl IntoView {
                         </div>
                     }.into_view(),
 
-                    Step::Claiming => view! {
-                        <div attr:data-testid="onboard-claiming" style="display: flex; flex-direction: column; align-items: center; gap: 20px;">
-                            <div class="ft-spinner"></div>
-                            <p class="is-size-6 has-text-grey">{move || t("onboard.claiming")}</p>
-                        </div>
-                    }.into_view(),
-
-                    Step::Pending => view! {
-                        <div attr:data-testid="onboard-claiming" style="display: flex; flex-direction: column; align-items: center; gap: 20px;">
-                            <div class="ft-spinner"></div>
-                            <p class="is-size-5 has-text-weight-semibold">{move || t("onboard.pending_title")}</p>
-                            <p class="is-size-6 has-text-grey">{move || t("onboard.pending_body")}</p>
-                            <button
-                                attr:data-testid="onboard-btn-retry"
-                                class="button is-link is-light"
-                                on:click=move |_| do_claim()
-                            >
-                                {move || t("onboard.retry")}
-                            </button>
-                        </div>
-                    }.into_view(),
-
-                    Step::Failed => view! {
-                        <div attr:data-testid="onboard-error">
-                            <div style="font-size: 56px; margin-bottom: 16px;">"\u{26a0}\u{fe0f}"</div>
-                            <h1 class="title is-5" style="margin-bottom: 0.5rem;">{move || t("onboard.error_title")}</h1>
-                            <p class="has-text-grey mb-2" style="line-height: 1.6;">{move || t("onboard.error_body")}</p>
-                            {move || error.get().map(|e| view! {
-                                <p class="is-size-7 has-text-danger mb-4">{e}</p>
-                            })}
-                            <button
-                                attr:data-testid="onboard-btn-retry"
-                                class="button is-light is-fullwidth mb-3"
-                                on:click=move |_| do_claim()
-                            >
-                                {move || t("onboard.retry")}
-                            </button>
-                            <button
-                                class="button is-ghost has-text-grey is-fullwidth"
-                                style="text-decoration: underline;"
-                                on:click=move |_| {
-                                    if let Some(w) = web_sys::window() { let _ = w.location().set_href("/"); }
-                                }
-                            >
-                                {move || t("auth.login_title")}
-                            </button>
-                        </div>
-                    }.into_view(),
-
-                    Step::Done => view! {
-                        <div attr:data-testid="onboard-success" style="display: flex; flex-direction: column; align-items: center; gap: 20px;">
-                            <div class="ft-spinner"></div>
-                            <p class="is-size-6 has-text-grey">{move || t("onboard.success")}</p>
-                        </div>
-                    }.into_view(),
+                    // InstallPwa is handled by the outer match (its own full screen).
+                    Step::InstallPwa => view! { <div></div> }.into_view(),
                 }}
             </div>
         </div>
+        }.into_view(),
     }
-}
-
-async fn sleep_ms(ms: u32) {
-    let promise = js_sys::Promise::new(&mut |resolve, _| {
-        let window = web_sys::window().expect("no window");
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms as i32);
-    });
-    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }

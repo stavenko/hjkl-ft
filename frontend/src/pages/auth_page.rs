@@ -1,8 +1,16 @@
 use leptos::*;
 use crate::services::auth;
 use crate::services::i18n::t;
+use crate::components::code_auth::CodeAuth;
 use crate::components::qr_code::QrCode;
 use crate::components::qr_scanner::QrScanner;
+
+/// The `?u=<user_id>` the installed PWA launches with (its dynamic manifest start_url).
+fn param_user_id() -> Option<String> {
+    let search = web_sys::window()?.location().search().ok()?;
+    let params = web_sys::UrlSearchParams::new_with_str(&search).ok()?;
+    params.get("u").filter(|s| !s.is_empty())
+}
 
 #[derive(Clone, PartialEq)]
 enum AuthStep {
@@ -10,6 +18,8 @@ enum AuthStep {
     Phrase,
     ShowQr { qr_url: String, pairing_id: String },
     Scanning,
+    // No-passkey Android fallback: enter the one-time code delivered to Telegram.
+    TgCode,
 }
 
 #[component]
@@ -21,6 +31,24 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
     let loading = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);
     let phrase_input = create_rw_signal(String::new());
+
+    // The installed PWA launches at `/?u=<user_id>` (its dynamic manifest start_url). When a
+    // passkey can't be used on this device, we fall back to the code login for THIS user_id.
+    // Fall back to the stored user_id (Android PWA shares localStorage) if the URL lost `?u`.
+    let pwa_user_id = param_user_id().or_else(auth::get_user_id);
+
+    // No-passkey device that arrived with a user_id (PWA launch) → default to the code login.
+    // Everywhere else the passkey login stays the default (passkey_unavailable → false, or no
+    // user_id in the URL).
+    if pwa_user_id.is_some() {
+        create_effect(move |_| {
+            spawn_local(async move {
+                if auth::passkey_unavailable().await && step.get_untracked() == AuthStep::Login {
+                    step.set(AuthStep::TgCode);
+                }
+            });
+        });
+    }
 
     // Username-less login with the backup phrase.
     let on_phrase_login = move |_| {
@@ -135,14 +163,12 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
     // "Регистрация": registration itself only happens in the paid `/onboard` claim
     // flow, so a new user is sent to the public landing to subscribe first.
     let on_register = move |_| {
-        let cfg = crate::services::config::get();
-        let url = if cfg.landing_url.is_empty() {
-            "https://renorma.app".to_string()
-        } else {
-            cfg.landing_url.clone()
-        };
-        if let Some(w) = web_sys::window() {
-            let _ = w.location().set_href(&url);
+        // landing_url is set in every env config; no hardcoded host fallback.
+        let url = crate::services::config::get().landing_url.clone();
+        if !url.is_empty() {
+            if let Some(w) = web_sys::window() {
+                let _ = w.location().set_href(&url);
+            }
         }
     };
 
@@ -322,6 +348,26 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                     </div>
                 </div>
             }.into_view(),
+
+            AuthStep::TgCode => {
+                let uid = pwa_user_id.clone().unwrap_or_default();
+                view! {
+                    <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
+                        <div style="max-width: 22rem; width: 100%;">
+                            <img src="/icon-192.png" alt="re:Norma" style="width: 72px; height: 72px; border-radius: 16px; margin-bottom: 1.25rem;" />
+                            <h1 class="title is-4" style="margin-bottom: 0.35rem;">"Вход по коду"</h1>
+                            <CodeAuth user_id=uid on_authenticated=on_authenticated />
+                            <button
+                                class="button is-ghost has-text-grey is-fullwidth mt-4"
+                                style="text-decoration: underline;"
+                                on:click=move |_| { error.set(None); step.set(AuthStep::Login); }
+                            >
+                                "Другой способ входа"
+                            </button>
+                        </div>
+                    </div>
+                }.into_view()
+            }
         }}
     }
 }

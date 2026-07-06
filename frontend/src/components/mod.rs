@@ -1,3 +1,4 @@
+pub mod code_auth;
 pub mod add_ingredient_modal;
 pub mod pwa_icons;
 pub mod food_picker;

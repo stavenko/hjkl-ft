@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use leptos::*;
 use api_types::*;
@@ -76,8 +77,6 @@ pub fn FoodEditor(
     let fat = create_rw_signal(String::new());
     let carbs = create_rw_signal(String::new());
     let custom_values = create_rw_signal(BTreeMap::<String, String>::new());
-    let ai_loading = create_rw_signal(false);
-    let ai_error = create_rw_signal(None::<String>);
     let ai_details = create_rw_signal(BTreeMap::<String, AiNutrientDetail>::new());
     // Which nutrient's "?" tooltip is currently open (tap to toggle). `title=`
     // alone only shows on hover, so it's invisible on touch — this drives a
@@ -85,17 +84,37 @@ pub fn FoodEditor(
     let open_tip = create_rw_signal(None::<String>);
     let draft_id = create_rw_signal(None::<String>);
 
-    // AI lookup progress: phase 0=working (waiting), 1=thinking, 2=answering.
-    let ai_phase = create_rw_signal(0u8);
-    let ai_think = create_rw_signal(0u32);
-    let ai_answer = create_rw_signal(0u32);
-    let ai_start = create_rw_signal(0f64);
-    let ai_tick = create_rw_signal(0u32);
-    let ai_interval = create_rw_signal(None::<i32>);
+    // Active tab: 0 = "by name" (text lookup), 1 = "by photo" (vision).
+    let active_tab = create_rw_signal(0u8);
+
+    // TWO independent detection channels so a name lookup and a photo lookup can
+    // run at the SAME time: the user starts a name detection, switches to the
+    // photo tab without waiting, adds photos and starts a vision detection. Each
+    // channel owns its own progress state; both write into the shared nutrient
+    // fields below (last completion wins) and into the single draft.
+    //
+    // phase 0=working (waiting), 1=thinking, 2=answering.
+    let name_loading = create_rw_signal(false);
+    let name_error = create_rw_signal(None::<String>);
+    let name_phase = create_rw_signal(0u8);
+    let name_think = create_rw_signal(0u32);
+    let name_answer = create_rw_signal(0u32);
+    let name_start = create_rw_signal(0f64);
+    let name_tick = create_rw_signal(0u32);
+    let name_interval = create_rw_signal(None::<i32>);
+
+    let photo_loading = create_rw_signal(false);
+    let photo_error = create_rw_signal(None::<String>);
+    let photo_phase = create_rw_signal(0u8);
+    let photo_think = create_rw_signal(0u32);
+    let photo_answer = create_rw_signal(0u32);
+    let photo_start = create_rw_signal(0f64);
+    let photo_tick = create_rw_signal(0u32);
+    let photo_interval = create_rw_signal(None::<i32>);
     // Async vision-queue status line ("in queue: N" / "recognizing…") and the
     // epoch-ms start of the current phase, so we can show seconds since it began.
-    let ai_vision_msg = create_rw_signal(String::new());
-    let ai_vision_start = create_rw_signal(0f64);
+    let photo_vision_msg = create_rw_signal(String::new());
+    let photo_vision_start = create_rw_signal(0f64);
 
     let photos_base64 = create_rw_signal(Vec::<String>::new());
     let photo_count = create_rw_signal(0usize);
@@ -170,7 +189,7 @@ pub fn FoodEditor(
                 // it — never silently drop / send an undecodable image.
                 match file_to_jpeg_base64(&file).await {
                     Ok(b64) => new_imgs.push(b64),
-                    Err(e) => { ai_error.set(Some(e)); }
+                    Err(e) => { photo_error.set(Some(e)); }
                 }
             }
             // APPEND, don't replace: the camera returns one image per capture, so
@@ -184,46 +203,88 @@ pub fn FoodEditor(
 
     let navigate = use_navigate();
 
-    let on_ai = move |_| {
+    // Create-or-update the SINGLE draft from the current fields. Both detection
+    // channels call this on completion; if a draft already exists (e.g. the
+    // other channel finished first) we UPDATE it rather than spawning a second.
+    let persist_result = move || {
+        let food = build_food();
+        let existing = draft_id.get_untracked();
+        spawn_local(async move {
+            match existing {
+                Some(id) => { local::update_draft_fields(&id, &food).await; }
+                None => {
+                    let draft = local::save_draft(&food).await;
+                    draft_id.set(Some(draft.id));
+                }
+            }
+        });
+    };
+
+    // One routine drives both channels; `use_vision` selects which progress
+    // signals it writes to and which backend path it takes. Wrapped in `Rc` so
+    // the two button handlers can each hold a copy.
+    let run_ai = Rc::new(move |use_vision: bool| {
+        let loading = if use_vision { photo_loading } else { name_loading };
+        let error_sig = if use_vision { photo_error } else { name_error };
+        let phase = if use_vision { photo_phase } else { name_phase };
+        let think = if use_vision { photo_think } else { name_think };
+        let answer = if use_vision { photo_answer } else { name_answer };
+        let start_sig = if use_vision { photo_start } else { name_start };
+        let tick = if use_vision { photo_tick } else { name_tick };
+        let interval = if use_vision { photo_interval } else { name_interval };
+        // Vision-only status line / phase-start; untouched by the text channel.
+        let vision_msg = photo_vision_msg;
+        let vision_start = photo_vision_start;
+
         let images = photos_base64.get_untracked();
         let n = name.get_untracked();
-        if images.is_empty() && n.is_empty() { return; }
+        if use_vision {
+            if images.is_empty() { return; }
+        } else if n.is_empty() {
+            return;
+        }
+
         let navigate = navigate.clone();
-        ai_loading.set(true);
-        ai_error.set(None);
-        ai_phase.set(0);
-        ai_think.set(0);
-        ai_answer.set(0);
-        ai_tick.set(0);
-        ai_vision_msg.set(String::new());
-        ai_vision_start.set(0.0);
-        ai_start.set(js_sys::Date::now());
+        loading.set(true);
+        error_sig.set(None);
+        phase.set(0);
+        think.set(0);
+        answer.set(0);
+        tick.set(0);
+        if use_vision {
+            vision_msg.set(String::new());
+            vision_start.set(0.0);
+        }
+        start_sig.set(js_sys::Date::now());
         // 1s tick to drive the live "Working: Xs" display.
         {
             let win = web_sys::window().unwrap();
-            let cb = wasm_bindgen::closure::Closure::<dyn Fn()>::new(move || ai_tick.update(|v| *v += 1));
+            let cb = wasm_bindgen::closure::Closure::<dyn Fn()>::new(move || tick.update(|v| *v += 1));
             if let Ok(id) = win.set_interval_with_callback_and_timeout_and_arguments_0(
                 cb.as_ref().unchecked_ref(),
                 1000,
             ) {
-                ai_interval.set(Some(id));
+                interval.set(Some(id));
             }
             cb.forget();
         }
         let nutrients_list = custom_nutrients.get_untracked();
         spawn_local(async move {
             let stop_timer = move || {
-                if let Some(id) = ai_interval.get_untracked() {
+                if let Some(id) = interval.get_untracked() {
                     web_sys::window().unwrap().clear_interval_with_handle(id);
-                    ai_interval.set(None);
+                    interval.set(None);
                 }
             };
             let finish = move |err: Option<String>, nav: &dyn Fn(&str)| {
                 stop_timer();
-                ai_vision_msg.set(String::new());
-                ai_loading.set(false);
+                // Only clear the vision status line from the vision channel — the
+                // text channel must not wipe a photo job's message running in
+                // parallel.
+                if use_vision { vision_msg.set(String::new()); }
+                loading.set(false);
                 if let Some(e) = err {
-                    if e.contains("HTTP 402") { nav("/settings/subscription"); } else { ai_error.set(Some(e)); }
+                    if e.contains("HTTP 402") { nav("/settings/subscription"); } else { error_sig.set(Some(e)); }
                 }
             };
 
@@ -233,19 +294,19 @@ pub fn FoodEditor(
             if let Ok(s) = subscription::status().await {
                 if !s.active {
                     stop_timer();
-                    ai_loading.set(false);
+                    loading.set(false);
                     navigate("/settings/subscription", Default::default());
                     return;
                 }
             }
 
-            if !images.is_empty() {
+            if use_vision {
                 // Vision is async: submit, then a 2-state machine — POLL the queue
                 // while `queued`, then SWITCH to the SSE STREAM while `processing`.
                 let input = AiVisionInput { images, custom_nutrients: nutrients_list };
                 // UPLOAD state: the image upload can take a while; show it.
-                ai_phase.set(0);
-                ai_vision_msg.set(t("food_editor.ai_uploading").to_string());
+                phase.set(0);
+                vision_msg.set(t("food_editor.ai_uploading").to_string());
                 let job_id = match ai::submit_vision(&input).await {
                     Ok(id) => id,
                     Err(e) => { finish(Some(e), &|p| { navigate(p, Default::default()); }); return; }
@@ -258,21 +319,20 @@ pub fn FoodEditor(
                     match ai::poll_queue(&job_id, &input).await {
                         Ok(ai::QueuePhase::Done(out)) => {
                             apply_result(&out);
-                            let draft = local::save_draft(&build_food()).await;
-                            draft_id.set(Some(draft.id));
+                            persist_result();
                             finish(None, &|p| { navigate(p, Default::default()); });
                             return;
                         }
                         Ok(ai::QueuePhase::Error(e)) => { finish(Some(e), &|p| { navigate(p, Default::default()); }); return; }
                         Ok(ai::QueuePhase::Processing { since_ms }) => {
-                            if since_ms > 0.0 { ai_vision_start.set(since_ms); }
+                            if since_ms > 0.0 { vision_start.set(since_ms); }
                             processing = true;
                             break;
                         }
                         Ok(ai::QueuePhase::Queued { position, since_ms }) => {
-                            if since_ms > 0.0 { ai_vision_start.set(since_ms); }
-                            ai_phase.set(0);
-                            ai_vision_msg.set(if position > 0 {
+                            if since_ms > 0.0 { vision_start.set(since_ms); }
+                            phase.set(0);
+                            vision_msg.set(if position > 0 {
                                 format!("{} {}", t("food_editor.ai_queue"), position)
                             } else {
                                 t("food_editor.ai_recognizing").to_string()
@@ -289,31 +349,30 @@ pub fn FoodEditor(
 
                 // State PROCESSING: stream live LLM phase/tokens. Reuses the same
                 // button rendering as text (phase 1 = thinking, 2 = answer).
-                ai_vision_msg.set(String::new());
-                let on_progress = move |phase: u8, tt: u32, at: u32| match phase {
-                    1 => { ai_phase.set(1); ai_think.set(tt); ai_vision_msg.set(String::new()); }
-                    2 => { ai_phase.set(2); ai_answer.set(at); ai_vision_msg.set(String::new()); }
-                    _ => { ai_phase.set(0); ai_vision_msg.set(t("food_editor.ai_recognizing").to_string()); }
+                vision_msg.set(String::new());
+                let on_progress = move |ph: u8, tt: u32, at: u32| match ph {
+                    1 => { phase.set(1); think.set(tt); vision_msg.set(String::new()); }
+                    2 => { phase.set(2); answer.set(at); vision_msg.set(String::new()); }
+                    _ => { phase.set(0); vision_msg.set(t("food_editor.ai_recognizing").to_string()); }
                 };
                 match ai::stream_vision(&job_id, &input, on_progress).await {
                     Ok(out) => {
                         apply_result(&out);
-                        let draft = local::save_draft(&build_food()).await;
-                        draft_id.set(Some(draft.id));
+                        persist_result();
                         finish(None, &|p| { navigate(p, Default::default()); });
                     }
                     Err(e) => finish(Some(e), &|p| { navigate(p, Default::default()); }),
                 }
             } else {
                 // Text lookup: streaming, blocking await (no queue).
-                let on_token = move |phase: ai::AiPhase| match phase {
+                let on_token = move |ph: ai::AiPhase| match ph {
                     ai::AiPhase::Thinking => {
-                        ai_think.update(|v| *v += 1);
-                        if ai_phase.get_untracked() == 0 { ai_phase.set(1); }
+                        think.update(|v| *v += 1);
+                        if phase.get_untracked() == 0 { phase.set(1); }
                     }
                     ai::AiPhase::Answer => {
-                        ai_answer.update(|v| *v += 1);
-                        if ai_phase.get_untracked() != 2 { ai_phase.set(2); }
+                        answer.update(|v| *v += 1);
+                        if phase.get_untracked() != 2 { phase.set(2); }
                     }
                 };
                 let input = AiLookupInput { name: n, custom_nutrients: nutrients_list };
@@ -321,15 +380,19 @@ pub fn FoodEditor(
                 match result {
                     Ok(output) => {
                         apply_result(&output);
-                        let draft = local::save_draft(&build_food()).await;
-                        draft_id.set(Some(draft.id));
+                        persist_result();
                         finish(None, &|p| { navigate(p, Default::default()); });
                     }
                     Err(e) => finish(Some(e), &|p| { navigate(p, Default::default()); }),
                 }
             }
         });
-    };
+    });
+
+    let run_name = run_ai.clone();
+    let on_detect_name = move |_| run_name(false);
+    let run_photo = run_ai.clone();
+    let on_detect_photo = move |_| run_photo(true);
 
     create_effect(move |prev: Option<()>| {
         let _ = name.get();
@@ -394,9 +457,13 @@ pub fn FoodEditor(
 
     // Seconds since the current phase started (queue phase start for vision,
     // button-press for text). Reads ai_tick so it re-renders every second.
-    let elapsed = move || -> u32 {
-        ai_tick.get();
-        let start = if ai_vision_start.get() > 0.0 { ai_vision_start.get() } else { ai_start.get() };
+    let name_elapsed = move || -> u32 {
+        name_tick.get();
+        ((js_sys::Date::now() - name_start.get()) / 1000.0).max(0.0) as u32
+    };
+    let photo_elapsed = move || -> u32 {
+        photo_tick.get();
+        let start = if photo_vision_start.get() > 0.0 { photo_vision_start.get() } else { photo_start.get() };
         ((js_sys::Date::now() - start) / 1000.0).max(0.0) as u32
     };
 
@@ -404,105 +471,166 @@ pub fn FoodEditor(
         <div on:keydown=move |ev: leptos::ev::KeyboardEvent| {
             if ev.key() == "Enter" { ev.prevent_default(); }
         }>
-            // Name input
-            <input type="text"
-                placeholder=t("food_editor.product_name")
-                class="is-size-6"
-                style="width: 100%; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none; box-sizing: border-box; margin-bottom: 10px;"
-                prop:value=move || name.get()
-                on:input=move |ev| {
-                    // Keep `draft_id` so the auto-sync effect propagates the new
-                    // name into BOTH the draft and the Food created from it. (We
-                    // used to clear it here, which orphaned the draft with the old
-                    // name and left its Food un-renamed.)
-                    name.set(event_target_value(&ev));
-                }
-            />
-
-            // Thumbnails of the photos already added (tap × to drop one). Photos
-            // are stored as JPEG base64, so they render directly as data URLs.
-            {move || {
-                let photos = photos_base64.get();
-                (!photos.is_empty()).then(|| view! {
-                    <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
-                        {photos.into_iter().enumerate().map(|(i, b64)| view! {
-                            <div style="position: relative; width: 56px; height: 56px;">
-                                <img src=format!("data:image/jpeg;base64,{b64}")
-                                    style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
-                                <button type="button"
-                                    style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
-                                    on:click=move |_| {
-                                        photos_base64.update(|v| { if i < v.len() { v.remove(i); } });
-                                        photo_count.set(photos_base64.get_untracked().len());
-                                    }
-                                >"\u{00d7}"</button>
-                            </div>
-                        }).collect_view()}
-                    </div>
-                })
-            }}
-
-            // Photo + AI buttons — stacked in a column.
-            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
-                <input type="file" accept="image/*" multiple=true
-                    id="food-photo-input"
-                    style="display: none;"
-                    on:change=on_file_change />
-                <button type="button"
-                    class="is-size-7"
-                    style="flex: 1; padding: 8px 0; border: 1px solid var(--bulma-border-weak); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); cursor: pointer;"
-                    on:click=move |_| {
-                        let doc = web_sys::window().unwrap().document().unwrap();
-                        let el = doc.get_element_by_id("food-photo-input").unwrap();
-                        use wasm_bindgen::JsCast;
-                        let input: &web_sys::HtmlInputElement = el.unchecked_ref();
-                        input.click();
-                    }
-                >
-                    {move || {
-                        // Label flips to "add another photo" once at least one is added.
-                        let key = if photo_count.get() == 0 {
-                            "food_editor.add_photo"
-                        } else {
-                            "food_editor.add_more_photo"
-                        };
-                        format!("\u{1f4f7} {}", t(key))
-                    }}
-                </button>
-                <button type="button"
-                    class="button is-link is-size-7"
-                    style="flex: 1; padding: 8px 0; border: none; border-radius: 10px; cursor: pointer;"
-                    disabled=move || ai_loading.get() || (name.get().is_empty() && photo_count.get() == 0)
-                    on:click=on_ai
-                >
-                    {move || if ai_loading.get() {
-                        match ai_phase.get() {
-                            0 => {
-                                let msg = ai_vision_msg.get();
-                                if msg.is_empty() {
-                                    format!("\u{231b} {}s", elapsed())
+            // Two independent sub-forms behind underline tabs. Switching only
+            // toggles visibility (display: none) — the DOM stays mounted and the
+            // signals live on the component, so every field, photo and in-flight
+            // detection is preserved across switches.
+            //
+            // Tabs are <button>, NOT Bulma's <a>: Leptos delegates click at the
+            // document root, and iOS Safari only bubbles clicks to document from
+            // natively-interactive elements (or ones with cursor:pointer). A
+            // href-less <a> is not interactive on iOS, so it highlighted on tap
+            // but the delegated on:click never fired — same bug the bottom nav hit
+            // (fixed there with real <a href> links). A <button> is natively
+            // clickable, matching the working "Форма/История" segmented control.
+            <div style="display: flex; border-bottom: 1px solid var(--bulma-border); margin-bottom: 12px;">
+                {[(0u8, "food_editor.tab_by_name"), (1u8, "food_editor.tab_by_photo")]
+                    .into_iter()
+                    .map(|(idx, label)| view! {
+                        <button type="button"
+                            style=move || format!(
+                                "flex: 1; background: none; border: none; border-bottom: 2px solid {}; \
+                                 margin-bottom: -1px; padding: 8px 0; cursor: pointer; font: inherit; \
+                                 font-size: 0.875rem; {}",
+                                if active_tab.get() == idx { "var(--bulma-link)" } else { "transparent" },
+                                if active_tab.get() == idx {
+                                    "color: var(--bulma-link); font-weight: 600;"
                                 } else {
-                                    format!("\u{231b} {msg} \u{00b7} {}s", elapsed())
-                                }
-                            }
-                            1 => format!("\u{1f9e0} Thinking ({} tok) \u{00b7} {}s", ai_think.get(), elapsed()),
-                            _ => format!("\u{270d}\u{fe0f} Answer ({} tok) \u{00b7} {}s", ai_answer.get(), elapsed()),
-                        }
-                    } else {
-                        format!("\u{2728} {}", t("food_editor.fill_info"))
-                    }}
-                </button>
+                                    "color: var(--bulma-text-weak);"
+                                },
+                            )
+                            on:click=move |_| active_tab.set(idx)
+                        >
+                            {move || t(label)}
+                        </button>
+                    })
+                    .collect_view()}
             </div>
 
-            <p class="is-size-7 has-text-grey" style="margin: -4px 0 12px 0;">
-                {move || t("food_editor.photo_hint")}
-            </p>
+            // Tab 1 — "By name": name field + detect-from-name button.
+            <div style=move || if active_tab.get() == 0 { "" } else { "display: none;" }>
+                <input type="text"
+                    placeholder=t("food_editor.product_name")
+                    class="is-size-6"
+                    style="width: 100%; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none; box-sizing: border-box; margin-bottom: 10px;"
+                    prop:value=move || name.get()
+                    on:input=move |ev| {
+                        // Keep `draft_id` so the auto-sync effect propagates the new
+                        // name into BOTH the draft and the Food created from it. (We
+                        // used to clear it here, which orphaned the draft with the old
+                        // name and left its Food un-renamed.)
+                        name.set(event_target_value(&ev));
+                    }
+                />
+                <button type="button"
+                    class="button is-link is-fullwidth is-size-7"
+                    style="padding: 8px 0; border: none; border-radius: 10px; cursor: pointer;"
+                    disabled=move || name_loading.get() || name.get().is_empty()
+                    on:click=on_detect_name
+                >
+                    {move || if name_loading.get() {
+                        match name_phase.get() {
+                            0 => format!("\u{231b} {}s", name_elapsed()),
+                            1 => format!("\u{1f9e0} Thinking ({} tok) \u{00b7} {}s", name_think.get(), name_elapsed()),
+                            _ => format!("\u{270d}\u{fe0f} Answer ({} tok) \u{00b7} {}s", name_answer.get(), name_elapsed()),
+                        }
+                    } else {
+                        format!("\u{2728} {}", t("food_editor.detect_by_name"))
+                    }}
+                </button>
+                {move || name_error.get().map(|e| view! {
+                    <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-top: 10px; background: var(--bulma-danger-light); border-radius: 10px;">
+                        {e}
+                    </div>
+                })}
+            </div>
 
-            {move || ai_error.get().map(|e| view! {
-                <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-bottom: 10px; background: var(--bulma-danger-light); border-radius: 10px;">
-                    {e}
+            // Tab 2 — "By photo": thumbnails + add-photo + detect-calories button.
+            <div style=move || if active_tab.get() == 1 { "" } else { "display: none;" }>
+                // Thumbnails of the photos already added (tap × to drop one). Photos
+                // are stored as JPEG base64, so they render directly as data URLs.
+                {move || {
+                    let photos = photos_base64.get();
+                    (!photos.is_empty()).then(|| view! {
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
+                            {photos.into_iter().enumerate().map(|(i, b64)| view! {
+                                <div style="position: relative; width: 56px; height: 56px;">
+                                    <img src=format!("data:image/jpeg;base64,{b64}")
+                                        style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
+                                    <button type="button"
+                                        style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
+                                        on:click=move |_| {
+                                            photos_base64.update(|v| { if i < v.len() { v.remove(i); } });
+                                            photo_count.set(photos_base64.get_untracked().len());
+                                        }
+                                    >"\u{00d7}"</button>
+                                </div>
+                            }).collect_view()}
+                        </div>
+                    })
+                }}
+
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
+                    <input type="file" accept="image/*" multiple=true
+                        id="food-photo-input"
+                        style="display: none;"
+                        on:change=on_file_change />
+                    <button type="button"
+                        class="is-size-7"
+                        style="flex: 1; padding: 8px 0; border: 1px solid var(--bulma-border-weak); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); cursor: pointer;"
+                        on:click=move |_| {
+                            let doc = web_sys::window().unwrap().document().unwrap();
+                            let el = doc.get_element_by_id("food-photo-input").unwrap();
+                            use wasm_bindgen::JsCast;
+                            let input: &web_sys::HtmlInputElement = el.unchecked_ref();
+                            input.click();
+                        }
+                    >
+                        {move || {
+                            // Label flips to "add another photo" once at least one is added.
+                            let key = if photo_count.get() == 0 {
+                                "food_editor.add_photo"
+                            } else {
+                                "food_editor.add_more_photo"
+                            };
+                            format!("\u{1f4f7} {}", t(key))
+                        }}
+                    </button>
+                    <button type="button"
+                        class="button is-link is-size-7"
+                        style="flex: 1; padding: 8px 0; border: none; border-radius: 10px; cursor: pointer;"
+                        disabled=move || photo_loading.get() || photo_count.get() == 0
+                        on:click=on_detect_photo
+                    >
+                        {move || if photo_loading.get() {
+                            match photo_phase.get() {
+                                0 => {
+                                    let msg = photo_vision_msg.get();
+                                    if msg.is_empty() {
+                                        format!("\u{231b} {}s", photo_elapsed())
+                                    } else {
+                                        format!("\u{231b} {msg} \u{00b7} {}s", photo_elapsed())
+                                    }
+                                }
+                                1 => format!("\u{1f9e0} Thinking ({} tok) \u{00b7} {}s", photo_think.get(), photo_elapsed()),
+                                _ => format!("\u{270d}\u{fe0f} Answer ({} tok) \u{00b7} {}s", photo_answer.get(), photo_elapsed()),
+                            }
+                        } else {
+                            format!("\u{2728} {}", t("food_editor.detect_by_photo"))
+                        }}
+                    </button>
                 </div>
-            })}
+
+                <p class="is-size-7 has-text-grey" style="margin: -4px 0 12px 0;">
+                    {move || t("food_editor.photo_hint")}
+                </p>
+
+                {move || photo_error.get().map(|e| view! {
+                    <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-bottom: 10px; background: var(--bulma-danger-light); border-radius: 10px;">
+                        {e}
+                    </div>
+                })}
+            </div>
 
             // Nutrient fields card. NB: no `overflow: hidden` — it would clip the
             // "?" hint popover that floats below the lower rows. The rounded look is

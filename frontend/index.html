@@ -138,9 +138,12 @@ if ('serviceWorker' in navigator) {
             });
         });
     });
-    // Notification deep-link: the service worker hands the tapped notification's
-    // URL to the running page (client.navigate is a no-op on a focused iOS PWA).
-    // A full navigation guarantees the target route re-mounts and consumes its
+    // Notification deep-link. The service worker records the tapped notification's
+    // URL two ways: a postMessage to the running page (works on desktop/Android) AND
+    // a durable Cache marker. On iOS standalone PWAs the postMessage/openWindow/
+    // client.navigate from notificationclick are unreliable, but tapping ALWAYS
+    // foregrounds the PWA — so we also consume the marker on visibilitychange/
+    // pageshow/boot. A full navigation re-mounts the target route so it consumes its
     // query (e.g. `/story/setup?notif=1` completing the setup task).
     navigator.serviceWorker.addEventListener('message', function(event) {
         var d = event.data || {};
@@ -148,6 +151,30 @@ if ('serviceWorker' in navigator) {
             window.location.href = d.url;
         }
     });
+    function consumeNotifDeepLink(attempt) {
+        attempt = attempt || 0;
+        if (!('caches' in window)) return;
+        caches.open('notif-deeplink').then(function(c) {
+            return c.match('/__tapped__').then(function(resp) {
+                if (!resp) {
+                    // The SW's marker write can land just after we foreground; retry briefly.
+                    if (attempt < 3) setTimeout(function() { consumeNotifDeepLink(attempt + 1); }, 350);
+                    return;
+                }
+                return resp.text().then(function(url) {
+                    return c.delete('/__tapped__').then(function() {
+                        if (url && url.charAt(0) === '/' && (location.pathname + location.search) !== url) {
+                            window.location.href = url;
+                        }
+                    });
+                });
+            });
+        }).catch(function() {});
+    }
+    consumeNotifDeepLink();
+    navigator.serviceWorker.ready.then(function() { consumeNotifDeepLink(); });
+    window.addEventListener('pageshow', function() { consumeNotifDeepLink(); });
+    document.addEventListener('visibilitychange', function() { if (!document.hidden) consumeNotifDeepLink(); });
 }
 window.addEventListener('appinstalled', function() {
     // Force reload after PWA install so the new window gets fresh content

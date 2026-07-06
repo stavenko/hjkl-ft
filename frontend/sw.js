@@ -1,4 +1,8 @@
-var CACHE_NAME = 'ft-v9';
+var CACHE_NAME = 'ft-v10';
+// Separate, long-lived cache holding the tapped-notification deep link. Kept across
+// SW activations (excluded from the cleanup below) so the page can consume it on
+// foreground — the reliable channel on iOS standalone PWAs.
+var NOTIF_CACHE = 'notif-deeplink';
 
 // Fixed-name shell: precached on install so an offline launch works even after
 // only a brief online session (iOS is finicky about lazy runtime caching). The
@@ -24,7 +28,7 @@ self.addEventListener('activate', function(event) {
     event.waitUntil(
         caches.keys().then(function(names) {
             return Promise.all(
-                names.filter(function(name) { return name !== CACHE_NAME; })
+                names.filter(function(name) { return name !== CACHE_NAME && name !== NOTIF_CACHE; })
                      .map(function(name) { return caches.delete(name); })
             );
         }).then(function() {
@@ -161,7 +165,15 @@ self.addEventListener('notificationclick', function(event) {
     }
 
     event.waitUntil(
-        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(windowClients) {
+        // Durable deep-link marker FIRST. On iOS standalone PWAs the postMessage /
+        // client.navigate / openWindow paths below are unreliable, but tapping the
+        // notification always foregrounds the PWA — so the page consumes this marker
+        // on visibilitychange/boot (see index.html) and navigates itself.
+        caches.open(NOTIF_CACHE).then(function(cache) {
+            return cache.put('/__tapped__', new Response(url));
+        }).then(function() {
+            return clients.matchAll({ type: 'window', includeUncontrolled: true });
+        }).then(function(windowClients) {
             for (var i = 0; i < windowClients.length; i++) {
                 var client = windowClients[i];
                 if (client.url.indexOf(self.location.origin) === 0) {

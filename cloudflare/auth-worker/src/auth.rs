@@ -131,7 +131,7 @@ pub async fn authenticate_finish(mut req: Request, ctx: RouteContext<()>) -> Res
 
 // ---- Add device (requires existing session) ----
 
-pub async fn add_device_begin(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+pub async fn add_device_begin(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     // Validate existing session token
     let user_id = match token::validate_from_header(&req, &ctx.env).await {
         Ok(sub) => sub,
@@ -143,9 +143,22 @@ pub async fn add_device_begin(req: Request, ctx: RouteContext<()>) -> Result<Res
         }
     };
 
+    // Forward the caller-supplied display name so the passkey's user.name/displayName (what
+    // the OS keychain shows) is the name the user typed — NOT the account UUID, which the DO
+    // falls back to when no name is given.
+    let body: serde_json::Value = req.json().await.unwrap_or_default();
+    let display_name = body
+        .get("display_name")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
     let origin = crate::request_origin(&req);
     let stub = auth_do_stub(&ctx.env)?;
-    let do_body = serde_json::json!({ "user_id": user_id, "origin": origin });
+    let mut do_body = serde_json::json!({ "user_id": user_id, "origin": origin });
+    if let Some(name) = display_name {
+        do_body["display_name"] = serde_json::Value::String(name.to_string());
+    }
     let internal_req = do_request("/register/begin", &do_body)?;
     let resp = stub.fetch_with_request(internal_req).await?;
 

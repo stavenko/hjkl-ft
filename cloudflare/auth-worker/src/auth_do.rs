@@ -32,6 +32,26 @@ const STORAGE_KEY_PHRASE_RL_PREFIX: &str = "phrase_rl:";
 // Failed phrase-login attempts allowed per normalized phrase per window before lockout.
 const PHRASE_RL_MAX: i64 = 8;
 const PHRASE_RL_WINDOW_MS: i64 = 3_600_000; // 1 hour
+// Provider-agnostic identity reverse index: `identity:<provider>:<uid>` → user_id. Maps an
+// external identity (Telegram today, others later) to one stable account. SEPARATE from
+// passkey/phrase. Login codes (bearer of a session for a user) live per-user with a TTL,
+// a per-user cooldown on issuance, and an attempt cap on verification.
+const STORAGE_KEY_IDENTITY_PREFIX: &str = "identity:";
+// Login codes are keyed by their HASH (`codehash:<hash>` → {userId, expires}) — NOT one per
+// user — so several outstanding codes (e.g. the Mini App mints one per /miniapp/me while a
+// prior one is still in the onboarding link) are ALL valid until consumed/expired. No overwrite.
+const STORAGE_KEY_CODEHASH_PREFIX: &str = "codehash:";
+const STORAGE_KEY_CODE_COOLDOWN_PREFIX: &str = "code_cd:";
+const CODE_TTL_MS: i64 = 600_000; // 10 min
+const CODE_COOLDOWN_MS: i64 = 60_000; // 1 min between user-triggered sends
+// Global fixed-window limiter on verify (blunts brute force of the 6-digit space).
+const STORAGE_KEY_VERIFY_RL: &str = "code_verify_rl";
+const VERIFY_RL_MAX: i64 = 30;
+const VERIFY_RL_WINDOW_MS: i64 = 600_000;
+/// Story chapters that became AVAILABLE in the running app for a user (chapter_id → first-seen
+/// ms), stored NEXT TO the persona (keyed by user_id). Reported from the app UI. A non-empty map
+/// means the first chapter unlocked → the user «entered the system» (the Mini App access signal).
+const STORAGE_KEY_CHAPTERS_PREFIX: &str = "chapters:";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -52,6 +72,18 @@ pub(crate) struct RecoveryHashData {
     pub hash_b64: String,
 }
 
+/// A linked external identity / delivery channel. Provider-agnostic: Telegram is the first,
+/// email/etc. slot in later without touching the core account. `provider_uid` is a string so
+/// any provider's id shape fits. This is how we (a) map a provider account → our user_id and
+/// (b) know where to deliver a login code.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Identity {
+    provider: String,
+    provider_uid: String,
+    #[serde(default)]
+    username: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct UserMetadata {
     recovery_hash_data: Option<RecoveryHashData>,
@@ -61,6 +93,10 @@ struct UserMetadata {
     /// needs only the phrase. `serde(default)` so pre-existing records deserialize.
     #[serde(default)]
     recovery_phrase: Option<String>,
+    /// Linked external identity (e.g. Telegram) — resolved at first touch, used for code
+    /// delivery + admin ("who paid but hasn't set up access"). `serde(default)` for old rows.
+    #[serde(default)]
+    identity: Option<Identity>,
 }
 
 /// Canonical form of a backup phrase for storage/lookup: lowercased, whitespace
@@ -499,6 +535,7 @@ impl AuthDO {
                 recovery_hash_data: None,
                 created_at: now_ms(),
                 recovery_phrase: None,
+                identity: None,
             };
             self.save_user_metadata(&user_id, &meta).await?;
         }
@@ -913,6 +950,7 @@ impl AuthDO {
                 recovery_hash_data: None,
                 created_at: now_ms(),
                 recovery_phrase: None,
+                identity: None,
             });
         meta.recovery_hash_data = Some(hash_data);
         self.save_user_metadata(user_id, &meta).await?;
@@ -945,6 +983,7 @@ impl AuthDO {
                 recovery_hash_data: None,
                 created_at: now_ms(),
                 recovery_phrase: None,
+                identity: None,
             });
         // Drop the stale reverse-index entry for a replaced phrase.
         if let Some(old) = meta.recovery_phrase.as_deref() {
@@ -1034,6 +1073,203 @@ impl AuthDO {
         let valid = verify_recovery_key(recovery_key, &hash_data)?;
         Response::from_json(&serde_json::json!({ "valid": valid }))
     }
+
+    /// Resolve an external identity (provider + provider_uid) to a STABLE account, creating a
+    /// credential-less user on first sight and storing the identity (for delivery + admin).
+    /// Provider-agnostic. Isolated from passkey/phrase — no credential is created, so the user
+    /// can later add a passkey to this SAME account. Idempotent: same identity → same user_id
+    /// (username is refreshed if it changed).
+    async fn handle_account_resolve(
+        &self,
+        provider: &str,
+        provider_uid: &str,
+        username: Option<&str>,
+    ) -> Result<Response> {
+        let index_key = format!("{STORAGE_KEY_IDENTITY_PREFIX}{provider}:{provider_uid}");
+        if let Some(uid) = self.state.storage().get::<String>(&index_key).await.ok().flatten() {
+            // Best-effort username refresh.
+            if let Some(u) = username {
+                if let Some(mut meta) = self.load_user_metadata(&uid).await? {
+                    let stale = meta
+                        .identity
+                        .as_ref()
+                        .map(|i| i.username.as_deref() != Some(u))
+                        .unwrap_or(true);
+                    if stale {
+                        meta.identity = Some(Identity {
+                            provider: provider.to_string(),
+                            provider_uid: provider_uid.to_string(),
+                            username: Some(u.to_string()),
+                        });
+                        self.save_user_metadata(&uid, &meta).await?;
+                    }
+                }
+            }
+            return Response::from_json(&serde_json::json!({ "userId": uid, "created": false }));
+        }
+        let user_id = uuid::Uuid::new_v4().to_string();
+        let meta = UserMetadata {
+            recovery_hash_data: None,
+            created_at: now_ms(),
+            recovery_phrase: None,
+            identity: Some(Identity {
+                provider: provider.to_string(),
+                provider_uid: provider_uid.to_string(),
+                username: username.map(|s| s.to_string()),
+            }),
+        };
+        self.save_user_metadata(&user_id, &meta).await?;
+        self.state.storage().put(&index_key, user_id.clone()).await?;
+        Response::from_json(&serde_json::json!({ "userId": user_id, "created": true }))
+    }
+
+    /// The user's linked identity/channel (for code delivery + admin). None → never linked.
+    async fn handle_identity(&self, user_id: &str) -> Result<Response> {
+        let identity = self.load_user_metadata(user_id).await?.and_then(|m| m.identity);
+        Response::from_json(&serde_json::json!({ "identity": identity }))
+    }
+
+    /// How many passkeys the user has. 0 → «paid but no credentials» (admin worklist).
+    async fn handle_credentials_count(&self, user_id: &str) -> Result<Response> {
+        let ids = self.load_user_cred_ids(user_id).await?;
+        Response::from_json(&serde_json::json!({ "count": ids.len() }))
+    }
+
+    /// Record that a story chapter became AVAILABLE in the app for this user. Idempotent: keeps
+    /// the FIRST-seen timestamp. Stored next to the persona, keyed by user_id.
+    async fn handle_chapter_available(&self, user_id: &str, chapter: &str) -> Result<Response> {
+        let key = format!("{STORAGE_KEY_CHAPTERS_PREFIX}{user_id}");
+        let stored: Option<String> = self.state.storage().get(&key).await?;
+        let mut map: std::collections::BTreeMap<String, i64> = match stored {
+            Some(s) => serde_json::from_str(&s)?,
+            None => std::collections::BTreeMap::new(),
+        };
+        if !map.contains_key(chapter) {
+            map.insert(chapter.to_string(), now_ms());
+            self.state.storage().put(&key, serde_json::to_string(&map)?).await?;
+        }
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    /// Has the user reached the app (any chapter became available)? Non-empty map → entered.
+    async fn handle_has_entered(&self, user_id: &str) -> Result<Response> {
+        let key = format!("{STORAGE_KEY_CHAPTERS_PREFIX}{user_id}");
+        let stored: Option<String> = self.state.storage().get(&key).await?;
+        let entered = match stored {
+            Some(s) => !serde_json::from_str::<std::collections::BTreeMap<String, i64>>(&s)?.is_empty(),
+            None => false,
+        };
+        Response::from_json(&serde_json::json!({ "entered": entered }))
+    }
+
+    /// The chapters (id → first-available ms) a user has reached — inspection / admin.
+    async fn handle_chapters_get(&self, user_id: &str) -> Result<Response> {
+        let key = format!("{STORAGE_KEY_CHAPTERS_PREFIX}{user_id}");
+        let stored: Option<String> = self.state.storage().get(&key).await?;
+        let chapters: serde_json::Value = match stored {
+            Some(s) => serde_json::from_str(&s)?,
+            None => serde_json::json!({}),
+        };
+        Response::from_json(&serde_json::json!({ "chapters": chapters }))
+    }
+
+    /// Store a login code keyed by its HASH, enforcing a per-user cooldown on this
+    /// (user-triggered, delivered) path. Within the cooldown → {ok:false, waitMs}. Does NOT
+    /// overwrite other outstanding codes for the user.
+    async fn handle_code_issue(&self, user_id: &str, code_hash: &str) -> Result<Response> {
+        let cd_key = format!("{STORAGE_KEY_CODE_COOLDOWN_PREFIX}{user_id}");
+        let now = now_ms();
+        if let Some(last) = self.state.storage().get::<i64>(&cd_key).await.ok().flatten() {
+            let wait = CODE_COOLDOWN_MS - (now - last);
+            if wait > 0 {
+                return Response::from_json(&serde_json::json!({ "ok": false, "waitMs": wait }));
+            }
+        }
+        self.store_code(user_id, code_hash, now).await?;
+        self.state.storage().put(&cd_key, now).await?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    /// Store a login code (by hash) WITHOUT cooldown — for the trusted Mini App, which mints a
+    /// code per /miniapp/me to embed in the onboard link. Because codes are hash-keyed, a
+    /// freshly minted code does NOT invalidate one already sitting in an earlier onboard link.
+    async fn handle_code_mint(&self, user_id: &str, code_hash: &str) -> Result<Response> {
+        self.store_code(user_id, code_hash, now_ms()).await?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    async fn store_code(&self, user_id: &str, code_hash: &str, now: i64) -> Result<()> {
+        let key = format!("{STORAGE_KEY_CODEHASH_PREFIX}{code_hash}");
+        let rec = serde_json::json!({ "userId": user_id, "expires": now + CODE_TTL_MS });
+        self.state.storage().put(&key, rec.to_string()).await
+    }
+
+    /// Verify + CONSUME a code by its hash. Match (unexpired) → delete → {ok:true, userId}.
+    /// Miss/expired → {ok:false} (+ a global fixed-window limiter to blunt brute force).
+    async fn handle_code_consume(&self, code_hash: &str) -> Result<Response> {
+        if let Some(resp) = self.verify_rl_over_limit().await? {
+            return Ok(resp);
+        }
+        let key = format!("{STORAGE_KEY_CODEHASH_PREFIX}{code_hash}");
+        let rec = self
+            .state
+            .storage()
+            .get::<String>(&key)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+        match rec {
+            Some(r) if r.get("expires").and_then(|v| v.as_i64()).unwrap_or(0) > now_ms() => {
+                self.state.storage().delete(&key).await?; // single-use
+                let user_id = r.get("userId").and_then(|v| v.as_str()).unwrap_or("");
+                Response::from_json(&serde_json::json!({ "ok": true, "userId": user_id }))
+            }
+            _ => {
+                self.verify_rl_bump().await?;
+                Response::from_json(&serde_json::json!({ "ok": false }))
+            }
+        }
+    }
+
+    async fn verify_rl_over_limit(&self) -> Result<Option<Response>> {
+        let (count, ws) = self
+            .state
+            .storage()
+            .get::<String>(STORAGE_KEY_VERIFY_RL)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<(i64, i64)>(&s).ok())
+            .unwrap_or((0, now_ms()));
+        let now = now_ms();
+        let count = if now - ws > VERIFY_RL_WINDOW_MS { 0 } else { count };
+        if count >= VERIFY_RL_MAX {
+            return Ok(Some(
+                Response::from_json(&serde_json::json!({ "ok": false, "rateLimited": true }))?,
+            ));
+        }
+        Ok(None)
+    }
+    async fn verify_rl_bump(&self) -> Result<()> {
+        let (mut count, mut ws) = self
+            .state
+            .storage()
+            .get::<String>(STORAGE_KEY_VERIFY_RL)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<(i64, i64)>(&s).ok())
+            .unwrap_or((0, now_ms()));
+        let now = now_ms();
+        if now - ws > VERIFY_RL_WINDOW_MS {
+            count = 0;
+            ws = now;
+        }
+        let val = serde_json::to_string(&(count + 1, ws))
+            .map_err(|e| Error::RustError(format!("serialize rl: {e}")))?;
+        self.state.storage().put(STORAGE_KEY_VERIFY_RL, val).await
+    }
 }
 
 impl DurableObject for AuthDO {
@@ -1091,6 +1327,95 @@ impl DurableObject for AuthDO {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing origin".into()))?;
                 self.handle_authenticate_finish(credential, origin).await
+            }
+            "/account/resolve" => {
+                let body: serde_json::Value = req.json().await?;
+                let provider = body
+                    .get("provider")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing provider".into()))?;
+                let provider_uid = body
+                    .get("provider_uid")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing provider_uid".into()))?;
+                let username = body.get("username").and_then(|v| v.as_str());
+                self.handle_account_resolve(provider, provider_uid, username).await
+            }
+            "/identity" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_identity(user_id).await
+            }
+            "/credentials/count" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_credentials_count(user_id).await
+            }
+            "/chapters/available" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let chapter = body
+                    .get("chapter")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing chapter".into()))?;
+                self.handle_chapter_available(user_id, chapter).await
+            }
+            "/has-entered" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_has_entered(user_id).await
+            }
+            "/chapters/get" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_chapters_get(user_id).await
+            }
+            "/code/issue" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let code_hash = body
+                    .get("code_hash")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing code_hash".into()))?;
+                self.handle_code_issue(user_id, code_hash).await
+            }
+            "/code/mint" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let code_hash = body
+                    .get("code_hash")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing code_hash".into()))?;
+                self.handle_code_mint(user_id, code_hash).await
+            }
+            "/code/consume" => {
+                let body: serde_json::Value = req.json().await?;
+                let code_hash = body
+                    .get("code_hash")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing code_hash".into()))?;
+                self.handle_code_consume(code_hash).await
             }
             "/pair/create" => {
                 let body: serde_json::Value = req.json().await?;

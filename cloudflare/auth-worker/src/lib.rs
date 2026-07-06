@@ -4,6 +4,7 @@ mod auth;
 mod auth_do;
 mod pair;
 
+mod account;
 mod recovery;
 mod token;
 mod types;
@@ -12,10 +13,16 @@ mod user_do;
 pub use auth_do::AuthDO;
 pub use user_do::UserDO;
 
+/// Storage epoch: BUMP to wipe ALL AuthDO data (accounts, identities, passkeys, tokens,
+/// codes) in one deploy — re-addresses a fresh instance; the old one orphans.
+const AUTH_EPOCH: &str = "v2";
+
 /// Get the global AuthDO stub (single instance for all auth operations).
 pub(crate) fn auth_do_stub(env: &Env) -> Result<worker::durable::Stub> {
     let namespace = env.durable_object("AUTH_DO")?;
-    namespace.id_from_name("global")?.get_stub()
+    namespace
+        .id_from_name(&format!("global-{AUTH_EPOCH}"))?
+        .get_stub()
 }
 
 /// Read the browser Origin header from a request (empty string if absent).
@@ -123,6 +130,13 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/pair/status/:id", pair::pairing_status)
         .post_async("/token/validate", token::validate_token)
         .get_async("/tokens", token::list_tokens)
+        .post_async("/internal/account-resolve", account::account_resolve)
+        .post_async("/internal/has-credentials", account::has_credentials)
+        .post_async("/internal/has-entered", account::has_entered)
+        .post_async("/internal/code/mint", account::code_mint)
+        .post_async("/code/request", account::code_request)
+        .post_async("/code/verify", account::code_verify)
+        .post_async("/chapters/available", account::chapter_available)
         .run(req, env)
         .await;
 

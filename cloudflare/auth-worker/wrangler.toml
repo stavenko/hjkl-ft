@@ -24,8 +24,16 @@ new_sqlite_classes = ["UserDO"]
 tag = "v2"
 new_sqlite_classes = ["AuthDO"]
 
+# Deliver login codes over the user's channel (Telegram today) — Worker→Worker binding.
+[[services]]
+binding = "TELEGRAM_WORKER"
+service = "telegram-worker-dev"
+
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+# Shared internal key (SAME value as payment-worker/telegram-worker) — gates
+# /internal/tg-account, called by payment-worker after it verifies the Telegram code.
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
 RP_ID = "renorma-fit-dev.pages.dev"
 RP_ORIGIN = "https://renorma-fit-dev.pages.dev"
 ADMIN_RP_ID = "renorma-admin-dev.pages.dev"
@@ -53,10 +61,20 @@ class_name = "AuthDO"
 
 # JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
 # [vars] value above). The binding name MUST equal the env name the code reads.
+[[env.production.services]]
+binding = "TELEGRAM_WORKER"
+service = "telegram-worker-prod"
+
 [[env.production.secrets_store_secrets]]
 binding = "JWT_SECRET"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "jwt-secret"
+
+# Shared internal key from the global Secrets Store (SAME as payment/telegram workers).
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"
 
 [env.production.vars]
 RP_ID = "renorma.app"

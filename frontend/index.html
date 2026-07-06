@@ -138,34 +138,28 @@ if ('serviceWorker' in navigator) {
             });
         });
     });
-    // Notification deep-link. The service worker records the tapped notification's
-    // URL two ways: a postMessage to the running page (works on desktop/Android) AND
-    // a durable Cache marker. On iOS standalone PWAs the postMessage/openWindow/
-    // client.navigate from notificationclick are unreliable, but tapping ALWAYS
-    // foregrounds the PWA — so we also consume the marker on visibilitychange/
-    // pageshow/boot. A full navigation re-mounts the target route so it consumes its
-    // query (e.g. `/story/setup?notif=1` completing the setup task).
+    // Messages from the service worker. Receipt delivery is described in
+    // docs/notification-receipt.md; on iOS SW→page postMessage is NOT delivered
+    // from the push event itself, but IS delivered as a reply to a page-initiated
+    // message (query_notif below) — hence both hooks here.
     navigator.serviceWorker.addEventListener('message', function(event) {
         var d = event.data || {};
         if (d.type === 'notificationclick' && d.url) {
             window.location.href = d.url;
         }
-        // LIVE receipt channel: the SW postMessages the ntf code on push receipt
-        // (and in reply to query_notif), because the page's own CacheStorage reads
-        // detach on iOS after a push subscribe/receipt (observed: SHRANK 39 -> 0).
-        // Store it for the WASM poll (lib.rs), which completes the task in Leptos.
+        // Receipt code (reply to query_notif, or a live push on platforms that do
+        // deliver it). Store it for the WASM poll (lib.rs), which completes the
+        // task in Leptos.
         if (d.type === 'notif_received' && d.code) {
             try { localStorage.setItem('rn_notif_received', d.code); } catch (e) {}
             pj('SW->page notif_received ' + d.code);
         }
-        // Live SW breadcrumbs (the cache mirror can't show them once the page's
-        // cache view detaches).
-        if (d.type === 'diag') pj('SW ' + d.m);
     });
-    // TEMP DIAGNOSTIC channel 2: page journal in localStorage ONLY — no Cache Storage
-    // involved, so it keeps recording even if the page's Cache access breaks (the
-    // suspected failure mode on iOS: after «Проверить уведомления» the mirrored log
-    // goes header-only while the durable cache still holds the old entries).
+    // Page journal for Settings → «Разработка»: lifecycle + notification-receipt
+    // breadcrumbs in localStorage ONLY. Deliberately NOT Cache Storage: the page's
+    // Cache view detaches on iOS after a push subscribe/receipt (reads return empty
+    // until relaunch — this is what broke the receipt flow originally), so a
+    // localStorage journal is the only one that keeps recording through it.
     function pj(msg) {
         try {
             var arr = JSON.parse(localStorage.getItem('rn_pj') || '[]');
@@ -180,62 +174,12 @@ if ('serviceWorker' in navigator) {
         } catch (e) {}
     }
     window.__pj = pj; // WASM (settings button handler, notif poll) logs through this too
-    // Page-side breadcrumb writer into the durable cache (also read back by the SW's diag).
-    function pdiag(msg) {
-        pj(msg);
-        if (!('caches' in window)) return Promise.resolve();
-        return caches.open('notif-deeplink').then(function(c) {
-            return c.match('/__diag__').then(function(r) {
-                return (r ? r.text() : Promise.resolve('[]')).then(function(txt) {
-                    var arr; try { arr = JSON.parse(txt); } catch (e) { arr = []; }
-                    arr.push({ t: Date.now(), m: 'PAGE ' + msg });
-                    if (arr.length > 40) arr = arr.slice(arr.length - 40);
-                    return c.put('/__diag__', new Response(JSON.stringify(arr)));
-                });
-            });
-        }).catch(function() {});
-    }
-    // Mirror the SW/page breadcrumb log into localStorage so Settings → «Разработка»
-    // (WASM, can't read Cache easily) can display it. Instrumented: a SHRINKING entry
-    // count or a read error is itself evidence (logged to the localStorage journal),
-    // because the durable cache is append-only from our side.
-    var _mirrorPrevLen = -1;
-    var _mirrorErrLogged = false;
-    function mirrorDiag() {
-        if (!('caches' in window)) return;
-        caches.open('notif-deeplink')
-            .then(function(c) { return c.match('/__diag__').then(function(r) { return r ? r.text() : '[]'; }); })
-            .then(function(txt) {
-                _mirrorErrLogged = false;
-                try { localStorage.setItem('rn_diag', txt); } catch (e) {}
-                try {
-                    var arr = JSON.parse(txt);
-                    if (_mirrorPrevLen >= 0 && arr.length < _mirrorPrevLen) {
-                        pj('CACHE-LOG SHRANK ' + _mirrorPrevLen + ' -> ' + arr.length);
-                    }
-                    _mirrorPrevLen = arr.length;
-                    var two = function(n) { return ('0' + n).slice(-2); };
-                    var lines = arr.slice(-40).map(function(e) {
-                        var d = new Date(e.t);
-                        return two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds()) + '  ' + e.m;
-                    });
-                    var head = 'ver=' + (globalThis.__APP_VERSION__ || '?') +
-                        ' ctrl=' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'y' : 'n');
-                    localStorage.setItem('rn_diag_txt', head + '\n' + lines.join('\n'));
-                } catch (e) {}
-            })
-            .catch(function(e) {
-                if (!_mirrorErrLogged) { _mirrorErrLogged = true; pj('CACHE READ ERR ' + e); }
-            });
-    }
-    // The setup "notification" task is completed in Rust (Settings → «Проверить
-    // уведомления» sets the flag on a successful send). No JS marker / navigation is
-    // used for completion anymore — clean up any legacy deep-link marker so it can't
-    // fire a stale navigation, and keep the diagnostic log alive.
+    // Legacy cleanup: older builds wrote a tap deep-link marker; nothing consumes it
+    // anymore (completion is on RECEIPT) — delete so it can't fire a stale navigation.
     if ('caches' in window) {
         caches.open('notif-deeplink').then(function(c) { c.delete('/__tapped__'); });
     }
-    pdiag('BOOT ' + location.pathname + (location.search || ''));
+    pj('BOOT ' + location.pathname + (location.search || ''));
     // Bridge the SW's durable receipt flag (Cache, the only store the SW can write) into
     // localStorage, which the WASM poll (lib.rs) reads to complete the task in Leptos.
     function bridgeNotifReceived() {
@@ -246,15 +190,15 @@ if ('serviceWorker' in navigator) {
                 return r.text().then(function(code) {
                     return c.delete('/__notif_received__').then(function() {
                         try { localStorage.setItem('rn_notif_received', code); } catch (e) {}
-                        return pdiag('notif_received -> localStorage: ' + code);
+                        pj('cache notif_received ' + code);
                     });
                 });
             });
         }).catch(function() {});
     }
-    // Third receipt channel: the SW also writes the ntf code to IndexedDB (a storage
-    // stack separate from CacheStorage, whose page-side view detaches on iOS after a
-    // push subscribe/receipt). Take-and-delete, then hand to the WASM poll.
+    // LIVE receipt channel: the SW writes the ntf code to IndexedDB (a storage
+    // stack separate from CacheStorage, whose page-side view detaches on iOS after
+    // a push subscribe/receipt). Take-and-delete, then hand to the WASM poll.
     function idbTakeNotif() {
         try {
             var req = indexedDB.open('rn-notif', 1);
@@ -278,37 +222,24 @@ if ('serviceWorker' in navigator) {
             };
         } catch (e) {}
     }
-    // JS-timer heartbeat: a bare timestamp updated every tick. A gap between this and
-    // "now" (shown in Settings → «Разработка») proves the page's timers were suspended.
-    function diagTick() {
-        try { localStorage.setItem('rn_hb_js', String(Date.now())); } catch (e) {}
-        bridgeNotifReceived();
-        idbTakeNotif();
-        mirrorDiag();
-    }
-    setInterval(diagTick, 1000);
-    diagTick();
+    function notifTick() { bridgeNotifReceived(); idbTakeNotif(); }
+    setInterval(notifTick, 1000);
+    notifTick();
     // Ask the SW for a pending receipt marker (it reads the cache with ITS view,
     // which stays valid when the page's detaches). On boot and on every resume.
     function queryNotif() {
         try {
             if (navigator.serviceWorker.controller) {
                 navigator.serviceWorker.controller.postMessage({ type: 'query_notif' });
-                // Which SW build answers (pong ft-vNN in the journal)? No pong at all
-                // means an OLD SW (no message handler) is still controlling — or
-                // SW→page postMessage doesn't deliver on this platform.
-                navigator.serviceWorker.controller.postMessage({ type: 'ping' });
-            } else {
-                pj('queryNotif: no controller');
             }
         } catch (e) {}
     }
-    navigator.serviceWorker.ready.then(function() { mirrorDiag(); queryNotif(); });
-    window.addEventListener('pageshow', function() { pdiag('pageshow'); mirrorDiag(); queryNotif(); });
-    window.addEventListener('focus', function() { pdiag('window focus'); mirrorDiag(); queryNotif(); });
+    navigator.serviceWorker.ready.then(queryNotif);
+    window.addEventListener('pageshow', function() { pj('pageshow'); queryNotif(); });
+    window.addEventListener('focus', function() { pj('window focus'); queryNotif(); });
     document.addEventListener('visibilitychange', function() {
-        pdiag('visibilitychange hidden=' + document.hidden);
-        if (!document.hidden) { mirrorDiag(); queryNotif(); }
+        pj('visibilitychange hidden=' + document.hidden);
+        if (!document.hidden) queryNotif();
     });
 }
 window.addEventListener('appinstalled', function() {

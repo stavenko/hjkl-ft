@@ -122,9 +122,6 @@ fn install_notif_receipt_poll() {
         else {
             return;
         };
-        // TEMP DIAGNOSTIC: WASM-timer heartbeat — a gap between this timestamp and
-        // "now" (shown in Settings → «Разработка») proves this interval was suspended.
-        let _ = storage.set_item("rn_hb_wasm", &js_sys::Date::now().to_string());
         let Some(code) = storage.get_item("rn_notif_received").ok().flatten() else { return };
         if code.is_empty() {
             return;

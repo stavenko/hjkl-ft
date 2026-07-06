@@ -16,29 +16,26 @@ const IOS_SEPARATOR: &str = "border-bottom: 0.5px solid var(--bulma-border-weak)
 // выполнит некоторые задания из «Истории».
 const SHOW_GOALS: bool = false;
 
-/// Compose the «Разработка» diagnostic view from its localStorage pieces:
-/// the Cache-mirrored breadcrumb log (`rn_diag_txt`), the two timer heartbeats
-/// (`rn_hb_js` — page JS interval, `rn_hb_wasm` — WASM notif poll; the shown age
-/// proves whether each timer is actually ticking), and the Cache-independent
-/// page journal (`rn_pj_txt`) that keeps recording even if Cache access breaks.
+/// Compose the «Разработка» view: build version + whether a service worker
+/// controls the page, then the page journal (`rn_pj_txt`) — lifecycle and
+/// notification-receipt breadcrumbs written by index.html / services::diag.
 fn read_diag_log() -> String {
-    let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) else {
-        return String::new();
-    };
-    let get = |k: &str| storage.get_item(k).ok().flatten().unwrap_or_default();
-    let hb_age = |k: &str| -> String {
-        match get(k).parse::<f64>() {
-            Ok(ts) => format!("{:.0}s", (js_sys::Date::now() - ts) / 1000.0),
-            Err(_) => "—".to_string(),
-        }
-    };
-    format!(
-        "hb js={} wasm={}\n{}\n--- журнал страницы (localStorage) ---\n{}",
-        hb_age("rn_hb_js"),
-        hb_age("rn_hb_wasm"),
-        get("rn_diag_txt"),
-        get("rn_pj_txt"),
-    )
+    let Some(win) = web_sys::window() else { return String::new() };
+    let ver = js_sys::Reflect::get(win.as_ref(), &"__APP_VERSION__".into())
+        .ok()
+        .and_then(|v| v.as_string())
+        .unwrap_or_else(|| "?".to_string());
+    let ctrl = js_sys::Reflect::get(win.navigator().as_ref(), &"serviceWorker".into())
+        .ok()
+        .and_then(|sw| js_sys::Reflect::get(&sw, &"controller".into()).ok())
+        .is_some_and(|c| !c.is_null() && !c.is_undefined());
+    let journal = win
+        .local_storage()
+        .ok()
+        .flatten()
+        .and_then(|s| s.get_item("rn_pj_txt").ok().flatten())
+        .unwrap_or_default();
+    format!("ver={ver} ctrl={}\n{journal}", if ctrl { "y" } else { "n" })
 }
 
 #[component]

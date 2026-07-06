@@ -1,11 +1,10 @@
-//! TEMP DIAGNOSTIC (remove once the iOS notification-receipt bug is fixed).
-//!
 //! Bridge into the page-side localStorage journal (`window.__pj`, defined in
 //! index.html) so WASM code paths — the settings «Проверить уведомления» button,
 //! the notification-receipt poll — leave breadcrumbs in the SAME journal the
 //! Settings → «Разработка» panel displays. The journal lives in localStorage
-//! only (no Cache Storage), so it keeps recording even if the page's Cache
-//! access breaks — the suspected iOS failure mode.
+//! only (no Cache Storage): the page's Cache access detaches on iOS after a
+//! push subscribe/receipt, a localStorage journal records through it
+//! (docs/notification-receipt.md).
 
 use wasm_bindgen::JsCast;
 

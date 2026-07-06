@@ -6,6 +6,7 @@ pub mod chat;
 pub mod auth;
 pub mod config;
 pub mod db;
+pub mod diag;
 pub mod i18n;
 pub mod local;
 pub mod meal_split;

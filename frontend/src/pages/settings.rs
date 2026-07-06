@@ -1,6 +1,8 @@
 use leptos::*;
 use leptos_router::*;
 use serde::Serialize;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
 
 use crate::services::{auth, push, db, story, profile, local, sync, update, i18n::t};
 use crate::services::profile::Sex;
@@ -14,9 +16,59 @@ const IOS_SEPARATOR: &str = "border-bottom: 0.5px solid var(--bulma-border-weak)
 // выполнит некоторые задания из «Истории».
 const SHOW_GOALS: bool = false;
 
+/// Compose the «Разработка» diagnostic view from its localStorage pieces:
+/// the Cache-mirrored breadcrumb log (`rn_diag_txt`), the two timer heartbeats
+/// (`rn_hb_js` — page JS interval, `rn_hb_wasm` — WASM notif poll; the shown age
+/// proves whether each timer is actually ticking), and the Cache-independent
+/// page journal (`rn_pj_txt`) that keeps recording even if Cache access breaks.
+fn read_diag_log() -> String {
+    let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) else {
+        return String::new();
+    };
+    let get = |k: &str| storage.get_item(k).ok().flatten().unwrap_or_default();
+    let hb_age = |k: &str| -> String {
+        match get(k).parse::<f64>() {
+            Ok(ts) => format!("{:.0}s", (js_sys::Date::now() - ts) / 1000.0),
+            Err(_) => "—".to_string(),
+        }
+    };
+    format!(
+        "hb js={} wasm={}\n{}\n--- журнал страницы (localStorage) ---\n{}",
+        hb_age("rn_hb_js"),
+        hb_age("rn_hb_wasm"),
+        get("rn_diag_txt"),
+        get("rn_pj_txt"),
+    )
+}
+
 #[component]
 pub fn SettingsPage() -> impl IntoView {
     let navigate = use_navigate();
+
+    // Diagnostics («Разработка»): the notif/deep-link breadcrumb log, refreshable.
+    let diag_log = create_rw_signal(read_diag_log());
+    let refresh_diag = move |_| diag_log.set(read_diag_log());
+    // Live refresh: the SW / page JS write breadcrumbs to localStorage asynchronously
+    // (outside Leptos's reactive graph), so poll them into the signal ~1/s. Cleared on
+    // unmount so the interval never fires against a disposed signal.
+    {
+        let interval_id = store_value(None::<i32>);
+        let cb = Closure::<dyn Fn()>::new(move || diag_log.set(read_diag_log()));
+        if let Some(win) = web_sys::window() {
+            if let Ok(id) = win.set_interval_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                1000,
+            ) {
+                interval_id.set_value(Some(id));
+            }
+        }
+        cb.forget();
+        on_cleanup(move || {
+            if let (Some(win), Some(id)) = (web_sys::window(), interval_id.get_value()) {
+                win.clear_interval_with_handle(id);
+            }
+        });
+    }
 
     // Расписание уведомлений показываем после того, как пройдена секция
     // «Настроим приложение» (язык + проверка уведомлений) — её задание ведёт
@@ -293,6 +345,7 @@ pub fn SettingsPage() -> impl IntoView {
                                     on:click=move |_| {
                                         loading.set(true);
                                         error.set(None);
+                                        crate::services::diag::note("notif button pressed");
                                         spawn_local(async move {
                                             let result = async {
                                                 // Always (re)subscribe before testing. The local
@@ -302,6 +355,7 @@ pub fn SettingsPage() -> impl IntoView {
                                                 // refreshes the server's record; it also surfaces a
                                                 // real "permission denied" instead of silently no-op.
                                                 push::subscribe().await?;
+                                                crate::services::diag::note("subscribe ok");
                                                 // The client picks the deep-link based on story
                                                 // progress: while the setup section's check task
                                                 // is pending, tapping the notification opens that
@@ -309,13 +363,28 @@ pub fn SettingsPage() -> impl IntoView {
                                                 // the notification just confirms it works.
                                                 let setup_done = story::get_flag(story::LANGUAGE_CONFIGURED).await
                                                     && story::get_flag(story::NOTIFICATION_RECEIVED).await;
-                                                let (body, url) = if setup_done {
-                                                    (t("settings.notif_push_plain"), "/")
+                                                let (body, url): (&str, String) = if setup_done {
+                                                    (t("settings.notif_push_plain"), "/".to_string())
                                                 } else {
-                                                    (t("settings.notif_push_task"), "/story/setup?notif=1")
+                                                    // Encode the notification: kind=tc (task complete),
+                                                    // section=setup, task=notif, + a short random id, e.g.
+                                                    // `?ntf=tc.setup.notif.a4f2`. Receiving it completes the
+                                                    // `notif` task's flag (see sw.js + lib.rs poll).
+                                                    let rand = format!(
+                                                        "{:04x}",
+                                                        0x1000 + (js_sys::Math::random() * 61439.0) as u32,
+                                                    );
+                                                    (
+                                                        t("settings.notif_push_task"),
+                                                        format!("/story/setup?ntf=tc.setup.notif.{rand}"),
+                                                    )
                                                 };
-                                                push::send_test(body, url).await
+                                                push::send_test(body, &url).await
                                             }.await;
+                                            match &result {
+                                                Ok(()) => crate::services::diag::note("send_test ok"),
+                                                Err(e) => crate::services::diag::note(&format!("ERR {e}")),
+                                            }
                                             if let Err(e) = result {
                                                 leptos::logging::error!("notifications: {}", e);
                                                 error.set(Some(e));
@@ -432,6 +501,29 @@ pub fn SettingsPage() -> impl IntoView {
                             {move || t("settings.version_update")}
                         </button>
                     })}
+                </div>
+            </div>
+
+            // ---- Разработка (notif/deep-link diagnostics) ----
+            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.dev")}</p>
+            <div style=IOS_CARD>
+                <div style="padding: 12px 16px;">
+                    <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                        <button class="button is-small" on:click=refresh_diag>{move || t("settings.dev_refresh")}</button>
+                        // Copy the CURRENT log snapshot to the clipboard — selecting text in
+                        // the <pre> is impossible because the 1s live refresh re-renders it
+                        // (the heartbeat line changes every tick) and drops the selection.
+                        <button class="button is-small" on:click=move |_| {
+                            let text = read_diag_log();
+                            spawn_local(async move {
+                                let clipboard = web_sys::window().unwrap().navigator().clipboard();
+                                let _ = wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&text)).await;
+                            });
+                        }>{move || t("settings.dev_copy")}</button>
+                    </div>
+                    <pre style="max-height: 44vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 11px; line-height: 1.4; margin: 0; background: var(--bulma-background); padding: 8px; border-radius: 8px; -webkit-user-select: text; user-select: text;">
+                        {move || { let s = diag_log.get(); if s.is_empty() { t("settings.dev_empty").to_string() } else { s } }}
+                    </pre>
                 </div>
             </div>
 

@@ -67,6 +67,7 @@ pub fn main() {
         // reload if a newer build was deployed (covers iOS PWA resumed from
         // memory, which never re-navigates).
         install_foreground_sync();
+        install_notif_receipt_poll();
         services::update::check_background();
         services::story::refresh_attention();
 
@@ -104,6 +105,46 @@ fn install_foreground_sync() {
     let _ = document
         .add_event_listener_with_callback("visibilitychange", cb.as_ref().unchecked_ref());
     // Leak the closure: it must live for the whole app session.
+    cb.forget();
+}
+
+#[cfg(not(test))]
+fn install_notif_receipt_poll() {
+    use wasm_bindgen::prelude::Closure;
+    use wasm_bindgen::JsCast;
+    // A "task complete" notification (its URL carries `ntf=<kind>.<section>.<task>.<rand>`)
+    // means that task's milestone is confirmed on receipt. The service worker records the
+    // code in Cache; index.html bridges it into localStorage `rn_notif_received`. Poll it,
+    // resolve the task's story flag and set it HERE in Leptos — set_flag bumps the story
+    // db-version signal, so the checkmark updates reactively. No tap / navigation.
+    let cb = Closure::<dyn Fn()>::new(move || {
+        let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten())
+        else {
+            return;
+        };
+        // TEMP DIAGNOSTIC: WASM-timer heartbeat — a gap between this timestamp and
+        // "now" (shown in Settings → «Разработка») proves this interval was suspended.
+        let _ = storage.set_item("rn_hb_wasm", &js_sys::Date::now().to_string());
+        let Some(code) = storage.get_item("rn_notif_received").ok().flatten() else { return };
+        if code.is_empty() {
+            return;
+        }
+        let _ = storage.remove_item("rn_notif_received");
+        services::diag::note(&format!("WASM poll consumed {code}"));
+        // code = "<kind>.<section>.<task>.<rand>" — the task id is the 3rd segment.
+        let task = code.split('.').nth(2).unwrap_or_default().to_string();
+        if let Some(flag) = services::story::flag_for_task(&task) {
+            leptos::spawn_local(async move {
+                services::story::set_flag(flag, true).await;
+            });
+        }
+    });
+    if let Some(win) = web_sys::window() {
+        let _ = win.set_interval_with_callback_and_timeout_and_arguments_0(
+            cb.as_ref().unchecked_ref(),
+            1000,
+        );
+    }
     cb.forget();
 }
 

@@ -8,19 +8,26 @@ compatibility_date = "2024-12-01"
 # the locked CLI doesn't support.
 command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
 
-[[durable_objects.bindings]]
-name = "TG_SESSION_DO"
-class_name = "TgSessionDO"
-
+# TgSessionDO (the old per-chat promo session store) was deleted: promo + payment now live
+# entirely in the Mini App. v1 created the class; v2 deletes it (no binding references it).
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TgSessionDO"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["TgSessionDO"]
 
 # Reach payment-worker /internal/checkout over a service binding (Worker→Worker;
 # a workers.dev URL would 404 — same reason support-worker / payment-worker note).
 [[services]]
 binding = "PAYMENT_WORKER"
 service = "payment-worker-dev"
+
+# Resolve the universal user_id for a Telegram identity at first touch (/miniapp/me).
+[[services]]
+binding = "AUTH_WORKER"
+service = "auth-worker-dev"
 
 [vars]
 # Dev placeholders ONLY. require_secrets checks the first three at the top of fetch.
@@ -34,6 +41,10 @@ ONBOARD_BASE_URL = "https://renorma-fit-dev.pages.dev/onboard-tg"
 # opens a real Safari, so we want /onboard, NOT the /onboard-tg bridge). Worker appends
 # `#claim=<id>.<secret>`.
 APP_ONBOARD_URL = "https://renorma-fit-dev.pages.dev/onboard"
+# Mini App URL opened from bot messages (dev = this dev worker's own host).
+MINIAPP_URL = "https://telegram-worker-dev.vg-stavenko.workers.dev/"
+# Bot deep-link shown on the out-of-Telegram gate page.
+MINIAPP_PAY_URL = "https://t.me/renorma_payment_helper_bot/pay"
 
 # ── Production (separate worker; clean DO data) ──
 # Deploy: wrangler deploy --env production. Prod secret VALUES are provisioned in the
@@ -47,13 +58,13 @@ workers_dev = false
 pattern = "tg.renorma.app"
 custom_domain = true
 
-[[env.production.durable_objects.bindings]]
-name = "TG_SESSION_DO"
-class_name = "TgSessionDO"
-
 [[env.production.services]]
 binding = "PAYMENT_WORKER"
 service = "payment-worker-prod"
+
+[[env.production.services]]
+binding = "AUTH_WORKER"
+service = "auth-worker-prod"
 
 # Shared/global secrets mounted from the global Secrets Store in prod. The store_id
 # reuses the same store as payment-worker-prod. INTERNAL_PUSH_KEY is the SAME shared
@@ -79,6 +90,10 @@ secret_name = "internal-push-key"
 ONBOARD_BASE_URL = "https://fit.renorma.app/onboard-tg"
 # DIRECT app onboarding entry used by the Mini App (openLink → Safari → /onboard).
 APP_ONBOARD_URL = "https://fit.renorma.app/onboard"
+# Mini App URL opened from bot messages (prod = tg.renorma.app custom domain).
+MINIAPP_URL = "https://tg.renorma.app/"
+# Bot deep-link shown on the out-of-Telegram gate page.
+MINIAPP_PAY_URL = "https://t.me/renorma_payment_helper_bot/pay"
 
 # Retain console logs (Workers Logs) so the bot-notify path is diagnosable.
 [env.production.observability]

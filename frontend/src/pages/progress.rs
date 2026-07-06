@@ -72,25 +72,18 @@ pub fn ProgressPage() -> impl IntoView {
                 {POSE_LABELS.iter().map(|(pose, label)| {
                     let pose = *pose;
                     let label = *label;
-                    let cam_id = format!("progress-cam-{pose}");
-                    let gal_id = format!("progress-gal-{pose}");
-                    let cam_btn = cam_id.clone();
-                    let gal_btn = gal_id.clone();
+                    let photo_id = format!("progress-photo-{pose}");
+                    let photo_btn = photo_id.clone();
                     let latest = move || photos.get().unwrap_or_default().into_iter().find(|p| p.pose == pose).map(|p| p.image);
                     view! {
                         <div style=CARD>
-                            // Camera (forces capture) and gallery (plain picker) — two inputs.
-                            <input type="file" accept="image/*" capture="environment" id=cam_id style="display: none;"
-                                on:change=move |ev| handle_file(pose, ev) />
-                            <input type="file" accept="image/*" id=gal_id style="display: none;"
+                            // Single picker (no capture attr) — the native chooser already offers camera + gallery on iOS and Android.
+                            <input type="file" accept="image/*" id=photo_id style="display: none;"
                                 on:change=move |ev| handle_file(pose, ev) />
                             <div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px;">
                                 <span class="is-size-6 has-text-weight-medium" style="flex: 1;">{move || t(label)}</span>
-                                <button class="button is-link is-small" on:click=move |_| click_input(&cam_btn)>
-                                    {move || t("progress.take_photo")}
-                                </button>
-                                <button class="button is-small" on:click=move |_| click_input(&gal_btn)>
-                                    {move || t("progress.from_gallery")}
+                                <button class="button is-link is-small" on:click=move |_| click_input(&photo_btn)>
+                                    {move || t("progress.capture")}
                                 </button>
                             </div>
                             {move || latest().map(|img| view! {

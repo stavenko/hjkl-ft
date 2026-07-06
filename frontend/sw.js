@@ -1,4 +1,4 @@
-var CACHE_NAME = 'ft-v7';
+var CACHE_NAME = 'ft-v9';
 
 // Fixed-name shell: precached on install so an offline launch works even after
 // only a brief online session (iOS is finicky about lazy runtime caching). The
@@ -55,11 +55,17 @@ self.addEventListener('fetch', function(event) {
         return;
     }
 
-    // HTML navigations AND the non-hashed module entry (init.js) — network
-    // first. init.js has a fixed filename but its content changes every build
-    // (it references the new hashed wasm/js). Serving it stale would load the
-    // previous build's wasm — i.e. the app would always be one deploy behind.
-    if (event.request.mode === 'navigate' || url.pathname === '/init.js') {
+    // HTML navigations, the non-hashed module entry (init.js), AND the runtime
+    // config — network first. init.js has a fixed filename but its content changes
+    // every build (it references the new hashed wasm/js); serving it stale would load
+    // the previous build's wasm. frontend.toml is the fixed-name config whose CONTENTS
+    // differ between dev and prod deploys — serving it stale strands the app on the
+    // wrong worker URLs (e.g. dev workers behind a prod CSP → blocked fetches). Both
+    // must always be fresh online, with the cache only as an offline fallback.
+    if (event.request.mode === 'navigate'
+        || url.pathname === '/init.js'
+        || url.pathname === '/config/frontend.toml'
+        || url.pathname === '/manifest.json') {
         // Offline fallback: exact cached navigation, else the cached app shell
         // ("/") — this is an SPA, so index.html + the client router render the
         // right route. Covers opening/reloading offline on any route (/diary…).

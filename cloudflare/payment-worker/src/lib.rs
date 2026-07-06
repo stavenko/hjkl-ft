@@ -70,7 +70,12 @@ fn error_response(message: &str, status: u16) -> Response {
 // worker starts addressing fresh (empty) DO instances by name; the old ones simply
 // orphan. This avoids delete-class migrations (Cloudflare rejects those while the
 // binding still references the class). Increment again for the next reset.
-const DO_EPOCH: &str = "v2";
+const DO_EPOCH: &str = "v5";
+
+/// How long a created lava invoice is considered payable. The status endpoint reports a
+/// pending invoice as expired past this window (the Mini App then shows a «create new
+/// invoice» action). Adjust to lava's real invoice lifetime.
+const INVOICE_TTL_MS: i64 = 60 * 60 * 1000; // 60 minutes
 
 fn sub_stub(env: &Env, user_id: &str) -> Result<worker::durable::Stub> {
     env.durable_object("SUBSCRIPTION_DO")?
@@ -144,6 +149,19 @@ fn test_entitlement_on(env: &Env) -> bool {
         .unwrap_or(false)
 }
 
+/// True when the provider talks to the REAL lava host (real money). The lava-mock is
+/// NOT real money, so it may run on the test env alongside TEST_ENTITLEMENT.
+fn real_money_provider(env: &Env) -> bool {
+    env.var("LAVA_API_URL").map(|v| v.to_string()).unwrap_or_default() == "https://gate.lava.top"
+}
+
+/// The free-sub test path and REAL money are mutually exclusive: an env that mints free
+/// test subs must NEVER also take real money. Blocks the real-checkout routes only when
+/// BOTH hold — so the lava-mock (fake money) checkout stays reachable on the test env.
+fn free_sub_blocks_checkout(env: &Env) -> bool {
+    test_entitlement_on(env) && real_money_provider(env)
+}
+
 
 // ── claim-secret crypto (MONEY-SAFETY #1) ─────────────────────────────────────
 /// 256-bit (>=128-bit) random secret, base64url, no padding. Used both for the
@@ -152,6 +170,28 @@ fn random_claim_secret() -> Result<String> {
     let mut bytes = [0u8; 32];
     getrandom::getrandom(&mut bytes).map_err(|e| Error::RustError(format!("getrandom: {e}")))?;
     Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
+/// Atomically fetch the next global bill sequence from ClaimDO (single-instance DO →
+/// race-free). Each issued Telegram invoice consumes one, making its buyer/receipt email
+/// unique + collision-proof.
+async fn next_bill_seq(env: &Env) -> Result<i64> {
+    let claim = claim_stub(env)?;
+    let mut r = do_post(&claim, "/next-bill-seq", &serde_json::json!({})).await?;
+    let v: serde_json::Value = r.json().await?;
+    v.get("value")
+        .and_then(|x| x.as_i64())
+        .ok_or_else(|| Error::RustError("next-bill-seq: no value".into()))
+}
+
+/// Reduce a Telegram username to an email-local-part-safe token: lowercase, keep only
+/// `[a-z0-9_]`. Telegram usernames already fit this set; this is defensive. The dot is
+/// deliberately dropped — it separates the `tg.<ident>.<seq>` fields of the address.
+fn email_ident(s: &str) -> String {
+    s.chars()
+        .map(|c| c.to_ascii_lowercase())
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect()
 }
 
 /// Lowercase hex sha256 — the DB stores ONLY hash(secret), never plaintext nor the
@@ -212,13 +252,41 @@ async fn read_secret_store(env: &Env, binding: &str) -> std::result::Result<Opti
     }
 }
 
-/// Build a provider with credentials resolved from the Secrets Store. dev/test bind
-/// NO lava store → both creds Ok(None) → not configured → real pay impossible.
-/// A present-but-unresolvable LAVA binding (prod misconfig) propagates Err loudly.
+/// Build a provider with the API base URL + credentials resolved per env. Credentials:
+/// PROD reads them from the Secrets Store; DEV/test reads them from plain `[vars]` (the
+/// lava-mock keys) — real lava never sees a dev value. A present-but-unresolvable LAVA
+/// store binding (prod misconfig) propagates Err loudly.
+///
+/// MONEY-SAFETY: if REAL (Secrets-Store) creds resolve, the base URL MUST be
+/// gate.lava.top — real creds can never be pointed at the mock (a mock+real-creds pair
+/// would let a dev URL move real money). Fail loud otherwise.
 async fn provider_for_env(name: &str, env: &Env) -> std::result::Result<Option<Lava>, String> {
-    let api_key = read_secret_store(env, "LAVA_API_KEY").await?;
-    let webhook_secret = read_secret_store(env, "LAVA_WEBHOOK_SECRET").await?;
-    Ok(provider_for(name, api_key, webhook_secret))
+    let base = env.var("LAVA_API_URL").map(|v| v.to_string()).unwrap_or_default();
+
+    let store_api_key = read_secret_store(env, "LAVA_API_KEY").await?;
+    let store_hook = read_secret_store(env, "LAVA_WEBHOOK_SECRET").await?;
+    let creds_from_store = store_api_key.is_some();
+
+    let var_nonempty = |k: &str| env.var(k).ok().map(|v| v.to_string()).filter(|s| !s.is_empty());
+    let api_key = store_api_key.or_else(|| var_nonempty("LAVA_API_KEY"));
+    let webhook_secret = store_hook.or_else(|| var_nonempty("LAVA_WEBHOOK_SECRET"));
+
+    // Real Secrets-Store creds may ONLY talk to the real lava host.
+    if creds_from_store && base != "https://gate.lava.top" {
+        return Err(format!(
+            "MISCONFIGURED: real lava creds with LAVA_API_URL='{base}' (must be gate.lava.top) — refusing (money-safety)"
+        ));
+    }
+    // Configured but no base → loud misconfig (never default a base silently).
+    if api_key.is_some() && base.is_empty() {
+        return Err("MISCONFIGURED: LAVA_API_URL not set".into());
+    }
+
+    // DEV: reach the lava-mock via a service binding (same-zone worker→worker fetch is
+    // blocked, error 1042). Absent in prod → real internet fetch to gate.lava.top.
+    let mock = env.service("LAVA_MOCK").ok();
+
+    Ok(provider_for(name, base, mock, api_key, webhook_secret))
 }
 
 // ── push (best-effort) ────────────────────────────────────────────────────────
@@ -560,6 +628,13 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         }
         return admin_unbound_reconciled(env).await;
     }
+    // Paid users who have NOT set up durable access (no passkey) — new-model worklist.
+    if method == Method::Get && path == "/admin/paid-no-access" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        return admin_paid_no_access(env).await;
+    }
     // Client-requested refunds (access already revoked); operator processes each in lava.
     if method == Method::Get && path == "/admin/refunds" {
         if let Err(resp) = require_admin(&req, env).await {
@@ -567,6 +642,31 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         }
         let stub = claim_stub(env)?;
         return relay(do_get(&stub, "/refunds").await?).await;
+    }
+    // Admin: recent caught receipts (each bound to its payment) — list view.
+    if method == Method::Get && path == "/admin/receipts" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        let stub = claim_stub(env)?;
+        return relay(do_get(&stub, "/receipt/recent").await?).await;
+    }
+    // Admin: one receipt's FULL body by ?id= (detail view).
+    if method == Method::Get && path == "/admin/receipt" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        let id = req
+            .url()?
+            .query_pairs()
+            .find(|(k, _)| k == "id")
+            .map(|(_, v)| v.into_owned())
+            .unwrap_or_default();
+        if id.is_empty() {
+            return Ok(error_response("missing id", 400));
+        }
+        let stub = claim_stub(env)?;
+        return relay(do_post(&stub, "/receipt/get", &serde_json::json!({ "id": id })).await?).await;
     }
     // Reconcile a Telegram user: given ?tg=<username|id>, return their claim(s) with
     // status (paid? claimed?) and claimed_by. Backs the operator «оплатил / привязал» check.
@@ -594,10 +694,28 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
     if method == Method::Post && path == "/internal/checkout" {
         return internal_checkout(req, env).await;
     }
+    // The offer's LIST price for a currency (no invoice minted) — the Mini App "ценник"
+    // before any promo. INTERNAL_PUSH_KEY-gated.
+    if method == Method::Post && path == "/internal/price" {
+        return internal_price(req, env).await;
+    }
     // The subscription status of the account a claim is bound to — so the Mini App can
     // show the LIVE status (active / cancelled + days left). INTERNAL_PUSH_KEY-gated.
     if method == Method::Post && path == "/internal/claim-subscription" {
         return internal_claim_subscription(req, env).await;
+    }
+    // The user's newest non-terminal claim (pending invoice + its deadline), so the Mini
+    // App can show «pay invoice until <deadline>» / «create new invoice». INTERNAL_PUSH_KEY.
+    if method == Method::Post && path == "/internal/active-by-tg" {
+        return internal_active_by_tg(req, env).await;
+    }
+    // receipt-worker → bind a caught receipt email (address, amount, full text) to its payment.
+    if method == Method::Post && path == "/internal/receipt" {
+        return internal_receipt(req, env).await;
+    }
+    // Telegram-binding reads/writes for telegram-worker (secret lives here now).
+    if method == Method::Post && path.starts_with("/internal/tg/") {
+        return internal_tg(req, env, &path["/internal/tg/".len()..].to_string()).await;
     }
 
     // ── Everything else is app-JWT authed ──
@@ -640,25 +758,109 @@ struct GuestCheckout {
     pay_url: String,
     claim_id: String,
     secret: String,
-    /// True when this reused an existing pending invoice for the same Telegram user
-    /// (F-2) instead of minting a new one. On reuse `secret` is empty — the caller must
-    /// NOT overwrite the secret it stored the first time.
-    reused: bool,
+    /// The ACTUAL amount to charge, decoded from lava's paymentParams.amount_total
+    /// (promo-applied). `None` when the decode missed — the client shows '…' rather
+    /// than a fabricated price; the invoice remains payable.
+    amount: Option<f64>,
+    /// Currency of `amount` (from amount_total.currency). `None` alongside `amount`.
+    amount_currency: Option<String>,
 }
 
-/// The shared body of guest checkout: provider resolution, plan lookup, claim-secret
-/// minting, lava checkout creation, ClaimDO /create-pending + contract→claim index.
-/// Returns Err(Response) for every error case (with the SAME statuses as before) so
-/// both callers surface identical errors; the PROD-ONLY guard stays in each caller.
+/// Resolve (or create) the universal user_id for an external identity via the AUTH_WORKER
+/// binding — provider-agnostic, idempotent (first touch may already have created it). Best-
+/// effort: on any failure we log loudly and return None so a checkout still succeeds and
+/// falls back to the legacy claim path; the caller must NOT hard-fail a payment on this.
+async fn resolve_account(
+    env: &Env,
+    provider: &str,
+    provider_uid: &str,
+    username: Option<&str>,
+) -> Option<String> {
+    let key = token::secret_or_var(env, "INTERNAL_PUSH_KEY").await.ok()?;
+    let mut body = serde_json::json!({ "provider": provider, "providerUid": provider_uid });
+    if let Some(u) = username {
+        body["username"] = serde_json::Value::String(u.to_string());
+    }
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/json").ok()?;
+    headers.set("X-Internal-Key", &key).ok()?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(JsValue::from_str(&body.to_string())));
+    let request = Request::new_with_init("https://auth-worker/internal/account-resolve", &init).ok()?;
+    let auth = env.service("AUTH_WORKER").ok()?;
+    let mut res = match auth.fetch_request(request).await {
+        Ok(r) => r,
+        Err(e) => {
+            console_error!("resolve_account: fetch failed: {e}");
+            return None;
+        }
+    };
+    if !(200..300).contains(&res.status_code()) {
+        console_error!("resolve_account: auth {} ", res.status_code());
+        return None;
+    }
+    let v: serde_json::Value = res.json().await.ok()?;
+    v.get("userId").and_then(|x| x.as_str()).map(String::from)
+}
+
+/// Ask auth-worker whether an account has any passkey. None on failure (treated as «unknown»,
+/// surfaced by the admin so it's not silently hidden).
+async fn auth_has_credentials(env: &Env, user_id: &str) -> Option<bool> {
+    let key = token::secret_or_var(env, "INTERNAL_PUSH_KEY").await.ok()?;
+    let payload = serde_json::json!({ "userId": user_id }).to_string();
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/json").ok()?;
+    headers.set("X-Internal-Key", &key).ok()?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(JsValue::from_str(&payload)));
+    let request =
+        Request::new_with_init("https://auth-worker/internal/has-credentials", &init).ok()?;
+    let auth = env.service("AUTH_WORKER").ok()?;
+    let mut res = auth.fetch_request(request).await.ok()?;
+    if !(200..300).contains(&res.status_code()) {
+        return None;
+    }
+    let v: serde_json::Value = res.json().await.ok()?;
+    v.get("hasCredentials").and_then(|x| x.as_bool())
+}
+
+/// Admin worklist: paid users who haven't set up durable access (no passkey). The signal the
+/// operator acts on — «paid, but can't get in yet» → nudge them.
+async fn admin_paid_no_access(env: &Env) -> Result<Response> {
+    let claim = claim_stub(env)?;
+    let mut r = do_get(&claim, "/paid-with-user").await?;
+    let v: serde_json::Value = r.json().await?;
+    let empty = vec![];
+    let claims = v.get("claims").and_then(|x| x.as_array()).unwrap_or(&empty);
+    let mut out: Vec<serde_json::Value> = vec![];
+    for c in claims {
+        let uid = c.get("user_id").and_then(|x| x.as_str()).unwrap_or("");
+        if uid.is_empty() {
+            continue;
+        }
+        // Surface those WITHOUT credentials (and «unknown» on a lookup error — never hide).
+        if auth_has_credentials(env, uid).await != Some(true) {
+            out.push(c.clone());
+        }
+    }
+    Response::from_json(&serde_json::json!({ "users": out }))
+}
+
+/// The shared body of checkout: provider resolution, plan lookup, lava checkout creation,
+/// ClaimDO /create-pending + contract→user index. Returns Err(Response) for every error case
+/// (with the SAME statuses as before) so both callers surface identical errors; the PROD-ONLY
+/// guard stays in each caller.
 async fn do_guest_checkout(
     body: &serde_json::Value,
     env: &Env,
 ) -> std::result::Result<GuestCheckout, Response> {
-    let provider_name = body
-        .get("provider")
-        .and_then(|v| v.as_str())
-        .unwrap_or("lava")
-        .to_string();
+    // One provider, one offer. The buyer never chooses this — it's a fixed constant, not a
+    // default filled in for a missing body field.
+    let provider_name = "lava".to_string();
     let provider = match provider_for_env(&provider_name, env).await {
         Ok(p) => p,
         Err(reason) => {
@@ -678,12 +880,42 @@ async fn do_guest_checkout(
         return Err(error_response("provider_not_configured", 400));
     }
     let plan_id_owned = offer_id.clone();
-    // Optional promo code (trimmed; empty → None).
+    // Optional promo code (trimmed; empty → None). An empty/absent promo means «no promo»
+    // (full price) — the client is authoritative, nothing is carried over from a prior claim.
     let promo_code = body
         .get("promoCode")
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    // Buyer currency — REQUIRED. RUB → Russian acquirer (RU cards); USD/EUR → international
+    // acquirer (foreign cards). The client always sends it explicitly; missing or not one of
+    // RUB/USD/EUR → 400. No silent fallback to RUB.
+    let currency = match body
+        .get("currency")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| matches!(s.as_str(), "RUB" | "USD" | "EUR"))
+    {
+        Some(c) => c,
+        None => return Err(error_response("currency_required", 400)),
+    };
+    // Buyer payment method — REQUIRED. Validated against lava's ACTUAL PaymentMethodType
+    // enum. The client always sends it explicitly (the Mini App sends CARD, the only reliable
+    // channel); missing or invalid → 400. No silent default, no currency-based fallback.
+    let payment_method = match body
+        .get("paymentMethod")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| {
+            matches!(
+                s.as_str(),
+                "CARD" | "SBP" | "PAYPAL" | "IDEAL" | "CHECKOUT_PAGE" | "MBWAY" | "BIZUM"
+                    | "STRIPE" | "SEPATRANSFER" | "PIX" | "BANCONTACT" | "APPLE_PAY"
+            )
+        }) {
+        Some(m) => m,
+        None => return Err(error_response("payment_method_required", 400)),
+    };
     // Optional Telegram identity (present only for the Mini App flow) — recorded on the
     // claim so an operator can reconcile «who paid / did they bind an account».
     let tg_user_id = body.get("tgUserId").and_then(|v| v.as_i64());
@@ -692,52 +924,38 @@ async fn do_guest_checkout(
         .and_then(|v| v.as_str())
         .map(|s| s.trim_start_matches('@').trim().to_string())
         .filter(|s| !s.is_empty());
-
+    // Universal user_id for this identity (first touch may have created it; idempotent). We
+    // bind the claim + contract to it below so the paid webhook activates the subscription
+    // directly for user_id. Best-effort — None falls back to the legacy claim path.
+    let user_id = match tg_user_id {
+        Some(uid) => resolve_account(env, "telegram", &uid.to_string(), tg_username.as_deref()).await,
+        None => None,
+    };
     let claim = match claim_stub(env) {
         Ok(s) => s,
         Err(e) => return Err(error_response(&e.to_string(), 500)),
     };
 
-    // F-2 idempotency: a repeat checkout for the SAME Telegram user must not mint a second
-    // lava invoice. Look up the user's newest non-terminal claim:
-    //   • pending (with a stored payUrl) → reuse it verbatim (no new invoice, no new claim).
-    //   • paid / claimed → they already have an entitlement; refuse (ALREADY_ACTIVE) so the
-    //     caller routes them to onboarding/app instead of selling a duplicate.
-    // Only the Mini App / bot flow carries tgUserId; the landing guest flow (no identity)
-    // falls through and always mints, as before.
+    // Duplicate-purchase guard: if this Telegram user already has a PAID/CLAIMED entitlement,
+    // refuse (ALREADY_ACTIVE 409) so the caller routes them into the app instead of minting a
+    // second subscription. Money-safety, not idempotency: every checkout mints a fresh invoice
+    // (the client caches the pay link per its own config), so there's no invoice to reuse here.
+    // Only the Mini App flow carries tgUserId; a landing guest (no identity) has nothing to
+    // dedup against and just mints.
     if let Some(uid) = tg_user_id {
         match do_post(&claim, "/active-by-tg", &serde_json::json!({ "tgUserId": uid })).await {
             Ok(mut resp) if resp.status_code() == 200 => {
                 let v: serde_json::Value = resp.json().await.unwrap_or(serde_json::json!({}));
                 let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("none");
-                match status {
-                    "pending" => {
-                        if let (Some(cid), Some(url)) = (
-                            v.get("claimId").and_then(|s| s.as_str()),
-                            v.get("payUrl").and_then(|s| s.as_str()),
-                        ) {
-                            if !url.is_empty() {
-                                return Ok(GuestCheckout {
-                                    pay_url: url.to_string(),
-                                    claim_id: cid.to_string(),
-                                    secret: String::new(),
-                                    reused: true,
-                                });
-                            }
-                        }
-                        // pending but no stored payUrl (pre-F-2 row) → fall through and mint.
-                    }
-                    "paid" | "claimed" => {
-                        return Err(error_response_detail(
-                            "ALREADY_ACTIVE",
-                            "an active subscription/claim already exists for this Telegram user",
-                            409,
-                        ));
-                    }
-                    _ => {}
+                if matches!(status, "paid" | "claimed") {
+                    return Err(error_response_detail(
+                        "ALREADY_ACTIVE",
+                        "an active subscription/claim already exists for this Telegram user",
+                        409,
+                    ));
                 }
             }
-            Ok(_) => {} // non-200 from the dedup probe → best-effort, mint anyway.
+            Ok(_) => {} // non-200 probe → best-effort, mint anyway.
             Err(e) => {
                 // A dead probe must not block a real purchase — log and mint.
                 console_error!("do_guest_checkout: active-by-tg probe failed: {e}");
@@ -748,19 +966,53 @@ async fn do_guest_checkout(
     let claim_id = random_claim_secret().map_err(|e| error_response(&e.to_string(), 500))?; // opaque public id (≠ contractId; #1)
     let secret = random_claim_secret().map_err(|e| error_response(&e.to_string(), 500))?; // high-entropy claim secret (256-bit)
     let secret_hash = sha256_hex(&secret);
+    // LANDING_RETURN_URL is set in both dev+prod [vars]; no hardcoded prod-host fallback.
     let base = env
         .var("LANDING_RETURN_URL")
         .map(|v| v.to_string())
-        .unwrap_or_else(|_| "https://fit.renorma.app/onboard".into());
+        .unwrap_or_default();
     // FRAGMENT, not query (#1): not sent to the server, not logged.
     let _return_url = format!("{base}#claim={claim_id}.{secret}");
 
+    // Keep the client-supplied promo/currency/method to persist on the claim (operator
+    // reconciliation) — the create_checkout call below consumes the originals.
+    let promo_for_claim = promo_code.clone();
+    let currency_for_claim = currency.clone();
+    let method_for_claim = payment_method.clone();
+    // Buyer email sent to lava MUST be unique per invoice: lava refuses (400) to create a
+    // second subscription invoice for an email that already has an active subscription to the
+    // offer. It ALSO doubles as the receipt address we can catch (Email Routing → Worker) and
+    // bind back to the payer. For the Telegram flow we encode a STABLE identity (the @username
+    // when present — readable — else the numeric tg id) plus a GLOBAL monotonic bill sequence:
+    // `tg.<ident>.<seq>@rcpt.renorma.app`. The seq guarantees per-invoice uniqueness AND is
+    // collision-proof even if a @username is released and reclaimed by another account. A
+    // landing guest (no Telegram identity) uses the opaque `<claimId>@rcpt.renorma.app`
+    // (one receiving subdomain for every flow — no separate guest.* domain).
+    // Never a buyer field — never taken from the request body.
+    let email = match tg_user_id {
+        Some(tid) => {
+            let seq = next_bill_seq(env)
+                .await
+                .map_err(|e| error_response(&e.to_string(), 500))?;
+            let ident = tg_username
+                .as_deref()
+                .map(email_ident)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| tid.to_string());
+            format!("tg.{ident}.{seq}@rcpt.renorma.app")
+        }
+        None => format!("{claim_id}@rcpt.renorma.app"),
+    };
+    // Keep a copy for the claim row (receipt→payment mapping); create_checkout consumes the original.
+    let email_for_claim = email.clone();
     let checkout = match provider
         .create_checkout(&CheckoutOpts {
             offer_id,
-            email: format!("{claim_id}@guest.renorma.app"),
+            email,
             return_url: _return_url,
             promo_code,
+            currency,
+            payment_method: Some(payment_method),
         })
         .await
     {
@@ -777,11 +1029,24 @@ async fn do_guest_checkout(
             "provider": provider_name,
             "planId": plan_id_owned,
             "contractId": checkout.order_id,
-            // No config price to record — lava owns the amount (webhook/receipt).
+            // Synthetic buyer/receipt email — stored on the claim so an incoming receipt maps here.
+            "email": email_for_claim,
+            // The lava-decoded amount (paymentParams.amount_total, promo-applied), stored
+            // in MINOR units (×100) to match the claims.amount INTEGER column + the webhook
+            // amount; a float here would silently become NULL via opt_i64. Null when the
+            // decode missed. lava still owns the authoritative amount on the receipt.
+            "amount": checkout.amount.map(|a| (a * 100.0).round() as i64),
+            // The universal account this payment belongs to (resolved at first touch). Stored
+            // so the admin can list «paid but no credentials» users.
+            "userId": user_id,
             "tgUserId": tg_user_id,
             "tgUsername": tg_username,
-            // Stored so a repeat checkout reuses this same invoice (F-2).
+            // The lava pay link, stored for status/reconciliation.
             "payUrl": checkout.url,
+            // The buyer's actual promo / currency / channel, stored for operator reconciliation.
+            "promoCode": promo_for_claim,
+            "currency": currency_for_claim,
+            "paymentMethod": method_for_claim,
         }),
     )
     .await
@@ -792,24 +1057,44 @@ async fn do_guest_checkout(
     if cp.status_code() != 200 {
         return Err(error_response("claim create-pending failed", 500));
     }
-    // Map contract → claimId so the webhook finds the guest row.
+    // Map contract → claimId so the paid webhook finds the row (marks it paid + notifies the
+    // bot via the guest path, which ALSO activates the sub for the claim's user_id).
     if let Err(e) = index_put(env, &format!("claim-contract:{}", checkout.order_id), &claim_id).await {
         return Err(error_response(&e.to_string(), 500));
+    }
+
+    // Telegram flow (Mini App / bot): bind the claim to the tg user + store its secret in
+    // ClaimDO — the single source of truth. FAIL LOUD (not fire-and-forget): without this
+    // row the paid-push webhook can't find the binding → the user pays but gets no success
+    // message / onboarding. INSERT OR IGNORE makes it safe to retry the whole checkout.
+    if let Some(tid) = tg_user_id {
+        let put = do_post(
+            &claim,
+            "/tg/put",
+            &serde_json::json!({ "claimId": claim_id, "tgId": tid, "secret": secret }),
+        )
+        .await;
+        match put {
+            Ok(r) if r.status_code() == 200 => {}
+            Ok(r) => return Err(error_response(&format!("tg binding failed: {}", r.status_code()), 500)),
+            Err(e) => return Err(error_response(&format!("tg binding failed: {e}"), 500)),
+        }
     }
 
     Ok(GuestCheckout {
         pay_url: checkout.url,
         claim_id,
         secret,
-        reused: false,
+        amount: checkout.amount,
+        amount_currency: checkout.currency,
     })
 }
 
 // ── POST /checkout/guest (NO JWT; PROD-ONLY) ──────────────────────────────────
 async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
-    // Mutually exclusive with the test path: an env that mints free test subs must
-    // NOT also take real money. On the test env this route looks non-existent (404).
-    if test_entitlement_on(env) {
+    // A free-sub env must NOT also take REAL money — but the lava-mock (fake money) may
+    // run on the test env, so only block when real lava is configured too.
+    if free_sub_blocks_checkout(env) {
         return Ok(error_response("Not found", 404));
     }
     let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
@@ -818,10 +1103,14 @@ async fn checkout_guest(mut req: Request, env: &Env) -> Result<Response> {
         Err(resp) => return Ok(resp),
     };
     // claimId only — NEVER the secret (it travels back via the lava fragment).
+    // amount/currency are the lava-decoded price (parity with the internal flow).
     Response::from_json(&serde_json::json!({
         "payUrl": gc.pay_url,
         "claimId": gc.claim_id,
-        "reused": gc.reused,
+        "amount": gc.amount,
+        "currency": gc.amount_currency,
+        // The invoice lifetime, so the client can watch for expiry without hardcoding it.
+        "ttlMs": INVOICE_TTL_MS,
     }))
 }
 
@@ -847,8 +1136,9 @@ async fn internal_checkout(mut req: Request, env: &Env) -> Result<Response> {
         return Ok(error_response("bad internal key", 403));
     }
 
-    // PROD-ONLY guard — identical mutual exclusivity with the test path.
-    if test_entitlement_on(env) {
+    // Same mutual exclusivity: a free-sub env may take MOCK money (lava-mock) but never
+    // REAL money — block only when real lava is configured.
+    if free_sub_blocks_checkout(env) {
         return Ok(error_response("Not found", 404));
     }
 
@@ -863,7 +1153,12 @@ async fn internal_checkout(mut req: Request, env: &Env) -> Result<Response> {
         "payUrl": gc.pay_url,
         "claimId": gc.claim_id,
         "secret": gc.secret,
-        "reused": gc.reused,
+        // Non-sensitive: the lava-decoded price so the Mini App can show it without a
+        // second round-trip. null when the decode missed (client shows '…').
+        "amount": gc.amount,
+        "currency": gc.amount_currency,
+        // The invoice lifetime, so the client can watch for expiry without hardcoding it.
+        "ttlMs": INVOICE_TTL_MS,
     }))
 }
 
@@ -917,6 +1212,222 @@ async fn internal_claim_subscription(mut req: Request, env: &Env) -> Result<Resp
         "noRenew": s.get("no_renew"),
         "daysLeft": days_left,
     }))
+}
+
+// ── POST /internal/tg/{op} (INTERNAL_PUSH_KEY-guarded) ────────────────────────
+/// telegram-worker's window into the tg_claims table (the Telegram binding + claim
+/// secret now live in ClaimDO). `op` ∈ get | by-user | mark-notified — thin proxies to
+/// the ClaimDO ops, forwarding the request body verbatim.
+async fn internal_tg(mut req: Request, env: &Env, op: &str) -> Result<Response> {
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) => k,
+        Err(e) => {
+            console_error!("internal_tg: {e}");
+            return Ok(error_response("internal_not_configured", 500));
+        }
+    };
+    let provided = req.headers().get("X-Internal-Key").ok().flatten().unwrap_or_default();
+    if provided.is_empty() || provided != key {
+        return Ok(error_response("bad internal key", 403));
+    }
+    let do_path = match op {
+        "get" => "/tg/get",
+        "by-user" => "/tg/by-user",
+        "mark-notified" => "/tg/mark-notified",
+        _ => return Ok(error_response("unknown tg op", 404)),
+    };
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let claim = claim_stub(env)?;
+    let mut r = do_post(&claim, do_path, &body).await?;
+    let v: serde_json::Value = r.json().await?;
+    Response::from_json(&v)
+}
+
+// ── POST /internal/price (INTERNAL_PUSH_KEY-guarded) ──────────────────────────
+/// The LAVA_OFFER_ID list price for a currency (RUB/USD/EUR), read from lava's products
+/// WITHOUT minting an invoice — the Mini App "ценник" before any promo. Returns
+/// {amount, currency}; amount is null (client shows "…") when the price can't be read
+/// (never a fabricated number). A hard provider/HTTP failure → 502.
+async fn internal_price(mut req: Request, env: &Env) -> Result<Response> {
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) => k,
+        Err(e) => {
+            console_error!("internal_price: {e}");
+            return Ok(error_response("internal_not_configured", 500));
+        }
+    };
+    let provided = req
+        .headers()
+        .get("X-Internal-Key")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if provided.is_empty() || provided != key {
+        return Ok(error_response("bad internal key", 403));
+    }
+
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    // Currency REQUIRED — the client always sends it. Missing/invalid → 400, no RUB fallback.
+    let currency = match body
+        .get("currency")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| matches!(s.as_str(), "RUB" | "USD" | "EUR"))
+    {
+        Some(c) => c,
+        None => return Ok(error_response("currency_required", 400)),
+    };
+
+    let offer_id = env.var("LAVA_OFFER_ID").map(|v| v.to_string()).unwrap_or_default();
+    if offer_id.is_empty() {
+        console_error!("internal_price: LAVA_OFFER_ID not configured");
+        return Ok(error_response("provider_not_configured", 400));
+    }
+    let provider = match provider_for_env("lava", env).await {
+        Ok(Some(p)) if p.configured() => p,
+        Ok(_) => return Ok(error_response("provider_not_configured", 400)),
+        Err(reason) => {
+            console_error!("internal_price: {reason}");
+            return Ok(error_response("provider_not_configured", 503));
+        }
+    };
+    match provider.offer_price(&offer_id, &currency).await {
+        Ok(Some((amount, cur))) => {
+            Response::from_json(&serde_json::json!({ "amount": amount, "currency": cur }))
+        }
+        Ok(None) => Response::from_json(&serde_json::json!({ "amount": null, "currency": currency })),
+        Err(e) => {
+            console_error!("internal_price: offer_price failed: {e}");
+            Ok(error_response("price_unavailable", 502))
+        }
+    }
+}
+
+// ── POST /internal/active-by-tg (INTERNAL_PUSH_KEY-guarded) ───────────────────
+/// The Telegram user's newest non-terminal claim. When it's a `pending` invoice, return
+/// its payUrl + deadline (created_at + INVOICE_TTL) + whether it's already expired, so the
+/// Mini App shows «pay invoice until <deadline>» while valid and «create new invoice» once
+/// expired. Non-pending (paid/claimed/none) → `{pending:false}`.
+async fn internal_active_by_tg(mut req: Request, env: &Env) -> Result<Response> {
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) => k,
+        Err(e) => {
+            console_error!("internal_active_by_tg: {e}");
+            return Ok(error_response("internal_not_configured", 500));
+        }
+    };
+    let provided = req
+        .headers()
+        .get("X-Internal-Key")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if provided.is_empty() || provided != key {
+        return Ok(error_response("bad internal key", 403));
+    }
+
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let tg_user_id = match body.get("tgUserId").and_then(|v| v.as_i64()) {
+        Some(id) => id,
+        None => return Ok(error_response("missing tgUserId", 400)),
+    };
+
+    let claim = claim_stub(env)?;
+    let mut r = do_post(&claim, "/active-by-tg", &serde_json::json!({ "tgUserId": tg_user_id })).await?;
+    let v: serde_json::Value = r.json().await?;
+    let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("none");
+    if status != "pending" {
+        return Response::from_json(&serde_json::json!({ "pending": false, "status": status }));
+    }
+    let created_at = v.get("createdAt").and_then(|s| s.as_i64()).unwrap_or(0);
+    let deadline = created_at + INVOICE_TTL_MS;
+    let expired = Date::now().as_millis() as i64 >= deadline;
+
+    // Ask lava directly whether this invoice was actually paid — don't rely on the
+    // webhook alone. A COMPLETED lava payment for the claim's contract → lavaPaid=true.
+    // (STATUS ONLY: we do NOT mark the claim paid here.)
+    let mut lava_paid = false;
+    if let Some(cid) = v.get("contractId").and_then(|s| s.as_str()) {
+        if let Ok(Some(provider)) = provider_for_env("lava", env).await {
+            if provider.configured() {
+                match provider.last_payment(cid).await {
+                    Ok(Some(_)) => lava_paid = true,
+                    Ok(None) => {}
+                    Err(e) => console_error!("active-by-tg: lava last_payment({cid}) failed: {e}"),
+                }
+            }
+        }
+    }
+
+    Response::from_json(&serde_json::json!({
+        "pending": true,
+        "claimId": v.get("claimId"),
+        "payUrl": v.get("payUrl"),
+        "deadline": deadline,
+        "expired": expired,
+        "lavaPaid": lava_paid,
+    }))
+}
+
+// ── POST /internal/receipt (INTERNAL_PUSH_KEY-guarded) ────────────────────────
+/// receipt-worker calls this after archiving a caught receipt email to R2. Resolves the
+/// recipient address → its payment (claim, case-insensitively — inbound addresses arrive
+/// lowercased) and stores the receipt (full text + amount) bound to it. Idempotent on the
+/// email Message-ID (ClaimDO INSERT OR IGNORE). Unknown address → {bound:false} (the raw
+/// stays archived in R2 regardless). The caller has ALREADY verified the sender is lava.
+async fn internal_receipt(mut req: Request, env: &Env) -> Result<Response> {
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) => k,
+        Err(e) => {
+            console_error!("internal_receipt: {e}");
+            return Ok(error_response("internal_not_configured", 500));
+        }
+    };
+    let provided = req.headers().get("X-Internal-Key").ok().flatten().unwrap_or_default();
+    if provided.is_empty() || provided != key {
+        return Ok(error_response("bad internal key", 403));
+    }
+
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let email = body
+        .get("email")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if email.is_empty() {
+        return Ok(error_response("missing email", 400));
+    }
+
+    let claim = claim_stub(env)?;
+    let mut r = do_post(&claim, "/claim-by-email", &serde_json::json!({ "email": email })).await?;
+    let cv: serde_json::Value = r.json().await?;
+    let claim_id = if cv.get("found").and_then(|b| b.as_bool()) == Some(true) {
+        cv.get("claimId").and_then(|v| v.as_str()).unwrap_or("").to_string()
+    } else {
+        console_warn!("internal_receipt: no claim for address {email} — archived only");
+        return Response::from_json(&serde_json::json!({ "ok": true, "bound": false }));
+    };
+
+    let receipt_id = random_claim_secret()?;
+    let add = do_post(
+        &claim,
+        "/receipt/add",
+        &serde_json::json!({
+            "id": receipt_id,
+            "claimId": claim_id,
+            "messageId": body.get("messageId"),
+            "amount": body.get("amount"),      // minor units (×100), integer
+            "currency": body.get("currency"),
+            "bodyText": body.get("bodyText"),  // full decoded receipt text/HTML
+            "pdfKey": body.get("pdfKey"),      // R2 key when a PDF attachment was present
+        }),
+    )
+    .await?;
+    if add.status_code() != 200 {
+        return Ok(error_response("receipt add failed", 500));
+    }
+    Response::from_json(&serde_json::json!({ "ok": true, "bound": true, "claimId": claim_id }))
 }
 
 // ── POST /test/guest-checkout (PRODUCTION-IMPOSSIBLE) ─────────────────────────
@@ -1315,10 +1826,33 @@ async fn webhook(mut req: Request, env: &Env, name: &str) -> Result<Response> {
                         "webhook: claim-contract index pointed at {gid} but ClaimDO has no row for contract={gcontract}"
                     );
                 } else if rj.get("paid").and_then(|v| v.as_bool()) == Some(true) {
-                    // Genuine pending→paid transition: notify telegram-worker so the
-                    // bot delivers the claim-binding link. Best-effort (never fails
-                    // the webhook); telegram-worker is idempotent regardless.
-                    // duplicate/alreadyPaid/claimed → no re-notify.
+                    // Genuine pending→paid transition.
+                    // NEW MODEL: the claim already carries the universal user_id (bound at
+                    // checkout) → activate the sub for it NOW (subscription starts at payment),
+                    // and map contract → user_id so future recurring events route to the user.
+                    if let Some(uid) = rj.get("userId").and_then(|v| v.as_str()) {
+                        let sub = sub_stub(env, uid)?;
+                        do_post(
+                            &sub,
+                            "/activate",
+                            &serde_json::json!({
+                                "periodEnd": ev.period_end,
+                                "provider": name,
+                                "contractId": ev.parent_contract_id.clone().or_else(|| ev.contract_id.clone()),
+                                "email": ev.email,
+                                "activateKey": ek,
+                            }),
+                        )
+                        .await?;
+                        if let Some(c) = &ev.contract_id {
+                            index_put(env, &format!("contract:{c}"), uid).await?;
+                        }
+                        if let Some(p) = &ev.parent_contract_id {
+                            index_put(env, &format!("contract:{p}"), uid).await?;
+                        }
+                    }
+                    // Notify telegram-worker so the bot delivers the access link. Best-effort
+                    // (never fails the webhook); telegram-worker is idempotent regardless.
                     notify_telegram_paid(env, gid).await;
                 }
                 return Response::from_json(&serde_json::json!({ "ok": true, "guest": true }));

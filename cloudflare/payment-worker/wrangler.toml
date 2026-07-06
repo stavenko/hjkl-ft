@@ -41,7 +41,18 @@ service = "support-worker-dev"
 binding = "TELEGRAM_WORKER"
 service = "telegram-worker-dev"
 
-# NO lava credentials on the default (dev/test) worker — the real lava Secrets
+[[services]]
+binding = "AUTH_WORKER"
+service = "auth-worker-dev"
+
+# DEV-ONLY: reach the lava-mock via a service binding (Cloudflare blocks worker→worker
+# fetch to a *.workers.dev URL on the same account, error 1042). Absent under
+# [env.production.services] → prod fetches the real gate.lava.top over the internet.
+[[services]]
+binding = "LAVA_MOCK"
+service = "lava-mock-dev"
+
+# lava credentials: dev uses [vars] placeholders (the mock keys) above; the real lava — the real lava Secrets
 # Store is bound ONLY under [env.production.*] below. The test env must NEVER be
 # able to take real money (locked decision: payment is PROD-ONLY). With no lava
 # key here `provider.configured()` is false → /checkout/guest returns 400 and
@@ -66,6 +77,14 @@ INTERNAL_PUSH_KEY = "dev-internal-push-key"
 # and pricing; the price is shown (manually) only on the landing. This is just the
 # provider pointer used as the checkout offerId.
 LAVA_OFFER_ID = "4d02bebe-badd-4600-8313-7f1c10a10844"
+# lava API base + creds. DEV points at the lava-mock worker (money-safety: real lava is
+# never touched on test); the creds are the mock's placeholder keys and MUST match
+# lava-mock's MOCK_LAVA_API_KEY / MOCK_LAVA_WEBHOOK_SECRET. PROD sets LAVA_API_URL =
+# gate.lava.top under [env.production.vars] and reads real creds from the Secrets Store;
+# a source guard refuses real creds paired with any non-gate.lava.top base.
+LAVA_API_URL = "https://lava-mock-dev.vg-stavenko.workers.dev"
+LAVA_API_KEY = "dev-lava-mock-key"
+LAVA_WEBHOOK_SECRET = "dev-lava-hook-key"
 
 # ── Production (separate worker on pay.renorma.app, clean DO data) ──
 # Deploy: wrangler deploy --env production
@@ -98,6 +117,10 @@ service = "support-worker-prod"
 [[env.production.services]]
 binding = "TELEGRAM_WORKER"
 service = "telegram-worker-prod"
+
+[[env.production.services]]
+binding = "AUTH_WORKER"
+service = "auth-worker-prod"
 
 [[env.production.secrets_store_secrets]]
 binding = "LAVA_API_KEY"
@@ -133,6 +156,9 @@ LANDING_RETURN_URL = "https://fit.renorma.app/onboard"
 PUSH_NOTIFY_URL = "https://push.renorma.app/push/notify"
 # Single lava offer pointer (no plan catalog/price in config — see dev [vars] note).
 LAVA_OFFER_ID = "4d02bebe-badd-4600-8313-7f1c10a10844"
+# REAL lava API. The source guard requires this exact host whenever real (Secrets
+# Store) lava creds resolve — the mock URL can never pair with real money.
+LAVA_API_URL = "https://gate.lava.top"
 
 # Retain console logs (Workers Logs) so the payment→bot-notify path is diagnosable.
 [env.production.observability]

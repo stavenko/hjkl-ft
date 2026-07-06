@@ -39,15 +39,28 @@ pub struct CheckoutOpts {
     #[allow(dead_code)]
     pub return_url: String,
     pub promo_code: Option<String>,
+    /// ISO currency the buyer pays in: `RUB` (Russian acquirer, RU cards only),
+    /// `USD` / `EUR` (international acquirer, foreign cards). The offer must have a
+    /// price configured in this currency on lava, else lava rejects the invoice.
+    pub currency: String,
+    /// lava acquirer channel. `BANK131` for RUB; `STRIPE` / `UNLIMINT` / `PAYPAL` for
+    /// USD/EUR. `None` → let lava pick the offer's default for the currency.
+    pub payment_method: Option<String>,
 }
 
 pub const PROVIDER_NAMES: &[&str] = &["lava"];
 
-/// Resolve a provider by name, with credentials already read from the Secrets
-/// Store (dev/test = None → not configured → real pay impossible).
-pub fn provider_for(name: &str, api_key: Option<String>, webhook_secret: Option<String>) -> Option<Lava> {
+/// Resolve a provider by name, with the API base URL + credentials already resolved
+/// (dev/test = mock URL + [vars] creds; prod = gate.lava.top + Secrets Store creds).
+pub fn provider_for(
+    name: &str,
+    base: String,
+    mock: Option<worker::Fetcher>,
+    api_key: Option<String>,
+    webhook_secret: Option<String>,
+) -> Option<Lava> {
     match name {
-        "lava" => Some(Lava::new(api_key, webhook_secret)),
+        "lava" => Some(Lava::new(base, mock, api_key, webhook_secret)),
         _ => None,
     }
 }

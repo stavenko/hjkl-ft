@@ -1,0 +1,39 @@
+name = "lava-mock-dev"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-12-01"
+
+[build]
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "INVOICE_STORE_DO"
+class_name = "InvoiceStoreDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["InvoiceStoreDO"]
+
+# Reach payment-worker-dev via a service binding for the webhook (same-zone worker→worker
+# fetch to a *.workers.dev URL is blocked, error 1042).
+[[services]]
+binding = "PAYMENT_WORKER"
+service = "payment-worker-dev"
+
+# ── DEV-ONLY test double for lava.top ──────────────────────────────────────────
+# MONEY-SAFETY: this worker mocks the payment provider so the checkout→pay→webhook
+# flow can be exercised on the TEST env without real money. There is DELIBERATELY
+# NO [env.production] block — `wrangler deploy --env production` errors out, so this
+# can NEVER become `lava-mock-prod` or land on renorma.app. Prod payment-worker
+# points at the real https://gate.lava.top; a mock on prod would be a free-sub
+# backdoor. Do NOT add an [env.production] section here.
+[vars]
+# Inbound auth: MUST equal payment-worker-dev's LAVA_API_KEY (worker sends it as X-Api-Key).
+MOCK_LAVA_API_KEY = "dev-lava-mock-key"
+# Outbound webhook auth: MUST equal payment-worker-dev's LAVA_WEBHOOK_SECRET
+# (payment-worker verifies the webhook's X-Api-Key against it).
+MOCK_LAVA_WEBHOOK_SECRET = "dev-lava-hook-key"
+# Must match payment-worker-dev LAVA_OFFER_ID so GET /api/v2/products resolves the price.
+LAVA_OFFER_ID = "4d02bebe-badd-4600-8313-7f1c10a10844"
+# Test subscription price (major units) returned for every currency.
+LAVA_OFFER_PRICE = "990"

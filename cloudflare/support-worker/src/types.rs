@@ -26,6 +26,18 @@ pub struct Message {
     pub expert_id: Option<String>,
     pub text: String,
     pub created_at: String, // RFC3339, DISPLAY ONLY
+    // Typed data-request / data-share envelope. Old rows/messages default to
+    // kind="text", payload=null.
+    #[serde(default = "default_kind")]
+    pub kind: String, // "text" | "data_request" | "data_share"
+    // RAW stored JSON string, or null. Always emitted (never skipped) so the
+    // read shape is stable; clients parse the string themselves.
+    #[serde(default)]
+    pub payload: Option<String>,
+}
+
+fn default_kind() -> String {
+    "text".to_string()
 }
 
 /// Append result returned by ConversationDO (internal).

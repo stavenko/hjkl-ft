@@ -5,6 +5,7 @@ pub mod bug_report;
 pub mod chat;
 pub mod auth;
 pub mod config;
+pub mod curator_share;
 pub mod db;
 pub mod i18n;
 pub mod local;

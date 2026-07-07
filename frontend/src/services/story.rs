@@ -93,6 +93,16 @@ async fn flag_set_date(key: &str) -> Option<chrono::NaiveDate> {
         .map(|dt| dt.with_timezone(&chrono::Local).date_naive())
 }
 
+/// The raw RFC3339 `updated_at` of a set flag, or `None` if unset/false/undated.
+/// Used by the curator data-share to timestamp completed tasks.
+pub async fn flag_updated_at(key: &str) -> Option<String> {
+    let f = db::get::<Flag>("story", key).await?;
+    if !f.value || f.updated_at.is_empty() {
+        return None;
+    }
+    Some(f.updated_at)
+}
+
 /// All story flag keys currently set to `true`. Backs the DSL engine snapshot
 /// (the `opened:` / `evt_closed:` / `chapter_opened:` flag sets).
 pub(crate) async fn true_flags() -> HashSet<String> {
@@ -112,30 +122,38 @@ pub(crate) async fn true_flags() -> HashSet<String> {
 /// bespoke pages keep working unchanged. The `set_flag`→`emit(event)` cleanup and
 /// native `opened:`/`evt_closed:` keys come in the final phase, when the bespoke
 /// pages are deleted.
+/// DSL task id → its legacy milestone flag. Event/section-close DSL tasks are closed
+/// when the mapped flag is set. Also used to resolve which flag a "task complete"
+/// notification (`ntf=tc.<section>.<task>.<rand>`) should set on receipt.
+const TASK_FLAG: &[(&str, &str)] = &[
+    ("photos", PROGRESS_PHOTOS_TAKEN),
+    ("sex", SEX_SELECTED),
+    ("age", BIRTH_YEAR_SET),
+    ("height", HEIGHT_SET),
+    ("lang", LANGUAGE_CONFIGURED),
+    ("notif", NOTIFICATION_RECEIVED),
+    ("weigh_in", WEIGH_IN_REMINDER),
+    ("first_weigh", FIRST_WEIGH),
+    ("first_food", FIRST_FOOD_DONE),
+    ("repeat_food", FOOD_REPEATED),
+    ("steps_reminder", STEPS_REMINDER),
+    ("first_steps", FIRST_STEPS),
+    ("dish_created", COOKING_DISH_CREATED),
+    ("dish_in_diary", COOKING_DISH_IN_DIARY),
+    ("bones", BONES_WASTE_ENTERED),
+    ("restaurant", RESTAURANT_FOOD_ENTERED),
+];
+
+/// The story flag a given DSL task id completes, if any.
+pub fn flag_for_task(task: &str) -> Option<&'static str> {
+    TASK_FLAG.iter().find(|(id, _)| *id == task).map(|(_, flag)| *flag)
+}
+
 pub async fn engine_snapshot() -> crate::services::story_dsl::EngineSnapshot {
     let progress = gather().await;
     let f = true_flags().await;
     let has = |k: &str| f.contains(k);
 
-    // Event/section-close DSL tasks → closed when their legacy milestone flag is set.
-    const TASK_FLAG: &[(&str, &str)] = &[
-        ("photos", PROGRESS_PHOTOS_TAKEN),
-        ("sex", SEX_SELECTED),
-        ("age", BIRTH_YEAR_SET),
-        ("height", HEIGHT_SET),
-        ("lang", LANGUAGE_CONFIGURED),
-        ("notif", NOTIFICATION_RECEIVED),
-        ("weigh_in", WEIGH_IN_REMINDER),
-        ("first_weigh", FIRST_WEIGH),
-        ("first_food", FIRST_FOOD_DONE),
-        ("repeat_food", FOOD_REPEATED),
-        ("steps_reminder", STEPS_REMINDER),
-        ("first_steps", FIRST_STEPS),
-        ("dish_created", COOKING_DISH_CREATED),
-        ("dish_in_diary", COOKING_DISH_IN_DIARY),
-        ("bones", BONES_WASTE_ENTERED),
-        ("restaurant", RESTAURANT_FOOD_ENTERED),
-    ];
     let evt_closed: HashSet<String> = TASK_FLAG
         .iter()
         .filter(|(_, flag)| has(flag))

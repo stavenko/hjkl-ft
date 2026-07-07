@@ -16,6 +16,16 @@ struct MsgRow {
     expert_id: Option<String>,
     text: String,
     created_at: String,
+    // Migrated columns; #[serde(default)] keeps this deserialising if an older
+    // read path ever returns rows without them.
+    #[serde(default = "default_kind")]
+    kind: String,
+    #[serde(default)]
+    payload: Option<String>,
+}
+
+fn default_kind() -> String {
+    "text".to_string()
 }
 
 impl From<MsgRow> for Message {
@@ -27,8 +37,17 @@ impl From<MsgRow> for Message {
             expert_id: r.expert_id,
             text: r.text,
             created_at: r.created_at,
+            kind: r.kind,
+            payload: r.payload,
         }
     }
+}
+
+/// One row of PRAGMA table_info(messages), used to detect already-added columns
+/// so the migration is idempotent across DO restarts.
+#[derive(Debug, Deserialize)]
+struct ColInfo {
+    name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,6 +102,22 @@ impl ConversationDO {
                 ('user_meta','{}')",
             None,
         )?;
+
+        // Idempotent migration: add typed-envelope columns to an already-created
+        // `messages` table. SQLite has no `ADD COLUMN IF NOT EXISTS`, so we probe
+        // PRAGMA table_info and only ALTER when the column is absent. Existing rows
+        // keep kind='text' (DEFAULT); payload stays NULL. Re-running is a no-op.
+        let cols: Vec<ColInfo> = sql.exec("PRAGMA table_info(messages)", None)?.to_array()?;
+        let has = |name: &str| cols.iter().any(|c| c.name == name);
+        if !has("kind") {
+            sql.exec(
+                "ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'",
+                None,
+            )?;
+        }
+        if !has("payload") {
+            sql.exec("ALTER TABLE messages ADD COLUMN payload TEXT", None)?;
+        }
         Ok(())
     }
 
@@ -107,12 +142,15 @@ impl ConversationDO {
 
     /// Idempotent append. Returns the existing seq/created_at with deduped=true
     /// when the client_id was already seen.
+    #[allow(clippy::too_many_arguments)]
     fn handle_append(
         &self,
         client_id: &str,
         sender: &str,
         text: &str,
         expert_id: Option<&str>,
+        kind: &str,
+        payload: Option<&str>,
     ) -> Result<Response> {
         let sql = self.state.storage().sql();
 
@@ -141,8 +179,8 @@ impl ConversationDO {
         //    any OTHER insert error (disk, schema, etc.) must SURFACE, not be
         //    swallowed as a fake dedup (repo policy: never swallow real errors).
         let insert = sql.exec(
-            "INSERT INTO messages(seq,client_id,sender,expert_id,text,created_at)
-             VALUES (?,?,?,?,?,?)",
+            "INSERT INTO messages(seq,client_id,sender,expert_id,text,created_at,kind,payload)
+             VALUES (?,?,?,?,?,?,?,?)",
             vec![
                 seq.into(),
                 client_id.into(),
@@ -150,6 +188,8 @@ impl ConversationDO {
                 expert_id.into(),
                 text.into(),
                 created_at.clone().into(),
+                kind.into(),
+                payload.into(),
             ],
         );
         if let Err(e) = insert {
@@ -189,7 +229,7 @@ impl ConversationDO {
         // Fetch limit+1 to detect has_more.
         let mut rows: Vec<MsgRow> = sql
             .exec(
-                "SELECT seq, client_id, sender, expert_id, text, created_at
+                "SELECT seq, client_id, sender, expert_id, text, created_at, kind, payload
                  FROM messages WHERE seq > ? ORDER BY seq ASC LIMIT ?",
                 vec![after_seq.into(), (limit + 1).into()],
             )?
@@ -250,7 +290,11 @@ impl DurableObject for ConversationDO {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing text".into()))?;
                 let expert_id = body.get("expert_id").and_then(|v| v.as_str());
-                self.handle_append(client_id, sender, text, expert_id)
+                // Typed envelope: default kind='text'. `payload` is a RAW JSON
+                // string (already stringified by the caller), stored verbatim.
+                let kind = body.get("kind").and_then(|v| v.as_str()).unwrap_or("text");
+                let payload = body.get("payload").and_then(|v| v.as_str());
+                self.handle_append(client_id, sender, text, expert_id, kind, payload)
             }
             "/list" => {
                 let body: serde_json::Value = req.json().await?;

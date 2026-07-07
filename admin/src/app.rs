@@ -424,6 +424,28 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
     let sending = create_rw_signal(false);
     // The dataset(s) whose shared payload is open in the modal (one modal at a time).
     let shared_open = create_rw_signal(Option::<datashare::Dataset>::None);
+    // Auto-scroll to the newest message (same as the client chat): the thread opens
+    // pinned to the bottom and follows new messages, but a user who scrolled up to
+    // read history isn't yanked down until they return near the bottom.
+    let msgs_ref = create_node_ref::<leptos::html::Div>();
+    let stick_bottom = create_rw_signal(true);
+    let scroll_to_bottom = move || {
+        if let Some(el) = msgs_ref.get() {
+            el.set_scroll_top(el.scroll_height());
+        }
+    };
+    let on_msgs_scroll = move |_| {
+        if let Some(el) = msgs_ref.get() {
+            let dist = el.scroll_height() - el.scroll_top() - el.client_height();
+            stick_bottom.set(dist < 120);
+        }
+    };
+    create_effect(move |_| {
+        messages.get();
+        if stick_bottom.get_untracked() {
+            request_animation_frame(scroll_to_bottom);
+        }
+    });
     // True while a list_messages fetch is outstanding, so the 4s poll and the
     // post-reply refresh don't race and clobber each other with stale data.
     let in_flight = create_rw_signal(false);
@@ -584,7 +606,7 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
 
         {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
 
-        <div class="screen screen--noflow">
+        <div class="screen screen--noflow" node_ref=msgs_ref on:scroll=on_msgs_scroll>
             <div class="msgs">
                 {move || messages.get().into_iter().map(|m| {
                     let is_expert = m.sender == "expert";

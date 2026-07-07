@@ -168,6 +168,24 @@ fn en(key: &str) -> &'static str {
         "chat.live_sending" => "sending…",
         "chat.live_retry" => "not sent, tap to retry",
 
+        // Curator data-request panel + share
+        "curator.request_title" => "Curator's request",
+        "curator.request_body" => "The curator is asking you for your body parameters",
+        "curator.request_food" => "The curator is asking you for your food diary",
+        "curator.request_story" => "The curator is asking you for your current and completed tasks",
+        "curator.request_weight" => "The curator is asking you for your weight diary",
+        "curator.request_steps" => "The curator is asking you for your steps diary",
+        "curator.request_all" => "The curator is asking you for all of your data",
+        "curator.share" => "Share",
+        "curator.sharing" => "Sharing…",
+        "curator.shared_done" => "Data sent",
+        "curator.shared_body" => "Data sent: body parameters",
+        "curator.shared_food" => "Data sent: food diary",
+        "curator.shared_story" => "Data sent: tasks",
+        "curator.shared_weight" => "Data sent: weight diary",
+        "curator.shared_steps" => "Data sent: steps diary",
+        "curator.shared_all" => "Data sent: all your data",
+
         // Diary: relative dates
         "diary.today" => "Today",
         "diary.yesterday" => "Yesterday",
@@ -403,6 +421,10 @@ fn en(key: &str) -> &'static str {
         "food_editor.fat" => "Fat",
         "food_editor.carbs" => "Carbs",
         "food_editor.add" => "Add",
+        "food_editor.paywall_title" => "Subscription inactive",
+        "food_editor.paywall_body" => "Automatic calorie & macro detection needs an active subscription.",
+        "food_editor.paywall_pay" => "Subscribe",
+        "food_editor.paywall_dismiss" => "Not now",
 
         // New food panel
         "new_food.title" => "New food",
@@ -1215,6 +1237,24 @@ fn ru(key: &str) -> &'static str {
         "chat.live_sending" => "отправка…",
         "chat.live_retry" => "не отправлено, нажмите чтобы повторить",
 
+        // Запрос данных куратора: панель + отправка
+        "curator.request_title" => "Запрос куратора",
+        "curator.request_body" => "Куратор запрашивает у вас параметры тела",
+        "curator.request_food" => "Куратор запрашивает у вас ваш дневник питания",
+        "curator.request_story" => "Куратор запрашивает у вас ваши текущие и выполненные задания",
+        "curator.request_weight" => "Куратор запрашивает у вас ваш дневник веса",
+        "curator.request_steps" => "Куратор запрашивает у вас ваш дневник шагов",
+        "curator.request_all" => "Куратор запрашивает у вас все ваши данные",
+        "curator.share" => "Поделиться",
+        "curator.sharing" => "Отправка…",
+        "curator.shared_done" => "Данные отправлены",
+        "curator.shared_body" => "Данные отправлены: параметры тела",
+        "curator.shared_food" => "Данные отправлены: дневник питания",
+        "curator.shared_story" => "Данные отправлены: задания",
+        "curator.shared_weight" => "Данные отправлены: дневник веса",
+        "curator.shared_steps" => "Данные отправлены: дневник шагов",
+        "curator.shared_all" => "Данные отправлены: все ваши данные",
+
         // Дневник: относительные даты
         "diary.today" => "Сегодня",
         "diary.yesterday" => "Вчера",
@@ -1450,6 +1490,10 @@ fn ru(key: &str) -> &'static str {
         "food_editor.fat" => "Жиры",
         "food_editor.carbs" => "Углеводы",
         "food_editor.add" => "Добавить",
+        "food_editor.paywall_title" => "Подписка не активна",
+        "food_editor.paywall_body" => "Автоматическое распознавание КБЖУ доступно по активной подписке.",
+        "food_editor.paywall_pay" => "Оплатить подписку",
+        "food_editor.paywall_dismiss" => "Не сейчас",
 
         // Панель нового продукта
         "new_food.title" => "Новый продукт",

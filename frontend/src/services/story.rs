@@ -93,6 +93,16 @@ async fn flag_set_date(key: &str) -> Option<chrono::NaiveDate> {
         .map(|dt| dt.with_timezone(&chrono::Local).date_naive())
 }
 
+/// The raw RFC3339 `updated_at` of a set flag, or `None` if unset/false/undated.
+/// Used by the curator data-share to timestamp completed tasks.
+pub async fn flag_updated_at(key: &str) -> Option<String> {
+    let f = db::get::<Flag>("story", key).await?;
+    if !f.value || f.updated_at.is_empty() {
+        return None;
+    }
+    Some(f.updated_at)
+}
+
 /// All story flag keys currently set to `true`. Backs the DSL engine snapshot
 /// (the `opened:` / `evt_closed:` / `chapter_opened:` flag sets).
 pub(crate) async fn true_flags() -> HashSet<String> {

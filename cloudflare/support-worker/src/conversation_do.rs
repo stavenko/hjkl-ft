@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::Deserialize;
 use worker::*;
 
@@ -5,6 +7,13 @@ use crate::types::{AppendResult, Message, MessagesPage};
 
 const DEFAULT_LIMIT: i64 = 50;
 const MAX_LIMIT: i64 = 200;
+/// Long-poll: how often the held-open /list re-reads SQLite for a newer seq. The
+/// re-read is a local (in-DO) SQLite query — cheap — so a tight step keeps new
+/// messages near-instant without any cross-request signalling.
+const WAIT_STEP_MS: u64 = 500;
+/// Hard cap on how long a /list request is held open, matched by the worker's
+/// `?wait` clamp. Well under the platform request limit.
+const MAX_WAIT_MS: u64 = 25_000;
 
 /// Row as read back from the `messages` table. seq/INTEGER deserialises to i64;
 /// the wire types convert to u64. seq stays far below 2^53 so this is lossless.
@@ -16,6 +25,16 @@ struct MsgRow {
     expert_id: Option<String>,
     text: String,
     created_at: String,
+    // Migrated columns; #[serde(default)] keeps this deserialising if an older
+    // read path ever returns rows without them.
+    #[serde(default = "default_kind")]
+    kind: String,
+    #[serde(default)]
+    payload: Option<String>,
+}
+
+fn default_kind() -> String {
+    "text".to_string()
 }
 
 impl From<MsgRow> for Message {
@@ -27,8 +46,17 @@ impl From<MsgRow> for Message {
             expert_id: r.expert_id,
             text: r.text,
             created_at: r.created_at,
+            kind: r.kind,
+            payload: r.payload,
         }
     }
+}
+
+/// One row of PRAGMA table_info(messages), used to detect already-added columns
+/// so the migration is idempotent across DO restarts.
+#[derive(Debug, Deserialize)]
+struct ColInfo {
+    name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,6 +111,22 @@ impl ConversationDO {
                 ('user_meta','{}')",
             None,
         )?;
+
+        // Idempotent migration: add typed-envelope columns to an already-created
+        // `messages` table. SQLite has no `ADD COLUMN IF NOT EXISTS`, so we probe
+        // PRAGMA table_info and only ALTER when the column is absent. Existing rows
+        // keep kind='text' (DEFAULT); payload stays NULL. Re-running is a no-op.
+        let cols: Vec<ColInfo> = sql.exec("PRAGMA table_info(messages)", None)?.to_array()?;
+        let has = |name: &str| cols.iter().any(|c| c.name == name);
+        if !has("kind") {
+            sql.exec(
+                "ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'",
+                None,
+            )?;
+        }
+        if !has("payload") {
+            sql.exec("ALTER TABLE messages ADD COLUMN payload TEXT", None)?;
+        }
         Ok(())
     }
 
@@ -107,12 +151,15 @@ impl ConversationDO {
 
     /// Idempotent append. Returns the existing seq/created_at with deduped=true
     /// when the client_id was already seen.
+    #[allow(clippy::too_many_arguments)]
     fn handle_append(
         &self,
         client_id: &str,
         sender: &str,
         text: &str,
         expert_id: Option<&str>,
+        kind: &str,
+        payload: Option<&str>,
     ) -> Result<Response> {
         let sql = self.state.storage().sql();
 
@@ -141,8 +188,8 @@ impl ConversationDO {
         //    any OTHER insert error (disk, schema, etc.) must SURFACE, not be
         //    swallowed as a fake dedup (repo policy: never swallow real errors).
         let insert = sql.exec(
-            "INSERT INTO messages(seq,client_id,sender,expert_id,text,created_at)
-             VALUES (?,?,?,?,?,?)",
+            "INSERT INTO messages(seq,client_id,sender,expert_id,text,created_at,kind,payload)
+             VALUES (?,?,?,?,?,?,?,?)",
             vec![
                 seq.into(),
                 client_id.into(),
@@ -150,6 +197,8 @@ impl ConversationDO {
                 expert_id.into(),
                 text.into(),
                 created_at.clone().into(),
+                kind.into(),
+                payload.into(),
             ],
         );
         if let Err(e) = insert {
@@ -183,13 +232,14 @@ impl ConversationDO {
         })
     }
 
-    fn handle_list(&self, after_seq: i64, limit: i64) -> Result<Response> {
+    /// Synchronous read of messages after `after_seq` (local SQLite).
+    fn query_after(&self, after_seq: i64, limit: i64) -> Result<MessagesPage> {
         let limit = limit.clamp(1, MAX_LIMIT);
         let sql = self.state.storage().sql();
         // Fetch limit+1 to detect has_more.
         let mut rows: Vec<MsgRow> = sql
             .exec(
-                "SELECT seq, client_id, sender, expert_id, text, created_at
+                "SELECT seq, client_id, sender, expert_id, text, created_at, kind, payload
                  FROM messages WHERE seq > ? ORDER BY seq ASC LIMIT ?",
                 vec![after_seq.into(), (limit + 1).into()],
             )?
@@ -201,12 +251,31 @@ impl ConversationDO {
         }
         let next_after_seq = rows.last().map(|r| r.seq as u64).unwrap_or(after_seq as u64);
         let messages: Vec<Message> = rows.into_iter().map(Message::from).collect();
-
-        Response::from_json(&MessagesPage {
+        Ok(MessagesPage {
             messages,
             next_after_seq,
             has_more,
         })
+    }
+
+    fn handle_list(&self, after_seq: i64, limit: i64) -> Result<Response> {
+        Response::from_json(&self.query_after(after_seq, limit)?)
+    }
+
+    /// Long-poll variant: hold the request open until a message newer than
+    /// `after_seq` exists, or `wait_ms` elapses — then return (possibly empty).
+    /// While this future awaits `Delay`, the DO runtime interleaves an incoming
+    /// `/append`, whose committed write the next `query_after` re-read observes —
+    /// so no explicit waiter/notify wiring is needed.
+    async fn handle_list_wait(&self, after_seq: i64, limit: i64, wait_ms: u64) -> Result<Response> {
+        let deadline = Date::now().as_millis() + wait_ms.min(MAX_WAIT_MS);
+        loop {
+            let page = self.query_after(after_seq, limit)?;
+            if !page.messages.is_empty() || Date::now().as_millis() >= deadline {
+                return Response::from_json(&page);
+            }
+            Delay::from(Duration::from_millis(WAIT_STEP_MS)).await;
+        }
     }
 
     /// Advance a read cursor forward only (monotonic). Never regresses.
@@ -250,7 +319,11 @@ impl DurableObject for ConversationDO {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing text".into()))?;
                 let expert_id = body.get("expert_id").and_then(|v| v.as_str());
-                self.handle_append(client_id, sender, text, expert_id)
+                // Typed envelope: default kind='text'. `payload` is a RAW JSON
+                // string (already stringified by the caller), stored verbatim.
+                let kind = body.get("kind").and_then(|v| v.as_str()).unwrap_or("text");
+                let payload = body.get("payload").and_then(|v| v.as_str());
+                self.handle_append(client_id, sender, text, expert_id, kind, payload)
             }
             "/list" => {
                 let body: serde_json::Value = req.json().await?;
@@ -259,7 +332,13 @@ impl DurableObject for ConversationDO {
                     .get("limit")
                     .and_then(|v| v.as_i64())
                     .unwrap_or(DEFAULT_LIMIT);
-                self.handle_list(after_seq, limit)
+                // wait_ms > 0 → long-poll (held open); 0 → immediate one-shot read.
+                let wait_ms = body.get("wait_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+                if wait_ms > 0 {
+                    self.handle_list_wait(after_seq, limit, wait_ms).await
+                } else {
+                    self.handle_list(after_seq, limit)
+                }
             }
             "/read" => {
                 let body: serde_json::Value = req.json().await?;

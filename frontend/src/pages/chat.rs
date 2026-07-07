@@ -15,6 +15,13 @@ use crate::services::i18n::t;
 use crate::services::support_chat::{self, ChatMode, LiveMessage, OutboxItem};
 use crate::services::{ai, db, i18n};
 
+/// Master switch for the Live-human / AI mode selector. OFF for now: the AI vs
+/// Live UX isn't right yet, so the chat is Live-human-only — the `ModeToggle` is
+/// hidden and the chat opens (and stays) in `ChatMode::Live`. The whole AI
+/// subtree/paths are left intact behind `mode == Ai` so flipping this back to
+/// `true` restores the selector. TODO: rework the AI/Live UX, then re-enable.
+const MODE_SELECTOR_ENABLED: bool = false;
+
 /// Single support chat. History is loaded from / persisted to IndexedDB (one
 /// record per message). The assistant reply streams in (requesting → thinking →
 /// answer) like the food lookup; it may escalate to a human via the
@@ -36,8 +43,14 @@ pub fn ChatPage() -> impl IntoView {
         .and_then(|l| l.search().ok())
         .unwrap_or_default()
         .contains("notif=1");
-    let initial_mode = if from_notif { ChatMode::Live } else { support_chat::load_mode() };
-    if from_notif {
+    // With the selector disabled the chat is Live-only; a push deep-link also
+    // forces Live. Otherwise honour the saved choice.
+    let initial_mode = if !MODE_SELECTOR_ENABLED || from_notif {
+        ChatMode::Live
+    } else {
+        support_chat::load_mode()
+    };
+    if !MODE_SELECTOR_ENABLED || from_notif {
         support_chat::save_mode(ChatMode::Live);
     }
     let mode = create_rw_signal(initial_mode);
@@ -112,12 +125,11 @@ pub fn ChatPage() -> impl IntoView {
             let my_gen = poll_gen.get_untracked();
             let alive = alive.clone();
             spawn_local(async move {
-                // Immediate poll on entering Live.
+                // Immediate poll on entering Live (fast first paint of new messages).
                 if let Err(e) = support_chat::poll().await {
                     logging::warn!("support poll: {e}");
                 }
                 loop {
-                    ai::sleep_ms(4000).await;
                     if !alive.get() {
                         break; // unmounted
                     }
@@ -128,10 +140,16 @@ pub fn ChatPage() -> impl IntoView {
                         break; // a newer poll loop superseded this one
                     }
                     if document_hidden() {
-                        continue; // page not visible → skip this tick
+                        // Don't hold a long-poll open while hidden; re-check shortly.
+                        ai::sleep_ms(4000).await;
+                        continue;
                     }
-                    if let Err(e) = support_chat::poll().await {
+                    // LONG-POLL: the worker holds this ~25s and returns the instant a
+                    // new message lands (or empty at the deadline). One request / 25s
+                    // instead of every 4s — and the CORS preflight rate drops with it.
+                    if let Err(e) = support_chat::poll_wait(25).await {
                         logging::warn!("support poll: {e}");
+                        ai::sleep_ms(2000).await; // back off on transient error
                     }
                 }
             });
@@ -365,7 +383,8 @@ pub fn ChatPage() -> impl IntoView {
         <div style="position: fixed; inset: 0; padding: env(safe-area-inset-top) 0.75rem 0; display: flex; flex-direction: column; background: var(--bulma-background);">
             <h1 class="title is-5" style="margin: 0 auto 0.75rem; max-width: 30rem; width: 100%; flex-shrink: 0;">{move || t("nav.support")}</h1>
 
-            <ModeToggle mode=mode />
+            // Live/AI selector hidden while MODE_SELECTOR_ENABLED is off (Live-only).
+            {MODE_SELECTOR_ENABLED.then(|| view! { <ModeToggle mode=mode /> })}
 
             <Show when=move || mode.get() == ChatMode::Ai && !context_tools().is_empty()>
                 <details attr:data-testid="chat-context"

@@ -206,10 +206,19 @@ async fn user_send(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
     if client_id.is_empty() || text.is_empty() {
         return Ok(json_status(400, "client_id and text are required"));
     }
+    // Typed envelope (default kind='text'). `payload` is a RAW JSON string;
+    // forwarded verbatim to the DO. See the data-request/data-share protocol.
+    let (kind, payload) = typed_envelope(&body);
 
     let append_req = do_request(
         "/append",
-        &serde_json::json!({ "client_id": client_id, "text": text, "sender": "user" }),
+        &serde_json::json!({
+            "client_id": client_id,
+            "text": text,
+            "sender": "user",
+            "kind": kind,
+            "payload": payload,
+        }),
     )?;
     let mut do_resp = conversation_stub(&ctx.env, &uid)?
         .fetch_with_request(append_req)
@@ -243,9 +252,10 @@ async fn user_messages(req: Request, ctx: RouteContext<()>) -> Result<Response> 
         Err(resp) => return Ok(resp),
     };
     let (after_seq, limit) = parse_paging(&req)?;
+    let wait_ms = parse_wait_ms(&req);
     let list_req = do_request(
         "/list",
-        &serde_json::json!({ "after_seq": after_seq, "limit": limit }),
+        &serde_json::json!({ "after_seq": after_seq, "limit": limit, "wait_ms": wait_ms }),
     )?;
     conversation_stub(&ctx.env, &uid)?
         .fetch_with_request(list_req)
@@ -297,9 +307,10 @@ async fn expert_messages(req: Request, ctx: RouteContext<()>) -> Result<Response
         .ok_or_else(|| Error::RustError("missing uid".into()))?
         .clone();
     let (after_seq, limit) = parse_paging(&req)?;
+    let wait_ms = parse_wait_ms(&req);
     let list_req = do_request(
         "/list",
-        &serde_json::json!({ "after_seq": after_seq, "limit": limit }),
+        &serde_json::json!({ "after_seq": after_seq, "limit": limit, "wait_ms": wait_ms }),
     )?;
     conversation_stub(&ctx.env, &uid)?
         .fetch_with_request(list_req)
@@ -322,6 +333,9 @@ async fn expert_reply(mut req: Request, ctx: RouteContext<()>) -> Result<Respons
     if client_id.is_empty() || text.is_empty() {
         return Ok(json_status(400, "client_id and text are required"));
     }
+    // Typed envelope (default kind='text'). A curator data-request rides here as
+    // kind='data_request' with the {dataset} payload; forwarded verbatim.
+    let (kind, payload) = typed_envelope(&body);
 
     let append_req = do_request(
         "/append",
@@ -330,6 +344,8 @@ async fn expert_reply(mut req: Request, ctx: RouteContext<()>) -> Result<Respons
             "text": text,
             "sender": "expert",
             "expert_id": expert_sub,
+            "kind": kind,
+            "payload": payload,
         }),
     )?;
     let mut do_resp = conversation_stub(&ctx.env, &uid)?
@@ -485,12 +501,48 @@ async fn internal_is_admin(mut req: Request, ctx: RouteContext<()>) -> Result<Re
     Response::from_json(&serde_json::json!({ "approved": approved }))
 }
 
+/// Extract the typed-envelope fields from a message request body.
+///
+/// `kind` defaults to "text". `payload` is normalised to a RAW JSON STRING (the
+/// storage/read contract): a JSON string passes through verbatim, a JSON object
+/// is stringified, anything else (or absent) becomes None. This is forwarded to
+/// the DO's `/append` and stored/returned unchanged.
+fn typed_envelope(body: &serde_json::Value) -> (String, Option<String>) {
+    let kind = body
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("text")
+        .to_string();
+    let payload = match body.get("payload") {
+        Some(serde_json::Value::String(s)) => Some(s.clone()),
+        Some(serde_json::Value::Null) | None => None,
+        Some(other) => Some(other.to_string()),
+    };
+    (kind, payload)
+}
+
 fn parse_paging(req: &Request) -> Result<(i64, i64)> {
     let url = req.url()?;
     let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
     let after_seq: i64 = q.get("after_seq").and_then(|s| s.parse().ok()).unwrap_or(0);
     let limit: i64 = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(50);
     Ok((after_seq, limit))
+}
+
+/// `?wait=<seconds>` → hold the /list open for up to that long (long-poll).
+/// Absent/0 = immediate one-shot read. Clamped to [0, 25] s (the DO caps too).
+fn parse_wait_ms(req: &Request) -> u64 {
+    req.url()
+        .ok()
+        .and_then(|u| {
+            u.query_pairs()
+                .into_owned()
+                .find(|(k, _)| k == "wait")
+                .and_then(|(_, v)| v.parse::<u64>().ok())
+        })
+        .unwrap_or(0)
+        .min(25)
+        * 1000
 }
 
 // ---- CORS ----

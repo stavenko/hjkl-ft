@@ -2,6 +2,18 @@ use leptos::*;
 
 use crate::api::{self, ConversationSummary, Message};
 use crate::auth;
+use crate::datashare;
+
+/// The six admin slash-commands: (command typed, dataset key, human menu label,
+/// RU panel text sent as the message .text fallback).
+const SLASH_COMMANDS: [(&str, &str, &str, &str); 6] = [
+    ("/request-body-params", "body", "Параметры тела", "Куратор запрашивает у вас параметры тела"),
+    ("/request-food-diary", "food", "Дневник питания", "Куратор запрашивает у вас ваш дневник питания"),
+    ("/request-story-progress", "story", "Задания", "Куратор запрашивает у вас ваши текущие и выполненные задания"),
+    ("/request-weight", "weight", "Дневник веса", "Куратор запрашивает у вас ваш дневник веса"),
+    ("/request-steps", "steps", "Дневник шагов", "Куратор запрашивает у вас ваш дневник шагов"),
+    ("/request-all", "all", "Все данные", "Куратор запрашивает у вас все ваши данные"),
+];
 
 /// Which screen is showing. Thread carries the selected user's id + display label.
 #[derive(Clone, PartialEq)]
@@ -393,18 +405,35 @@ fn Queue(view: RwSignal<View>) -> impl IntoView {
     }
 }
 
+/// Await `ms` milliseconds (setTimeout-backed) — used to back off the long-poll
+/// loop after a transient error without busy-spinning.
+async fn worker_delay(ms: i32) {
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
+        }
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+}
+
 #[component]
 fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView {
     let messages = create_rw_signal(Vec::<Message>::new());
     let error = create_rw_signal(Option::<String>::None);
     let draft = create_rw_signal(String::new());
     let sending = create_rw_signal(false);
+    // The dataset(s) whose shared payload is open in the modal (one modal at a time).
+    let shared_open = create_rw_signal(Option::<datashare::Dataset>::None);
     // True while a list_messages fetch is outstanding, so the 4s poll and the
     // post-reply refresh don't race and clobber each other with stale data.
     let in_flight = create_rw_signal(false);
     // Highest seq we've already marked read, so we only POST /read when it advances
     // instead of every single poll tick.
     let read_seq = create_rw_signal(0u64);
+    // Highest seq currently shown — the `after_seq` the long-poll waits past. Kept
+    // in sync by `load`; the change-detector loop advances it before refreshing so
+    // it can never long-poll from 0 (which returns instantly and would busy-loop).
+    let last_seq = create_rw_signal(0u64);
 
     // `load` is a Callback (Copy) so it can be reused by both the initial fetch and
     // the post-reply refresh without moving it out of the FnMut click handler.
@@ -436,6 +465,8 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                             });
                         }
                     }
+                    // Track the max seq shown so the long-poll waits past it.
+                    last_seq.set(page.messages.last().map(|m| m.seq).unwrap_or(0));
                     messages.set(page.messages);
                     error.set(None);
                 }
@@ -451,17 +482,46 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
 
     load.call(());
 
-    // Poll the open thread for the user's new messages.
-    // Fail loudly if the timer can't be registered rather than silently not polling.
-    let handle = match set_interval_with_handle(move || load.call(()), std::time::Duration::from_secs(4)) {
-        Ok(h) => Some(h),
-        Err(e) => {
-            logging::error!("thread poll timer failed to start: {e:?}");
-            error.set(Some("Авто-обновление переписки не запустилось".to_string()));
-            None
+    // Watch the open thread via LONG-POLL instead of a fixed interval: the worker
+    // holds each request open (~25s) and returns the moment a newer message lands,
+    // so new messages are near-instant AND we make ~1 request / 25s (was every 4s),
+    // which also collapses the CORS preflight rate. Sequential loop (no interval);
+    // a stop flag flipped on cleanup ends it when the thread closes.
+    let uid_poll = user_id.clone();
+    let stop = std::rc::Rc::new(std::cell::Cell::new(false));
+    let stop_cleanup = stop.clone();
+    spawn_local(async move {
+        loop {
+            if stop.get() {
+                break;
+            }
+            let after = last_seq.get_untracked();
+            match api::list_messages_wait(&uid_poll, after, 25).await {
+                Ok(page) => {
+                    if stop.get() {
+                        break;
+                    }
+                    if !page.messages.is_empty() {
+                        // Advance BEFORE refreshing so the next long-poll can't fire
+                        // from a stale `after` and spin. `load` re-renders + marks read.
+                        last_seq.set(page.next_after_seq);
+                        load.call(());
+                    }
+                    // Empty = the wait window elapsed with no new message → loop.
+                }
+                Err(e) if e.is_auth() => {
+                    auth::logout();
+                    view.set(View::Login);
+                    break;
+                }
+                Err(_) => {
+                    // Transient (network / worker hiccup): back off, then retry.
+                    worker_delay(2000).await;
+                }
+            }
         }
-    };
-    on_cleanup(move || { if let Some(h) = handle { h.clear(); } });
+    });
+    on_cleanup(move || stop_cleanup.set(true));
 
     let uid_send = user_id.clone();
     let send = move |_| {
@@ -487,6 +547,27 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
         });
     };
 
+    // Fire a data_request for `dataset` with its RU panel text, then clear the draft.
+    let uid_req = user_id.clone();
+    let send_request = Callback::new(move |(dataset, text): (String, String)| {
+        sending.set(true);
+        let uid = uid_req.clone();
+        spawn_local(async move {
+            match api::reply_data_request(&uid, &dataset, &text).await {
+                Ok(_) => {
+                    draft.set(String::new());
+                    load.call(());
+                }
+                Err(e) if e.is_auth() => {
+                    auth::logout();
+                    view.set(View::Login);
+                }
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            sending.set(false);
+        });
+    });
+
     view! {
         <header class="appbar">
             <button class="btn btn--ghost btn--icon" attr:aria-label="Назад"
@@ -505,18 +586,109 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
             <div class="msgs">
                 {move || messages.get().into_iter().map(|m| {
                     let is_expert = m.sender == "expert";
-                    let cls = if is_expert { "bubble bubble--me" } else { "bubble bubble--them" };
-                    view! {
-                        <div attr:data-testid="msg" attr:data-sender=m.sender.clone() class=cls>
-                            {m.text}
-                        </div>
+                    let side_cls = if is_expert { "bubble--me" } else { "bubble--them" };
+                    match m.kind.as_str() {
+                        // The user shared data: render one labelled button per dataset;
+                        // tap opens the modal. A broken payload surfaces loudly.
+                        "data_share" => {
+                            // payload is a RAW JSON STRING from the worker — parse it first.
+                            let datasets = match m.payload.as_deref() {
+                                Some(raw) => serde_json::from_str::<serde_json::Value>(raw)
+                                    .map_err(|e| format!("payload не JSON: {e}"))
+                                    .and_then(|v| datashare::datasets_from_payload(&v)),
+                                None => Err("data_share без payload".to_string()),
+                            };
+                            match datasets {
+                                Ok(list) => view! {
+                                    <div attr:data-testid="msg" attr:data-sender=m.sender.clone()
+                                         class=format!("bubble {side_cls}")
+                                         style="display:flex; flex-direction:column; gap:6px; align-items:stretch;">
+                                        {list.into_iter().map(|ds| {
+                                            let label = ds.label();
+                                            let ds2 = ds.clone();
+                                            view! {
+                                                <button attr:data-testid="data-share-btn"
+                                                    class="btn btn--ghost"
+                                                    style="justify-content:flex-start;"
+                                                    on:click=move |_| shared_open.set(Some(ds2.clone()))>
+                                                    {label}
+                                                </button>
+                                            }
+                                        }).collect_view()}
+                                    </div>
+                                }.into_view(),
+                                Err(e) => view! {
+                                    <div class="bubble bubble--them"
+                                         style="color:var(--danger);">
+                                        {format!("Не удалось прочитать данные: {e}")}
+                                    </div>
+                                }.into_view(),
+                            }
+                        }
+                        // A data_request the admin itself sent → compact "запрошено" chip.
+                        "data_request" => {
+                            let what = m.payload.as_deref()
+                                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                                .and_then(|v| v.get("dataset").and_then(|d| d.as_str()).map(str::to_string))
+                                .map(|d| dataset_ru(&d))
+                                .unwrap_or_else(|| "данные".to_string());
+                            view! {
+                                <div attr:data-testid="msg" attr:data-sender=m.sender.clone()
+                                     class=format!("bubble {side_cls}")
+                                     style="opacity:.9; font-size:.9rem;">
+                                    <span class="mono">"⤴ запрошено: "</span>{what}
+                                </div>
+                            }.into_view()
+                        }
+                        // Plain text (default / legacy).
+                        _ => view! {
+                            <div attr:data-testid="msg" attr:data-sender=m.sender.clone()
+                                 class=format!("bubble {side_cls}")>
+                                {m.text}
+                            </div>
+                        }.into_view(),
                     }
                 }).collect_view()}
             </div>
 
+            // Slash-command menu: shown when the draft starts with "/". Selecting a
+            // command SENDS the corresponding data_request and clears the draft.
+            {move || {
+                let d = draft.get();
+                if !d.starts_with('/') {
+                    return ().into_view();
+                }
+                let q = d.to_lowercase();
+                view! {
+                    <div attr:data-testid="slash-menu"
+                         style="position:sticky; bottom:0; margin:0 16px; background:var(--surface); \
+                                border:1px solid var(--line); border-radius:var(--r); overflow:hidden; \
+                                box-shadow:var(--shadow); z-index:25;">
+                        {SLASH_COMMANDS.iter()
+                            .filter(|(cmd, _, _, _)| cmd.starts_with(&q))
+                            .map(|(cmd, dataset, label, panel_text)| {
+                                let dataset = dataset.to_string();
+                                let panel_text = panel_text.to_string();
+                                view! {
+                                    <button attr:data-testid="slash-item"
+                                        style="display:flex; flex-direction:column; align-items:flex-start; gap:2px; \
+                                               width:100%; text-align:left; padding:10px 14px; \
+                                               border-bottom:1px solid var(--line-soft);"
+                                        on:click=move |_| {
+                                            send_request.call((dataset.clone(), panel_text.clone()));
+                                        }>
+                                        <span style="font-weight:600;">{*label}</span>
+                                        <span class="mono row__meta">{*cmd}</span>
+                                    </button>
+                                }
+                            }).collect_view()}
+                    </div>
+                }.into_view()
+            }}
+
             <div class="composer">
                 <textarea attr:data-testid="reply-input" class="field" rows="1"
-                    style="flex: 1; resize: none; max-height: 120px;" placeholder="Ответ…"
+                    style="flex: 1; resize: none; max-height: 120px;" placeholder="Ответ… (или / для запроса данных)"
                     prop:value=move || draft.get()
                     on:input=move |e| draft.set(event_target_value(&e)) />
                 <button attr:data-testid="reply-send" class="btn btn--primary btn--icon"
@@ -528,8 +700,46 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                     }}
                 </button>
             </div>
+
+            // Shared-data modal (reuses the receipt-detail modal pattern).
+            {move || shared_open.get().map(|ds| {
+                let title = ds.title();
+                let body = datashare::render_dataset(&ds);
+                view! {
+                    <div on:click=move |_| shared_open.set(None)
+                         style="position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:60; \
+                                display:flex; align-items:center; justify-content:center; padding:16px;">
+                        <div on:click=move |ev: leptos::ev::MouseEvent| ev.stop_propagation()
+                             attr:data-testid="data-share-modal"
+                             style="background:var(--surface); color:var(--text); max-width:660px; width:100%; \
+                                    max-height:86vh; overflow:auto; border-radius:12px; border:1px solid var(--line);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; \
+                                        padding:12px 16px; border-bottom:1px solid var(--line); \
+                                        position:sticky; top:0; background:var(--surface);">
+                                <b>{title}</b>
+                                <button class="btn btn--ghost" on:click=move |_| shared_open.set(None)>"✕"</button>
+                            </div>
+                            <div style="padding:14px 16px;">{body}</div>
+                        </div>
+                    </div>
+                }
+            })}
         </div>
     }
+}
+
+/// Human RU name for a dataset key (for the compact "запрошено" chip).
+fn dataset_ru(key: &str) -> String {
+    match key {
+        "body" => "параметры тела",
+        "food" => "дневник питания",
+        "story" => "задания",
+        "weight" => "дневник веса",
+        "steps" => "дневник шагов",
+        "all" => "все данные",
+        other => other,
+    }
+    .to_string()
 }
 
 /// ms-epoch → coarse "N назад" label for the payments worklist.

@@ -68,6 +68,19 @@ pub struct Message {
     pub expert_id: Option<String>,
     pub text: String,
     pub created_at: String,
+    /// "text" | "data_request" | "data_share". Old rows/messages with no kind
+    /// deserialize as plain text (backward compatible).
+    #[serde(default = "default_kind")]
+    pub kind: String,
+    /// Typed envelope for data_request / data_share. The worker stores and returns
+    /// it as a RAW JSON STRING (not an embedded object) — parse it with
+    /// `serde_json::from_str` at the use site. NULL/absent for plain text.
+    #[serde(default)]
+    pub payload: Option<String>,
+}
+
+fn default_kind() -> String {
+    "text".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +94,12 @@ pub struct MessagesPage {
 struct ReplyReq<'a> {
     client_id: &'a str,
     text: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'a str>,
+    /// RAW JSON STRING — the worker reads `body.payload` as a string. Sending an
+    /// object here makes the worker's `.as_str()` return None → payload dropped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payload: Option<String>,
 }
 
 fn base() -> Result<String, ApiError> {
@@ -188,15 +207,48 @@ pub async fn list_messages(user_id: &str, after_seq: u64) -> Result<MessagesPage
     request("GET", &path, None).await
 }
 
+/// Long-poll variant: the worker holds the request open until a message newer
+/// than `after_seq` arrives or `wait_secs` elapses (then returns, possibly empty).
+/// Used by the thread's change-detector loop instead of a fixed interval.
+pub async fn list_messages_wait(
+    user_id: &str,
+    after_seq: u64,
+    wait_secs: u32,
+) -> Result<MessagesPage, ApiError> {
+    let path = format!(
+        "/conversations/{user_id}/messages?after_seq={after_seq}&limit=200&wait={wait_secs}"
+    );
+    request("GET", &path, None).await
+}
+
 /// Send an expert reply. Returns the assigned `seq`.
 pub async fn reply(user_id: &str, text: &str) -> Result<u64, ApiError> {
     let client_id = uuid::Uuid::now_v7().to_string();
-    let body = serde_json::to_string(&ReplyReq { client_id: &client_id, text })
+    let body = serde_json::to_string(&ReplyReq { client_id: &client_id, text, kind: None, payload: None })
         .map_err(|e| ApiError::Other(e.to_string()))?;
     let v: serde_json::Value = request("POST", &format!("/conversations/{user_id}/reply"), Some(body)).await?;
     v.get("seq")
         .and_then(|s| s.as_u64())
         .ok_or_else(|| ApiError::Other("reply: missing seq".to_string()))
+}
+
+/// Send a typed data_request to the user: kind="data_request",
+/// payload={"dataset": …}, text = the human-readable RU fallback. Returns the seq.
+pub async fn reply_data_request(user_id: &str, dataset: &str, text: &str) -> Result<u64, ApiError> {
+    let client_id = uuid::Uuid::now_v7().to_string();
+    // payload travels as a JSON STRING (the worker stores it verbatim).
+    let payload = serde_json::json!({ "dataset": dataset }).to_string();
+    let body = serde_json::to_string(&ReplyReq {
+        client_id: &client_id,
+        text,
+        kind: Some("data_request"),
+        payload: Some(payload),
+    })
+    .map_err(|e| ApiError::Other(e.to_string()))?;
+    let v: serde_json::Value = request("POST", &format!("/conversations/{user_id}/reply"), Some(body)).await?;
+    v.get("seq")
+        .and_then(|s| s.as_u64())
+        .ok_or_else(|| ApiError::Other("reply_data_request: missing seq".to_string()))
 }
 
 /// Advance the expert-side read marker for a thread.

@@ -446,7 +446,14 @@ pub fn ChatPage() -> impl IntoView {
                 </details>
             </Show>
 
-            <div node_ref=messages_ref on:scroll=on_messages_scroll attr:data-testid="chat-messages" attr:data-ios-scroll="1" style="flex: 1; overflow-y: auto; overscroll-behavior: contain; max-width: 30rem; width: 100%; margin: 0 auto; padding-bottom: 9rem;">
+            // Scroll container. `min-height: 0` is REQUIRED for a `flex: 1` item to
+            // actually scroll instead of growing its parent (flex items default to
+            // min-height: auto). `-webkit-overflow-scrolling: touch` gives iOS native
+            // momentum. The inner wrapper (`min-height: 100%; justify-content: flex-end`)
+            // anchors messages to the BOTTOM when the thread is short — the reference's
+            // pattern — so the newest message shows without a jump.
+            <div node_ref=messages_ref on:scroll=on_messages_scroll attr:data-testid="chat-messages" attr:data-ios-scroll="1" style="flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; max-width: 30rem; width: 100%; margin: 0 auto;">
+              <div style="display: flex; flex-direction: column; min-height: 100%; justify-content: flex-end; padding-bottom: 9rem;">
                 // ── AI thread ──
                 <Show when=move || mode.get() == ChatMode::Ai>
                     <Show
@@ -542,6 +549,7 @@ pub fn ChatPage() -> impl IntoView {
                         />
                     </Show>
                 </Show>
+              </div>
             </div>
 
             // AI input (with attachments). Hidden in Live mode.

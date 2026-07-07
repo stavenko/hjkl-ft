@@ -235,10 +235,10 @@ if ('serviceWorker' in navigator) {
         } catch (e) {}
     }
     navigator.serviceWorker.ready.then(queryNotif);
-    window.addEventListener('pageshow', function() { pj('pageshow'); queryNotif(); });
-    window.addEventListener('focus', function() { pj('window focus'); queryNotif(); });
+    window.addEventListener('pageshow', function() { pj('pageshow' + vvStat()); queryNotif(); });
+    window.addEventListener('focus', function() { pj('window focus' + vvStat()); queryNotif(); });
     document.addEventListener('visibilitychange', function() {
-        pj('visibilitychange hidden=' + document.hidden);
+        pj('visibilitychange hidden=' + document.hidden + vvStat());
         if (!document.hidden) queryNotif();
     });
 }
@@ -305,15 +305,42 @@ document.addEventListener('touchstart', function(e) {
 // keyboard and can't be scrolled into view. Scroll containers add
 // `padding-bottom: var(--kb-inset)` to gain exactly that much extra scroll room
 // (0 when the keyboard is closed → no wasted space).
+// NB: pinning bottom-fixed bars above the keyboard via translateY(-inset) was
+// tried and REVERTED — visualViewport events lag the keyboard-close animation,
+// so the bar visibly detaches ("отлипает") while the keyboard slides away.
 function updateKbInset() {
     var vv = window.visualViewport;
     if (!vv) return;
     var inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
     document.documentElement.style.setProperty('--kb-inset', inset + 'px');
+    // Journal the 0 ↔ >0 transitions (not every pan tick). `ae=BODY` alongside a
+    // positive inset = keyboard metrics with no focused field — the "phantom
+    // keyboard after resume" evidence the fixed-nav-scrolls bug hunt needs.
+    var pos = inset > 1;
+    if (pos !== _kbInsetWasPos) {
+        _kbInsetWasPos = pos;
+        if (window.__pj) window.__pj('kb-inset ' + Math.round(inset) + vvStat());
+    }
+}
+var _kbInsetWasPos = false;
+// Viewport state suffix for journal lines: visual height+offsetTop, layout
+// (inner) height, page scroll, active element tag.
+function vvStat() {
+    var vv = window.visualViewport;
+    if (!vv) return '';
+    var ae = document.activeElement ? document.activeElement.tagName : '-';
+    return ' vv=' + Math.round(vv.height) + '+' + Math.round(vv.offsetTop)
+        + ' ih=' + window.innerHeight + ' sy=' + Math.round(window.scrollY) + ' ae=' + ae;
 }
 if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', updateKbInset);
     window.visualViewport.addEventListener('scroll', updateKbInset);
+    // Recompute on resume too: iOS can restore the PWA with stale visual-viewport
+    // (keyboard) metrics — this both records the fact and refreshes the inset.
+    window.addEventListener('pageshow', updateKbInset);
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) updateKbInset();
+    });
     updateKbInset();
 }
 

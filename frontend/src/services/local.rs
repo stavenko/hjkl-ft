@@ -807,6 +807,55 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
     Some(food)
 }
 
+/// Change a finalized recipe's final total weight and REPRICE its finished food
+/// in place. The dish's total nutrients (summed from ingredients) are fixed; only
+/// the per-100g density changes, so recompute `100/new_total_grams` and update the
+/// SAME food row (recipe.food_id) plus the recipe's `total_grams`. Any diary entry
+/// referencing this food picks up the new per-100g values automatically.
+pub async fn change_recipe_weight(recipe_id: &str, new_total_grams: f64) -> Option<Food> {
+    if new_total_grams <= 0.0 {
+        return None;
+    }
+    let recipe = get_recipe(recipe_id).await?;
+    let food_id = recipe.food_id.clone()?;
+    let foods = list_foods().await;
+
+    let mut total_kcal = 0.0_f64;
+    let mut total_protein = 0.0_f64;
+    let mut total_fat = 0.0_f64;
+    let mut total_carbs = 0.0_f64;
+    let mut total_nutrients = BTreeMap::<String, f64>::new();
+    for ing in &recipe.ingredients {
+        if let Some(f) = foods.iter().find(|f| f.id == ing.food_id) {
+            let factor = ing.grams / 100.0;
+            total_kcal += f.kcal * factor;
+            total_protein += f.protein * factor;
+            total_fat += f.fat * factor;
+            total_carbs += f.carbs * factor;
+            for (k, v) in &f.nutrients {
+                *total_nutrients.entry(k.clone()).or_default() += v * factor;
+            }
+        }
+    }
+
+    let scale = 100.0 / new_total_grams;
+    let mut food: Food = db::get("foods", &food_id).await?;
+    food.kcal = total_kcal * scale;
+    food.protein = total_protein * scale;
+    food.fat = total_fat * scale;
+    food.carbs = total_carbs * scale;
+    food.nutrients = total_nutrients.into_iter().map(|(k, v)| (k, v * scale)).collect();
+    food.updated_at = now();
+    db::put("foods", &food).await;
+
+    let mut updated_recipe: Recipe = db::get("recipes", recipe_id).await?;
+    updated_recipe.total_grams = Some(new_total_grams);
+    updated_recipe.updated_at = now();
+    db::put("recipes", &updated_recipe).await;
+
+    Some(food)
+}
+
 // --- Goals ---
 
 pub async fn list_goals() -> Vec<Goal> {

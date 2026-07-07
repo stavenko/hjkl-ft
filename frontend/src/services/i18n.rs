@@ -308,6 +308,7 @@ fn en(key: &str) -> &'static str {
         "recipes.new" => "+ New",
         "recipes.search_placeholder" => "Search recipes...",
         "recipes.cook_again" => "Cook again",
+        "recipes.change_weight" => "Change final weight",
         "recipes.complete" => "Complete",
         "recipes.in_progress" => "In Progress",
 
@@ -1377,6 +1378,7 @@ fn ru(key: &str) -> &'static str {
         "recipes.new" => "+ Новый",
         "recipes.search_placeholder" => "Найти рецепт...",
         "recipes.cook_again" => "Приготовить снова",
+        "recipes.change_weight" => "Изменить окончательный вес",
         "recipes.complete" => "Готов",
         "recipes.in_progress" => "Готовится",
 

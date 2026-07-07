@@ -3,6 +3,7 @@ use leptos_router::*;
 use api_types::*;
 
 use crate::components::food_list_item::FoodListItem;
+use crate::components::weight_modal::WeightModal;
 use crate::services::{local, sync};
 use crate::services::i18n::t;
 
@@ -10,6 +11,10 @@ use crate::services::i18n::t;
 pub fn RecipesPage() -> impl IntoView {
     let search = create_rw_signal(String::new());
     let version = create_rw_signal(0u32);
+    // Which finalized recipe's action menu is open (its id), and the "change final
+    // weight" modal state: (recipe_id, food_name, current_total_grams).
+    let menu_open = create_rw_signal(None::<String>);
+    let weight_modal = create_rw_signal(None::<(String, String, f64)>);
 
     let recipes_res = create_resource(
         move || version.get(),
@@ -83,7 +88,6 @@ pub fn RecipesPage() -> impl IntoView {
                     filtered().into_iter().map(|recipe| {
                         let id = recipe.id.clone();
                         let id_nav = recipe.id.clone();
-                        let id_cook = recipe.id.clone();
                         let is_done = recipe.finalized;
 
                         if is_done {
@@ -93,27 +97,77 @@ pub fn RecipesPage() -> impl IntoView {
                                 .cloned();
 
                             if let Some(food) = food {
+                                // Diary-like row: badges show the WHOLE product's КБЖУ
+                                // (grams = total_grams), the final weight is shown, and
+                                // the actions hide behind a kebab "⋮" menu (like the diary).
+                                let total = recipe.total_grams;
+                                let rid_menu = recipe.id.clone();
+                                let rid_open = recipe.id.clone();
+                                // Copy handles for use inside the `<Show>` menu (whose
+                                // content must be `Fn`, so it can't move owned Strings).
+                                let sv_id = store_value(recipe.id.clone());
+                                let sv_name = store_value(food.name.clone());
                                 view! {
                                     <a href=format!("/recipes/{id}") style="text-decoration: none; color: inherit;">
-                                        <FoodListItem food=food goals=Signal::derive(goals)>
-                                            <button
-                                                class="button is-small"
-                                                style="white-space: nowrap;"
-                                                on:click=move |ev| {
-                                                    ev.prevent_default();
-                                                    ev.stop_propagation();
-                                                    let cid = id_cook.clone();
-                                                    spawn_local(async move {
-                                                        if let Some(new_recipe) = local::clone_recipe(&cid).await {
-                                                            let new_id = new_recipe.id.clone();
-                                                            invalidate();
-                                                            sync::push_background();
-                                                            let navigate = use_navigate();
-                                                            navigate(&format!("/recipes/{new_id}"), Default::default());
-                                                        }
-                                                    });
-                                                }
-                                            >{move || t("recipes.cook_again")}</button>
+                                        <FoodListItem food=food goals=Signal::derive(goals) grams=total.unwrap_or(100.0)>
+                                            {total.map(|g| view! {
+                                                <span class="is-size-7 has-text-grey" style="white-space: nowrap;">
+                                                    {format!("{:.0}{}", g, t("common.unit.g"))}
+                                                </span>
+                                            })}
+                                            <div style="position: relative;">
+                                                <button
+                                                    class="button is-ghost has-text-grey-light"
+                                                    style="height: 2.5rem; width: 2.5rem; padding: 0; text-decoration: none;"
+                                                    on:click=move |ev| {
+                                                        ev.prevent_default();
+                                                        ev.stop_propagation();
+                                                        let rid = rid_menu.clone();
+                                                        menu_open.update(|m| {
+                                                            if m.as_deref() == Some(&rid) { *m = None; } else { *m = Some(rid); }
+                                                        });
+                                                    }
+                                                >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                                        <circle cx="10" cy="4" r="1.6"/>
+                                                        <circle cx="10" cy="10" r="1.6"/>
+                                                        <circle cx="10" cy="16" r="1.6"/>
+                                                    </svg>
+                                                </button>
+                                                <Show when=move || menu_open.get().as_deref() == Some(&rid_open)>
+                                                    <div style="position: absolute; right: 0; top: 100%; z-index: 10; background: var(--bulma-scheme-main); border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); min-width: 12rem; padding: 0.25rem 0;">
+                                                        <button
+                                                            class="button is-ghost is-small is-fullwidth"
+                                                            style="justify-content: flex-start; text-decoration: none;"
+                                                            on:click=move |ev: leptos::ev::MouseEvent| {
+                                                                ev.prevent_default();
+                                                                ev.stop_propagation();
+                                                                menu_open.set(None);
+                                                                let cid = sv_id.get_value();
+                                                                spawn_local(async move {
+                                                                    if let Some(new_recipe) = local::clone_recipe(&cid).await {
+                                                                        let new_id = new_recipe.id.clone();
+                                                                        invalidate();
+                                                                        sync::push_background();
+                                                                        let navigate = use_navigate();
+                                                                        navigate(&format!("/recipes/{new_id}"), Default::default());
+                                                                    }
+                                                                });
+                                                            }
+                                                        >{move || t("recipes.cook_again")}</button>
+                                                        <button
+                                                            class="button is-ghost is-small is-fullwidth"
+                                                            style="justify-content: flex-start; text-decoration: none;"
+                                                            on:click=move |ev: leptos::ev::MouseEvent| {
+                                                                ev.prevent_default();
+                                                                ev.stop_propagation();
+                                                                menu_open.set(None);
+                                                                weight_modal.set(Some((sv_id.get_value(), sv_name.get_value(), total.unwrap_or(0.0))));
+                                                            }
+                                                        >{move || t("recipes.change_weight")}</button>
+                                                    </div>
+                                                </Show>
+                                            </div>
                                         </FoodListItem>
                                     </a>
                                 }.into_view()
@@ -141,6 +195,33 @@ pub fn RecipesPage() -> impl IntoView {
                     }).collect::<Vec<_>>()
                 }}
             </div>
+
+            // Tap-away backdrop: closes an open row menu when tapping outside it.
+            {move || menu_open.get().is_some().then(|| view! {
+                <div style="position: fixed; inset: 0; z-index: 9;"
+                    on:pointerdown=move |_| menu_open.set(None)></div>
+            })}
+
+            // "Изменить окончательный вес": enter a new final weight → repriced.
+            {move || weight_modal.get().map(|(rid, fname, cur)| {
+                view! {
+                    <WeightModal
+                        food_name=fname
+                        current_grams=cur
+                        package_weight=None
+                        on_save=Callback::new(move |new_w: f64| {
+                            let rid = rid.clone();
+                            spawn_local(async move {
+                                local::change_recipe_weight(&rid, new_w).await;
+                                invalidate();
+                                sync::push_background();
+                            });
+                            weight_modal.set(None);
+                        })
+                        on_close=Callback::new(move |_| weight_modal.set(None))
+                    />
+                }
+            })}
         </div>
     }
 }

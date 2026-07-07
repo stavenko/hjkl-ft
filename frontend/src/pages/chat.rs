@@ -83,6 +83,36 @@ pub fn ChatPage() -> impl IntoView {
     let rec_start = create_rw_signal(0f64);
     let rec_tick = create_rw_signal(0u32);
 
+    // Auto-scroll to the newest message (normal chat UX): the list opens pinned to
+    // the bottom and follows new messages, but if the user scrolls up to read
+    // history we stop yanking them down until they return near the bottom.
+    let messages_ref = create_node_ref::<leptos::html::Div>();
+    let stick_bottom = create_rw_signal(true);
+    let scroll_to_bottom = move || {
+        if let Some(el) = messages_ref.get() {
+            el.set_scroll_top(el.scroll_height());
+        }
+    };
+    // On any scroll, remember whether the user is at/near the bottom.
+    let on_messages_scroll = move |_| {
+        if let Some(el) = messages_ref.get() {
+            let dist = el.scroll_height() - el.scroll_top() - el.client_height();
+            stick_bottom.set(dist < 120);
+        }
+    };
+    // Follow new content when pinned. Tracks every source that grows the list
+    // (AI stream + Live thread + optimistic outbox) so it fires on each update.
+    create_effect(move |_| {
+        messages.get();
+        streaming_text.get();
+        ai_loading.get();
+        live_messages.get();
+        live_outbox.get();
+        if stick_bottom.get_untracked() {
+            request_animation_frame(scroll_to_bottom);
+        }
+    });
+
     // Load history on mount.
     spawn_local(async move {
         let msgs = chat::list_messages().await;
@@ -416,7 +446,7 @@ pub fn ChatPage() -> impl IntoView {
                 </details>
             </Show>
 
-            <div attr:data-testid="chat-messages" attr:data-ios-scroll="1" style="flex: 1; overflow-y: auto; overscroll-behavior: contain; max-width: 30rem; width: 100%; margin: 0 auto; padding-bottom: 9rem;">
+            <div node_ref=messages_ref on:scroll=on_messages_scroll attr:data-testid="chat-messages" attr:data-ios-scroll="1" style="flex: 1; overflow-y: auto; overscroll-behavior: contain; max-width: 30rem; width: 100%; margin: 0 auto; padding-bottom: 9rem;">
                 // ── AI thread ──
                 <Show when=move || mode.get() == ChatMode::Ai>
                     <Show

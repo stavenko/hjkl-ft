@@ -1,4 +1,4 @@
-var CACHE_NAME = 'ft-v28';
+var CACHE_NAME = 'ft-v29';
 // Separate, long-lived cache holding the notification-receipt marker (the ntf code
 // of a received push). Kept across SW activations (excluded from the cleanup below)
 // so an app launched AFTER the push still consumes it. NOT usable as a live channel:

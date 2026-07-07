@@ -11,12 +11,41 @@
 // It owns NO Durable Object: it only BINDS the cross-script SUBSCRIPTION_DO that
 // payment-worker owns, to gate AI on an active Trial/Paid subscription.
 
+use wasm_bindgen::JsCast;
 use worker::*;
 
 mod token;
 mod types;
 
 use token::{secret_or_var, validate_from_header};
+
+/// Invoke the Workers AI binding with the input as a REAL JS object graph.
+///
+/// `worker`'s `Ai::run`/`run_bytes` serialize the input via `serde_wasm_bindgen`,
+/// which turns a serde MAP — our `serde_json::Value::Object` — into a JS `Map`.
+/// `env.AI.run` reads `input.messages` as an OBJECT property, which a `Map` does
+/// not expose, so Workers AI sees no `messages`/`prompt`/`requests` at the root and
+/// rejects EVERY request with `5006: oneOf at '/' not met`. `JSON.parse` yields
+/// plain objects all the way down, which the binding accepts. Returns the raw
+/// resolved value: a result object for `stream:false`, a `ReadableStream` for
+/// `stream:true`.
+async fn ai_run(env: &Env, model: &str, params: &serde_json::Value) -> Result<wasm_bindgen::JsValue> {
+    use wasm_bindgen::JsValue;
+    let ai = env.ai("AI")?;
+    let binding: &JsValue = ai.as_ref();
+    let run_fn: js_sys::Function = js_sys::Reflect::get(binding, &JsValue::from_str("run"))
+        .map_err(|e| Error::RustError(format!("AI.run lookup: {e:?}")))?
+        .dyn_into()
+        .map_err(|_| Error::RustError("AI.run is not a function".into()))?;
+    let input = js_sys::JSON::parse(&serde_json::to_string(params)?)
+        .map_err(|e| Error::RustError(format!("input JSON.parse: {e:?}")))?;
+    let promise = run_fn
+        .call2(binding, &JsValue::from_str(model), &input)
+        .map_err(|e| Error::RustError(format!("AI.run call: {e:?}")))?;
+    worker::wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(promise))
+        .await
+        .map_err(|e| Error::RustError(format!("AI.run: {e:?}")))
+}
 
 // ── CORS ────────────────────────────────────────────────────────────────────
 // Known origins only (no wildcard): the prod app + any renorma.app subdomain,
@@ -307,16 +336,18 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
         .to_string();
 
     let run_params = serde_json::Value::Object(run_params);
-    let ai = env.ai("AI")?;
+    let out = ai_run(env, &model, &run_params).await?;
 
     if !want_stream {
-        let out: serde_json::Value = ai.run(&model, &run_params).await?;
-        return Response::from_json(&out);
+        let out_val: serde_json::Value = serde_wasm_bindgen::from_value(out)
+            .map_err(|e| Error::RustError(format!("AI.run output decode: {e}")))?;
+        return Response::from_json(&out_val);
     }
 
-    // Raw passthrough of the Workers AI SSE byte stream — no re-parsing.
-    let stream = ai.run_bytes(&model, &run_params).await?;
-    let resp = Response::from_stream(stream)?;
+    // Raw passthrough of the Workers AI SSE byte stream — no re-parsing. `stream:true`
+    // resolves to a ReadableStream; wrap it as the worker crate's ByteStream.
+    let stream = worker::web_sys::ReadableStream::unchecked_from_js(out);
+    let resp = Response::from_stream(worker::ByteStream::from(stream))?;
     let headers = resp.headers();
     headers.set("Content-Type", "text/event-stream")?;
     headers.set("Cache-Control", "no-cache")?;

@@ -28,8 +28,6 @@ service = "main-flow-dev"
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
-# Comma-separated allowlist of user_ids (JWT sub) permitted to use /conversations*.
-EXPERT_IDS = "expert-1,expert-2"
 # Shared secret main-flow's /push/notify verifies (X-Internal-Key). Prod:
 # `wrangler secret put INTERNAL_PUSH_KEY --env production` (same value as main-flow-prod).
 INTERNAL_PUSH_KEY = "dev-internal-push-key"
@@ -80,8 +78,6 @@ store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "admin-approve-secret"
 
 [env.production.vars]
-# set real expert ids at deploy time
-EXPERT_IDS = ""
 # INTERNAL_PUSH_KEY and ADMIN_APPROVE_SECRET are mounted from the Secrets Store
 # in prod (the secrets_store_secrets blocks above), NOT plaintext vars. The push
 # target is the MAIN_FLOW service binding above (main-flow-prod), not a URL.

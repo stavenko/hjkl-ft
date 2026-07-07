@@ -27,7 +27,7 @@ async function mkToken(sub: string): Promise<string> {
 
 let userTok: string; // sub = user-A (not an expert)
 let userBTok: string; // sub = user-B (not an expert)
-let expertTok: string; // sub = expert-1 (in EXPERT_IDS)
+let expertTok: string; // sub = expert-1 (DO-approved in beforeAll)
 
 beforeAll(async () => {
   mf = new Miniflare({
@@ -50,7 +50,6 @@ beforeAll(async () => {
     },
     bindings: {
       JWT_SECRET,
-      EXPERT_IDS: "expert-1,expert-2",
       ADMIN_APPROVE_SECRET: "test-admin-secret",
       INTERNAL_PUSH_KEY: "test-internal-key",
     },
@@ -60,6 +59,17 @@ beforeAll(async () => {
   userTok = await mkToken("user-A");
   userBTok = await mkToken("user-B");
   expertTok = await mkToken("expert-1");
+  // There is no env allowlist anymore — the ONLY way to be an expert is the DO
+  // approve flow. Approve expert-1 here so the expert-route tests exercise a
+  // genuinely DO-approved admin.
+  const { code }: any = await (
+    await workerFetch("/admin/request", authed(expertTok, { method: "POST", body: "{}" }))
+  ).json();
+  await workerFetch("/admin/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Secret": "test-admin-secret" },
+    body: JSON.stringify({ code }),
+  });
 });
 
 afterAll(async () => {
@@ -371,7 +381,7 @@ describe("admin authorization (request/approve/me)", () => {
   }
 
   test("full request -> approve -> expert-access flow + invariants", async () => {
-    // A fresh candidate sub, not in EXPERT_IDS, so it doesn't collide with other tests.
+    // A fresh candidate sub, distinct from expert-1, so it doesn't collide with other tests.
     const CAND = "admin-cand";
     const candTok = await mkToken(CAND);
 
@@ -457,7 +467,7 @@ describe("internal /internal/is-admin (cross-worker admin check)", () => {
     expect((await isAdmin("expert-1", "wrong")).status).toBe(403);
   });
 
-  test("sub in EXPERT_IDS => {approved:true}", async () => {
+  test("DO-approved sub (expert-1) => {approved:true}", async () => {
     const resp = await isAdmin("expert-1", "test-internal-key");
     expect(resp.status).toBe(200);
     expect(await resp.json()).toEqual({ approved: true });

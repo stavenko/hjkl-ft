@@ -39,7 +39,7 @@ and how to deploy/operate it.
 - `GET  /messages?after_seq&limit` → `{messages,next_after_seq,has_more}` (cursor paging)
 - `POST /read` `{seq}`
 
-**Expert** (auth: `auth_expert` — JWT `sub` ∈ `EXPERT_IDS` **OR** approved in the DO):
+**Expert** (auth: `auth_expert` — JWT `sub` approved in the DO `admins` table):
 - `GET  /conversations?status=pending|answered&after&limit` — pending = oldest-waiting first
 - `GET  /conversations/:uid/messages?after_seq&limit`
 - `POST /conversations/:uid/reply` `{client_id,text}` → `{seq}` (also fires the push nudge)
@@ -52,8 +52,8 @@ and how to deploy/operate it.
 
 ### Auth model
 - `auth_user` — verifies the JWT (HS256, `JWT_SECRET`), returns `sub`.
-- `auth_expert` (async) — passes if `sub ∈ EXPERT_IDS` (bootstrap owners, env) **OR** the
-  index DO's `admins` table has it. Fail-loud 500 on any DO error; 403 otherwise.
+- `auth_expert` (async) — passes iff the index DO's `admins` table has `sub` (the ONLY
+  source of truth; no env allowlist). Fail-loud 500 on any DO error; 403 otherwise.
 - **Expert approval flow** (adds an expert WITHOUT redeploy):
   1. Candidate signs in on the admin console (passkey → JWT with their `sub`).
   2. Admin UI calls `POST /admin/request` → shows a short code.
@@ -75,7 +75,6 @@ as payment-worker's `notifyPush`).
 | Name | Dev (`[vars]`) | Prod | Notes |
 |---|---|---|---|
 | `JWT_SECRET` | `dev-secret-change-in-production` | **secret** | MUST equal auth-worker's |
-| `EXPERT_IDS` | `expert-1,expert-2` | var (default `""`) | bootstrap owners; others use the approve flow |
 | `INTERNAL_PUSH_KEY` | `dev-internal-push-key` | **secret** | MUST equal main-flow's |
 | `ADMIN_APPROVE_SECRET` | `dev-admin-approve-secret` | **secret** | operator approve key; unset ⇒ approve fails closed |
 | `MAIN_FLOW` (service binding) | → `main-flow` | → `main-flow-prod` | not a var |
@@ -151,8 +150,8 @@ Leptos 0.6 CSR PWA. Light inline CSS, no IndexedDB.
      wrangler secret put INTERNAL_PUSH_KEY    --env production && \  # = main-flow-prod's
      wrangler secret put ADMIN_APPROVE_SECRET --env production)      # operator approve key
    ```
-   Set bootstrap owner(s) in `support-worker/wrangler.toml` `[env.production.vars] EXPERT_IDS`
-   (your own prod `sub`), or leave empty and approve yourself via the code flow.
+   Approve the first expert via the code flow (`POST /admin/request` → `POST /admin/approve`
+   with `ADMIN_APPROVE_SECRET`); there is no env allowlist.
 2. **Workers:**
    ```bash
    (cd cloudflare/auth-worker    && npx wrangler deploy --env production)

@@ -60,16 +60,6 @@ async fn auth_user(req: &Request, env: &Env) -> std::result::Result<String, Resp
         .map_err(|e| json_status(401, &e.to_string()))
 }
 
-fn expert_ids(env: &Env) -> Vec<String> {
-    env.var("EXPERT_IDS")
-        .map(|v| v.to_string())
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
 /// Operator-only secret for POST /admin/approve (X-Admin-Secret). Read like
 /// INTERNAL_PUSH_KEY: env.secret first (prod `wrangler secret put`), env.var
 /// fallback (dev [vars]). Err means UNSET — the caller MUST fail closed.
@@ -77,21 +67,17 @@ async fn admin_approve_secret(env: &Env) -> std::result::Result<String, String> 
     token::secret_or_var(env, "ADMIN_APPROVE_SECRET").await
 }
 
-/// 401 if the token is invalid, 403 if a valid sub is neither in EXPERT_IDS nor
-/// DO-approved. Returns the expert's sub on success.
+/// 401 if the token is invalid, 403 if a valid sub is not DO-approved. Returns
+/// the expert's sub on success.
 ///
-/// Bootstrap owners listed in EXPERT_IDS pass with no DO round-trip. Everyone
-/// else is checked against the GLOBAL index DO's `admins` table (the only
-/// approved-admins store — runtime-mutable, no redeploy). On ANY DO/stub/parse
-/// failure we 500 (fail loudly); there is NO code path that grants expert access
-/// without env-listing or a stored approval.
+/// The ONLY source of truth is the GLOBAL index DO's `admins` table (runtime-
+/// mutable via the approve flow, no redeploy). On ANY DO/stub/parse failure we
+/// 500 (fail loudly); there is NO code path that grants expert access without a
+/// stored approval.
 async fn auth_expert(req: &Request, env: &Env) -> std::result::Result<String, Response> {
     let sub = validate_from_header(req, env)
         .await
         .map_err(|e| json_status(401, &e.to_string()))?;
-    if expert_ids(env).iter().any(|id| id == &sub) {
-        return Ok(sub);
-    }
     let do_req = match do_request("/admin-is-approved", &serde_json::json!({ "sub": sub })) {
         Ok(r) => r,
         Err(e) => return Err(json_status(500, &format!("admin auth: {e}"))),
@@ -412,12 +398,6 @@ async fn admin_me(req: Request, ctx: RouteContext<()>) -> Result<Response> {
         Ok(s) => s,
         Err(resp) => return Ok(resp),
     };
-    // Env-bootstrap experts are approved WITHOUT a DO record — must match
-    // auth_expert, or the UI would gate a valid env-expert onto the request
-    // screen even though the queue API lets them through.
-    if expert_ids(&ctx.env).iter().any(|id| id == &sub) {
-        return Response::from_json(&serde_json::json!({ "approved": true, "code": null }));
-    }
     let do_req = do_request("/admin-get", &serde_json::json!({ "sub": sub }))?;
     index_stub(&ctx.env)?.fetch_with_request(do_req).await
 }
@@ -462,8 +442,8 @@ async fn admin_approve(mut req: Request, ctx: RouteContext<()>) -> Result<Respon
 
 /// POST /internal/is-admin {sub} -> {approved}. Cross-worker admin check, called
 /// by payment-worker's require_admin via the SUPPORT_WORKER service binding. SAME
-/// source of truth as auth_expert: env EXPERT_IDS bootstrap OR the DO `admins`
-/// table — one approved-admins store, no redeploy to add an admin. Guarded by the
+/// source of truth as auth_expert: the DO `admins` table — one approved-admins
+/// store, no redeploy to add an admin. Guarded by the
 /// shared INTERNAL_PUSH_KEY (X-Internal-Key); an unset key fails closed (500), a
 /// wrong/missing key 403s. NEVER swallows: any DO/stub/parse error 500s.
 async fn internal_is_admin(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
@@ -487,10 +467,7 @@ async fn internal_is_admin(mut req: Request, ctx: RouteContext<()>) -> Result<Re
         return Ok(json_status(400, "sub required"));
     }
 
-    // SAME logic as auth_expert: env bootstrap OR the DO admins table.
-    if expert_ids(&ctx.env).iter().any(|id| id == sub) {
-        return Response::from_json(&serde_json::json!({ "approved": true }));
-    }
+    // SAME logic as auth_expert: the DO admins table.
     let do_req = do_request("/admin-is-approved", &serde_json::json!({ "sub": sub }))?;
     let mut resp = index_stub(&ctx.env)?.fetch_with_request(do_req).await?;
     if resp.status_code() != 200 {
@@ -621,7 +598,7 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/message", user_send)
         .get_async("/messages", user_messages)
         .post_async("/read", user_read)
-        // EXPERT side (JWT AND sub ∈ EXPERT_IDS)
+        // EXPERT side (JWT AND sub DO-approved in the admins table)
         .get_async("/conversations", expert_conversations)
         .get_async("/conversations/:uid/messages", expert_messages)
         .post_async("/conversations/:uid/reply", expert_reply)

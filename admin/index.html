@@ -118,7 +118,10 @@
             -webkit-mask: radial-gradient(circle, transparent 7px, #000 8px);
             mask: radial-gradient(circle, transparent 7px, #000 8px); }
 
-        .screen { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+        /* min-height: 0 is REQUIRED for a flex:1 item to scroll instead of growing
+           its parent (flex items default to min-height:auto) — same iOS-robust fix
+           as the client chat. */
+        .screen { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
             padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 8px); }
         .screen--noflow { padding-bottom: 0; }
         .pad { padding: 16px; }

@@ -107,8 +107,13 @@ pub fn RecipesPage() -> impl IntoView {
                                 // content must be `Fn`, so it can't move owned Strings).
                                 let sv_id = store_value(recipe.id.clone());
                                 let sv_name = store_value(food.name.clone());
+                                // Row navigates on tap via on:click (not <a>): a leptos_router
+                                // <a> intercepts clicks even on the kebab, so a div lets the
+                                // menu's stop_propagation actually suppress navigation.
+                                let nid = recipe.id.clone();
                                 view! {
-                                    <a href=format!("/recipes/{id}") style="text-decoration: none; color: inherit;">
+                                    <div on:click=move |_| { use_navigate()(&format!("/recipes/{nid}"), Default::default()); }
+                                         style="cursor: pointer;">
                                         <FoodListItem food=food goals=Signal::derive(goals) grams=total.unwrap_or(100.0)>
                                             {total.map(|g| view! {
                                                 <span class="is-size-7 has-text-grey" style="white-space: nowrap;">
@@ -169,7 +174,7 @@ pub fn RecipesPage() -> impl IntoView {
                                                 </Show>
                                             </div>
                                         </FoodListItem>
-                                    </a>
+                                    </div>
                                 }.into_view()
                             } else {
                                 view! {

@@ -547,17 +547,19 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
         });
     };
 
-    // Fire a data_request for `dataset` with its RU panel text, then clear the draft.
+    // Fire a data_request for `dataset` with its RU panel text.
     let uid_req = user_id.clone();
     let send_request = Callback::new(move |(dataset, text): (String, String)| {
+        // Close the menu + clear the input IMMEDIATELY on tap: the menu is bound to
+        // the draft starting with "/", so clearing `draft` synchronously (before the
+        // round-trip) hides it and empties the textarea, making the tap feel done.
+        draft.set(String::new());
         sending.set(true);
         let uid = uid_req.clone();
         spawn_local(async move {
             match api::reply_data_request(&uid, &dataset, &text).await {
-                Ok(_) => {
-                    draft.set(String::new());
-                    load.call(());
-                }
+                // The sent request shows up as a "⤴ запрошено: …" chip on refresh.
+                Ok(_) => load.call(()),
                 Err(e) if e.is_auth() => {
                     auth::logout();
                     view.set(View::Login);

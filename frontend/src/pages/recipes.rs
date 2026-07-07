@@ -97,9 +97,9 @@ pub fn RecipesPage() -> impl IntoView {
                                 .cloned();
 
                             if let Some(food) = food {
-                                // Diary-like row: badges show the WHOLE product's КБЖУ
-                                // (grams = total_grams), the final weight is shown, and
-                                // the actions hide behind a kebab "⋮" menu (like the diary).
+                                // Diary-like row: badges show КБЖУ per 100 g (the food's
+                                // stored values), the final total weight is shown, and the
+                                // actions hide behind a kebab "⋮" menu (like the diary).
                                 let total = recipe.total_grams;
                                 let rid_menu = recipe.id.clone();
                                 let rid_open = recipe.id.clone();
@@ -114,7 +114,7 @@ pub fn RecipesPage() -> impl IntoView {
                                 view! {
                                     <div on:click=move |_| { use_navigate()(&format!("/recipes/{nid}"), Default::default()); }
                                          style="cursor: pointer;">
-                                        <FoodListItem food=food goals=Signal::derive(goals) grams=total.unwrap_or(100.0)>
+                                        <FoodListItem food=food goals=Signal::derive(goals)>
                                             {total.map(|g| view! {
                                                 <span class="is-size-7 has-text-grey" style="white-space: nowrap;">
                                                     {format!("{:.0}{}", g, t("common.unit.g"))}

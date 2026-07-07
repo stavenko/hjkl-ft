@@ -130,12 +130,22 @@ async fn do_post_body(stub: &worker::durable::Stub, url: &str, body: String) -> 
     stub.fetch_with_request(req).await
 }
 
-/// Active subscription (Trial not expired, or Paid) for `user_id`. Reads the
-/// per-user SubscriptionDO owned by payment-worker (cross-script binding).
-async fn subscription_active(env: &Env, user_id: &str) -> Result<bool> {
-    let ns = env.durable_object("SUBSCRIPTION_DO")?;
-    let stub = ns.id_from_name(user_id)?.get_stub()?;
-    let mut res = stub.fetch_with_str("https://do/subscription").await?;
+/// Active subscription (Trial not expired, or Paid) for the caller.
+///
+/// Delegates to payment-worker — the OWNER of the SubscriptionDO — over the
+/// PAYMENT service binding, forwarding the caller's bearer (the same JWT
+/// payment-worker validates). payment-worker resolves the DO by its own private
+/// epoch, so this worker holds NO knowledge of the DO's name/epoch. That coupling
+/// drifted once (this reader stuck on an old epoch → empty DO → active:false →
+/// spurious 402 paywall); delegating removes it entirely.
+async fn subscription_active(env: &Env, authorization: &str) -> Result<bool> {
+    let headers = Headers::new();
+    headers.set("Authorization", authorization)?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Get).with_headers(headers);
+    // Host is irrelevant for a service-binding fetch; only the path routes.
+    let req = Request::new_with_init("https://payment-worker/subscription", &init)?;
+    let mut res = env.service("PAYMENT")?.fetch_request(req).await?;
     if res.status_code() != 200 {
         return Ok(false);
     }
@@ -210,8 +220,9 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
             Some(s) => s,
             None => return cors_json(&serde_json::json!({ "error": "Unauthorized" }), 401),
         };
-        // Only enqueue for users with an active subscription (Trial/Paid).
-        if !subscription_active(env, &sub).await? {
+        // Only enqueue for users with an active subscription (Trial/Paid). The
+        // bearer is forwarded to payment-worker, which owns the subscription.
+        if !subscription_active(env, &format!("Bearer {token}")).await? {
             return cors_json(&serde_json::json!({ "error": "subscription_required" }), 402);
         }
 

@@ -718,7 +718,7 @@ mod tests {
     fn section_routes_are_recognised() {
         // Engine/unlock logic is tested in story_dsl; here just the route mapping.
         assert!(is_section_route("/story/intro"));
-        assert!(is_section_route("/story/ch3-reward"));
+        assert!(is_section_route("/story/ch3-habits"));
         assert!(!is_section_route("/diary"));
         assert!(!is_section_route("/paywall"));
     }

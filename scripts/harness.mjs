@@ -74,7 +74,6 @@ export const CHAPTERS = [
       { id: "ch3-sleep" },
       { id: "ch3-walk" },
       { id: "ch3-habits" },
-      { id: "ch3-reward" },
     ],
   },
 ];

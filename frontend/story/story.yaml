@@ -505,6 +505,3 @@ chapters:
           - {text_key: story.ch3.habits.p6}
           - {text_key: story.ch3.habits.p7}
           - {text_key: story.ch3.habits.p8}
-      - id: ch3-reward
-        icon: "🏆"
-        title: {en: "Food is a reward", ru: "Еда — это награда"}

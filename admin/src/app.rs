@@ -181,6 +181,12 @@ fn RequestAccess(view: RwSignal<View>) -> impl IntoView {
     let code = create_rw_signal(Option::<String>::None);
     let busy = create_rw_signal(false);
     let error = create_rw_signal(Option::<String>::None);
+    // The initial /admin/me is in flight. While an authorized admin is being
+    // resolved (→ Queue), show a loader instead of flashing the access form.
+    // Cleared only for outcomes that actually KEEP us on this screen (candidate,
+    // or a non-auth error); approved/dead-token navigate away, so the loader
+    // stays until the view switches.
+    let checking = create_rw_signal(true);
 
     // Re-check approval via /admin/me. An approved expert flips to Queue; a
     // candidate stays here (showing their existing code, if any). Used both on
@@ -191,14 +197,20 @@ fn RequestAccess(view: RwSignal<View>) -> impl IntoView {
             match api::admin_me().await {
                 Ok(me) if me.approved => view.set(View::Queue),
                 // Not approved yet: show the existing code if one was already requested.
-                Ok(me) => code.set(me.code),
+                Ok(me) => {
+                    code.set(me.code);
+                    checking.set(false);
+                }
                 // A dead token (auth_user 401) means the session is gone → back to Login.
                 Err(e) if e.is_auth() => {
                     auth::logout();
                     view.set(View::Login);
                 }
                 // Any other failure is surfaced, never silently swallowed.
-                Err(e) => error.set(Some(e.message().to_string())),
+                Err(e) => {
+                    error.set(Some(e.message().to_string()));
+                    checking.set(false);
+                }
             }
         });
     };
@@ -225,6 +237,14 @@ fn RequestAccess(view: RwSignal<View>) -> impl IntoView {
 
     view! {
         <div class="center">
+            {move || if checking.get() {
+                // Authorized session being resolved — loader, not the access form.
+                return view! { <div class="spinner"></div> }.into_view();
+            } else {
+                ().into_view()
+            }}
+
+            {move || (!checking.get()).then(|| view! {
             <div class="brandmark"></div>
             <h1 class="h1">"Доступ к консоли"</h1>
             <p class="sub">"Запросите код и передайте его оператору."</p>
@@ -257,6 +277,7 @@ fn RequestAccess(view: RwSignal<View>) -> impl IntoView {
 
             {move || error.get().map(|e| view! {
                 <p style="color: var(--danger); white-space: pre-wrap; margin-top: 16px;">{e}</p>
+            })}
             })}
         </div>
     }

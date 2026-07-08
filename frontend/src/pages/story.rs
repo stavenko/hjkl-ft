@@ -90,7 +90,14 @@ pub fn StoryPage() -> impl IntoView {
                 let active: Vec<String> = e
                     .active_tasks()
                     .iter()
-                    .map(|t| story::fill_task_target(&t.id, tr(&t.title), &e.snap.progress))
+                    .map(|t| match (t.short.as_ref(), e.task_counter(&t.id)) {
+                        // Streak/counter tasks get a compact "<label>: X/N дней" form
+                        // on the hub plate, distinct from the full task title.
+                        (Some(short), Some((cur, tgt))) => tr(short)
+                            .replace("{x}", &cur.to_string())
+                            .replace("{n}", &tgt.to_string()),
+                        _ => story::fill_task_target(&t.id, tr(&t.title), &e.snap.progress),
+                    })
                     .collect();
                 let total = st.tasks.len();
                 let done = st.tasks.iter().filter(|t| e.task_closed(&t.id)).count();

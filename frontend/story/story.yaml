@@ -64,6 +64,7 @@ tasks:
     close: {event: weight_saved}
   - id: weight_streak
     title: {en: "Weigh in 7 days in a row", ru: "Взвешивайтесь 7 дней подряд"}
+    short: {en: "Weight diary: {x}/{n} days", ru: "Дневник веса: {x}/{n} дней"}
     close: {streak: weight, gte: 7}
   - id: first_food
     title: {en: "Log your first food", ru: "Внесите первую еду"}
@@ -71,6 +72,7 @@ tasks:
     close:  {event: food_logged}            # fired only while enabled
   - id: diary_streak
     title: {en: "Keep the food diary 7 days in a row", ru: "Ведите дневник еды 7 дней подряд"}
+    short: {en: "Food diary: {x}/{n} days", ru: "Дневник питания: {x}/{n} дней"}
     close: {streak: diary, gte: 7}
   - id: repeat_food
     title: {en: "Repeat yesterday's food", ru: "Повторите вчерашнюю еду"}
@@ -83,6 +85,7 @@ tasks:
     close: {event: steps_saved}
   - id: steps_streak
     title: {en: "Log steps 7 days in a row", ru: "Записывайте шаги 7 дней подряд"}
+    short: {en: "Steps diary: {x}/{n} days", ru: "Дневник шагов: {x}/{n} дней"}
     close: {streak: steps, gte: 7}
   - id: dish_created
     title: {en: "Create a cooked dish", ru: "Создайте готовое блюдо"}
@@ -98,6 +101,7 @@ tasks:
     close: {event: restaurant_logged}
   - id: diary_continue
     title: {en: "Keep the food diary 7 more days in a row", ru: "Ведите дневник еды ещё 7 дней подряд"}
+    short: {en: "Food diary: {x}/{n} days", ru: "Дневник питания: {x}/{n} дней"}
     # Counts only days AFTER ch2-mistake is opened (baseline = that section's seen
     # flag) — so it's a fresh 7 days, not the streak that already unlocked chapter 2.
     close: {streak: diary, gte: 7, since_open: ch2-mistake}

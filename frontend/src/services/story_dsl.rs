@@ -33,6 +33,11 @@ pub struct Story {
 pub struct Task {
     pub id: String,
     pub title: Loc,
+    /// Compact label for the story hub's active-task plate. When set (and the task
+    /// has a counter), it's shown there instead of `title`, with `{x}` = current
+    /// progress and `{n}` = target filled in (e.g. "Дневник питания: 3/7 дней").
+    #[serde(default)]
+    pub short: Option<Loc>,
     /// When the task becomes active (within its open chapter). Default: always.
     #[serde(default)]
     pub enable: Cond,

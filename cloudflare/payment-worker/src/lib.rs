@@ -1260,13 +1260,17 @@ async fn internal_usage(mut req: Request, env: &Env) -> Result<Response> {
 
     let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
     let user_id = body.get("userId").and_then(|v| v.as_str()).unwrap_or("").trim();
-    let tokens = body.get("tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+    let i64f = |k: &str| body.get(k).and_then(|v| v.as_i64()).unwrap_or(0).max(0);
+    let in_tokens = i64f("inTokens");
+    let out_tokens = i64f("outTokens");
+    let in_neurons = i64f("inNeurons");
+    let out_neurons = i64f("outNeurons");
     let source = match body.get("source").and_then(|v| v.as_str()) {
         Some("vision") => "vision",
         _ => "text",
     };
     // No-op (still 200) on nothing to record — a well-formed but empty report.
-    if user_id.is_empty() || tokens <= 0 {
+    if user_id.is_empty() || in_tokens + out_tokens <= 0 {
         return Response::from_json(&serde_json::json!({ "ok": true }));
     }
 
@@ -1274,7 +1278,11 @@ async fn internal_usage(mut req: Request, env: &Env) -> Result<Response> {
     do_post(
         &stub,
         "/add",
-        &serde_json::json!({ "userId": user_id, "tokens": tokens, "source": source }),
+        &serde_json::json!({
+            "userId": user_id, "source": source,
+            "inTokens": in_tokens, "outTokens": out_tokens,
+            "inNeurons": in_neurons, "outNeurons": out_neurons,
+        }),
     )
     .await?;
     Response::from_json(&serde_json::json!({ "ok": true }))

@@ -465,38 +465,60 @@ pub async fn receipt_detail(id: &str) -> Result<Option<ReceiptFull>, ApiError> {
 
 // ── Token usage (payment-worker UsageDO; same expert JWT / approved-admins gate) ──
 
-/// One user's AI-token consumption: `tokens` is the grand total, split into
-/// `text` (ai-worker) and `vision` (ocr-queue) sources.
+/// One user's AI usage over a window. Raw components are persisted so cost is
+/// re-derivable if the tariff changes. `*_neurons` are MICRO-neurons (neurons×1e6);
+/// only the text source (Cloudflare Workers AI) carries neurons — vision runs on the
+/// on-prem GPU and has none.
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserUsage {
     #[serde(rename = "userId")]
     pub user_id: String,
-    #[serde(default)]
-    pub tokens: i64,
-    #[serde(default)]
-    pub text: i64,
-    #[serde(default)]
-    pub vision: i64,
+    #[serde(rename = "inTokens", default)]
+    pub in_tokens: i64,
+    #[serde(rename = "outTokens", default)]
+    pub out_tokens: i64,
+    #[serde(rename = "inNeurons", default)]
+    pub in_neurons: i64,
+    #[serde(rename = "outNeurons", default)]
+    pub out_neurons: i64,
 }
 
-/// Per-day total tokens across all users.
+impl UserUsage {
+    pub fn tokens(&self) -> i64 { self.in_tokens + self.out_tokens }
+    /// Total neurons (real, not micro).
+    pub fn neurons(&self) -> f64 { (self.in_neurons + self.out_neurons) as f64 / 1e6 }
+}
+
+/// One (week_start, user) row from the long-term weekly table.
 #[derive(Debug, Clone, Deserialize)]
-pub struct DayUsage {
-    pub day: String,
-    #[serde(default)]
-    pub tokens: i64,
+pub struct WeeklyUsage {
+    #[serde(rename = "weekStart", default)]
+    pub week_start: String,
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    #[serde(rename = "inNeurons", default)]
+    pub in_neurons: i64,
+    #[serde(rename = "outNeurons", default)]
+    pub out_neurons: i64,
 }
 
-/// GET /admin/usage response: per-user totals (DESC by tokens), per-day totals
-/// (ASC by day), and the grand total.
+impl WeeklyUsage {
+    pub fn neurons(&self) -> f64 { (self.in_neurons + self.out_neurons) as f64 / 1e6 }
+}
+
+/// GET /admin/usage response: the current week per-user (`week`, DESC by neurons),
+/// the long-term weekly rows (`weekly`), and the price constant so the admin renders
+/// the cost AND can recompute it if the tariff moves.
 #[derive(Debug, Clone, Deserialize)]
 pub struct UsageReport {
+    #[serde(rename = "weekStart", default)]
+    pub week_start: String,
     #[serde(default)]
-    pub users: Vec<UserUsage>,
+    pub week: Vec<UserUsage>,
     #[serde(default)]
-    pub days: Vec<DayUsage>,
-    #[serde(default)]
-    pub total: i64,
+    pub weekly: Vec<WeeklyUsage>,
+    #[serde(rename = "priceUsdPer1kNeurons", default)]
+    pub price_usd_per_1k_neurons: f64,
 }
 
 /// GET /admin/usage (payment-worker). Per-user + per-day AI-token consumption.

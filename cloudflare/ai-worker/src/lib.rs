@@ -191,35 +191,49 @@ async fn handle(req: Request, env: &Env, ctx: &Context) -> Result<Response> {
 // fail the user's AI request. On any error we log loudly (console_error!) and
 // swallow. INTERNAL_PUSH_KEY-guarded; if that key is unset we skip + log.
 
-/// Pull `usage.total_tokens` (fallback prompt_tokens + completion_tokens) out of a
-/// value carrying a top-level `usage` object. Returns None when no positive count.
-fn usage_tokens(val: &serde_json::Value) -> Option<i64> {
-    let usage = val.get("usage")?;
-    let total = usage.get("total_tokens").and_then(|v| v.as_i64());
-    let total = match total {
-        Some(t) => t,
-        None => {
-            let p = usage.get("prompt_tokens").and_then(|v| v.as_i64());
-            let c = usage.get("completion_tokens").and_then(|v| v.as_i64());
-            match (p, c) {
-                (Some(p), Some(c)) => p + c,
-                _ => return None,
-            }
-        }
-    };
-    if total > 0 {
-        Some(total)
-    } else {
-        None
+/// Micro-neurons (neurons × 1e6) per token, as (input, output), for each model.
+/// Cloudflare prices Workers AI in NEURONS per MILLION tokens — which is exactly
+/// micro-neurons PER TOKEN, so the cost is an exact integer: prompt·in + completion·out.
+/// Input and output are billed at different rates. Keep in sync with
+/// https://developers.cloudflare.com/workers-ai/platform/pricing/
+fn neuron_rates(model: &str) -> (i64, i64) {
+    match model {
+        "@cf/qwen/qwen3-30b-a3b-fp8" => (4_625, 30_475),
+        // Only qwen3-30b is used for text today; price unknown models at its rates
+        // as a best-effort estimate (the caller logs the unknown model).
+        _ => (4_625, 30_475),
     }
 }
 
-/// POST the usage to payment-worker over the PAYMENT service binding. Best-effort:
-/// logs and swallows every failure. Skips (with a log) if INTERNAL_PUSH_KEY is unset.
-async fn report_usage(env: &Env, user_id: &str, tokens: i64) {
-    if tokens <= 0 || user_id.is_empty() {
+/// (prompt_tokens, completion_tokens) from a value carrying a top-level `usage`.
+/// Falls back to attributing a lone total to OUTPUT (the pricier rate → conservative
+/// upper bound). None when no positive count.
+fn usage_split(val: &serde_json::Value) -> Option<(i64, i64)> {
+    let usage = val.get("usage")?;
+    let p = usage.get("prompt_tokens").and_then(|v| v.as_i64());
+    let c = usage.get("completion_tokens").and_then(|v| v.as_i64());
+    match (p, c) {
+        (Some(p), Some(c)) if p + c > 0 => Some((p.max(0), c.max(0))),
+        _ => match usage.get("total_tokens").and_then(|v| v.as_i64()) {
+            Some(t) if t > 0 => Some((0, t)),
+            _ => None,
+        },
+    }
+}
+
+/// POST usage to payment-worker over the PAYMENT service binding. Records total
+/// tokens AND the Cloudflare-billable NEURONS (input·in_rate + output·out_rate,
+/// micro-neurons). Best-effort: logs and swallows every failure; skips (logs) if
+/// INTERNAL_PUSH_KEY is unset.
+async fn report_usage(env: &Env, user_id: &str, model: &str, prompt: i64, completion: i64) {
+    let (prompt, completion) = (prompt.max(0), completion.max(0));
+    if prompt + completion <= 0 || user_id.is_empty() {
         return;
     }
+    let (in_rate, out_rate) = neuron_rates(model);
+    // micro-neurons (neurons × 1e6): rate is "neurons per M tokens" == µ-neurons/token.
+    let in_neurons = prompt * in_rate;
+    let out_neurons = completion * out_rate;
     let key = match secret_or_var(env, "INTERNAL_PUSH_KEY").await {
         Ok(k) => k,
         Err(reason) => {
@@ -227,16 +241,31 @@ async fn report_usage(env: &Env, user_id: &str, tokens: i64) {
             return;
         }
     };
-    if let Err(e) = report_usage_inner(env, &key, user_id, tokens).await {
+    if let Err(e) =
+        report_usage_inner(env, &key, user_id, prompt, completion, in_neurons, out_neurons).await
+    {
         console_error!("usage-report failed (best-effort, swallowed): {e:?}");
     }
 }
 
-async fn report_usage_inner(env: &Env, key: &str, user_id: &str, tokens: i64) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+async fn report_usage_inner(
+    env: &Env,
+    key: &str,
+    user_id: &str,
+    in_tokens: i64,
+    out_tokens: i64,
+    in_neurons: i64,
+    out_neurons: i64,
+) -> Result<()> {
     let headers = Headers::new();
     headers.set("X-Internal-Key", key)?;
     headers.set("Content-Type", "application/json")?;
-    let body = serde_json::json!({ "userId": user_id, "tokens": tokens, "source": "text" });
+    let body = serde_json::json!({
+        "userId": user_id, "source": "text",
+        "inTokens": in_tokens, "outTokens": out_tokens,
+        "inNeurons": in_neurons, "outNeurons": out_neurons,
+    });
     let mut init = RequestInit::new();
     init.with_method(Method::Post)
         .with_headers(headers)
@@ -257,6 +286,7 @@ async fn report_usage_inner(env: &Env, key: &str, user_id: &str, tokens: i64) ->
 async fn report_stream_usage(
     env: &Env,
     user_id: String,
+    model: String,
     branch: worker::web_sys::ReadableStream,
 ) {
     let bytes = match drain_stream(&branch).await {
@@ -267,7 +297,7 @@ async fn report_stream_usage(
         }
     };
     let text = String::from_utf8_lossy(&bytes);
-    let mut found: Option<i64> = None;
+    let mut found: Option<(i64, i64)> = None;
     for line in text.lines() {
         let data = match line.strip_prefix("data:") {
             Some(d) => d.trim(),
@@ -277,13 +307,13 @@ async fn report_stream_usage(
             continue;
         }
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
-            if let Some(t) = usage_tokens(&val) {
-                found = Some(t);
+            if let Some(split) = usage_split(&val) {
+                found = Some(split);
             }
         }
     }
     match found {
-        Some(tokens) => report_usage(env, &user_id, tokens).await,
+        Some((p, c)) => report_usage(env, &user_id, &model, p, c).await,
         None => console_error!(
             "usage-report: no usage chunk in stream (include_usage may be unsupported); reporting nothing"
         ),
@@ -491,11 +521,12 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
     if !want_stream {
         let out_val: serde_json::Value = serde_wasm_bindgen::from_value(out)
             .map_err(|e| Error::RustError(format!("AI.run output decode: {e}")))?;
-        // Best-effort TEXT token accounting (never blocks/affects the response).
-        if let Some(tokens) = usage_tokens(&out_val) {
+        // Best-effort TEXT token/neuron accounting (never blocks/affects the response).
+        if let Some((p, c)) = usage_split(&out_val) {
             let env = env.clone();
             let user_id = user_id.to_string();
-            ctx.wait_until(async move { report_usage(&env, &user_id, tokens).await });
+            let model = model.clone();
+            ctx.wait_until(async move { report_usage(&env, &user_id, &model, p, c).await });
         }
         return Response::from_json(&out_val);
     }
@@ -510,7 +541,8 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
     {
         let env = env.clone();
         let user_id = user_id.to_string();
-        ctx.wait_until(async move { report_stream_usage(&env, user_id, usage_branch).await });
+        let model = model.clone();
+        ctx.wait_until(async move { report_stream_usage(&env, user_id, model, usage_branch).await });
     }
     let resp = Response::from_stream(worker::ByteStream::from(client_branch))?;
     let headers = resp.headers();

@@ -83,10 +83,16 @@ impl QueueDO {
         let headers = Headers::new();
         headers.set("X-Internal-Key", &key)?;
         headers.set("Content-Type", "application/json")?;
+        // Vision runs on the on-prem GPU, NOT Cloudflare Workers AI — so it carries
+        // NO Cloudflare neurons (inNeurons/outNeurons = 0). We record the model's
+        // answer_tokens as output tokens for the volume/on-prem-load view only.
         let body = serde_json::json!({
             "userId": user_id,
-            "tokens": tokens,
             "source": "vision",
+            "inTokens": 0,
+            "outTokens": tokens,
+            "inNeurons": 0,
+            "outNeurons": 0,
         })
         .to_string();
         let mut init = RequestInit::new();

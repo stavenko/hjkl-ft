@@ -1064,33 +1064,6 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
     }
 }
 
-/// Compact "12.3K" / "1.2M" token count for tight bar labels.
-fn fmt_tokens_short(n: i64) -> String {
-    let n = n.max(0);
-    if n < 1_000 {
-        n.to_string()
-    } else if n < 1_000_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
-    } else {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    }
-}
-
-/// Full grouped-thousands token count for the headline, e.g. 1234567 → "1 234 567".
-fn fmt_tokens_full(n: i64) -> String {
-    let s = n.max(0).to_string();
-    let bytes = s.as_bytes();
-    let mut out = String::new();
-    let len = bytes.len();
-    for (i, b) in bytes.iter().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
-            out.push(' ');
-        }
-        out.push(*b as char);
-    }
-    out
-}
-
 /// A short user-id label for a bar (first / last chars, to keep bars readable).
 fn short_uid(uid: &str) -> String {
     let chars: Vec<char> = uid.chars().collect();
@@ -1103,20 +1076,35 @@ fn short_uid(uid: &str) -> String {
     }
 }
 
-/// Inline SVG BAR HISTOGRAM: one bar per user (height ∝ tokens), DESC. Each bar
-/// is labelled with a short user id and its token count. No external libs (mirrors
-/// `datashare::weight_svg`). `users` is assumed DESC by tokens (as the API returns).
-fn usage_histogram(users: &[api::UserUsage]) -> leptos::View {
+/// USD for a real neuron count at the given $/1000-neurons tariff.
+fn usd_of(neurons: f64, price_per_1k: f64) -> f64 {
+    neurons / 1000.0 * price_per_1k
+}
+
+/// Adaptive USD formatting — test amounts are tiny, so keep precision when small.
+fn fmt_usd(usd: f64) -> String {
+    if usd <= 0.0 {
+        "$0".to_string()
+    } else if usd >= 1.0 {
+        format!("${usd:.2}")
+    } else if usd >= 0.01 {
+        format!("${usd:.3}")
+    } else {
+        format!("${usd:.5}")
+    }
+}
+
+/// Inline SVG BAR HISTOGRAM: one bar per user, height ∝ NEURONS, labelled with the
+/// COST (₽/$ tariff). DESC by neurons (as the API returns). Vision has no neurons,
+/// so this is the Cloudflare-billable spend per user this week.
+fn usage_histogram(users: &[api::UserUsage], price_per_1k: f64) -> leptos::View {
     if users.is_empty() {
         return view! { <div class="row__meta">"Нет данных для графика"</div> }.into_view();
     }
-    // Cap the number of bars we draw so a wide roster stays legible; the rest are
-    // still counted in the headline totals.
     const MAX_BARS: usize = 40;
     let shown: Vec<api::UserUsage> = users.iter().take(MAX_BARS).cloned().collect();
     let n = shown.len();
-
-    let max_tokens = shown.iter().map(|u| u.tokens).max().unwrap_or(0).max(1) as f64;
+    let max_neurons = shown.iter().map(|u| u.neurons()).fold(0.0_f64, f64::max).max(1.0);
 
     let (w, h) = (600.0_f64, 240.0_f64);
     let (pad_l, pad_r, pad_t, pad_b) = (6.0_f64, 6.0_f64, 22.0_f64, 42.0_f64);
@@ -1130,21 +1118,19 @@ fn usage_histogram(users: &[api::UserUsage]) -> leptos::View {
         .enumerate()
         .map(|(i, u)| {
             let cx = pad_l + slot * (i as f64 + 0.5);
-            let bh = (u.tokens as f64 / max_tokens) * plot_h;
+            let bh = (u.neurons() / max_neurons) * plot_h;
             let x = cx - bar_w / 2.0;
             let y = pad_t + (plot_h - bh);
-            let count = fmt_tokens_short(u.tokens);
+            let cost = fmt_usd(usd_of(u.neurons(), price_per_1k));
             let uid = short_uid(&u.user_id);
             view! {
                 <g>
                     <rect x=format!("{x:.1}") y=format!("{y:.1}")
                           width=format!("{bar_w:.1}") height=format!("{:.1}", bh.max(0.0))
                           rx="3" fill="var(--accent)"/>
-                    // token count above the bar
                     <text x=format!("{cx:.1}") y=format!("{:.1}", y - 5.0)
-                          text-anchor="middle" font-size="11" fill="var(--text)"
-                          font-weight="600">{count}</text>
-                    // short uid below the axis, rotated to fit
+                          text-anchor="middle" font-size="10" fill="var(--text)"
+                          font-weight="600">{cost}</text>
                     <text x=format!("{cx:.1}") y=format!("{:.1}", h - pad_b + 12.0)
                           text-anchor="end" font-size="10" fill="var(--muted)"
                           transform=format!("rotate(-35 {cx:.1} {:.1})", h - pad_b + 12.0)>
@@ -1173,28 +1159,42 @@ fn usage_histogram(users: &[api::UserUsage]) -> leptos::View {
     .into_view()
 }
 
-/// Small per-day total bars beneath the per-user histogram (ASC by day).
-fn usage_days(days: &[api::DayUsage]) -> leptos::View {
-    if days.is_empty() {
-        return ().into_view();
+/// Long-term "average week": per-week total cost bars from the weekly rollup table,
+/// plus the mean weekly cost across all stored weeks.
+fn usage_weekly(weekly: &[api::WeeklyUsage], price_per_1k: f64) -> leptos::View {
+    if weekly.is_empty() {
+        return view! { <div class="row__meta">"Недельная агрегация появится после первого воскресенья"</div> }
+            .into_view();
     }
-    let max_tokens = days.iter().map(|d| d.tokens).max().unwrap_or(0).max(1) as f64;
+    // Sum neurons per week_start (rows are per user).
+    let mut weeks: Vec<(String, f64)> = Vec::new();
+    for r in weekly {
+        match weeks.iter_mut().find(|(w, _)| *w == r.week_start) {
+            Some((_, n)) => *n += r.neurons(),
+            None => weeks.push((r.week_start.clone(), r.neurons())),
+        }
+    }
+    let avg_usd = usd_of(weeks.iter().map(|(_, n)| *n).sum::<f64>() / weeks.len() as f64, price_per_1k);
+    let max_n = weeks.iter().map(|(_, n)| *n).fold(0.0_f64, f64::max).max(1.0);
     view! {
+        <div class="row__meta" style="margin-bottom:8px;">
+            "Средняя неделя: "<b style="color:var(--text);">{fmt_usd(avg_usd)}</b>
+            {format!(" (по {} нед.)", weeks.len())}
+        </div>
         <div style="display:flex; flex-direction:column; gap:6px;">
-            {days.iter().cloned().map(|d| {
-                let pct = (d.tokens as f64 / max_tokens * 100.0).clamp(0.0, 100.0);
-                let count = fmt_tokens_short(d.tokens);
+            {weeks.into_iter().map(|(week, neurons)| {
+                let pct = (neurons / max_n * 100.0).clamp(0.0, 100.0);
+                let cost = fmt_usd(usd_of(neurons, price_per_1k));
                 view! {
                     <div style="display:flex; align-items:center; gap:10px;">
                         <span class="mono" style="width:92px; flex:none; color:var(--muted); font-size:.82rem;">
-                            {d.day}
+                            {week}
                         </span>
                         <div style="flex:1; height:14px; background:var(--surface-2); border-radius:7px; overflow:hidden;">
-                            <div style=format!(
-                                "height:100%; width:{pct:.1}%; background:var(--accent); border-radius:7px;")></div>
+                            <div style=format!("height:100%; width:{pct:.1}%; background:var(--accent); border-radius:7px;")></div>
                         </div>
-                        <span class="mono" style="width:64px; flex:none; text-align:right; font-weight:600;">
-                            {count}
+                        <span class="mono" style="width:72px; flex:none; text-align:right; font-weight:600;">
+                            {cost}
                         </span>
                     </div>
                 }
@@ -1235,8 +1235,8 @@ fn Usage(view: RwSignal<View>) -> impl IntoView {
         <header class="appbar">
             <div class="ring"></div>
             <div style="flex: 1; min-width: 0;">
-                <div class="appbar__title">"Токены"</div>
-                <div class="appbar__sub">"расход ИИ-токенов по пользователям"</div>
+                <div class="appbar__title">"Нейроны"</div>
+                <div class="appbar__sub">"расход ИИ по пользователям и стоимость"</div>
             </div>
             <button class="btn btn--ghost btn--icon" attr:aria-label="Обновить" on:click=move |_| load.call(())>
                 <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
@@ -1254,27 +1254,31 @@ fn Usage(view: RwSignal<View>) -> impl IntoView {
                     return ().into_view();
                 };
 
-                if r.users.is_empty() && r.total == 0 {
+                if r.week.is_empty() && r.weekly.is_empty() {
                     return view! {
                         <div class="empty"><div class="empty__ring"></div><p>"Пока нет данных"</p></div>
                     }.into_view();
                 }
 
-                let user_count = r.users.len();
-                let avg = if user_count > 0 { r.total / user_count as i64 } else { 0 };
-                let hist = usage_histogram(&r.users);
-                let days = usage_days(&r.days);
-                let has_days = !r.days.is_empty();
+                let price = r.price_usd_per_1k_neurons;
+                let user_count = r.week.len();
+                let total_neurons: f64 = r.week.iter().map(|u| u.neurons()).sum();
+                let total_usd = usd_of(total_neurons, price);
+                let avg_usd = if user_count > 0 { total_usd / user_count as f64 } else { 0.0 };
+                let hist = usage_histogram(&r.week, price);
+                let weekly = usage_weekly(&r.weekly, price);
+                let has_week = !r.week.is_empty();
+                let week_start = r.week_start.clone();
 
                 view! {
                     <div class="pad">
-                        // Headline: total tokens · users · average per user.
+                        // Headline: this-week cost · users · average per user (this week).
                         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
                             <div style="flex:1; min-width:120px; padding:12px; background:var(--surface-2); \
                                         border:1px solid var(--line); border-radius:10px;">
-                                <div class="row__meta">"Всего токенов"</div>
+                                <div class="row__meta">"Эта неделя, ₽/$"</div>
                                 <div class="mono" style="font-size:1.25rem; font-weight:700;">
-                                    {fmt_tokens_full(r.total)}
+                                    {fmt_usd(total_usd)}
                                 </div>
                             </div>
                             <div style="flex:1; min-width:100px; padding:12px; background:var(--surface-2); \
@@ -1288,20 +1292,25 @@ fn Usage(view: RwSignal<View>) -> impl IntoView {
                                         border:1px solid var(--line); border-radius:10px;">
                                 <div class="row__meta">"В среднем на пользователя"</div>
                                 <div class="mono" style="font-size:1.25rem; font-weight:700;">
-                                    {fmt_tokens_full(avg)}
+                                    {fmt_usd(avg_usd)}
                                 </div>
                             </div>
                         </div>
 
-                        // Per-user histogram (the "how much each tester eats" view).
-                        <div style="font-weight:650; margin:0 0 8px;">"По пользователям"</div>
-                        {hist}
+                        <div class="row__meta" style="margin-bottom:12px;">
+                            {format!("тариф ${price}/1000 нейронов · неделя с {week_start} · \
+                                      всего {:.0} нейронов", total_neurons)}
+                        </div>
 
-                        // Per-day totals beneath.
-                        {has_days.then(|| view! {
-                            <div style="font-weight:650; margin:18px 0 8px;">"По дням"</div>
-                            {days}
+                        // Per-user histogram (the "how much each tester eats" view).
+                        {has_week.then(|| view! {
+                            <div style="font-weight:650; margin:0 0 8px;">"По пользователям (эта неделя)"</div>
+                            {hist.clone()}
                         })}
+
+                        // Long-term weekly rollup ("average week").
+                        <div style="font-weight:650; margin:18px 0 8px;">"По неделям"</div>
+                        {weekly}
                     </div>
                 }.into_view()
             }}

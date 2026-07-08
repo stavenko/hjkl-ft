@@ -517,6 +517,14 @@ chapters:
       - id: ch4-amount
         icon: "🥩"
         title: {en: "How much protein to eat?", ru: "Сколько надо есть белка?"}
+        blocks:
+          - {text_key: story.ch4.amount.p1}
+          - {text_key: story.ch4.amount.p2}
+          - {text_key: story.ch4.amount.p3}
+          - {text_key: story.ch4.amount.p4}
+          - {text_key: story.ch4.amount.p5}
+          - {text_key: story.ch4.amount.p6}
+          - {text_key: story.ch4.amount.p7}
       - id: ch4-sources
         icon: "🍗"
         title: {en: "Sources — what kinds there are", ru: "Источники, какие бывают"}

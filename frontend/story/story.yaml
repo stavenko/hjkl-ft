@@ -69,6 +69,9 @@ tasks:
     title: {en: "Log your first food", ru: "Внесите первую еду"}
     enable: {section_opened: first-food}   # armed when the section is opened
     close:  {event: food_logged}            # fired only while enabled
+  - id: diary_streak
+    title: {en: "Keep the food diary 7 days in a row", ru: "Ведите дневник еды 7 дней подряд"}
+    close: {streak: diary, gte: 7}
   - id: repeat_food
     title: {en: "Repeat yesterday's food", ru: "Повторите вчерашнюю еду"}
     close:  {event: food_repeated}          # fired by "Repeat today" in the diary
@@ -191,7 +194,11 @@ chapters:
       - id: first-food
         icon: "🍽️"
         title: {en: "My first food entries", ru: "Мои первые записи еды"}
-        tasks: [first_food]
+        tasks: [first_food, diary_streak]
+        # The 7-day diary streak is shown as a task but does NOT gate the next
+        # section (same pattern as `accounting`'s weight_streak) — only the first
+        # logged food advances the story.
+        complete: {task: first_food}
         on_open: [arm_first_food]
         blocks:
           - {text_key: story.ff.p1}

@@ -16,6 +16,10 @@ const IOS_SEPARATOR: &str = "border-bottom: 0.5px solid var(--bulma-border-weak)
 // выполнит некоторые задания из «Истории».
 const SHOW_GOALS: bool = false;
 
+// TODO: Панель диагностических логов (notif/deep-link). Скрыта до тех пор, пока
+// снова не понадобится для отладки — вернуть в true, чтобы показать.
+const SHOW_DIAG_LOG: bool = false;
+
 /// Compose the «Разработка» view: build version + whether a service worker
 /// controls the page, then the page journal (`rn_pj_txt`) — lifecycle and
 /// notification-receipt breadcrumbs written by index.html / services::diag.
@@ -502,27 +506,29 @@ pub fn SettingsPage() -> impl IntoView {
             </div>
 
             // ---- Разработка (notif/deep-link diagnostics) ----
-            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.dev")}</p>
-            <div style=IOS_CARD>
-                <div style="padding: 12px 16px;">
-                    <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                        <button class="button is-small" on:click=refresh_diag>{move || t("settings.dev_refresh")}</button>
-                        // Copy the CURRENT log snapshot to the clipboard — selecting text in
-                        // the <pre> is impossible because the 1s live refresh re-renders it
-                        // (the heartbeat line changes every tick) and drops the selection.
-                        <button class="button is-small" on:click=move |_| {
-                            let text = read_diag_log();
-                            spawn_local(async move {
-                                let clipboard = web_sys::window().unwrap().navigator().clipboard();
-                                let _ = wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&text)).await;
-                            });
-                        }>{move || t("settings.dev_copy")}</button>
+            {SHOW_DIAG_LOG.then(|| view! {
+                <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.dev")}</p>
+                <div style=IOS_CARD>
+                    <div style="padding: 12px 16px;">
+                        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                            <button class="button is-small" on:click=refresh_diag>{move || t("settings.dev_refresh")}</button>
+                            // Copy the CURRENT log snapshot to the clipboard — selecting text in
+                            // the <pre> is impossible because the 1s live refresh re-renders it
+                            // (the heartbeat line changes every tick) and drops the selection.
+                            <button class="button is-small" on:click=move |_| {
+                                let text = read_diag_log();
+                                spawn_local(async move {
+                                    let clipboard = web_sys::window().unwrap().navigator().clipboard();
+                                    let _ = wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&text)).await;
+                                });
+                            }>{move || t("settings.dev_copy")}</button>
+                        </div>
+                        <pre style="max-height: 44vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 11px; line-height: 1.4; margin: 0; background: var(--bulma-background); padding: 8px; border-radius: 8px; -webkit-user-select: text; user-select: text;">
+                            {move || { let s = diag_log.get(); if s.is_empty() { t("settings.dev_empty").to_string() } else { s } }}
+                        </pre>
                     </div>
-                    <pre style="max-height: 44vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 11px; line-height: 1.4; margin: 0; background: var(--bulma-background); padding: 8px; border-radius: 8px; -webkit-user-select: text; user-select: text;">
-                        {move || { let s = diag_log.get(); if s.is_empty() { t("settings.dev_empty").to_string() } else { s } }}
-                    </pre>
                 </div>
-            </div>
+            })}
 
             // ---- Subscription row → /settings/subscription ----
             <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.subscription")}</p>

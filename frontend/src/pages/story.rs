@@ -174,11 +174,7 @@ pub fn StoryPage() -> impl IntoView {
 
 /// "Chapter N" label by chapter id (purely cosmetic numbering for the header).
 fn tr_chapter_label(id: &str) -> String {
-    let n = match id {
-        "ch1" => 1,
-        "ch2" => 2,
-        "ch3" => 3,
-        _ => 0,
-    };
+    // Numbering follows the "ch<N>" id convention.
+    let n = id.strip_prefix("ch").and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
     format!("{} {}", i18n::t("story.chapter"), n)
 }

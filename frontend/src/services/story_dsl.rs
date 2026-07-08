@@ -463,9 +463,9 @@ mod tests {
     }
 
     #[test]
-    fn yaml_parses_and_has_three_chapters() {
-        assert_eq!(story().chapters.len(), 3);
-        assert_eq!(story().tasks.len(), 26);
+    fn yaml_parses_and_has_four_chapters() {
+        assert_eq!(story().chapters.len(), 4);
+        assert_eq!(story().tasks.len(), 27);
     }
 
     #[test]

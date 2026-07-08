@@ -505,3 +505,38 @@ chapters:
           - {text_key: story.ch3.habits.p6}
           - {text_key: story.ch3.habits.p7}
           - {text_key: story.ch3.habits.p8}
+
+  - id: ch4
+    title: {en: "Protein", ru: "Белок"}
+    # TODO(open): unlock condition is a placeholder — gates on the protein habit
+    # being established (protein_streak). Adjust once the intended gate is decided.
+    open: {streak: protein, gte: 7}
+    sections:
+      # NOTE: section prose (blocks) is intentionally empty — awaiting the verbatim
+      # lesson text. Titles/ids/icons are scaffolded so the chapter is navigable.
+      - id: ch4-amount
+        icon: "🥩"
+        title: {en: "How much protein to eat?", ru: "Сколько надо есть белка?"}
+      - id: ch4-sources
+        icon: "🍗"
+        title: {en: "Sources — what kinds there are", ru: "Источники, какие бывают"}
+      - id: ch4-dairy
+        icon: "🥛"
+        # TODO: «планка по кальцию» — a NEW calcium-planka mechanic (day-source +
+        # sensor + widget + task), not yet built. Wire its task here once it exists.
+        title: {en: "Dairy protein sources (+ calcium planka)", ru: "Молочные источники белка (+ планка по кальцию)"}
+      - id: ch4-gout
+        icon: "🦶"
+        title: {en: "Gout", ru: "Подагра"}
+      - id: ch4-collagen
+        icon: "🧬"
+        title: {en: "Collagen", ru: "Коллаген"}
+      - id: ch4-plant
+        icon: "🌱"
+        title: {en: "Plant protein", ru: "Растительный белок"}
+      - id: ch4-powder
+        icon: "🥤"
+        title: {en: "Protein from a tub", ru: "Протеин из банки"}
+      - id: ch4-amino
+        icon: "⚗️"
+        title: {en: "Amino acids", ru: "Аминокислоты"}

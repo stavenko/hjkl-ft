@@ -150,6 +150,54 @@ pub fn bmi(weight_kg: f64, height_cm: f64) -> Option<f64> {
     Some(weight_kg / (m * m))
 }
 
+/// Current age in whole years from the stored birth year (approximate — no
+/// birthday tracking). `None` if the birth year is unset/out of range.
+pub fn get_age_years() -> Option<i32> {
+    let current_year = chrono::Utc::now().format("%Y").to_string().parse::<i32>().unwrap_or(2026);
+    get_birth_year().map(|by| current_year - by)
+}
+
+/// Daily protein target in grams, computed from estimated FAT-FREE MASS rather
+/// than raw body weight. We estimate body-fat % with the Deurenberg (1991)
+/// equation from BMI + age + sex — i.e. assuming an ordinary, UNTRAINED body
+/// composition typical for the person's population — then take 1.6 g of protein
+/// per kg of fat-free mass:
+///
+/// ```text
+/// BF%   = 1.2·BMI + 0.23·age − 10.8·sex − 5.4      (sex: 1 male, 0 female)
+/// FFM   = weight · (1 − BF%/100)
+/// target = round(1.6 · FFM)
+/// ```
+///
+/// Returns `None` if weight/height is non-positive (BMI undefined). The estimated
+/// BF% is clamped to a physiological [3, 60]% before FFM so an out-of-range
+/// extrapolation can't yield an absurd (or negative) target.
+pub fn protein_target_g(weight_kg: f64, height_cm: f64, age_years: i32, sex: Sex) -> Option<u32> {
+    if weight_kg <= 0.0 {
+        return None;
+    }
+    let bmi = bmi(weight_kg, height_cm)?;
+    let sex_term = match sex {
+        Sex::Male => 1.0,
+        Sex::Female => 0.0,
+    };
+    let bf_pct = (1.2 * bmi + 0.23 * age_years as f64 - 10.8 * sex_term - 5.4).clamp(3.0, 60.0);
+    let ffm = weight_kg * (1.0 - bf_pct / 100.0);
+    Some((1.6 * ffm).round() as u32)
+}
+
+/// Convenience over [`protein_target_g`]: pulls height/age/sex from the profile
+/// and computes the target for `weight_kg`. Returns 0 when any of those is unset
+/// (the setup section captures them before protein ever matters), so the task
+/// simply shows «0 г» until the profile is complete — the same fallback the
+/// weight-only formula used.
+pub fn protein_target_from_profile(weight_kg: f64) -> u32 {
+    match (get_height_cm(), get_age_years(), get_sex()) {
+        (Some(h), Some(age), Some(sex)) => protein_target_g(weight_kg, h, age, sex).unwrap_or(0),
+        _ => 0,
+    }
+}
+
 /// One-time migration of the legacy device-global localStorage profile (sex +
 /// height) into the synced `profile` row.
 ///
@@ -186,4 +234,32 @@ pub async fn migrate_from_local_storage() {
     db::put("profile", &row).await;
     let _ = ls.remove_item(KEY_SEX);
     let _ = ls.remove_item(KEY_HEIGHT);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deurenberg_worked_example_man() {
+        // Man, 35 y, 180 cm, 90 kg → BMI 27.8, BF% ≈ 25%, FFM ≈ 67.3 kg,
+        // protein 1.6 g/kg FFM ≈ 108 g (the reference example).
+        let g = protein_target_g(90.0, 180.0, 35, Sex::Male).unwrap();
+        assert_eq!(g, 108);
+    }
+
+    #[test]
+    fn deurenberg_woman_higher_bf_lower_target() {
+        // Same anthropometrics but female (sex term 0) → higher BF%, less FFM,
+        // so a lower protein target than the man.
+        let woman = protein_target_g(90.0, 180.0, 35, Sex::Female).unwrap();
+        let man = protein_target_g(90.0, 180.0, 35, Sex::Male).unwrap();
+        assert!(woman < man, "woman {woman} should be < man {man}");
+    }
+
+    #[test]
+    fn protein_target_needs_positive_weight_and_height() {
+        assert!(protein_target_g(0.0, 180.0, 35, Sex::Male).is_none());
+        assert!(protein_target_g(90.0, 0.0, 35, Sex::Male).is_none());
+    }
 }

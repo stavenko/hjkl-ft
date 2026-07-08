@@ -269,10 +269,11 @@ async fn source_days() -> std::collections::BTreeMap<String, Vec<chrono::NaiveDa
         .collect();
     out.insert("veg".to_string(), veg);
 
-    // Protein target = 1.2 g/kg of the latest logged weight (0 if no weight).
+    // Protein target from estimated fat-free mass (Deurenberg BF% → FFM → 1.6 g/kg)
+    // of the latest logged weight; 0 if no weight / incomplete profile.
     let protein_target_g = weight_entries
         .last()
-        .map(|e| (1.2 * e.weight_kg).round() as u32)
+        .map(|e| profile::protein_target_from_profile(e.weight_kg))
         .unwrap_or(0);
 
     // Protein: days hitting the calculated target. Empty when target==0 (preserving
@@ -465,9 +466,10 @@ pub struct Progress {
     pub restaurant_food: bool,
     pub meal_split_unlocked: bool,
     pub night_feedback_viewed: bool,
-    /// The calculated daily protein target in grams: 1.2 g per kg of the latest
-    /// logged body weight, rounded up to 10 g (0 if no weight logged). Shown in
-    /// the protein task title.
+    /// The calculated daily protein target in grams: 1.6 g per kg of estimated
+    /// fat-free mass, where FFM comes from the Deurenberg (1991) BF% estimate
+    /// (BMI + age + sex). 0 if weight or profile data is missing. Shown in the
+    /// protein task title. See `profile::protein_target_g`.
     pub protein_target_g: u32,
     pub calorie_planka_set: bool,
     pub s4_done: bool,
@@ -518,13 +520,14 @@ pub async fn gather() -> Progress {
     };
     let s5_done = report_ready && !local::high_cal_drink_on(&y).await && drinks_after_open;
 
-    // Protein target = 1.2 g/kg of the latest logged weight (0 if no weight). Kept
-    // here because it is a displayed target (fill_task_target) — not a sensor.
+    // Protein target from estimated fat-free mass (Deurenberg BF% → FFM → 1.6 g/kg)
+    // of the latest logged weight. Kept here because it is a displayed target
+    // (fill_task_target) — not a sensor. 0 if no weight / incomplete profile.
     let protein_target_g = local::list_weight_entries()
         .await
         .into_iter()
         .last()
-        .map(|e| (1.2 * e.weight_kg).round() as u32)
+        .map(|e| profile::protein_target_from_profile(e.weight_kg))
         .unwrap_or(0);
 
     let sub = subscription::cached();

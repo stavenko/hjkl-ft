@@ -528,6 +528,17 @@ chapters:
       - id: ch4-sources
         icon: "🍗"
         title: {en: "Sources — what kinds there are", ru: "Источники, какие бывают"}
+        blocks:
+          - {heading: story.ch4.sources.h1}
+          - {text_key: story.ch4.sources.p1}
+          - {text_key: story.ch4.sources.p2}
+          - {text_key: story.ch4.sources.p3}
+          - {text_key: story.ch4.sources.p4}
+          - {text_key: story.ch4.sources.p5}
+          - {text_key: story.ch4.sources.p6}
+          - {text_key: story.ch4.sources.p7}
+          - {text_key: story.ch4.sources.p8}
+          - {text_key: story.ch4.sources.p9}
       - id: ch4-dairy
         icon: "🥛"
         # TODO: «планка по кальцию» — a NEW calcium-planka mechanic (day-source +

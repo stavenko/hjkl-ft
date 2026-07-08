@@ -21,10 +21,12 @@ mod providers;
 mod subscription_do;
 mod token;
 mod types;
+mod usage_do;
 
 pub use claim_do::ClaimDO;
 pub use payment_index_do::PaymentIndexDO;
 pub use subscription_do::SubscriptionDO;
+pub use usage_do::UsageDO;
 
 use providers::{provider_for, CheckoutOpts, Lava, WebhookEvent, WebhookKind};
 use token::validate_from_header;
@@ -90,6 +92,13 @@ fn index_stub(env: &Env) -> Result<worker::durable::Stub> {
 fn claim_stub(env: &Env) -> Result<worker::durable::Stub> {
     env.durable_object("CLAIM_DO")?
         .id_from_name(&format!("claims-{DO_EPOCH}"))?
+        .get_stub()
+}
+/// The single global neuro-token usage ledger. A fresh store (no epoch): it holds no
+/// money-safety state, so there is nothing to wipe on a DO_EPOCH bump.
+fn usage_stub(env: &Env) -> Result<worker::durable::Stub> {
+    env.durable_object("USAGE_DO")?
+        .id_from_name("usage")?
         .get_stub()
 }
 
@@ -643,6 +652,14 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         let stub = claim_stub(env)?;
         return relay(do_get(&stub, "/refunds").await?).await;
     }
+    // Admin: neuro-token usage aggregate (per-user totals+split, per-day totals, grand total).
+    if method == Method::Get && path == "/admin/usage" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        let stub = usage_stub(env)?;
+        return relay(do_get(&stub, "/report").await?).await;
+    }
     // Admin: recent caught receipts (each bound to its payment) — list view.
     if method == Method::Get && path == "/admin/receipts" {
         if let Err(resp) = require_admin(&req, env).await {
@@ -712,6 +729,10 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
     // receipt-worker → bind a caught receipt email (address, amount, full text) to its payment.
     if method == Method::Post && path == "/internal/receipt" {
         return internal_receipt(req, env).await;
+    }
+    // ai-worker / ocr-queue → record neuro-token usage (best-effort on the caller side).
+    if method == Method::Post && path == "/internal/usage" {
+        return internal_usage(req, env).await;
     }
     // Telegram-binding reads/writes for telegram-worker (secret lives here now).
     if method == Method::Post && path.starts_with("/internal/tg/") {
@@ -1212,6 +1233,51 @@ async fn internal_claim_subscription(mut req: Request, env: &Env) -> Result<Resp
         "noRenew": s.get("no_renew"),
         "daysLeft": days_left,
     }))
+}
+
+// ── POST /internal/usage (INTERNAL_PUSH_KEY-guarded) ──────────────────────────
+/// Record neuro-token usage into the global UsageDO. Called by ai-worker (source
+/// "text") and ocr-queue (source "vision") over their PAYMENT service binding. The
+/// key gate FAILS CLOSED: an unset INTERNAL_PUSH_KEY → 500 (never an unauthenticated
+/// write); a mismatch → 403. tokens<=0 or an empty userId is a 200 no-op.
+async fn internal_usage(mut req: Request, env: &Env) -> Result<Response> {
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) => k,
+        Err(e) => {
+            console_error!("internal_usage: {e}");
+            return Ok(error_response("internal_not_configured", 500));
+        }
+    };
+    let provided = req
+        .headers()
+        .get("X-Internal-Key")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if provided.is_empty() || provided != key {
+        return Ok(error_response("bad internal key", 403));
+    }
+
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let user_id = body.get("userId").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let tokens = body.get("tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+    let source = match body.get("source").and_then(|v| v.as_str()) {
+        Some("vision") => "vision",
+        _ => "text",
+    };
+    // No-op (still 200) on nothing to record — a well-formed but empty report.
+    if user_id.is_empty() || tokens <= 0 {
+        return Response::from_json(&serde_json::json!({ "ok": true }));
+    }
+
+    let stub = usage_stub(env)?;
+    do_post(
+        &stub,
+        "/add",
+        &serde_json::json!({ "userId": user_id, "tokens": tokens, "source": source }),
+    )
+    .await?;
+    Response::from_json(&serde_json::json!({ "ok": true }))
 }
 
 // ── POST /internal/tg/{op} (INTERNAL_PUSH_KEY-guarded) ────────────────────────

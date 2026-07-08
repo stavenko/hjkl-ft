@@ -22,10 +22,20 @@ class_name = "PaymentIndexDO"
 name = "CLAIM_DO"
 class_name = "ClaimDO"
 
+# Single global neuro-token usage ledger (per-user/day/source token accounting).
+[[durable_objects.bindings]]
+name = "USAGE_DO"
+class_name = "UsageDO"
+
 # Clean DO migration (no users to preserve): all three classes as SQLite DOs.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SubscriptionDO", "PaymentIndexDO", "ClaimDO"]
+
+# UsageDO added later as a fresh SQLite DO (neuro-token accounting).
+[[migrations]]
+tag = "usage_v1"
+new_sqlite_classes = ["UsageDO"]
 
 # /admin/* authorizes via the SUPPORT_WORKER service binding + INTERNAL_PUSH_KEY;
 # one source of truth = the support-worker approved-admins (env EXPERT_IDS bootstrap
@@ -109,6 +119,20 @@ class_name = "PaymentIndexDO"
 [[env.production.durable_objects.bindings]]
 name = "CLAIM_DO"
 class_name = "ClaimDO"
+
+[[env.production.durable_objects.bindings]]
+name = "USAGE_DO"
+class_name = "UsageDO"
+
+# Named-env migrations do NOT inherit the top-level [[migrations]] — restate them so
+# prod creates the same SQLite DO classes (three original + UsageDO).
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SubscriptionDO", "PaymentIndexDO", "ClaimDO"]
+
+[[env.production.migrations]]
+tag = "usage_v1"
+new_sqlite_classes = ["UsageDO"]
 
 [[env.production.services]]
 binding = "SUPPORT_WORKER"

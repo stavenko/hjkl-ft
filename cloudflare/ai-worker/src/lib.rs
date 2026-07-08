@@ -125,7 +125,7 @@ async fn subscription_active(env: &Env, authorization: &str) -> Result<bool> {
 }
 
 #[event(fetch)]
-async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     let origin = req
         .headers()
         .get("Origin")
@@ -149,18 +149,20 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return add_cors(resp, &origin);
     }
 
-    let resp = match handle(req, &env).await {
+    let resp = match handle(req, &env, &ctx).await {
         Ok(r) => r,
         Err(e) => error_response(&e.to_string(), 500),
     };
     add_cors(resp, &origin)
 }
 
-async fn handle(req: Request, env: &Env) -> Result<Response> {
-    // JWT verify (Authorization: Bearer). 401 on missing/invalid.
-    if validate_from_header(&req, env).await.is_err() {
-        return Ok(error_response("Unauthorized", 401));
-    }
+async fn handle(req: Request, env: &Env, ctx: &Context) -> Result<Response> {
+    // JWT verify (Authorization: Bearer). 401 on missing/invalid. Keep the sub
+    // (authenticated user_id) for backend-authoritative token accounting.
+    let user_id = match validate_from_header(&req, env).await {
+        Ok(sub) => sub,
+        Err(_) => return Ok(error_response("Unauthorized", 401)),
+    };
 
     let url = req.url()?;
     let path = url.path().to_string();
@@ -177,10 +179,143 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         if !subscription_active(env, &authorization).await? {
             return Ok(error_response("subscription_required", 402));
         }
-        return handle_chat_completions(req, env).await;
+        return handle_chat_completions(req, env, ctx, &user_id).await;
     }
 
     Ok(error_response("Not found", 404))
+}
+
+// ── Neuro-token usage accounting (best-effort) ────────────────────────────────
+// Report backend-authoritative TEXT token consumption to payment-worker, which
+// owns the global UsageDO billing store. This path is BEST-EFFORT: it must NEVER
+// fail the user's AI request. On any error we log loudly (console_error!) and
+// swallow. INTERNAL_PUSH_KEY-guarded; if that key is unset we skip + log.
+
+/// Pull `usage.total_tokens` (fallback prompt_tokens + completion_tokens) out of a
+/// value carrying a top-level `usage` object. Returns None when no positive count.
+fn usage_tokens(val: &serde_json::Value) -> Option<i64> {
+    let usage = val.get("usage")?;
+    let total = usage.get("total_tokens").and_then(|v| v.as_i64());
+    let total = match total {
+        Some(t) => t,
+        None => {
+            let p = usage.get("prompt_tokens").and_then(|v| v.as_i64());
+            let c = usage.get("completion_tokens").and_then(|v| v.as_i64());
+            match (p, c) {
+                (Some(p), Some(c)) => p + c,
+                _ => return None,
+            }
+        }
+    };
+    if total > 0 {
+        Some(total)
+    } else {
+        None
+    }
+}
+
+/// POST the usage to payment-worker over the PAYMENT service binding. Best-effort:
+/// logs and swallows every failure. Skips (with a log) if INTERNAL_PUSH_KEY is unset.
+async fn report_usage(env: &Env, user_id: &str, tokens: i64) {
+    if tokens <= 0 || user_id.is_empty() {
+        return;
+    }
+    let key = match secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) => k,
+        Err(reason) => {
+            console_error!("usage-report skipped: INTERNAL_PUSH_KEY unset: {reason}");
+            return;
+        }
+    };
+    if let Err(e) = report_usage_inner(env, &key, user_id, tokens).await {
+        console_error!("usage-report failed (best-effort, swallowed): {e:?}");
+    }
+}
+
+async fn report_usage_inner(env: &Env, key: &str, user_id: &str, tokens: i64) -> Result<()> {
+    let headers = Headers::new();
+    headers.set("X-Internal-Key", key)?;
+    headers.set("Content-Type", "application/json")?;
+    let body = serde_json::json!({ "userId": user_id, "tokens": tokens, "source": "text" });
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(wasm_bindgen::JsValue::from_str(&body.to_string())));
+    // Host is irrelevant for a service-binding fetch; only the path routes.
+    let req = Request::new_with_init("https://payment-worker/internal/usage", &init)?;
+    let res = env.service("PAYMENT")?.fetch_request(req).await?;
+    let status = res.status_code();
+    if status < 200 || status >= 300 {
+        return Err(Error::RustError(format!("/internal/usage → {status}")));
+    }
+    Ok(())
+}
+
+/// Read a TEE'd copy of the SSE byte stream fully, scan `data:` lines for the chunk
+/// carrying a top-level `usage`, and report it. If no usage chunk arrives (the
+/// platform may not support `include_usage`), log and report nothing — never guess.
+async fn report_stream_usage(
+    env: &Env,
+    user_id: String,
+    branch: worker::web_sys::ReadableStream,
+) {
+    let bytes = match drain_stream(&branch).await {
+        Ok(b) => b,
+        Err(e) => {
+            console_error!("usage-report: draining tee'd stream failed (swallowed): {e:?}");
+            return;
+        }
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    let mut found: Option<i64> = None;
+    for line in text.lines() {
+        let data = match line.strip_prefix("data:") {
+            Some(d) => d.trim(),
+            None => continue,
+        };
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Some(t) = usage_tokens(&val) {
+                found = Some(t);
+            }
+        }
+    }
+    match found {
+        Some(tokens) => report_usage(env, &user_id, tokens).await,
+        None => console_error!(
+            "usage-report: no usage chunk in stream (include_usage may be unsupported); reporting nothing"
+        ),
+    }
+}
+
+/// Fully read a web_sys ReadableStream into bytes via its default reader.
+async fn drain_stream(stream: &worker::web_sys::ReadableStream) -> Result<Vec<u8>> {
+    use wasm_bindgen::JsValue;
+    use worker::wasm_bindgen_futures::JsFuture;
+    let reader = stream
+        .get_reader()
+        .dyn_into::<worker::web_sys::ReadableStreamDefaultReader>()
+        .map_err(|_| Error::RustError("stream reader is not a default reader".into()))?;
+    let mut out = Vec::new();
+    loop {
+        let result = JsFuture::from(reader.read())
+            .await
+            .map_err(|e| Error::RustError(format!("stream read: {e:?}")))?;
+        let done = js_sys::Reflect::get(&result, &JsValue::from_str("done"))
+            .ok()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        if done {
+            break;
+        }
+        let value = js_sys::Reflect::get(&result, &JsValue::from_str("value"))
+            .map_err(|e| Error::RustError(format!("stream chunk value: {e:?}")))?;
+        let chunk = js_sys::Uint8Array::new(&value);
+        out.extend_from_slice(&chunk.to_vec());
+    }
+    Ok(out)
 }
 
 // ── Chat completions request massaging ────────────────────────────────────────
@@ -241,7 +376,12 @@ fn has_image_content(messages: &[serde_json::Value]) -> bool {
     })
 }
 
-async fn handle_chat_completions(mut req: Request, env: &Env) -> Result<Response> {
+async fn handle_chat_completions(
+    mut req: Request,
+    env: &Env,
+    ctx: &Context,
+    user_id: &str,
+) -> Result<Response> {
     let body: serde_json::Value = req.json().await?;
 
     // Clone the messages array we will (possibly) massage.
@@ -311,6 +451,16 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
     );
     run_params.insert("stream".to_string(), serde_json::Value::Bool(want_stream));
 
+    // Ask Workers AI to emit a final usage chunk so we can account TEXT tokens
+    // backend-authoritatively. NOTE: include_usage support is uncertain on the
+    // Workers AI platform — if no usage chunk arrives we report nothing (never guess).
+    if want_stream {
+        run_params.insert(
+            "stream_options".to_string(),
+            serde_json::json!({ "include_usage": true }),
+        );
+    }
+
     // Reasoning control. A client may override explicitly via chat_template_kwargs;
     // else if NO image, enable thinking; else (image present) pass none.
     if let Some(ctk) = body.get("chat_template_kwargs") {
@@ -341,13 +491,28 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
     if !want_stream {
         let out_val: serde_json::Value = serde_wasm_bindgen::from_value(out)
             .map_err(|e| Error::RustError(format!("AI.run output decode: {e}")))?;
+        // Best-effort TEXT token accounting (never blocks/affects the response).
+        if let Some(tokens) = usage_tokens(&out_val) {
+            let env = env.clone();
+            let user_id = user_id.to_string();
+            ctx.wait_until(async move { report_usage(&env, &user_id, tokens).await });
+        }
         return Response::from_json(&out_val);
     }
 
     // Raw passthrough of the Workers AI SSE byte stream — no re-parsing. `stream:true`
-    // resolves to a ReadableStream; wrap it as the worker crate's ByteStream.
+    // resolves to a ReadableStream. TEE it: branch 0 → the client byte-for-byte;
+    // branch 1 → drained inside ctx.wait_until to extract the usage chunk (if any).
     let stream = worker::web_sys::ReadableStream::unchecked_from_js(out);
-    let resp = Response::from_stream(worker::ByteStream::from(stream))?;
+    let tee = stream.tee();
+    let client_branch = worker::web_sys::ReadableStream::unchecked_from_js(tee.get(0));
+    let usage_branch = worker::web_sys::ReadableStream::unchecked_from_js(tee.get(1));
+    {
+        let env = env.clone();
+        let user_id = user_id.to_string();
+        ctx.wait_until(async move { report_stream_usage(&env, user_id, usage_branch).await });
+    }
+    let resp = Response::from_stream(worker::ByteStream::from(client_branch))?;
     let headers = resp.headers();
     headers.set("Content-Type", "text/event-stream")?;
     headers.set("Cache-Control", "no-cache")?;

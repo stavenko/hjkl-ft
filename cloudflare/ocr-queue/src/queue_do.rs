@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use wasm_bindgen::JsValue;
 use worker::*;
 
 // Base64 chunk size kept well under the SQLite-backed DO per-value limit.
@@ -37,7 +38,6 @@ struct Job {
 #[durable_object]
 pub struct QueueDO {
     state: worker::durable::State,
-    #[allow(dead_code)]
     env: Env,
 }
 
@@ -65,6 +65,43 @@ impl QueueDO {
 
     async fn put_job(&self, id: &str, job: &Job) -> Result<()> {
         self.state.storage().put(&format!("job:{id}"), job).await
+    }
+
+    /// Best-effort neuro-token usage report to payment-worker (the UsageDO owner)
+    /// over the PAYMENT service binding. source="vision". NEVER propagates an
+    /// error — billing is best-effort; on any failure we log loudly and swallow.
+    async fn report_usage(&self, user_id: &str, tokens: i64) {
+        if let Err(e) = self.try_report_usage(user_id, tokens).await {
+            console_error!("usage report failed (vision, user={user_id}, tokens={tokens}): {e}");
+        }
+    }
+
+    async fn try_report_usage(&self, user_id: &str, tokens: i64) -> Result<()> {
+        let key = crate::token::secret_or_var(&self.env, "INTERNAL_PUSH_KEY")
+            .await
+            .map_err(Error::RustError)?;
+        let headers = Headers::new();
+        headers.set("X-Internal-Key", &key)?;
+        headers.set("Content-Type", "application/json")?;
+        let body = serde_json::json!({
+            "userId": user_id,
+            "tokens": tokens,
+            "source": "vision",
+        })
+        .to_string();
+        let mut init = RequestInit::new();
+        init.with_method(Method::Post)
+            .with_headers(headers)
+            .with_body(Some(JsValue::from_str(&body)));
+        // Host is irrelevant for a service-binding fetch; only the path routes.
+        let req = Request::new_with_init("https://payment-worker/internal/usage", &init)?;
+        let mut res = self.env.service("PAYMENT")?.fetch_request(req).await?;
+        let status = res.status_code();
+        if status != 200 {
+            let text = res.text().await.unwrap_or_default();
+            return Err(Error::RustError(format!("payment-worker returned {status}: {text}")));
+        }
+        Ok(())
     }
 }
 
@@ -223,11 +260,25 @@ impl DurableObject for QueueDO {
                 job.status = "done".into();
                 job.result = b.get("result").cloned();
             }
+            // The poller may deliver the final answer-token count on /complete
+            // (not just via /progress) — take it if present.
+            if let Some(t) = b.get("answer_tokens").and_then(|v| v.as_i64()) {
+                job.answer_tokens = Some(t);
+            }
             job.updated_at = now_ms();
             self.put_job(&job_id, &job).await?;
             // Free the image chunks once the job is finished.
             for i in 0..job.chunks {
                 let _ = self.state.storage().delete(&format!("img:{job_id}:{i}")).await;
+            }
+            // Best-effort neuro-token usage report (source="vision"). NEVER fail
+            // /complete on a reporting error — billing is best-effort.
+            if job.status == "done" {
+                if let Some(tokens) = job.answer_tokens {
+                    if tokens > 0 && !job.owner.is_empty() {
+                        self.report_usage(&job.owner, tokens).await;
+                    }
+                }
             }
             return Response::from_json(&serde_json::json!({ "ok": true }));
         }

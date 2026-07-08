@@ -26,6 +26,8 @@ enum View {
     Thread { user_id: String, label: String },
     /// Operator worklist of paid-but-unbound payments (manual refund in lava).
     Payments,
+    /// Per-user AI-token consumption histogram (payment-worker UsageDO).
+    Usage,
 }
 
 #[component]
@@ -51,6 +53,7 @@ pub fn App() -> impl IntoView {
                     view! { <Thread view=view user_id=user_id label=label /> }.into_view()
                 }
                 View::Payments => view! { <Payments view=view /> }.into_view(),
+                View::Usage => view! { <Usage view=view /> }.into_view(),
             }}
         </div>
     }
@@ -61,6 +64,7 @@ pub fn App() -> impl IntoView {
 enum Section {
     Queue,
     Payments,
+    Usage,
 }
 
 /// Persistent bottom navigation shared by the three main authed screens.
@@ -78,6 +82,11 @@ fn TabBar(view: RwSignal<View>, active: Section) -> impl IntoView {
                 on:click=move |_| view.set(View::Payments)>
                 <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M3 10.5h18"/></svg>
                 "Платежи"
+            </button>
+            <button class=move || on(Section::Usage) attr:data-testid="tab-usage"
+                on:click=move |_| view.set(View::Usage)>
+                <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+                "Токены"
             </button>
         </nav>
     }
@@ -1052,5 +1061,252 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
         </div>
 
         <TabBar view=view active=Section::Payments/>
+    }
+}
+
+/// Compact "12.3K" / "1.2M" token count for tight bar labels.
+fn fmt_tokens_short(n: i64) -> String {
+    let n = n.max(0);
+    if n < 1_000 {
+        n.to_string()
+    } else if n < 1_000_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    }
+}
+
+/// Full grouped-thousands token count for the headline, e.g. 1234567 → "1 234 567".
+fn fmt_tokens_full(n: i64) -> String {
+    let s = n.max(0).to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::new();
+    let len = bytes.len();
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            out.push(' ');
+        }
+        out.push(*b as char);
+    }
+    out
+}
+
+/// A short user-id label for a bar (first / last chars, to keep bars readable).
+fn short_uid(uid: &str) -> String {
+    let chars: Vec<char> = uid.chars().collect();
+    if chars.len() <= 10 {
+        uid.to_string()
+    } else {
+        let head: String = chars[..6].iter().collect();
+        let tail: String = chars[chars.len() - 3..].iter().collect();
+        format!("{head}…{tail}")
+    }
+}
+
+/// Inline SVG BAR HISTOGRAM: one bar per user (height ∝ tokens), DESC. Each bar
+/// is labelled with a short user id and its token count. No external libs (mirrors
+/// `datashare::weight_svg`). `users` is assumed DESC by tokens (as the API returns).
+fn usage_histogram(users: &[api::UserUsage]) -> leptos::View {
+    if users.is_empty() {
+        return view! { <div class="row__meta">"Нет данных для графика"</div> }.into_view();
+    }
+    // Cap the number of bars we draw so a wide roster stays legible; the rest are
+    // still counted in the headline totals.
+    const MAX_BARS: usize = 40;
+    let shown: Vec<api::UserUsage> = users.iter().take(MAX_BARS).cloned().collect();
+    let n = shown.len();
+
+    let max_tokens = shown.iter().map(|u| u.tokens).max().unwrap_or(0).max(1) as f64;
+
+    let (w, h) = (600.0_f64, 240.0_f64);
+    let (pad_l, pad_r, pad_t, pad_b) = (6.0_f64, 6.0_f64, 22.0_f64, 42.0_f64);
+    let plot_w = w - pad_l - pad_r;
+    let plot_h = h - pad_t - pad_b;
+    let slot = plot_w / n as f64;
+    let bar_w = (slot * 0.66).min(46.0);
+
+    let bars = shown
+        .iter()
+        .enumerate()
+        .map(|(i, u)| {
+            let cx = pad_l + slot * (i as f64 + 0.5);
+            let bh = (u.tokens as f64 / max_tokens) * plot_h;
+            let x = cx - bar_w / 2.0;
+            let y = pad_t + (plot_h - bh);
+            let count = fmt_tokens_short(u.tokens);
+            let uid = short_uid(&u.user_id);
+            view! {
+                <g>
+                    <rect x=format!("{x:.1}") y=format!("{y:.1}")
+                          width=format!("{bar_w:.1}") height=format!("{:.1}", bh.max(0.0))
+                          rx="3" fill="var(--accent)"/>
+                    // token count above the bar
+                    <text x=format!("{cx:.1}") y=format!("{:.1}", y - 5.0)
+                          text-anchor="middle" font-size="11" fill="var(--text)"
+                          font-weight="600">{count}</text>
+                    // short uid below the axis, rotated to fit
+                    <text x=format!("{cx:.1}") y=format!("{:.1}", h - pad_b + 12.0)
+                          text-anchor="end" font-size="10" fill="var(--muted)"
+                          transform=format!("rotate(-35 {cx:.1} {:.1})", h - pad_b + 12.0)>
+                        {uid}
+                    </text>
+                </g>
+            }
+        })
+        .collect_view();
+
+    let baseline_y = pad_t + plot_h;
+    view! {
+        <svg viewBox=format!("0 0 {w} {h}")
+             style="width:100%; height:240px; display:block; background:var(--surface-2); border-radius:10px;">
+            <line x1=format!("{pad_l:.1}") y1=format!("{baseline_y:.1}")
+                  x2=format!("{:.1}", w - pad_r) y2=format!("{baseline_y:.1}")
+                  stroke="var(--line)" stroke-width="1"/>
+            {bars}
+        </svg>
+        {(users.len() > MAX_BARS).then(|| view! {
+            <div class="row__meta" style="margin-top:6px;">
+                {format!("показаны топ-{MAX_BARS} из {} пользователей", users.len())}
+            </div>
+        })}
+    }
+    .into_view()
+}
+
+/// Small per-day total bars beneath the per-user histogram (ASC by day).
+fn usage_days(days: &[api::DayUsage]) -> leptos::View {
+    if days.is_empty() {
+        return ().into_view();
+    }
+    let max_tokens = days.iter().map(|d| d.tokens).max().unwrap_or(0).max(1) as f64;
+    view! {
+        <div style="display:flex; flex-direction:column; gap:6px;">
+            {days.iter().cloned().map(|d| {
+                let pct = (d.tokens as f64 / max_tokens * 100.0).clamp(0.0, 100.0);
+                let count = fmt_tokens_short(d.tokens);
+                view! {
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span class="mono" style="width:92px; flex:none; color:var(--muted); font-size:.82rem;">
+                            {d.day}
+                        </span>
+                        <div style="flex:1; height:14px; background:var(--surface-2); border-radius:7px; overflow:hidden;">
+                            <div style=format!(
+                                "height:100%; width:{pct:.1}%; background:var(--accent); border-radius:7px;")></div>
+                        </div>
+                        <span class="mono" style="width:64px; flex:none; text-align:right; font-weight:600;">
+                            {count}
+                        </span>
+                    </div>
+                }
+            }).collect_view()}
+        </div>
+    }
+    .into_view()
+}
+
+/// Token-usage view: fetches /admin/usage on mount (+ refresh button) and renders
+/// a headline (total / users / average), a per-user bar histogram, and per-day totals.
+#[component]
+fn Usage(view: RwSignal<View>) -> impl IntoView {
+    let report = create_rw_signal(Option::<api::UsageReport>::None);
+    let error = create_rw_signal(Option::<String>::None);
+    let loading = create_rw_signal(true);
+
+    let load = Callback::new(move |_: ()| {
+        loading.set(true);
+        spawn_local(async move {
+            match api::admin_usage().await {
+                Ok(r) => {
+                    report.set(Some(r));
+                    error.set(None);
+                }
+                Err(e) if e.is_auth() => {
+                    auth::logout();
+                    view.set(View::Login);
+                }
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            loading.set(false);
+        });
+    });
+    load.call(());
+
+    view! {
+        <header class="appbar">
+            <div class="ring"></div>
+            <div style="flex: 1; min-width: 0;">
+                <div class="appbar__title">"Токены"</div>
+                <div class="appbar__sub">"расход ИИ-токенов по пользователям"</div>
+            </div>
+            <button class="btn btn--ghost btn--icon" attr:aria-label="Обновить" on:click=move |_| load.call(())>
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
+            </button>
+        </header>
+
+        <div class="screen">
+            {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+
+            {move || {
+                let Some(r) = report.get() else {
+                    if loading.get() {
+                        return view! { <div class="spinner"></div> }.into_view();
+                    }
+                    return ().into_view();
+                };
+
+                if r.users.is_empty() && r.total == 0 {
+                    return view! {
+                        <div class="empty"><div class="empty__ring"></div><p>"Пока нет данных"</p></div>
+                    }.into_view();
+                }
+
+                let user_count = r.users.len();
+                let avg = if user_count > 0 { r.total / user_count as i64 } else { 0 };
+                let hist = usage_histogram(&r.users);
+                let days = usage_days(&r.days);
+                let has_days = !r.days.is_empty();
+
+                view! {
+                    <div class="pad">
+                        // Headline: total tokens · users · average per user.
+                        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+                            <div style="flex:1; min-width:120px; padding:12px; background:var(--surface-2); \
+                                        border:1px solid var(--line); border-radius:10px;">
+                                <div class="row__meta">"Всего токенов"</div>
+                                <div class="mono" style="font-size:1.25rem; font-weight:700;">
+                                    {fmt_tokens_full(r.total)}
+                                </div>
+                            </div>
+                            <div style="flex:1; min-width:100px; padding:12px; background:var(--surface-2); \
+                                        border:1px solid var(--line); border-radius:10px;">
+                                <div class="row__meta">"Пользователей"</div>
+                                <div class="mono" style="font-size:1.25rem; font-weight:700;">
+                                    {user_count.to_string()}
+                                </div>
+                            </div>
+                            <div style="flex:1; min-width:120px; padding:12px; background:var(--surface-2); \
+                                        border:1px solid var(--line); border-radius:10px;">
+                                <div class="row__meta">"В среднем на пользователя"</div>
+                                <div class="mono" style="font-size:1.25rem; font-weight:700;">
+                                    {fmt_tokens_full(avg)}
+                                </div>
+                            </div>
+                        </div>
+
+                        // Per-user histogram (the "how much each tester eats" view).
+                        <div style="font-weight:650; margin:0 0 8px;">"По пользователям"</div>
+                        {hist}
+
+                        // Per-day totals beneath.
+                        {has_days.then(|| view! {
+                            <div style="font-weight:650; margin:18px 0 8px;">"По дням"</div>
+                            {days}
+                        })}
+                    </div>
+                }.into_view()
+            }}
+        </div>
+
+        <TabBar view=view active=Section::Usage/>
     }
 }

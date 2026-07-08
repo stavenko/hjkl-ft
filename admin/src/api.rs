@@ -463,3 +463,44 @@ pub async fn receipt_detail(id: &str) -> Result<Option<ReceiptFull>, ApiError> {
     Ok(if r.found { r.receipt } else { None })
 }
 
+// ── Token usage (payment-worker UsageDO; same expert JWT / approved-admins gate) ──
+
+/// One user's AI-token consumption: `tokens` is the grand total, split into
+/// `text` (ai-worker) and `vision` (ocr-queue) sources.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserUsage {
+    #[serde(rename = "userId")]
+    pub user_id: String,
+    #[serde(default)]
+    pub tokens: i64,
+    #[serde(default)]
+    pub text: i64,
+    #[serde(default)]
+    pub vision: i64,
+}
+
+/// Per-day total tokens across all users.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DayUsage {
+    pub day: String,
+    #[serde(default)]
+    pub tokens: i64,
+}
+
+/// GET /admin/usage response: per-user totals (DESC by tokens), per-day totals
+/// (ASC by day), and the grand total.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UsageReport {
+    #[serde(default)]
+    pub users: Vec<UserUsage>,
+    #[serde(default)]
+    pub days: Vec<DayUsage>,
+    #[serde(default)]
+    pub total: i64,
+}
+
+/// GET /admin/usage (payment-worker). Per-user + per-day AI-token consumption.
+pub async fn admin_usage() -> Result<UsageReport, ApiError> {
+    request_to(&payment_base()?, "GET", "/admin/usage", None).await
+}
+

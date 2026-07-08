@@ -19,6 +19,11 @@ service = "payment-worker-dev"
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+# Best-effort neuro-token usage accounting: POST /internal/usage to payment-worker
+# (over the PAYMENT service binding), X-Internal-Key-guarded. Same shared cross-worker
+# key as payment-worker's INTERNAL_PUSH_KEY. Billing is best-effort — NOT a fail-closed
+# required secret (its absence only skips reporting, never blocks the AI request).
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
 
 # ── Production (separate worker on ai.renorma.app) ──
 # Deploy: wrangler deploy --env production
@@ -45,3 +50,11 @@ service = "payment-worker-prod"
 binding = "JWT_SECRET"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "jwt-secret"
+
+# Shared cross-worker key for the best-effort usage-report POST to payment-worker's
+# /internal/usage. SAME value as payment-worker-prod's INTERNAL_PUSH_KEY. Billing is
+# best-effort → NOT added to require_secrets (its absence only skips reporting).
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"

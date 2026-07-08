@@ -35,6 +35,10 @@ service = "payment-worker-dev"
 JWT_SECRET = "dev-secret-change-in-production"
 # The on-prem poller authenticates with this bearer secret.
 POLLER_SECRET = "dev-poller-secret-change-in-production"
+# Guards the best-effort neuro-token usage report to payment-worker
+# (POST /internal/usage). NOT a fail-closed required secret here — usage
+# reporting is best-effort and must never fail the user's OCR request.
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
 # Region hint for the queue DO.
 QUEUE_REGION = "weur"
 
@@ -65,6 +69,13 @@ service = "payment-worker-prod"
 binding = "JWT_SECRET"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "jwt-secret"
+
+# INTERNAL_PUSH_KEY (best-effort usage report to payment-worker) also comes from
+# the global Secrets Store in prod. Not fail-closed — reporting is best-effort.
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"
 
 [env.production.vars]
 QUEUE_REGION = "weur"

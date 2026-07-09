@@ -717,25 +717,14 @@ pub fn DiaryPage() -> impl IntoView {
                               // Grouped by derived meal. A header per non-empty
                               // group (name + playful subtitle for the 3 mains),
                               // followed by that group's rows.
-                              use crate::services::meal_split::{group_by_meal, MealType};
+                              use crate::services::meal_split::group_by_meal;
                               let es = entries();
                               group_by_meal(&es).into_iter().map(|grp| {
                                   let name_key = grp.meal.i18n_key();
-                                  let sub_key = match grp.meal {
-                                      MealType::Breakfast => Some("meal.breakfast_sub"),
-                                      MealType::Lunch => Some("meal.lunch_sub"),
-                                      MealType::Dinner => Some("meal.dinner_sub"),
-                                      _ => None,
-                                  };
                                   let rows = grp.entries.into_iter().map(render_row).collect::<Vec<_>>();
                                   view! {
                                       <div style="padding: 1rem 0 0.25rem 0;">
                                           <span class="is-size-6 has-text-weight-bold">{move || t(name_key)}</span>
-                                          {sub_key.map(|sk| view! {
-                                              <span class="is-size-7 has-text-grey-light" style="margin-left: 0.5rem;">
-                                                  "« " {move || t(sk)} " »"
-                                              </span>
-                                          })}
                                       </div>
                                       {rows}
                                   }.into_view()

@@ -21,20 +21,14 @@ const TOGGLE_KNOB: &str = "width: 27px; height: 27px; border-radius: 14px; backg
 
 #[component]
 pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> impl IntoView {
-    // Re-derive visibility whenever the story DB changes (flags land async).
+    // Whether a notification has been received in the background — only used to
+    // optionally hide the enable/test button (see `hide_check_after_received`).
     let story_ver = db::version("story");
-    let show_schedule = create_rw_signal(false);
-    let show_meal_reminders = create_rw_signal(false);
     let notif_received = create_rw_signal(false);
     create_effect(move |_| {
         story_ver.get();
         spawn_local(async move {
-            let lang = story::get_flag(story::LANGUAGE_CONFIGURED).await;
-            let recv = story::get_flag(story::NOTIFICATION_RECEIVED).await;
-            notif_received.set(recv);
-            // REVISION MODE: `UNLOCK_ALL` forces the schedule + meal reminders open.
-            show_schedule.set(story::UNLOCK_ALL || (lang && recv));
-            show_meal_reminders.set(story::UNLOCK_ALL || story::get_flag(story::MEAL_REMINDERS_UNLOCKED).await);
+            notif_received.set(story::get_flag(story::NOTIFICATION_RECEIVED).await);
         });
     });
 
@@ -162,8 +156,7 @@ pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> 
             }
         })}
 
-        {move || show_schedule.get().then(|| view! {
-            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.schedule")}</p>
+        <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.schedule")}</p>
             <div style=IOS_CARD>
                 // Master «turn off all notifications» toggle. Sending it with the
                 // full schedule on every change means the backend never misses it.
@@ -191,23 +184,20 @@ pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> 
                     <div style=IOS_SEPARATOR></div>
                     <ScheduleRow label="settings.weigh_in" slot_id="weigh_in" enabled=wi_on time=wi_time
                         disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
-                    {move || show_meal_reminders.get().then(|| view! {
-                        <div style=IOS_SEPARATOR></div>
-                        <ScheduleRow label="settings.breakfast" slot_id="breakfast" enabled=bf_on time=bf_time
-                            disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
-                        <div style=IOS_SEPARATOR></div>
-                        <ScheduleRow label="settings.lunch" slot_id="lunch" enabled=lu_on time=lu_time
-                            disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
-                        <div style=IOS_SEPARATOR></div>
-                        <ScheduleRow label="settings.dinner" slot_id="dinner" enabled=di_on time=di_time
-                            disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
-                        <div style=IOS_SEPARATOR></div>
-                        <ScheduleRow label="settings.steps" slot_id="steps" enabled=st_on time=st_time
-                            disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
-                    })}
+                    <div style=IOS_SEPARATOR></div>
+                    <ScheduleRow label="settings.breakfast" slot_id="breakfast" enabled=bf_on time=bf_time
+                        disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                    <div style=IOS_SEPARATOR></div>
+                    <ScheduleRow label="settings.lunch" slot_id="lunch" enabled=lu_on time=lu_time
+                        disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                    <div style=IOS_SEPARATOR></div>
+                    <ScheduleRow label="settings.dinner" slot_id="dinner" enabled=di_on time=di_time
+                        disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                    <div style=IOS_SEPARATOR></div>
+                    <ScheduleRow label="settings.steps" slot_id="steps" enabled=st_on time=st_time
+                        disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
                 })}
             </div>
-        })}
     }
 }
 

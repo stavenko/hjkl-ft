@@ -5,7 +5,7 @@ use api_types::*;
 use crate::components::food_weight_modal::FoodWeightModal;
 use crate::components::summary_block::SummaryBlock;
 use crate::components::food_edit_modal::FoodEditModal;
-use crate::services::{local, sync, db, story};
+use crate::services::{local, sync, story};
 use crate::services::i18n::t;
 
 fn format_date_relative(date_str: &str) -> String {
@@ -190,17 +190,8 @@ pub fn DiaryPage() -> impl IntoView {
         },
     );
 
-    // Story DB version — drives the meal-split resource below.
-    let story_ver = db::version("story");
-
-    // Chapter 2 / s6: once the meal-split section has been opened, the day's
-    // diary entries are grouped into derived meals. Until then, keep the flat
-    // list unchanged (no regression).
-    let meal_split_res = create_resource(
-        move || story_ver.get(),
-        |_| async { story::UNLOCK_ALL || story::get_flag(story::MEAL_SPLIT_UNLOCKED).await },
-    );
-    let meal_split_on = move || meal_split_res.get().unwrap_or(false);
+    // The day's diary entries are always grouped into derived meals.
+    let meal_split_on = move || true;
 
     let foods = move || foods_res.get().unwrap_or_default();
     let goals = move || goals_res.get().unwrap_or_default();

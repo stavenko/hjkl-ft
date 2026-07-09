@@ -115,14 +115,9 @@ pub fn StoryPage() -> impl IntoView {
 
                 // ── Chapters ──
                 let chapters = st.chapters.iter().map(|ch| {
-                    // REVISION MODE: `UNLOCK_ALL` opens every chapter/section so all
-                    // features can be reviewed at once (see story::UNLOCK_ALL).
-                    let open = story::UNLOCK_ALL || e.chapter_open(ch);
-                    let lock = if open { "" } else { "\u{1f512}" };
-                    let head = format!("{} \u{00b7} {} {}", tr_chapter_label(&ch.id), tr(&ch.title), lock);
+                    let head = format!("{} \u{00b7} {}", tr_chapter_label(&ch.id), tr(&ch.title));
 
                     let rows = ch.sections.iter().enumerate().map(|(i, sec)| {
-                        let unlocked = story::UNLOCK_ALL || e.section_unlocked(ch, i);
                         let route = sec.legacy_route.clone()
                             .unwrap_or_else(|| format!("/story/{}", sec.id));
                         let title = tr(&sec.title);
@@ -130,27 +125,17 @@ pub fn StoryPage() -> impl IntoView {
                         let icon_span = (!icon.is_empty()).then(|| view! {
                             <span style="font-size: 20px; width: 26px; text-align: center; flex-shrink: 0;">{icon}</span>
                         });
-                        let is_new = unlocked && !seen_set.contains(&route);
+                        let is_new = !seen_set.contains(&route);
                         let sep = (i > 0).then(|| view! { <div style=IOS_SEPARATOR></div> });
-                        let row = if unlocked {
-                            view! {
-                                <a href=route style=format!("{}cursor: pointer;", ROW_STYLE)>
-                                    {icon_span}
-                                    <span class="is-size-6" style="flex: 1;">{title}</span>
-                                    {is_new.then(new_dot)}
-                                    <span style="color: var(--bulma-text-weak); font-size: 18px;">"\u{203a}"</span>
-                                </a>
-                            }.into_view()
-                        } else {
-                            view! {
-                                <div style=format!("{}opacity: 0.45;", ROW_STYLE)>
-                                    {icon_span}
-                                    <span class="is-size-6" style="flex: 1;">{title}</span>
-                                    <span style="font-size: 15px;">"\u{1f512}"</span>
-                                </div>
-                            }.into_view()
-                        };
-                        view! { {sep}{row} }
+                        view! {
+                            {sep}
+                            <a href=route style=format!("{}cursor: pointer;", ROW_STYLE)>
+                                {icon_span}
+                                <span class="is-size-6" style="flex: 1;">{title}</span>
+                                {is_new.then(new_dot)}
+                                <span style="color: var(--bulma-text-weak); font-size: 18px;">"\u{203a}"</span>
+                            </a>
+                        }
                     }).collect_view();
 
                     view! {

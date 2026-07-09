@@ -7,13 +7,6 @@ use serde::{Deserialize, Serialize};
 use crate::services::story_dsl::{self, Engine};
 use crate::services::{db, local, profile, subscription, summary, sync};
 
-/// REVISION MODE: force every progressively-gated feature open at once so the
-/// product can be audited (which features are actually needed). When true, all
-/// story chapters/sections are unlocked and the feature-unlock flags (notification
-/// schedule, meal reminders, meal split, course goal) are treated as satisfied.
-/// Set back to false to restore the normal progressive gating.
-pub const UNLOCK_ALL: bool = true;
-
 /// Task flag: the user committed to wanting a new body (chapter 1, intro).
 pub const WANT_NEW_BODY: &str = "want_new_body";
 /// Task flag: the user confirmed the language is set up the way they want.

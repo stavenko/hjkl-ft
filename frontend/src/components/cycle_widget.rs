@@ -162,30 +162,23 @@ pub fn CyclePanel() -> impl IntoView {
                             border-radius: 16px; padding: 18px; width: min(20rem, calc(100% - 3rem)); \
                             display: flex; flex-direction: column; gap: 14px;">
                     <span class="is-size-6 has-text-weight-bold">{move || t("cycle.set_first_day")}</span>
-                    // The date is shown as WORDS (Сегодня/Вчера/…); tapping opens the
-                    // native picker via a hidden 1×1 <input type=date> + showPicker().
-                    <div style="position: relative;">
-                        <input type="date" id="cycle-date-picker" max=today_str()
-                            style="position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none;"
+                    // The date reads as WORDS (Сегодня/Вчера/…). The real native date
+                    // input sits transparently ON TOP, so a tap lands on it and opens
+                    // the native picker directly (showPicker() is unreliable on iOS).
+                    <div style="position: relative; width: 100%;">
+                        <div style="font: inherit; padding: 12px; border-radius: 10px; text-align: center; \
+                                border: 1px solid var(--bulma-border); background: var(--bulma-scheme-main); \
+                                color: var(--bulma-text); pointer-events: none;">
+                            {move || relative_date(&draft.get())}
+                        </div>
+                        <input type="date" max=today_str()
+                            style="position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; \
+                                cursor: pointer; -webkit-appearance: none; appearance: none;"
                             prop:value=move || draft.get()
                             on:change=move |ev| {
                                 let v = event_target_value(&ev);
                                 if !v.is_empty() { draft.set(v); }
                             }/>
-                        <button style="font: inherit; padding: 12px; border-radius: 10px; width: 100%; \
-                                border: 1px solid var(--bulma-border); background: var(--bulma-scheme-main); \
-                                color: var(--bulma-text); cursor: pointer; text-align: center;"
-                            on:click=move |_| {
-                                if let Some(el) = web_sys::window().and_then(|w| w.document())
-                                    .and_then(|d| d.get_element_by_id("cycle-date-picker"))
-                                {
-                                    use wasm_bindgen::JsCast;
-                                    let input: &web_sys::HtmlInputElement = el.unchecked_ref();
-                                    let _ = input.show_picker();
-                                }
-                            }>
-                            {move || relative_date(&draft.get())}
-                        </button>
                     </div>
                     <div style="display: flex; gap: 8px;">
                         <button class="button is-light" style="flex: 1;" on:click=move |_| dialog_open.set(false)>

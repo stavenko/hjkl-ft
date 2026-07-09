@@ -121,7 +121,7 @@ pub fn HelpFoodPage() -> impl IntoView {
                         display: flex; align-items: center; justify-content: center; font-size: 1.6rem;">
                     "🍽"
                 </div>
-                {food_row("help.demo.photo_name", 250.0, 12.0, 14.0, 20.0)}
+                {food_row("help.demo.photo_name", 200.0, 18.0, 13.0, 2.0)}
             </div>
         </div>
 
@@ -143,19 +143,87 @@ pub fn HelpFoodPage() -> impl IntoView {
     }
 }
 
-/// Sub-topic article (/help/:id). Content is a stub until it's written.
+fn para(key: &'static str) -> impl IntoView {
+    view! { <p class="is-size-6" style="line-height: 1.5; margin: 0 0 10px;">{move || t(key)}</p> }
+}
+
+/// Inert replica of the diary row's «⋮» menu popover with the given items
+/// (label key, `danger`). Matches the real popover styling.
+fn menu_demo(items: Vec<(&'static str, bool)>) -> impl IntoView {
+    view! {
+        <div style=format!("{DEMO} justify-content: flex-start; padding: 16px; pointer-events: none;")>
+            <div style="background: var(--bulma-scheme-main); border-radius: 6px; \
+                    box-shadow: 0 2px 12px rgba(0,0,0,0.15); min-width: 12rem; padding: 0.25rem 0;">
+                {items.into_iter().map(|(key, danger)| view! {
+                    <button class=if danger { "button is-ghost is-small is-fullwidth has-text-danger" }
+                                  else { "button is-ghost is-small is-fullwidth" }
+                        style="justify-content: flex-start; text-decoration: none;">
+                        {move || t(key)}
+                    </button>
+                }).collect_view()}
+            </div>
+        </div>
+    }
+}
+
+fn fab_demo() -> impl IntoView {
+    view! {
+        <div style=format!("{DEMO} pointer-events: none;")>
+            <button class="button is-success is-rounded"
+                style="width: 3.5rem; height: 3.5rem; font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); border: none;">
+                "+"
+            </button>
+        </div>
+    }
+}
+
+/// Sub-topic article (/help/:id).
 #[component]
 pub fn HelpArticlePage() -> impl IntoView {
     let params = use_params_map();
-    let title_key = move || {
-        let id = params.with(|p| p.get("id").cloned().unwrap_or_default());
-        format!("help.link.{}", id.replace('-', "_"))
-    };
+    let id = move || params.with(|p| p.get("id").cloned().unwrap_or_default());
+    let row_menu = || menu_demo(vec![("diary.duplicate", false), ("diary.edit", false), ("diary.delete", true)]);
     view! {
         {back_bar()}
-        <h1 class="is-size-4 has-text-weight-bold" style="margin: 0 0 12px;">
-            {move || t(&title_key()).to_string()}
-        </h1>
-        <p class="is-size-6 has-text-grey" style="line-height: 1.5;">{move || t("help.article.stub")}</p>
+        {move || {
+            let id = id();
+            let title_key = format!("help.link.{}", id.replace('-', "_"));
+            let body = match id.as_str() {
+                "copy-day" => view! {
+                    {para("help.article.copy_day.p1")}
+                    {para("help.article.copy_day.p2")}
+                    {menu_demo(vec![("diary.repeat_today", false)])}
+                }.into_view(),
+                "add-food" => view! {
+                    {para("help.article.add_food.p1")}
+                    {para("help.article.add_food.p2")}
+                    {fab_demo()}
+                }.into_view(),
+                "recipes" => view! {
+                    {para("help.article.recipes.p1")}
+                    {para("help.article.recipes.p2")}
+                }.into_view(),
+                "delete-food" => view! {
+                    {para("help.article.delete_food.p1")}
+                    {row_menu()}
+                }.into_view(),
+                "edit-weight" => view! {
+                    {para("help.article.edit_weight.p1")}
+                    {para("help.article.edit_weight.p2")}
+                    {row_menu()}
+                }.into_view(),
+                "rename-food" => view! {
+                    {para("help.article.rename_food.p1")}
+                    {para("help.article.rename_food.p2")}
+                    {row_menu()}
+                }.into_view(),
+                _ => view! { <p class="is-size-6 has-text-grey">{move || t("help.article.stub")}</p> }.into_view(),
+            };
+            view! {
+                <h1 class="is-size-4 has-text-weight-bold" style="margin: 0 0 12px;">{t(&title_key).to_string()}</h1>
+                {body}
+                <div style="height: 24px;"></div>
+            }
+        }}
     }
 }

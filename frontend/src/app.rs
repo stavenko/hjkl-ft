@@ -201,7 +201,10 @@ pub fn App() -> impl IntoView {
                      style="position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4.5rem;">
                     <div style="padding: 0.75rem;">
                     <Routes>
-                        <Route path="/" view=pages::story::StoryPage />
+                        // The dashboard is the new default screen; the story («История»)
+                        // is preserved at /history until it's fully replaced by widgets.
+                        <Route path="/" view=pages::dashboard::DashboardPage />
+                        <Route path="/history" view=pages::story::StoryPage />
                         // Generic DSL-driven section page; serves migrated sections (those
                         // without a bespoke static route above). Static routes win by specificity.
                         <Route path="/story/:id" view=pages::story_section::StorySectionPage />
@@ -234,16 +237,17 @@ pub fn App() -> impl IntoView {
                 <a attr:data-testid="nav-story" href="/" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
                     <span style="position: relative; display: inline-flex;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
-                        <path d="M9 7h6" />
-                        <path d="M9 11h4" />
+                        <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                        <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                        <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                        <rect x="14" y="14" width="7" height="7" rx="1.5" />
                     </svg>
                     {move || story::attention_signal().get().then(|| view! {
                         <span attr:data-testid="nav-story-attention-dot"
                             style="position: absolute; top: -1px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--bulma-danger); border: 1.5px solid var(--bulma-scheme-main);"></span>
                     })}
                     </span>
-                    <span style="font-size: 0.6rem; margin-top: 2px;">{move || t("nav.story")}</span>
+                    <span style="font-size: 0.6rem; margin-top: 2px;">{move || t("nav.dashboard")}</span>
                 </a>
                 <a attr:data-testid="nav-diary" href="/diary" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

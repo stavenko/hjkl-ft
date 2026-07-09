@@ -46,6 +46,17 @@
                 font: 600 1.1rem/1.4 -apple-system, system-ui, sans-serif;
             }
         }
+        /* Dashboard notifications widget: the bell jiggles once the persona is filled. */
+        @keyframes dash-bell {
+            0%, 60%, 100% { transform: rotate(0); }
+            10% { transform: rotate(-14deg); }
+            20% { transform: rotate(12deg); }
+            30% { transform: rotate(-10deg); }
+            40% { transform: rotate(8deg); }
+            50% { transform: rotate(-4deg); }
+        }
+        .dash-bell-jiggle { animation: dash-bell 1.6s ease-in-out infinite; transform-origin: 50% 10%; }
+
         /* Generic spinner (e.g. the paywall "contacting the payment system" state). */
         @keyframes ft-spin { to { transform: rotate(360deg); } }
         .ft-spinner {

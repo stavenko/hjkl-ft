@@ -104,6 +104,9 @@ impl From<CourseGoal> for CourseGoalDto {
         match g {
             CourseGoal::Lose => CourseGoalDto::Lose,
             CourseGoal::Maintain => CourseGoalDto::Maintain,
+            // TODO: the weekly card doesn't model a surplus yet; treat "gain" as
+            // maintenance until surplus planning is added.
+            CourseGoal::Gain => CourseGoalDto::Maintain,
         }
     }
 }

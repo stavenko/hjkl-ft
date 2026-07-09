@@ -16,6 +16,7 @@ pub mod recipes;
 pub mod settings;
 pub mod steps;
 pub mod subscription;
+pub mod dashboard;
 pub mod story;
 pub mod story_section;
 pub mod progress;

@@ -33,6 +33,7 @@ pub enum Sex {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CourseGoal {
     Lose,
+    Gain,
     Maintain,
 }
 
@@ -126,6 +127,7 @@ pub fn get_goal() -> CourseGoal {
     CACHE.with(|c| {
         match c.borrow().as_ref().and_then(|r| r.goal.as_deref()) {
             Some("maintain") => CourseGoal::Maintain,
+            Some("gain") => CourseGoal::Gain,
             _ => CourseGoal::Lose,
         }
     })
@@ -135,6 +137,7 @@ pub fn get_goal() -> CourseGoal {
 pub fn set_goal(goal: CourseGoal) {
     let v = match goal {
         CourseGoal::Lose => "lose",
+        CourseGoal::Gain => "gain",
         CourseGoal::Maintain => "maintain",
     };
     write(|r| r.goal = Some(v.to_string()));

@@ -19,6 +19,11 @@ pub struct UserSchedule {
     pub dinner: NotificationSlot,
     #[serde(default)]
     pub steps: NotificationSlot,
+    /// Global kill-switch. When true, ALL reminders are off regardless of the
+    /// per-slot `enabled` flags. The client sends the full schedule (incl. this
+    /// flag) on every change, so we never miss the signal.
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 const STORAGE_SCHEDULE: &str = "schedule";
@@ -65,6 +70,7 @@ impl DurableObject for ScheduleDO {
                     lunch: NotificationSlot::default(),
                     dinner: NotificationSlot::default(),
                     steps: NotificationSlot::default(),
+                    disabled: false,
                 };
                 let sched_json = serde_json::to_string(&sched)
                     .map_err(|e| Error::RustError(format!("serialize: {e}")))?;
@@ -159,6 +165,11 @@ impl ScheduleDO {
     }
 
     async fn schedule_next_alarm(&self, schedule: &UserSchedule, buffer_ms: u64) -> Result<()> {
+        // Global kill-switch: no alarm at all when the user disabled notifications.
+        if schedule.disabled {
+            console_log!("ScheduleDO: notifications disabled — no alarm scheduled");
+            return Ok(());
+        }
         let slots: [(&str, &NotificationSlot); 5] = [
             ("weigh_in", &schedule.weigh_in),
             ("breakfast", &schedule.breakfast),

@@ -61,6 +61,8 @@ pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> 
     let di_time = create_rw_signal("19:00".to_string());
     let st_on = create_rw_signal(false);
     let st_time = create_rw_signal("22:00".to_string());
+    // Global kill-switch: rides to the backend with every schedule push.
+    let disabled = create_rw_signal(false);
     spawn_local(async move {
         if let Some(val) = db::get::<serde_json::Value>("_sync_meta", "notification_schedule").await {
             let load = |key: &str, on: RwSignal<bool>, time: RwSignal<String>| {
@@ -78,6 +80,9 @@ pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> 
             load("lunch", lu_on, lu_time);
             load("dinner", di_on, di_time);
             load("steps", st_on, st_time);
+            if let Some(v) = val.get("disabled").and_then(|v| v.as_bool()) {
+                disabled.set(v);
+            }
         }
     });
 
@@ -159,21 +164,46 @@ pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> 
         {move || show_schedule.get().then(|| view! {
             <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.schedule")}</p>
             <div style=IOS_CARD>
-                <ScheduleRow label="settings.weigh_in" slot_id="weigh_in" enabled=wi_on time=wi_time
-                    wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
-                {move || show_meal_reminders.get().then(|| view! {
+                // Master «turn off all notifications» toggle. Sending it with the
+                // full schedule on every change means the backend never misses it.
+                <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px;">
+                    <span class="is-size-6" style="flex: 1;">{move || t("settings.notif_disable")}</span>
+                    <button attr:data-testid="notif-toggle-disabled"
+                        style=move || format!(
+                            "{}background: {};",
+                            TOGGLE_BASE,
+                            if disabled.get() { "var(--bulma-danger)" } else { "var(--bulma-border)" }
+                        )
+                        on:click=move |_| {
+                            disabled.update(|v| *v = !*v);
+                            save_notification_schedule(disabled, wi_on, bf_on, lu_on, di_on, st_on, wi_time, bf_time, lu_time, di_time, st_time);
+                        }>
+                        <div style=move || format!(
+                            "{}transform: {};",
+                            TOGGLE_KNOB,
+                            if disabled.get() { "translateX(20px)" } else { "translateX(0)" }
+                        )></div>
+                    </button>
+                </div>
+
+                {move || (!disabled.get()).then(|| view! {
                     <div style=IOS_SEPARATOR></div>
-                    <ScheduleRow label="settings.breakfast" slot_id="breakfast" enabled=bf_on time=bf_time
-                        wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
-                    <div style=IOS_SEPARATOR></div>
-                    <ScheduleRow label="settings.lunch" slot_id="lunch" enabled=lu_on time=lu_time
-                        wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
-                    <div style=IOS_SEPARATOR></div>
-                    <ScheduleRow label="settings.dinner" slot_id="dinner" enabled=di_on time=di_time
-                        wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
-                    <div style=IOS_SEPARATOR></div>
-                    <ScheduleRow label="settings.steps" slot_id="steps" enabled=st_on time=st_time
-                        wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                    <ScheduleRow label="settings.weigh_in" slot_id="weigh_in" enabled=wi_on time=wi_time
+                        disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                    {move || show_meal_reminders.get().then(|| view! {
+                        <div style=IOS_SEPARATOR></div>
+                        <ScheduleRow label="settings.breakfast" slot_id="breakfast" enabled=bf_on time=bf_time
+                            disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                        <div style=IOS_SEPARATOR></div>
+                        <ScheduleRow label="settings.lunch" slot_id="lunch" enabled=lu_on time=lu_time
+                            disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                        <div style=IOS_SEPARATOR></div>
+                        <ScheduleRow label="settings.dinner" slot_id="dinner" enabled=di_on time=di_time
+                            disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                        <div style=IOS_SEPARATOR></div>
+                        <ScheduleRow label="settings.steps" slot_id="steps" enabled=st_on time=st_time
+                            disabled wi_on bf_on lu_on di_on st_on wi_time bf_time lu_time di_time st_time />
+                    })}
                 })}
             </div>
         })}
@@ -186,6 +216,7 @@ fn ScheduleRow(
     slot_id: &'static str,
     enabled: RwSignal<bool>,
     time: RwSignal<String>,
+    disabled: RwSignal<bool>,
     wi_on: RwSignal<bool>,
     bf_on: RwSignal<bool>,
     lu_on: RwSignal<bool>,
@@ -198,7 +229,7 @@ fn ScheduleRow(
     st_time: RwSignal<String>,
 ) -> impl IntoView {
     let save = move || {
-        save_notification_schedule(wi_on, bf_on, lu_on, di_on, st_on, wi_time, bf_time, lu_time, di_time, st_time);
+        save_notification_schedule(disabled, wi_on, bf_on, lu_on, di_on, st_on, wi_time, bf_time, lu_time, di_time, st_time);
     };
 
     view! {
@@ -258,6 +289,7 @@ struct SlotData {
 #[derive(Serialize)]
 struct ScheduleRecord {
     key: String,
+    disabled: bool,
     weigh_in: SlotData,
     breakfast: SlotData,
     lunch: SlotData,
@@ -266,6 +298,7 @@ struct ScheduleRecord {
 }
 
 fn save_notification_schedule(
+    disabled: RwSignal<bool>,
     wi_on: RwSignal<bool>,
     bf_on: RwSignal<bool>,
     lu_on: RwSignal<bool>,
@@ -279,6 +312,7 @@ fn save_notification_schedule(
 ) {
     let record = ScheduleRecord {
         key: "notification_schedule".to_string(),
+        disabled: disabled.get_untracked(),
         weigh_in: SlotData { enabled: wi_on.get_untracked(), time: wi_time.get_untracked() },
         breakfast: SlotData { enabled: bf_on.get_untracked(), time: bf_time.get_untracked() },
         lunch: SlotData { enabled: lu_on.get_untracked(), time: lu_time.get_untracked() },
@@ -290,6 +324,7 @@ fn save_notification_schedule(
         let offset = -(js_sys::Date::new_0().get_timezone_offset() as i32);
         let payload = serde_json::json!({
             "utc_offset_minutes": offset,
+            "disabled": record.disabled,
             "weigh_in": {"enabled": record.weigh_in.enabled, "time": record.weigh_in.time},
             "breakfast": {"enabled": record.breakfast.enabled, "time": record.breakfast.time},
             "lunch": {"enabled": record.lunch.enabled, "time": record.lunch.time},

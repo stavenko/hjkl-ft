@@ -19,6 +19,7 @@ use leptos::*;
 use crate::components::notify_panel::NotifyPanel;
 use crate::services::i18n::t;
 use crate::services::profile::{self, CourseGoal, Sex};
+use crate::services::{db, story};
 
 /// Which widget's editor is open over the grid (None = just the grid).
 #[derive(Clone, Copy, PartialEq)]
@@ -57,6 +58,26 @@ pub fn DashboardPage() -> impl IntoView {
     // Persona takes over the whole screen while it's incomplete OR re-opened.
     let persona_full = move || !persona_complete() || overlay.get() == Overlay::Persona;
 
+    // Notifications state for the bell: `configured` (a test notification was
+    // received → stop jiggling) and `disabled` (the master kill-switch → cross the
+    // bell out). Both re-read when the story flags or the schedule record change.
+    let meta_ver = db::version("_sync_meta");
+    let story_ver = db::version("story");
+    let notif_configured = create_rw_signal(false);
+    let notif_disabled = create_rw_signal(false);
+    create_effect(move |_| {
+        meta_ver.get();
+        story_ver.get();
+        spawn_local(async move {
+            notif_configured.set(story::get_flag(story::NOTIFICATION_RECEIVED).await);
+            let d = db::get::<serde_json::Value>("_sync_meta", "notification_schedule")
+                .await
+                .and_then(|v| v.get("disabled").and_then(|x| x.as_bool()))
+                .unwrap_or(false);
+            notif_disabled.set(d);
+        });
+    });
+
     view! {
         {move || {
             if persona_full() {
@@ -85,15 +106,18 @@ pub fn DashboardPage() -> impl IntoView {
                             {move || t("nav.dashboard")}
                         </h1>
                         <div style=GRID>
-                            <button style=format!("{TILE} grid-column: span 1; grid-row: span 1;")
+                            <button style=format!("{TILE} grid-column: 1 / 2; grid-row: span 1;")
                                 on:click=move |_| overlay.set(Overlay::Persona)>
                                 <span style="font-size: 1.5rem;">"👤"</span>
                             </button>
-                            <button style=format!("{TILE} grid-column: span 1; grid-row: span 1;")
+                            // Notifications bell lives in the FAR-RIGHT cell (col 8).
+                            // It jiggles only until notifications are configured, and
+                            // is drawn crossed-out (🔕) while the kill-switch is on.
+                            <button style=format!("{TILE} grid-column: 8 / 9; grid-row: span 1;")
                                 on:click=move |_| overlay.set(Overlay::Notifications)>
-                                <span class="dash-bell-jiggle"
+                                <span class=move || if notif_configured.get() || notif_disabled.get() { "" } else { "dash-bell-jiggle" }
                                     style="font-size: 1.5rem; display: inline-block; transform-origin: 50% 10%;">
-                                    "🔔"
+                                    {move || if notif_disabled.get() { "🔕" } else { "🔔" }}
                                 </span>
                             </button>
                         </div>

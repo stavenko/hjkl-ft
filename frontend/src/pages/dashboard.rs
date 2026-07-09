@@ -108,16 +108,16 @@ pub fn DashboardPage() -> impl IntoView {
                         <div style=GRID>
                             <button style=format!("{TILE} grid-column: 1 / 2; grid-row: span 1;")
                                 on:click=move |_| overlay.set(Overlay::Persona)>
-                                <span style="font-size: 1.5rem;">"👤"</span>
+                                {icon_user()}
                             </button>
                             // Notifications bell lives in the FAR-RIGHT cell (col 8).
                             // It jiggles only until notifications are configured, and
-                            // is drawn crossed-out (🔕) while the kill-switch is on.
+                            // is drawn crossed-out (bell-off) while the kill-switch is on.
                             <button style=format!("{TILE} grid-column: 8 / 9; grid-row: span 1;")
                                 on:click=move |_| overlay.set(Overlay::Notifications)>
                                 <span class=move || if notif_configured.get() || notif_disabled.get() { "" } else { "dash-bell-jiggle" }
-                                    style="font-size: 1.5rem; display: inline-block; transform-origin: 50% 10%;">
-                                    {move || if notif_disabled.get() { "🔕" } else { "🔔" }}
+                                    style="display: inline-flex; transform-origin: 50% 10%;">
+                                    {move || if notif_disabled.get() { icon_bell_off().into_view() } else { icon_bell().into_view() }}
                                 </span>
                             </button>
                         </div>
@@ -232,5 +232,46 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                 </div>
             </div>
         </div>
+    }
+}
+
+// ── Feather/Lucide line icons (24×24, currentColor, 2px round strokes) — the same
+// style as the bottom-nav icons, so the widgets stop looking like OS emoji. ──
+
+const IC: &str = "http://www.w3.org/2000/svg";
+
+/// Feather `user`.
+fn icon_user() -> impl IntoView {
+    view! {
+        <svg xmlns=IC width="30" height="30" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+        </svg>
+    }
+}
+
+/// Feather `bell`.
+fn icon_bell() -> impl IntoView {
+    view! {
+        <svg xmlns=IC width="28" height="28" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+    }
+}
+
+/// Feather `bell-off` (the crossed-out bell for the disabled state).
+fn icon_bell_off() -> impl IntoView {
+    view! {
+        <svg xmlns=IC width="28" height="28" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            <path d="M18.63 13A17.89 17.89 0 0 1 18 8"/>
+            <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/>
+            <path d="M18 8a6 6 0 0 0-9.33-5"/>
+            <line x1="1" y1="1" x2="23" y2="23"/>
+        </svg>
     }
 }

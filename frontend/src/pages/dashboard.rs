@@ -220,14 +220,12 @@ fn EditorHead(
 /// straight to the profile and bumps the dashboard so completeness re-evaluates.
 #[component]
 fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
-    let sex = move || {
-        bump.get();
-        profile::get_sex()
-    };
-    let goal = move || {
-        bump.get();
-        profile::get_goal()
-    };
+    // Initial values captured once. We deliberately DON'T reactively control the
+    // <select> value: a reactive `prop:value` fought the native selection and
+    // reverted the shown option even though the value was already saved. The editor
+    // is recreated every time it opens, so a one-time `selected` is enough.
+    let sex0 = profile::get_sex();
+    let goal0 = profile::get_goal();
     let pick_sex = move |s: Sex| {
         profile::set_sex(s);
         bump.update(|v| *v += 1);
@@ -249,23 +247,11 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
     let row = "display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px;";
     let label = "margin: 0;";
 
-    let goal_str = move || match goal() {
-        CourseGoal::Lose => "lose",
-        CourseGoal::Gain => "gain",
-        CourseGoal::Maintain => "maintain",
-    };
-    let sex_str = move || match sex() {
-        Some(Sex::Male) => "male",
-        Some(Sex::Female) => "female",
-        None => "",
-    };
-
     view! {
         <div style="display: flex; flex-direction: column; gap: 8px;">
             <div style=row>
                 <span class="is-size-6" style=label>{move || t("dashboard.sex")}</span>
                 <select style=select
-                    prop:value=sex_str
                     on:change=move |ev| {
                         match event_target_value(&ev).as_str() {
                             "male" => pick_sex(Sex::Male),
@@ -274,9 +260,9 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                         }
                     }>
                     // Empty placeholder until a sex is chosen (keeps the profile incomplete).
-                    <option value="" disabled hidden></option>
-                    <option value="male">{move || t("dashboard.sex_male")}</option>
-                    <option value="female">{move || t("dashboard.sex_female")}</option>
+                    <option value="" selected=sex0.is_none() disabled hidden></option>
+                    <option value="male" selected=sex0 == Some(Sex::Male)>{move || t("dashboard.sex_male")}</option>
+                    <option value="female" selected=sex0 == Some(Sex::Female)>{move || t("dashboard.sex_female")}</option>
                 </select>
             </div>
 
@@ -313,7 +299,6 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
             <div style=row>
                 <span class="is-size-6" style=label>{move || t("dashboard.goal")}</span>
                 <select style=select
-                    prop:value=goal_str
                     on:change=move |ev| {
                         let g = match event_target_value(&ev).as_str() {
                             "gain" => CourseGoal::Gain,
@@ -322,9 +307,9 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                         };
                         pick_goal(g);
                     }>
-                    <option value="lose">{move || t("dashboard.goal_lose")}</option>
-                    <option value="gain">{move || t("dashboard.goal_gain")}</option>
-                    <option value="maintain">{move || t("dashboard.goal_maintain")}</option>
+                    <option value="lose" selected=goal0 == CourseGoal::Lose>{move || t("dashboard.goal_lose")}</option>
+                    <option value="gain" selected=goal0 == CourseGoal::Gain>{move || t("dashboard.goal_gain")}</option>
+                    <option value="maintain" selected=goal0 == CourseGoal::Maintain>{move || t("dashboard.goal_maintain")}</option>
                 </select>
             </div>
         </div>

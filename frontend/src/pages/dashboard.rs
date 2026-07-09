@@ -17,9 +17,18 @@
 use leptos::*;
 
 use crate::components::notify_panel::NotifyPanel;
+use crate::components::steps_chart_modal::StepsChartModal;
+use crate::components::steps_widget::StepsWidget;
+use crate::components::weight_chart_modal::WeightChartModal;
+use crate::components::weight_widget::WeightWidget;
 use crate::services::i18n::t;
 use crate::services::profile::{self, CourseGoal, Sex};
-use crate::services::{db, story};
+use crate::services::{db, local, story};
+
+// Bare 4×3 tile wrapper: the weight/steps widgets bring their own card, so this
+// button is transparent and just fills the grid area to open the chart modal.
+const WIDGET_TILE: &str = "appearance: none; -webkit-appearance: none; border: none; background: none; \
+    padding: 0; margin: 0; cursor: pointer; font: inherit; color: inherit; text-align: left; display: block;";
 
 /// Which widget's editor is open over the grid (None = just the grid).
 #[derive(Clone, Copy, PartialEq)]
@@ -78,6 +87,17 @@ pub fn DashboardPage() -> impl IntoView {
         });
     });
 
+    // Weight & steps widgets (moved here from the diary). Resources refresh when
+    // their stores change; the tiles open the same chart modals.
+    let weight_ver = db::version("weight_entries");
+    let weight_res = create_resource(move || weight_ver.get(), |_| async { local::list_weight_entries().await });
+    let weight_entries = move || weight_res.get().unwrap_or_default();
+    let steps_ver = db::version("step_entries");
+    let steps_res = create_resource(move || steps_ver.get(), |_| async { local::list_step_entries().await });
+    let steps_entries = move || steps_res.get().unwrap_or_default();
+    let show_weight_modal = create_rw_signal(false);
+    let show_steps_modal = create_rw_signal(false);
+
     view! {
         {move || {
             if persona_full() {
@@ -120,11 +140,33 @@ pub fn DashboardPage() -> impl IntoView {
                                     {move || if notif_disabled.get() { icon_bell_off().into_view() } else { icon_bell().into_view() }}
                                 </span>
                             </button>
+
+                            // Weight & steps widgets: 4×3 tiles side by side under the top row.
+                            <button style=format!("{WIDGET_TILE} grid-column: 1 / 5; grid-row: 2 / 5;")
+                                attr:data-testid="dash-weight-widget"
+                                on:click=move |_| show_weight_modal.set(true)>
+                                <WeightWidget entries=Signal::derive(weight_entries)/>
+                            </button>
+                            <button style=format!("{WIDGET_TILE} grid-column: 5 / 9; grid-row: 2 / 5;")
+                                attr:data-testid="dash-steps-widget"
+                                on:click=move |_| show_steps_modal.set(true)>
+                                <StepsWidget entries=Signal::derive(steps_entries)/>
+                            </button>
                         </div>
                     </div>
                 }.into_view()
             }
         }}
+
+        // Chart modals (shared with what the diary used to show), on top of everything.
+        {move || show_weight_modal.get().then(|| view! {
+            <WeightChartModal entries=Signal::derive(weight_entries)
+                on_close=Callback::new(move |_| show_weight_modal.set(false))/>
+        })}
+        {move || show_steps_modal.get().then(|| view! {
+            <StepsChartModal entries=Signal::derive(steps_entries)
+                on_close=Callback::new(move |_| show_steps_modal.set(false))/>
+        })}
     }
 }
 
@@ -162,6 +204,8 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
     let pick_sex = move |s: Sex| {
         profile::set_sex(s);
         bump.update(|v| *v += 1);
+        // Keep the story setup-section tasks working (Settings used to set these).
+        spawn_local(async { story::set_flag(story::SEX_SELECTED, true).await; });
     };
     let pick_goal = move |g: CourseGoal| {
         profile::set_goal(g);
@@ -199,8 +243,11 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                     prop:value=move || { bump.get(); profile::get_height_cm().map(|h| (h as i64).to_string()).unwrap_or_default() }
                     on:change=move |ev| {
                         if let Ok(v) = event_target_value(&ev).trim().parse::<f64>() {
-                            profile::set_height_cm(v);
-                            bump.update(|x| *x += 1);
+                            if v > 0.0 {
+                                profile::set_height_cm(v);
+                                bump.update(|x| *x += 1);
+                                spawn_local(async { story::set_flag(story::HEIGHT_SET, true).await; });
+                            }
                         }
                     }/>
             </div>
@@ -211,8 +258,11 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                     prop:value=move || { bump.get(); profile::get_birth_year().map(|y| y.to_string()).unwrap_or_default() }
                     on:change=move |ev| {
                         if let Ok(v) = event_target_value(&ev).trim().parse::<i32>() {
-                            profile::set_birth_year(v);
-                            bump.update(|x| *x += 1);
+                            if (1900..=2026).contains(&v) {
+                                profile::set_birth_year(v);
+                                bump.update(|x| *x += 1);
+                                spawn_local(async { story::set_flag(story::BIRTH_YEAR_SET, true).await; });
+                            }
                         }
                     }/>
             </div>

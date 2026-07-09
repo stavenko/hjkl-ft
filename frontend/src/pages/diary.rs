@@ -3,18 +3,10 @@ use leptos_router::*;
 use api_types::*;
 
 use crate::components::food_weight_modal::FoodWeightModal;
-use crate::components::weight_widget::WeightWidget;
-use crate::components::weight_chart_modal::WeightChartModal;
-use crate::components::steps_widget::StepsWidget;
-use crate::components::steps_chart_modal::StepsChartModal;
 use crate::components::summary_block::SummaryBlock;
 use crate::components::food_edit_modal::FoodEditModal;
 use crate::services::{local, sync, db, story};
 use crate::services::i18n::t;
-
-/// Button reset so a native <button> can wrap a widget card transparently
-/// (iOS Safari fires clicks reliably on buttons, not on bare <div>s).
-const WIDGET_BTN: &str = "min-width: 0; cursor: pointer; appearance: none; -webkit-appearance: none; border: none; background: none; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; display: block;";
 
 fn format_date_relative(date_str: &str) -> String {
     use chrono::Datelike;
@@ -198,23 +190,8 @@ pub fn DiaryPage() -> impl IntoView {
         },
     );
 
-    let weight_res = create_resource(
-        move || version.get(),
-        |_| async { local::list_weight_entries().await },
-    );
-
-    // The weight chart appears at the same moment as the weigh-in reminder
-    // toggle in settings — i.e. once the setup section is done.
+    // Story DB version — drives the meal-split resource below.
     let story_ver = db::version("story");
-    let setup_done_res = create_resource(
-        move || story_ver.get(),
-        |_| async {
-            story::get_flag(story::LANGUAGE_CONFIGURED).await
-                && story::get_flag(story::NOTIFICATION_RECEIVED).await
-        },
-    );
-    let setup_done = move || setup_done_res.get().unwrap_or(false);
-    let show_weight_modal = create_rw_signal(false);
 
     // Chapter 2 / s6: once the meal-split section has been opened, the day's
     // diary entries are grouped into derived meals. Until then, keep the flat
@@ -225,19 +202,11 @@ pub fn DiaryPage() -> impl IntoView {
     );
     let meal_split_on = move || meal_split_res.get().unwrap_or(false);
 
-    let steps_res = create_resource(
-        move || version.get(),
-        |_| async { local::list_step_entries().await },
-    );
-    let steps_entries = move || steps_res.get().unwrap_or_default();
-    let show_steps_modal = create_rw_signal(false);
-
     let foods = move || foods_res.get().unwrap_or_default();
     let goals = move || goals_res.get().unwrap_or_default();
     let entries = move || entries_res.get().unwrap_or_default();
     let today_entries = move || today_entries_res.get().unwrap_or_default();
     let week_entries = move || week_entries_res.get().unwrap_or_default();
-    let weight_entries = move || weight_res.get().unwrap_or_default();
 
     let food_name = move |food_id: &str| -> String {
         foods()
@@ -502,31 +471,7 @@ pub fn DiaryPage() -> impl IntoView {
                 }}
             </div>
 
-            {move || (is_today() && setup_done()).then(|| view! {
-                <div style="display: flex; gap: 0.75rem; align-items: stretch; margin-bottom: 0.75rem;">
-                    // Native <button> wrappers: iOS Safari doesn't reliably fire
-                    // delegated click events on non-interactive <div>s.
-                    <button type="button" attr:data-testid="diary-weight-widget" style=WIDGET_BTN style:flex="1" on:click=move |_| show_weight_modal.set(true)>
-                        <WeightWidget entries=Signal::derive(weight_entries) />
-                    </button>
-                    <button type="button" style=WIDGET_BTN style:flex="1" on:click=move |_| show_steps_modal.set(true)>
-                        <StepsWidget entries=Signal::derive(steps_entries) />
-                    </button>
-                </div>
-            })}
-
-            {move || show_weight_modal.get().then(|| view! {
-                <WeightChartModal
-                    entries=Signal::derive(weight_entries)
-                    on_close=Callback::new(move |_| show_weight_modal.set(false))
-                />
-            })}
-            {move || show_steps_modal.get().then(|| view! {
-                <StepsChartModal
-                    entries=Signal::derive(steps_entries)
-                    on_close=Callback::new(move |_| show_steps_modal.set(false))
-                />
-            })}
+            // Weight & steps widgets moved to the dashboard (pages::dashboard).
 
             {move || if entries().is_empty() {
                 if is_today() {

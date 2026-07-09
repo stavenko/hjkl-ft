@@ -4,7 +4,6 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::services::{auth, db, story, profile, local, sync, update, i18n::t};
-use crate::services::profile::Sex;
 
 const IOS_BG: &str = "background: var(--bulma-background); min-height: 100vh; padding: 16px; margin: -0.75rem;";
 const IOS_CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden;";
@@ -77,49 +76,6 @@ pub fn SettingsPage() -> impl IntoView {
     // Danger zone: the "delete diary data" row expands into its two options.
     let show_diary_delete = create_rw_signal(false);
 
-    // Biological sex (localStorage). Picking it also marks the setup-section
-    // story task. Reactive signal so the ✓ updates immediately.
-    let sex = create_rw_signal(profile::get_sex());
-    let pick_sex = move |s: Sex| {
-        profile::set_sex(s);
-        sex.set(Some(s));
-        spawn_local(async { story::set_flag(story::SEX_SELECTED, true).await; });
-    };
-
-    // Height (cm, localStorage) + the latest logged weight → BMI. Lets us read how
-    // much of the body mass is fat. Saving a valid height also marks the
-    // setup-section `height` story task (like sex/birth_year).
-    let height = create_rw_signal(profile::get_height_cm());
-    let set_height = move |raw: String| {
-        let cm = raw.trim().replace(',', ".").parse::<f64>().ok().filter(|h| *h > 0.0);
-        profile::set_height_cm(cm.unwrap_or(0.0));
-        height.set(cm);
-        if cm.is_some() {
-            spawn_local(async { story::set_flag(story::HEIGHT_SET, true).await; });
-        }
-    };
-    // Year of birth (synced profile). Saving a valid year also marks the
-    // setup-section `age` story task. Only a valid year completes the task —
-    // a cleared/garbage entry must not.
-    let birth_year = create_rw_signal(profile::get_birth_year());
-    let set_birth_year = move |raw: String| {
-        let y = raw.trim().parse::<i32>().ok().filter(|y| (1900..=2026).contains(y));
-        profile::set_birth_year(y.unwrap_or(0));
-        birth_year.set(y);
-        if y.is_some() {
-            spawn_local(async { story::set_flag(story::BIRTH_YEAR_SET, true).await; });
-        }
-    };
-
-    let latest_weight = create_rw_signal(None::<f64>);
-    let weight_ver = db::version("weight_entries");
-    create_effect(move |_| {
-        weight_ver.get();
-        spawn_local(async move {
-            latest_weight.set(local::list_weight_entries().await.last().map(|e| e.weight_kg));
-        });
-    });
-    let bmi = move || height.get().zip(latest_weight.get()).and_then(|(h, w)| profile::bmi(w, h));
 
     // Course goal (lose / maintain). The chooser is shown ONLY after the relevant
     // chapter unlocks it; until then it's hidden and the goal defaults to lose.
@@ -195,69 +151,8 @@ pub fn SettingsPage() -> impl IntoView {
                 </button>
             </div>
 
-            // ---- Sex section ----
-            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.sex")}</p>
-            <div style=IOS_CARD>
-                <button
-                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
-                    attr:data-testid="settings-btn-sex-female"
-                    on:click=move |_| pick_sex(Sex::Female)
-                >
-                    <span class="is-size-6">{move || t("settings.sex_female")}</span>
-                    {move || (sex.get() == Some(Sex::Female)).then(|| view! { <span class="has-text-link is-size-5">"✓"</span> })}
-                </button>
-                <div style=IOS_SEPARATOR></div>
-                <button
-                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
-                    attr:data-testid="settings-btn-sex-male"
-                    on:click=move |_| pick_sex(Sex::Male)
-                >
-                    <span class="is-size-6">{move || t("settings.sex_male")}</span>
-                    {move || (sex.get() == Some(Sex::Male)).then(|| view! { <span class="has-text-link is-size-5">"✓"</span> })}
-                </button>
-            </div>
-            <p class="is-size-7 has-text-grey" style="padding: 8px 16px 0 16px; margin: 0; line-height: 1.45;">
-                {move || t("settings.sex_why")}
-            </p>
-
-            // ---- Birth year section ----
-            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.birth_year")}</p>
-            <div style=IOS_CARD>
-                <div style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
-                    <span class="is-size-6">{move || t("settings.birth_year_label")}</span>
-                    <input
-                        type="number" inputmode="numeric" min="1900" step="1"
-                        attr:data-testid="settings-input-birth-year"
-                        style="appearance: none; -webkit-appearance: none; border: none; background: none; font: inherit; text-align: right; width: 96px; color: inherit;"
-                        prop:value=move || birth_year.get().map(|y| y.to_string()).unwrap_or_default()
-                        on:change=move |ev| set_birth_year(event_target_value(&ev))
-                    />
-                </div>
-            </div>
-            <p class="is-size-7 has-text-grey" style="padding: 8px 16px 0 16px; margin: 0; line-height: 1.45;">
-                {move || t("settings.birth_year_why")}
-            </p>
-
-            // ---- Height / BMI section ----
-            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.height")}</p>
-            <div style=IOS_CARD>
-                <div style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
-                    <span class="is-size-6">{move || t("settings.height_label")}</span>
-                    <input
-                        type="number" inputmode="numeric" min="0" step="1"
-                        attr:data-testid="settings-input-height"
-                        style="appearance: none; -webkit-appearance: none; border: none; background: none; font: inherit; text-align: right; width: 96px; color: inherit;"
-                        prop:value=move || height.get().map(|h| (h.round() as i64).to_string()).unwrap_or_default()
-                        on:change=move |ev| set_height(event_target_value(&ev))
-                    />
-                </div>
-            </div>
-            <p class="is-size-7 has-text-grey" style="padding: 8px 16px 0 16px; margin: 0; line-height: 1.45;">
-                {move || match bmi() {
-                    Some(v) => t("settings.bmi").replace("{n}", &format!("{v:.1}")),
-                    None => t("settings.height_why").to_string(),
-                }}
-            </p>
+            // Sex / birth year / height are configured in the dashboard «Персона»
+            // widget now (see pages::dashboard::PersonaEditor).
 
             // ---- Course goal section (hidden until the relevant chapter unlocks) ----
             {move || show_goal.get().then(|| view! {

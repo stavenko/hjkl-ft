@@ -212,21 +212,35 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
         bump.update(|v| *v += 1);
     };
 
+    // Small segmented pill for the sex choice (compact, right-aligned in its row).
     let seg = |active: bool| -> String {
         format!(
-            "flex: 1; padding: 10px; border-radius: 10px; border: none; cursor: pointer; font: inherit; \
+            "padding: 8px 14px; border-radius: 10px; border: none; cursor: pointer; font: inherit; \
              background: {}; color: {};",
             if active { "var(--bulma-link)" } else { "var(--bulma-scheme-main)" },
             if active { "#fff" } else { "var(--bulma-text)" },
         )
     };
+    // Right-aligned number field on its row.
     let field = "background: var(--bulma-scheme-main); border: none; border-radius: 10px; \
-                 padding: 10px 12px; width: 100%; color: var(--bulma-text); font: inherit;";
+                 padding: 10px 12px; width: 110px; text-align: right; color: var(--bulma-text); font: inherit;";
+    // Compact native select for the goal.
+    let select = "background: var(--bulma-scheme-main); border: none; border-radius: 10px; \
+                  padding: 9px 10px; color: var(--bulma-text); font: inherit;";
+    // Each field is one row: label on the left, control on the right.
+    let row = "display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px;";
+    let label = "margin: 0;";
+
+    let goal_str = move || match goal() {
+        CourseGoal::Lose => "lose",
+        CourseGoal::Gain => "gain",
+        CourseGoal::Maintain => "maintain",
+    };
 
     view! {
-        <div style="display: flex; flex-direction: column; gap: 14px;">
-            <div>
-                <p class="is-size-7 has-text-grey" style="margin: 0 0 6px;">{move || t("dashboard.sex")}</p>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style=row>
+                <span class="is-size-6" style=label>{move || t("dashboard.sex")}</span>
                 <div style="display: flex; gap: 8px;">
                     <button style=move || seg(sex() == Some(Sex::Male)) on:click=move |_| pick_sex(Sex::Male)>
                         {move || t("dashboard.sex_male")}
@@ -237,8 +251,8 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                 </div>
             </div>
 
-            <div>
-                <p class="is-size-7 has-text-grey" style="margin: 0 0 6px;">{move || t("dashboard.height")}</p>
+            <div style=row>
+                <span class="is-size-6" style=label>{move || t("dashboard.height")}</span>
                 <input type="number" inputmode="numeric" min="80" max="250" style=field
                     prop:value=move || { bump.get(); profile::get_height_cm().map(|h| (h as i64).to_string()).unwrap_or_default() }
                     on:change=move |ev| {
@@ -252,8 +266,8 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                     }/>
             </div>
 
-            <div>
-                <p class="is-size-7 has-text-grey" style="margin: 0 0 6px;">{move || t("dashboard.birth_year")}</p>
+            <div style=row>
+                <span class="is-size-6" style=label>{move || t("dashboard.birth_year")}</span>
                 <input type="number" inputmode="numeric" min="1900" max="2025" style=field
                     prop:value=move || { bump.get(); profile::get_birth_year().map(|y| y.to_string()).unwrap_or_default() }
                     on:change=move |ev| {
@@ -267,19 +281,22 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                     }/>
             </div>
 
-            <div>
-                <p class="is-size-7 has-text-grey" style="margin: 0 0 6px;">{move || t("dashboard.goal")}</p>
-                <div style="display: flex; gap: 8px;">
-                    <button style=move || seg(goal() == CourseGoal::Lose) on:click=move |_| pick_goal(CourseGoal::Lose)>
-                        {move || t("dashboard.goal_lose")}
-                    </button>
-                    <button style=move || seg(goal() == CourseGoal::Gain) on:click=move |_| pick_goal(CourseGoal::Gain)>
-                        {move || t("dashboard.goal_gain")}
-                    </button>
-                    <button style=move || seg(goal() == CourseGoal::Maintain) on:click=move |_| pick_goal(CourseGoal::Maintain)>
-                        {move || t("dashboard.goal_maintain")}
-                    </button>
-                </div>
+            <div style=row>
+                <span class="is-size-6" style=label>{move || t("dashboard.goal")}</span>
+                <select style=select
+                    prop:value=goal_str
+                    on:change=move |ev| {
+                        let g = match event_target_value(&ev).as_str() {
+                            "gain" => CourseGoal::Gain,
+                            "maintain" => CourseGoal::Maintain,
+                            _ => CourseGoal::Lose,
+                        };
+                        pick_goal(g);
+                    }>
+                    <option value="lose">{move || t("dashboard.goal_lose")}</option>
+                    <option value="gain">{move || t("dashboard.goal_gain")}</option>
+                    <option value="maintain">{move || t("dashboard.goal_maintain")}</option>
+                </select>
             </div>
         </div>
     }

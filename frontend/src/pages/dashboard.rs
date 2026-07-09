@@ -123,9 +123,6 @@ pub fn DashboardPage() -> impl IntoView {
                 // Collapsed grid: persona 1×1 + notifications bell 1×1.
                 view! {
                     <div style="display: flex; flex-direction: column; gap: 12px;">
-                        <h1 class="is-size-4 has-text-weight-bold" style="margin: 4px 4px 0;">
-                            {move || t("nav.dashboard")}
-                        </h1>
                         <div style=GRID>
                             <button style=format!("{TILE} grid-column: 1 / 2; grid-row: span 1;")
                                 on:click=move |_| overlay.set(Overlay::Persona)>

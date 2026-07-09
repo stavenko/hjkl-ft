@@ -166,6 +166,22 @@ fn menu_demo(items: Vec<(&'static str, bool)>) -> impl IntoView {
     }
 }
 
+/// Inert example of a diary row where the grams value «150 г» is the tappable
+/// control that opens the weight editor.
+fn grams_row_demo() -> impl IntoView {
+    let goals = Signal::derive(Vec::<Goal>::new);
+    view! {
+        <div style=format!("{DEMO} align-items: stretch; padding: 12px; pointer-events: none;")>
+            <FoodListItem food=demo_food(t("help.demo.food1_name").to_string(), 92.0, 3.4, 0.6, 18.6)
+                goals=goals grams=150.0>
+                <span class="is-size-6 has-text-link has-text-weight-semibold">
+                    {move || format!("150 {}", t("common.unit.g"))}
+                </span>
+            </FoodListItem>
+        </div>
+    }
+}
+
 fn fab_demo() -> impl IntoView {
     view! {
         <div style=format!("{DEMO} pointer-events: none;")>
@@ -210,7 +226,7 @@ pub fn HelpArticlePage() -> impl IntoView {
                 "edit-weight" => view! {
                     {para("help.article.edit_weight.p1")}
                     {para("help.article.edit_weight.p2")}
-                    {row_menu()}
+                    {grams_row_demo()}
                 }.into_view(),
                 "rename-food" => view! {
                     {para("help.article.rename_food.p1")}

@@ -17,6 +17,7 @@
 use leptos::*;
 
 use crate::components::notify_panel::NotifyPanel;
+use crate::components::progress_widget::ProgressWidget;
 use crate::components::steps_chart_modal::StepsChartModal;
 use crate::components::steps_widget::StepsWidget;
 use crate::components::weight_chart_modal::WeightChartModal;
@@ -152,6 +153,11 @@ pub fn DashboardPage() -> impl IntoView {
                                 on:click=move |_| show_steps_modal.set(true)>
                                 <StepsWidget entries=Signal::derive(steps_entries)/>
                             </button>
+
+                            // Progress widget: full width, 6 rows tall.
+                            <div style="grid-column: 1 / 9; grid-row: 5 / 11;">
+                                <ProgressWidget/>
+                            </div>
                         </div>
                     </div>
                 }.into_view()

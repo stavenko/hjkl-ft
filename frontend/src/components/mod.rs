@@ -27,3 +27,4 @@ pub mod chat_input;
 pub mod mode_toggle;
 pub mod live_message;
 pub mod notify_panel;
+pub mod progress_widget;

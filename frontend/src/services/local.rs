@@ -131,6 +131,36 @@ pub async fn calorie_planka_suggestion() -> Option<f64> {
     Some(calorie_planka(avg, balance))
 }
 
+/// The currently-set daily calorie planka (the `Calories`/`AtMost` goal), if any.
+pub async fn calorie_goal_amount() -> Option<f64> {
+    list_goals()
+        .await
+        .into_iter()
+        .find(|g| g.nutrient == "Calories" && g.direction == GoalDirection::AtMost && g.amount > 0.0)
+        .map(|g| g.amount)
+}
+
+/// Progress toward the "one week of observations" the planka needs: for each of
+/// food / weight / steps, how many of the last 7 calendar days (today + 6) have an
+/// entry, capped at 7. Drives the dashboard progress widget's «X/7» counters.
+pub async fn progress_week_counts() -> (u32, u32, u32) {
+    let today = chrono::Local::now().date_naive();
+    let window: std::collections::BTreeSet<chrono::NaiveDate> =
+        (0..7).map(|i| today - chrono::Duration::days(i)).collect();
+    let count = |dates: &[String]| -> u32 {
+        dates
+            .iter()
+            .filter_map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .filter(|d| window.contains(d))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len() as u32
+    };
+    let food = count(&list_diary_dates().await);
+    let weight = count(&list_weight_entries().await.into_iter().map(|e| e.date).collect::<Vec<_>>());
+    let steps = count(&list_step_entries().await.into_iter().map(|e| e.date).collect::<Vec<_>>());
+    (food, weight, steps)
+}
+
 // --- Chapter 2 detection helpers ---
 //
 // Case-insensitive substring name-matching on `food.name.to_lowercase()`. These

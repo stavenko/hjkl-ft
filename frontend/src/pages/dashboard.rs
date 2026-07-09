@@ -3,9 +3,13 @@
 //!
 //! Layout: an 8-COLUMN square-cell grid. A unit is 1×1 cell; widgets occupy a
 //! rectangle of units (the weight/steps widgets will be 4×3). Widgets are revealed
-//! progressively — like the story, but simpler: the Persona widget comes first, and
-//! once the profile is filled it collapses to 1×1 and the Notifications widget's
-//! bell starts jiggling. Tapping a collapsed widget opens its editor over the grid.
+//! progressively — like the story, but simpler.
+//!
+//! The Persona widget comes FIRST and is OPEN by default: while the profile is
+//! incomplete its editor fills the whole dashboard (above the nav, in-flow — never a
+//! bottom sheet that fights the menu), and the other widgets (the notifications bell)
+//! are hidden behind it. Once every field is filled it collapses to a 1×1 tile and
+//! the bell appears and jiggles; tapping the tile re-opens the full-screen editor.
 //!
 //! This first increment ships the framework + the Persona and Notifications widgets.
 //! Weight/steps tiles (4×3) will slot into the same grid next.
@@ -32,7 +36,11 @@ const GRID: &str = "--gap: 6px; --u: calc((100vw - 1.5rem - 7 * var(--gap)) / 8)
 const TILE: &str = "appearance: none; -webkit-appearance: none; border: none; font: inherit; \
     color: inherit; text-align: left; cursor: pointer; background: var(--bulma-scheme-main); \
     border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); overflow: hidden; \
-    display: flex; flex-direction: column; padding: 10px;";
+    display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px;";
+
+// An open editor fills the dashboard area; min-height keeps it "full-screen" while
+// still sitting inside the scroll container (so the bottom nav stays clear).
+const EDITOR: &str = "display: flex; flex-direction: column; gap: 14px; min-height: calc(100dvh - 5.5rem);";
 
 #[component]
 pub fn DashboardPage() -> impl IntoView {
@@ -46,93 +54,71 @@ pub fn DashboardPage() -> impl IntoView {
     };
 
     let overlay = create_rw_signal(Overlay::None);
+    // Persona takes over the whole screen while it's incomplete OR re-opened.
+    let persona_full = move || !persona_complete() || overlay.get() == Overlay::Persona;
 
     view! {
-        <div style="display: flex; flex-direction: column; gap: 12px;">
-            <h1 class="is-size-4 has-text-weight-bold" style="margin: 4px 4px 0;">
-                {move || t("nav.dashboard")}
-            </h1>
-
-            <div style=GRID>
-                // ── Persona widget ──
-                {move || {
-                    if persona_complete() {
-                        // Collapsed 1×1 summary; tap to reconfigure.
-                        view! {
-                            <button style=format!("{TILE} grid-column: span 1; grid-row: span 1; align-items: center; justify-content: center;")
+        {move || {
+            if persona_full() {
+                view! {
+                    <div style=EDITOR>
+                        <EditorHead title="dashboard.persona_title"
+                            show_done=Signal::derive(persona_complete)
+                            on_done=move || overlay.set(Overlay::None)/>
+                        <PersonaEditor bump/>
+                    </div>
+                }.into_view()
+            } else if overlay.get() == Overlay::Notifications {
+                view! {
+                    <div style=EDITOR>
+                        <EditorHead title="dashboard.notifications_title"
+                            show_done=Signal::derive(|| true)
+                            on_done=move || overlay.set(Overlay::None)/>
+                        <NotifyPanel hide_check_after_received=true/>
+                    </div>
+                }.into_view()
+            } else {
+                // Collapsed grid: persona 1×1 + notifications bell 1×1.
+                view! {
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <h1 class="is-size-4 has-text-weight-bold" style="margin: 4px 4px 0;">
+                            {move || t("nav.dashboard")}
+                        </h1>
+                        <div style=GRID>
+                            <button style=format!("{TILE} grid-column: span 1; grid-row: span 1;")
                                 on:click=move |_| overlay.set(Overlay::Persona)>
                                 <span style="font-size: 1.5rem;">"👤"</span>
                             </button>
-                        }.into_view()
-                    } else {
-                        // Setup prompt: full width, two rows tall.
-                        view! {
-                            <button style=format!("{TILE} grid-column: span 8; grid-row: span 2; justify-content: center; gap: 4px;")
-                                on:click=move |_| overlay.set(Overlay::Persona)>
-                                <span style="font-size: 1.6rem;">"👤"</span>
-                                <span class="has-text-weight-semibold">{move || t("dashboard.persona_setup_title")}</span>
-                                <span class="is-size-7 has-text-grey">{move || t("dashboard.persona_setup_hint")}</span>
+                            <button style=format!("{TILE} grid-column: span 1; grid-row: span 1;")
+                                on:click=move |_| overlay.set(Overlay::Notifications)>
+                                <span class="dash-bell-jiggle"
+                                    style="font-size: 1.5rem; display: inline-block; transform-origin: 50% 10%;">
+                                    "🔔"
+                                </span>
                             </button>
-                        }.into_view()
-                    }
-                }}
-
-                // ── Notifications widget (1×1) ──
-                <button style=format!("{TILE} grid-column: span 1; grid-row: span 1; align-items: center; justify-content: center;")
-                    on:click=move |_| overlay.set(Overlay::Notifications)>
-                    <span class=move || if persona_complete() { "dash-bell-jiggle" } else { "" }
-                        style="font-size: 1.5rem; display: inline-block; transform-origin: 50% 10%;">
-                        "🔔"
-                    </span>
-                </button>
-            </div>
-        </div>
-
-        // ── Editor overlay (over all widgets) ──
-        {move || match overlay.get() {
-            Overlay::None => ().into_view(),
-            Overlay::Persona => view! {
-                <WidgetOverlay title="dashboard.persona_title" on_close=move || overlay.set(Overlay::None)>
-                    <PersonaEditor bump/>
-                </WidgetOverlay>
-            }.into_view(),
-            Overlay::Notifications => view! {
-                <WidgetOverlay title="dashboard.notifications_title" on_close=move || overlay.set(Overlay::None)>
-                    <NotifyPanel hide_check_after_received=true/>
-                </WidgetOverlay>
-            }.into_view(),
+                        </div>
+                    </div>
+                }.into_view()
+            }
         }}
     }
 }
 
-/// Full-screen overlay host: a scrim + a rounded sheet with a title, a Done button,
-/// and the widget's editor as children.
+/// Editor header: the widget title + a "Done" button (shown only when `show_done`).
 #[component]
-fn WidgetOverlay(
+fn EditorHead(
     title: &'static str,
-    on_close: impl Fn() + 'static + Copy,
-    children: Children,
+    #[prop(into)] show_done: MaybeSignal<bool>,
+    on_done: impl Fn() + 'static + Copy,
 ) -> impl IntoView {
     view! {
-        <div style="position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; justify-content: flex-end;">
-            // Scrim is a SIBLING behind the sheet (not a parent), so taps on the
-            // sheet can't bubble to it — Leptos delegated on:click doesn't reliably
-            // honour an inner stop_propagation, so we avoid relying on it.
-            <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.35);"
-                on:click=move |_| on_close()></div>
-            <div style="position: relative; z-index: 1; background: var(--bulma-background); \
-                        border-radius: 20px 20px 0 0; max-height: 88vh; overflow-y: auto; \
-                        -webkit-overflow-scrolling: touch; \
-                        padding: 12px 16px calc(16px + env(safe-area-inset-bottom));"
-                data-ios-scroll="1">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <h2 class="is-size-5 has-text-weight-bold" style="margin: 0;">{move || t(title)}</h2>
-                    <button class="button is-small is-light" on:click=move |_| on_close()>
-                        {move || t("dashboard.close")}
-                    </button>
-                </div>
-                {children()}
-            </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin: 4px 4px 0;">
+            <h1 class="is-size-4 has-text-weight-bold" style="margin: 0;">{move || t(title)}</h1>
+            {move || show_done.get().then(|| view! {
+                <button class="button is-small is-light" on:click=move |_| on_done()>
+                    {move || t("dashboard.close")}
+                </button>
+            })}
         </div>
     }
 }
@@ -170,7 +156,7 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                  padding: 10px 12px; width: 100%; color: var(--bulma-text); font: inherit;";
 
     view! {
-        <div style="display: flex; flex-direction: column; gap: 14px; padding-bottom: 8px;">
+        <div style="display: flex; flex-direction: column; gap: 14px;">
             <div>
                 <p class="is-size-7 has-text-grey" style="margin: 0 0 6px;">{move || t("dashboard.sex")}</p>
                 <div style="display: flex; gap: 8px;">

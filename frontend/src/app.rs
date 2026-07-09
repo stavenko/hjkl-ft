@@ -205,6 +205,8 @@ pub fn App() -> impl IntoView {
                         // is preserved at /history until it's fully replaced by widgets.
                         <Route path="/" view=pages::dashboard::DashboardPage />
                         <Route path="/history" view=pages::story::StoryPage />
+                        <Route path="/help/food" view=pages::help::HelpFoodPage />
+                        <Route path="/help/:id" view=pages::help::HelpArticlePage />
                         // Generic DSL-driven section page; serves migrated sections (those
                         // without a bespoke static route above). Static routes win by specificity.
                         <Route path="/story/:id" view=pages::story_section::StorySectionPage />

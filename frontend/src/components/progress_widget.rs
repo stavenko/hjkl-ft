@@ -5,6 +5,7 @@
 //! (`local::calorie_planka_suggestion` → `local::set_calorie_goal`).
 
 use leptos::*;
+use leptos_router::use_navigate;
 
 use crate::services::i18n::t;
 use crate::services::profile::{self, CourseGoal};
@@ -25,6 +26,12 @@ pub fn ProgressWidget() -> impl IntoView {
         |_| async { local::progress_week_counts().await },
     );
     let c = move || counts.get().unwrap_or((0, 0, 0));
+
+    // Before the very first food entry we show how to add food instead of counters.
+    let has_food = create_resource(
+        move || food_ver.get(),
+        |_| async { !local::list_diary_dates().await.is_empty() },
+    );
 
     // The planka, once set, flips the widget to its "done" state.
     let goals_ver = db::version("goals");
@@ -74,6 +81,29 @@ pub fn ProgressWidget() -> impl IntoView {
                         <span class="is-size-7 has-text-grey">{move || t("dashboard.progress.done_hint")}</span>
                     </div>
                 }.into_view(),
+                // Before the first food entry: explain how to add food + «?».
+                None if !has_food.get().unwrap_or(false) => {
+                    let go_help = move |_| use_navigate()("/help/food", Default::default());
+                    view! {
+                        <p class="is-size-6" style="line-height: 1.5; margin: 0;">
+                            {move || t("dashboard.progress.help_1")}
+                        </p>
+                        <p class="is-size-6" style="line-height: 1.5; margin: 0;">
+                            {move || t("dashboard.progress.help_2")}
+                        </p>
+                        <p class="is-size-6" style="line-height: 1.5; margin: 0;">
+                            {move || t("dashboard.progress.help_3")}
+                        </p>
+                        <div style="display: flex; justify-content: center; margin-top: 6px;">
+                            <button attr:aria-label="?" on:click=go_help
+                                style="width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer; \
+                                       background: var(--bulma-link); color: #fff; font-size: 1.5rem; \
+                                       font-weight: 700; line-height: 1;">
+                                "?"
+                            </button>
+                        </div>
+                    }.into_view()
+                }
                 // Still collecting the week of observations.
                 None => {
                     let (food, weight, steps) = c();

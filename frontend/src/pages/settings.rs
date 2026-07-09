@@ -3,7 +3,7 @@ use leptos_router::*;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use crate::services::{auth, profile, local, sync, update, i18n::t};
+use crate::services::{auth, local, sync, update, i18n::t};
 
 const IOS_BG: &str = "background: var(--bulma-background); min-height: 100vh; padding: 16px; margin: -0.75rem;";
 const IOS_CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden;";
@@ -72,13 +72,6 @@ pub fn SettingsPage() -> impl IntoView {
     // Danger zone: the "delete diary data" row expands into its two options.
     let show_diary_delete = create_rw_signal(false);
 
-    // Course goal (lose / gain / maintain).
-    use crate::services::profile::CourseGoal;
-    let goal = create_rw_signal(profile::get_goal());
-    let pick_goal = move |g: CourseGoal| {
-        profile::set_goal(g);
-        goal.set(g);
-    };
 
 
     view! {
@@ -143,30 +136,7 @@ pub fn SettingsPage() -> impl IntoView {
             // Sex / birth year / height are configured in the dashboard «Персона»
             // widget now (see pages::dashboard::PersonaEditor).
 
-            // ---- Course goal section ----
-            <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.goal")}</p>
-            <div style=IOS_CARD>
-                <button
-                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
-                    attr:data-testid="settings-btn-goal-lose"
-                    on:click=move |_| pick_goal(CourseGoal::Lose)
-                >
-                    <span class="is-size-6">{move || t("settings.goal_lose")}</span>
-                    {move || (goal.get() == CourseGoal::Lose).then(|| view! { <span class="has-text-link is-size-5">"✓"</span> })}
-                </button>
-                <div style=IOS_SEPARATOR></div>
-                <button
-                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
-                    attr:data-testid="settings-btn-goal-maintain"
-                    on:click=move |_| pick_goal(CourseGoal::Maintain)
-                >
-                    <span class="is-size-6">{move || t("settings.goal_maintain")}</span>
-                    {move || (goal.get() == CourseGoal::Maintain).then(|| view! { <span class="has-text-link is-size-5">"✓"</span> })}
-                </button>
-            </div>
-            <p class="is-size-7 has-text-grey" style="padding: 8px 16px 0 16px; margin: 0; line-height: 1.45;">
-                {move || t("settings.goal_why")}
-            </p>
+            // Course goal moved to the dashboard «Персона» widget.
 
             // ---- Privacy row ----
             <div style="margin-top: 24px;">

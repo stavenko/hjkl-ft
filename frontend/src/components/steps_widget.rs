@@ -2,6 +2,7 @@ use leptos::*;
 use api_types::StepEntry;
 
 use crate::components::mini_chart::chart_block;
+use crate::components::weight_widget::EmptyPrompt;
 use crate::services::i18n::t;
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; padding: 10px 12px; height: 100%; box-sizing: border-box;";
@@ -19,11 +20,19 @@ pub fn StepsWidget(entries: Signal<Vec<StepEntry>>) -> impl IntoView {
 
     view! {
         <div style=CARD>
-            <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px;">
-                <span class="is-size-7 has-text-grey">{move || t("steps.title")}</span>
-                <span class="is-size-6 has-text-weight-semibold">{last_value}</span>
-            </div>
-            <div inner_html=move || chart_svg_steps(&entries.get())></div>
+            {move || {
+                if entries.get().len() < 2 {
+                    view! { <EmptyPrompt text_key="steps.empty_prompt"/> }.into_view()
+                } else {
+                    view! {
+                        <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px;">
+                            <span class="is-size-7 has-text-grey">{move || t("steps.title")}</span>
+                            <span class="is-size-6 has-text-weight-semibold">{last_value}</span>
+                        </div>
+                        <div inner_html=move || chart_svg_steps(&entries.get())></div>
+                    }.into_view()
+                }
+            }}
         </div>
     }
 }

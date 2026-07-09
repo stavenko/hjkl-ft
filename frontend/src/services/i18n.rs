@@ -707,6 +707,7 @@ fn en(key: &str) -> &'static str {
         "weight.unit_kg" => "kg",
         "weight.unit_lbs" => "lbs",
         "weight.widget_title" => "Weight",
+        "weight.empty_prompt" => "Log your weight every morning",
         "weight.widget_placeholder" => "Your weight chart will appear here. Not enough data to draw it yet — once you have at least three measurements, the chart will be shown.",
         "weight.trend.title" => "Trend · 14 days",
         "weight.trend.down" => "Losing",
@@ -723,6 +724,7 @@ fn en(key: &str) -> &'static str {
         "weight.cycle.decycled" => "Weight without the cycle",
 
         "steps.title" => "Steps",
+        "steps.empty_prompt" => "Log your step count every day",
         "steps.for_today" => "Recording evening steps for TODAY",
         "steps.for_yesterday" => "Recording morning steps for YESTERDAY",
         "steps.input_placeholder" => "Steps",
@@ -1800,6 +1802,7 @@ fn ru(key: &str) -> &'static str {
         "weight.unit_kg" => "кг",
         "weight.unit_lbs" => "фунты",
         "weight.widget_title" => "Вес",
+        "weight.empty_prompt" => "Каждый день с утра записывайте вес",
         "weight.widget_placeholder" => "Здесь будет график вашего веса. Пока что график не изобразить, потому что слишком мало данных. Когда появится хотя бы три измерения, график будет нарисован.",
         "weight.trend.title" => "Тренд · 14 дней",
         "weight.trend.down" => "Снижается",
@@ -1816,6 +1819,7 @@ fn ru(key: &str) -> &'static str {
         "weight.cycle.decycled" => "Вес без месячных",
 
         "steps.title" => "Шаги",
+        "steps.empty_prompt" => "Каждый день вписывайте количество шагов",
         "steps.for_today" => "Записываю шаги вечером за СЕГОДНЯ",
         "steps.for_yesterday" => "Записываю шаги с утра за ВЧЕРА",
         "steps.input_placeholder" => "Шаги",

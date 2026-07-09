@@ -38,11 +38,37 @@ pub fn WeightWidget(entries: Signal<Vec<WeightEntry>>) -> impl IntoView {
 
     view! {
         <div style=CARD>
-            <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px;">
-                <span class="is-size-7 has-text-grey">{move || t("weight.widget_title")}</span>
-                <span attr:data-testid="weight-widget-value" class="is-size-6 has-text-weight-semibold" style:color=weight_color>{last_value}</span>
-            </div>
-            <div inner_html=move || chart_svg(&entries.get(), unit.get())></div>
+            {move || {
+                // A line needs at least two points; with fewer, show a prompt + «+»
+                // instead of an empty chart.
+                if entries.get().len() < 2 {
+                    view! { <EmptyPrompt text_key="weight.empty_prompt"/> }.into_view()
+                } else {
+                    view! {
+                        <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px;">
+                            <span class="is-size-7 has-text-grey">{move || t("weight.widget_title")}</span>
+                            <span attr:data-testid="weight-widget-value" class="is-size-6 has-text-weight-semibold" style:color=weight_color>{last_value}</span>
+                        </div>
+                        <div inner_html=move || chart_svg(&entries.get(), unit.get())></div>
+                    }.into_view()
+                }
+            }}
+        </div>
+    }
+}
+
+/// Empty-state body for a data widget: a short prompt centred over a round «+»
+/// affordance. It's a plain (non-button) element — the surrounding tile is the
+/// clickable button that opens the add/chart modal, so nesting buttons is avoided.
+#[component]
+pub fn EmptyPrompt(text_key: &'static str) -> impl IntoView {
+    view! {
+        <div style="height: 100%; display: flex; flex-direction: column; align-items: center; \
+                    justify-content: center; text-align: center; gap: 10px; padding: 4px;">
+            <span class="is-size-7 has-text-grey" style="line-height: 1.35;">{move || t(text_key)}</span>
+            <span style="width: 40px; height: 40px; border-radius: 50%; background: var(--bulma-link); \
+                         color: #fff; display: flex; align-items: center; justify-content: center; \
+                         font-size: 1.6rem; line-height: 1; flex-shrink: 0;">"+"</span>
         </div>
     }
 }

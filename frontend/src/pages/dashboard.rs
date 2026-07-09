@@ -16,6 +16,7 @@
 
 use leptos::*;
 
+use crate::components::cycle_widget::{CycleLine, CyclePanel};
 use crate::components::notify_panel::NotifyPanel;
 use crate::components::progress_widget::ProgressWidget;
 use crate::components::steps_chart_modal::StepsChartModal;
@@ -37,6 +38,7 @@ enum Overlay {
     None,
     Persona,
     Notifications,
+    Cycle,
 }
 
 // 8 columns; each cell is a square whose side `--u` is derived from the viewport
@@ -67,6 +69,11 @@ pub fn DashboardPage() -> impl IntoView {
     let overlay = create_rw_signal(Overlay::None);
     // Persona takes over the whole screen while it's incomplete OR re-opened.
     let persona_full = move || !persona_complete() || overlay.get() == Overlay::Persona;
+    // The cycle widget is female-only.
+    let is_female = move || {
+        bump.get();
+        profile::get_sex() == Some(Sex::Female)
+    };
 
     // Notifications state for the bell: `configured` (a test notification was
     // received → stop jiggling) and `disabled` (the master kill-switch → cross the
@@ -119,6 +126,15 @@ pub fn DashboardPage() -> impl IntoView {
                         <NotifyPanel hide_check_after_received=true/>
                     </div>
                 }.into_view()
+            } else if overlay.get() == Overlay::Cycle {
+                view! {
+                    <div style=EDITOR>
+                        <EditorHead title="cycle.title"
+                            show_done=Signal::derive(|| true)
+                            on_done=move || overlay.set(Overlay::None)/>
+                        <CyclePanel/>
+                    </div>
+                }.into_view()
             } else {
                 // Collapsed grid: persona 1×1 + notifications bell 1×1.
                 view! {
@@ -155,6 +171,14 @@ pub fn DashboardPage() -> impl IntoView {
                             <div style="grid-column: 1 / 9; grid-row: 5 / 11;">
                                 <ProgressWidget/>
                             </div>
+
+                            // Cycle widget (female only): full-width single line.
+                            {move || is_female().then(|| view! {
+                                <button style=format!("{WIDGET_TILE} grid-column: 1 / 9; grid-row: 11 / 12;")
+                                    on:click=move |_| overlay.set(Overlay::Cycle)>
+                                    <CycleLine/>
+                                </button>
+                            })}
                         </div>
                     </div>
                 }.into_view()

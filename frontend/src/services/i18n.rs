@@ -105,6 +105,43 @@ pub fn t(key: &str) -> &'static str {
     }
 }
 
+/// A "YYYY-MM-DD" date as words relative to today: Сегодня / Вчера / Позавчера,
+/// then the weekday name (3–7 days ago), then the full date (older / any future).
+pub fn relative_date(date_str: &str) -> String {
+    use chrono::Datelike;
+    let today = chrono::Local::now().date_naive();
+    let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+        Ok(d) => d,
+        Err(_) => return date_str.to_string(),
+    };
+    match (today - date).num_days() {
+        d if d < 0 => date_str.to_string(),
+        0 => t("diary.today").to_string(),
+        1 => t("diary.yesterday").to_string(),
+        2 => t("diary.day_before").to_string(),
+        3..=7 => match date.weekday() {
+            chrono::Weekday::Mon => t("diary.weekday.mon"),
+            chrono::Weekday::Tue => t("diary.weekday.tue"),
+            chrono::Weekday::Wed => t("diary.weekday.wed"),
+            chrono::Weekday::Thu => t("diary.weekday.thu"),
+            chrono::Weekday::Fri => t("diary.weekday.fri"),
+            chrono::Weekday::Sat => t("diary.weekday.sat"),
+            chrono::Weekday::Sun => t("diary.weekday.sun"),
+        }
+        .to_string(),
+        _ => {
+            let month = match date.month() {
+                1 => t("diary.month.1"), 2 => t("diary.month.2"), 3 => t("diary.month.3"),
+                4 => t("diary.month.4"), 5 => t("diary.month.5"), 6 => t("diary.month.6"),
+                7 => t("diary.month.7"), 8 => t("diary.month.8"), 9 => t("diary.month.9"),
+                10 => t("diary.month.10"), 11 => t("diary.month.11"), 12 => t("diary.month.12"),
+                _ => "",
+            };
+            format!("{} {} {}", date.day(), month, date.year())
+        }
+    }
+}
+
 pub fn nutrient_name(key: &str) -> &'static str {
     match key {
         "Calories" => t("nutrient.calories"),
@@ -163,6 +200,32 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.done_title" => "Your daily target",
         "dashboard.progress.kcal_day" => "kcal/day",
         "dashboard.progress.done_hint" => "We'll adjust it as observations come in.",
+        "cycle.title" => "Cycle",
+        "cycle.day_label" => "Day",
+        "cycle.not_set" => "—",
+        "cycle.first_day" => "First day of the cycle",
+        "cycle.set_first_day" => "Set the first day of the cycle",
+        "cycle.set_prompt" => "Set the first day of your cycle to track its phases.",
+        "cycle.weight_heading" => "Weight",
+        "cycle.training_heading" => "Training",
+        "cycle.save" => "Save",
+        "cycle.cancel" => "Cancel",
+        "cycle.phase.menstrual.name" => "Menstrual phase",
+        "cycle.phase.menstrual.desc" => "The start of the cycle: menstruation is under way and hormone levels are at their lowest.",
+        "cycle.phase.menstrual.weight" => "Weight may be slightly higher from water retention and bloating. Once the period ends the extra water leaves and weight returns to normal.",
+        "cycle.phase.menstrual.training" => "Well-being is often lower — reduce intensity and rest more. Light activity, walking and stretching suit better than heavy loads.",
+        "cycle.phase.follicular.name" => "Follicular phase",
+        "cycle.phase.follicular.desc" => "The body prepares for ovulation: estrogen rises and energy builds up.",
+        "cycle.phase.follicular.weight" => "Hormones are favourable: weight is stable and water isn't retained. A good time to judge your weight trend objectively.",
+        "cycle.phase.follicular.training" => "Energy and recovery are on the rise — a great time for strength and intense training. You can push the load and go for personal records.",
+        "cycle.phase.ovulation.name" => "Ovulation",
+        "cycle.phase.ovulation.desc" => "Mid-cycle: the egg is released, estrogen and energy peak.",
+        "cycle.phase.ovulation.weight" => "Weight is usually stable, with maybe slight water retention at the hormone peak. Don't expect meaningful swings.",
+        "cycle.phase.ovulation.training" => "Peak strength and endurance — an excellent day for heavy training. Be careful with your joints: ligaments are a little more relaxed in this period.",
+        "cycle.phase.luteal.name" => "Luteal phase",
+        "cycle.phase.luteal.desc" => "The second half of the cycle: progesterone rises and the body tends to retain water.",
+        "cycle.phase.luteal.weight" => "The body retains more water — weight can go up by 0.5–2 kg. It isn't fat: the water leaves once your period starts, so don't panic over the numbers.",
+        "cycle.phase.luteal.training" => "Energy drops and recovery slows — cut the volume and add rest. Cravings are likely: keep the focus on protein and your calorie target.",
         "nav.diary" => "Diary",
         "nav.recipes" => "Recipes",
         "nav.settings" => "Settings",
@@ -1277,6 +1340,32 @@ fn ru(key: &str) -> &'static str {
         "dashboard.progress.done_title" => "Ваша дневная планка",
         "dashboard.progress.kcal_day" => "ккал/день",
         "dashboard.progress.done_hint" => "Мы будем корректировать её по мере наблюдений.",
+        "cycle.title" => "Цикл",
+        "cycle.day_label" => "День",
+        "cycle.not_set" => "—",
+        "cycle.first_day" => "Первый день цикла",
+        "cycle.set_first_day" => "Задать первый день цикла",
+        "cycle.set_prompt" => "Задайте первый день цикла, чтобы отслеживать фазы.",
+        "cycle.weight_heading" => "Вес",
+        "cycle.training_heading" => "Тренировки",
+        "cycle.save" => "Сохранить",
+        "cycle.cancel" => "Отмена",
+        "cycle.phase.menstrual.name" => "Менструальная фаза",
+        "cycle.phase.menstrual.desc" => "Начало цикла: идёт менструация, уровень гормонов на минимуме.",
+        "cycle.phase.menstrual.weight" => "Вес может быть чуть выше из-за задержки воды и вздутия. После окончания менструации лишняя вода уходит, и вес возвращается к норме.",
+        "cycle.phase.menstrual.training" => "Самочувствие часто снижено — уменьшите интенсивность и больше отдыхайте. Лёгкая активность, ходьба и растяжка подойдут лучше тяжёлых нагрузок.",
+        "cycle.phase.follicular.name" => "Фолликулярная фаза",
+        "cycle.phase.follicular.desc" => "Организм готовится к овуляции: растёт эстроген, прибавляется энергия.",
+        "cycle.phase.follicular.weight" => "Гормональный фон благоприятен: вес стабилен, лишняя вода не задерживается. Это удачное время объективно оценивать динамику веса.",
+        "cycle.phase.follicular.training" => "Энергия и восстановление на подъёме — хорошее время для силовых и интенсивных тренировок. Можно повышать нагрузку и идти на личные рекорды.",
+        "cycle.phase.ovulation.name" => "Овуляция",
+        "cycle.phase.ovulation.desc" => "Середина цикла: выход яйцеклетки, пик эстрогена и энергии.",
+        "cycle.phase.ovulation.weight" => "Вес обычно стабилен, возможна лёгкая задержка воды на пике гормонов. Существенных колебаний ждать не стоит.",
+        "cycle.phase.ovulation.training" => "Пик силы и выносливости — отличный день для тяжёлых тренировок. Будьте аккуратны с суставами: связки в этот период чуть более расслаблены.",
+        "cycle.phase.luteal.name" => "Лютеиновая фаза",
+        "cycle.phase.luteal.desc" => "Вторая половина цикла: растёт прогестерон, тело склонно задерживать воду.",
+        "cycle.phase.luteal.weight" => "Тело задерживает больше воды — вес может подрасти на 0,5–2 кг. Это не жир: после начала менструации вода уйдёт, поэтому не паникуйте из-за цифр.",
+        "cycle.phase.luteal.training" => "Энергия снижается, восстановление замедляется — уменьшите объём и добавьте отдыха. Возможна тяга к еде: держите фокус на белке и планке по калориям.",
         "nav.diary" => "Дневник",
         "nav.recipes" => "Рецепты",
         "nav.settings" => "Настройки",

@@ -60,6 +60,7 @@ fn row_or_default() -> ProfileRow {
         height_cm: None,
         birth_year: None,
         goal: None,
+        cycle_start: None,
         updated_at: String::new(),
     })
 }
@@ -141,6 +142,17 @@ pub fn set_goal(goal: CourseGoal) {
         CourseGoal::Maintain => "maintain",
     };
     write(|r| r.goal = Some(v.to_string()));
+}
+
+/// First day of the current menstrual cycle (YYYY-MM-DD), if set.
+pub fn get_cycle_start() -> Option<String> {
+    CACHE.with(|c| c.borrow().as_ref().and_then(|r| r.cycle_start.clone()))
+}
+
+/// Store the first day of the cycle (YYYY-MM-DD). An empty string clears it.
+pub fn set_cycle_start(date: &str) {
+    let v = if date.is_empty() { None } else { Some(date.to_string()) };
+    write(|r| r.cycle_start = v);
 }
 
 /// Body Mass Index = weight(kg) / height(m)². `None` if height is not a positive
@@ -232,6 +244,7 @@ pub async fn migrate_from_local_storage() {
         height_cm,
         birth_year: None,
         goal: None,
+        cycle_start: None,
         updated_at: chrono::Utc::now().to_rfc3339(),
     };
     db::put("profile", &row).await;

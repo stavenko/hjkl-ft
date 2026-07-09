@@ -475,6 +475,9 @@ pub struct ProfileRow {
     /// The course goal: "lose" | "maintain". None ⇒ default "lose".
     #[serde(default)]
     pub goal: Option<String>,
+    /// First day of the current menstrual cycle (YYYY-MM-DD), if the user set it.
+    #[serde(default)]
+    pub cycle_start: Option<String>,
     #[serde(default)]
     pub updated_at: String,
 }

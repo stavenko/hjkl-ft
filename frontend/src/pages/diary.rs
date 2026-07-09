@@ -9,50 +9,7 @@ use crate::services::{local, sync, story};
 use crate::services::i18n::t;
 
 fn format_date_relative(date_str: &str) -> String {
-    use chrono::Datelike;
-    let today = chrono::Local::now().date_naive();
-    let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-        Ok(d) => d,
-        Err(_) => return date_str.to_string(),
-    };
-    let diff = (today - date).num_days();
-
-    match diff {
-        d if d < 0 => date_str.to_string(),
-        0 => t("diary.today").to_string(),
-        1 => t("diary.yesterday").to_string(),
-        2 => t("diary.day_before").to_string(),
-        3..=7 => {
-            match date.weekday() {
-                chrono::Weekday::Mon => t("diary.weekday.mon"),
-                chrono::Weekday::Tue => t("diary.weekday.tue"),
-                chrono::Weekday::Wed => t("diary.weekday.wed"),
-                chrono::Weekday::Thu => t("diary.weekday.thu"),
-                chrono::Weekday::Fri => t("diary.weekday.fri"),
-                chrono::Weekday::Sat => t("diary.weekday.sat"),
-                chrono::Weekday::Sun => t("diary.weekday.sun"),
-            }
-            .to_string()
-        }
-        _ => {
-            let month = match date.month() {
-                1 => t("diary.month.1"),
-                2 => t("diary.month.2"),
-                3 => t("diary.month.3"),
-                4 => t("diary.month.4"),
-                5 => t("diary.month.5"),
-                6 => t("diary.month.6"),
-                7 => t("diary.month.7"),
-                8 => t("diary.month.8"),
-                9 => t("diary.month.9"),
-                10 => t("diary.month.10"),
-                11 => t("diary.month.11"),
-                12 => t("diary.month.12"),
-                _ => "",
-            };
-            format!("{} {} {}", date.day(), month, date.year())
-        }
-    }
+    crate::services::i18n::relative_date(date_str)
 }
 
 fn format_date_past_prefix(date_str: &str) -> String {

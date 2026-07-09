@@ -13,6 +13,9 @@ const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; p
 const SHOT: &str = "background: var(--bulma-background); border: 1px dashed var(--bulma-border); \
     border-radius: 10px; padding: 32px 12px; text-align: center; color: var(--bulma-text-weak); \
     font-size: 0.85rem;";
+// A subtle frame that holds a LIVE control so it doesn't stand out against the text.
+const DEMO: &str = "background: var(--bulma-background); border-radius: 10px; padding: 20px; \
+    display: flex; align-items: center; justify-content: center;";
 const H2: &str = "font-weight: 700; margin: 18px 0 4px;";
 const ROW: &str = "display: flex; align-items: center; justify-content: space-between; \
     padding: 12px 4px; color: inherit; text-decoration: none;";
@@ -49,7 +52,13 @@ pub fn HelpFoodPage() -> impl IntoView {
 
         <div style=H2>{move || t("help.food.where_title")}</div>
         <p class="is-size-6" style="line-height: 1.5; margin-bottom: 8px;">{move || t("help.food.where_text")}</p>
-        {shot("help.shot.diary_fab")}
+        // Live «+» FAB — the exact same button the diary shows (not a screenshot).
+        <div style=DEMO>
+            <button class="button is-success is-rounded" attr:aria-label="+"
+                style="width: 3.5rem; height: 3.5rem; font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); border: none; cursor: default;">
+                "+"
+            </button>
+        </div>
 
         <div style=H2>{move || t("help.food.methods_title")}</div>
 

@@ -212,15 +212,6 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
         bump.update(|v| *v += 1);
     };
 
-    // Small segmented pill for the sex choice (compact, right-aligned in its row).
-    let seg = |active: bool| -> String {
-        format!(
-            "padding: 8px 14px; border-radius: 10px; border: none; cursor: pointer; font: inherit; \
-             background: {}; color: {};",
-            if active { "var(--bulma-link)" } else { "var(--bulma-scheme-main)" },
-            if active { "#fff" } else { "var(--bulma-text)" },
-        )
-    };
     // Right-aligned number field on its row.
     let field = "background: var(--bulma-scheme-main); border: none; border-radius: 10px; \
                  padding: 10px 12px; width: 110px; text-align: right; color: var(--bulma-text); font: inherit;";
@@ -236,19 +227,30 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
         CourseGoal::Gain => "gain",
         CourseGoal::Maintain => "maintain",
     };
+    let sex_str = move || match sex() {
+        Some(Sex::Male) => "male",
+        Some(Sex::Female) => "female",
+        None => "",
+    };
 
     view! {
         <div style="display: flex; flex-direction: column; gap: 8px;">
             <div style=row>
                 <span class="is-size-6" style=label>{move || t("dashboard.sex")}</span>
-                <div style="display: flex; gap: 8px;">
-                    <button style=move || seg(sex() == Some(Sex::Male)) on:click=move |_| pick_sex(Sex::Male)>
-                        {move || t("dashboard.sex_male")}
-                    </button>
-                    <button style=move || seg(sex() == Some(Sex::Female)) on:click=move |_| pick_sex(Sex::Female)>
-                        {move || t("dashboard.sex_female")}
-                    </button>
-                </div>
+                <select style=select
+                    prop:value=sex_str
+                    on:change=move |ev| {
+                        match event_target_value(&ev).as_str() {
+                            "male" => pick_sex(Sex::Male),
+                            "female" => pick_sex(Sex::Female),
+                            _ => {}
+                        }
+                    }>
+                    // Empty placeholder until a sex is chosen (keeps the profile incomplete).
+                    <option value="" disabled hidden></option>
+                    <option value="male">{move || t("dashboard.sex_male")}</option>
+                    <option value="female">{move || t("dashboard.sex_female")}</option>
+                </select>
             </div>
 
             <div style=row>

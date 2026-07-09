@@ -196,7 +196,7 @@ pub fn App() -> impl IntoView {
             // visual viewport after a resume (the "phantom keyboard" bug — the
             // nav slid up as if a keyboard were open). Only the inner container
             // scrolls; it opts into the resume scroll re-arm (data-ios-scroll).
-            <div style="position: fixed; inset: 0; overflow: hidden;">
+            <div style="position: fixed; inset: 0; overflow: hidden; background: var(--bulma-background);">
                 <div attr:data-ios-scroll="1"
                      style="position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4.5rem;">
                     <div style="padding: 0.75rem;">

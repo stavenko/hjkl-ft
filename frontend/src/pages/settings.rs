@@ -88,7 +88,7 @@ pub fn SettingsPage() -> impl IntoView {
     let show_goal = create_rw_signal(false);
     create_effect(move |_| {
         story_ver.get();
-        spawn_local(async move { show_goal.set(story::get_flag(story::COURSE_GOAL_UNLOCKED).await); });
+        spawn_local(async move { show_goal.set(story::UNLOCK_ALL || story::get_flag(story::COURSE_GOAL_UNLOCKED).await); });
     });
 
 

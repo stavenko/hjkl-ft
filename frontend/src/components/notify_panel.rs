@@ -32,8 +32,9 @@ pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> 
             let lang = story::get_flag(story::LANGUAGE_CONFIGURED).await;
             let recv = story::get_flag(story::NOTIFICATION_RECEIVED).await;
             notif_received.set(recv);
-            show_schedule.set(lang && recv);
-            show_meal_reminders.set(story::get_flag(story::MEAL_REMINDERS_UNLOCKED).await);
+            // REVISION MODE: `UNLOCK_ALL` forces the schedule + meal reminders open.
+            show_schedule.set(story::UNLOCK_ALL || (lang && recv));
+            show_meal_reminders.set(story::UNLOCK_ALL || story::get_flag(story::MEAL_REMINDERS_UNLOCKED).await);
         });
     });
 

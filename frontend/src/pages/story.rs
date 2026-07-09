@@ -115,12 +115,14 @@ pub fn StoryPage() -> impl IntoView {
 
                 // ── Chapters ──
                 let chapters = st.chapters.iter().map(|ch| {
-                    let open = e.chapter_open(ch);
+                    // REVISION MODE: `UNLOCK_ALL` opens every chapter/section so all
+                    // features can be reviewed at once (see story::UNLOCK_ALL).
+                    let open = story::UNLOCK_ALL || e.chapter_open(ch);
                     let lock = if open { "" } else { "\u{1f512}" };
                     let head = format!("{} \u{00b7} {} {}", tr_chapter_label(&ch.id), tr(&ch.title), lock);
 
                     let rows = ch.sections.iter().enumerate().map(|(i, sec)| {
-                        let unlocked = e.section_unlocked(ch, i);
+                        let unlocked = story::UNLOCK_ALL || e.section_unlocked(ch, i);
                         let route = sec.legacy_route.clone()
                             .unwrap_or_else(|| format!("/story/{}", sec.id));
                         let title = tr(&sec.title);

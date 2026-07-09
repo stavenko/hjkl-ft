@@ -198,7 +198,7 @@ pub fn DiaryPage() -> impl IntoView {
     // list unchanged (no regression).
     let meal_split_res = create_resource(
         move || story_ver.get(),
-        |_| async { story::get_flag(story::MEAL_SPLIT_UNLOCKED).await },
+        |_| async { story::UNLOCK_ALL || story::get_flag(story::MEAL_SPLIT_UNLOCKED).await },
     );
     let meal_split_on = move || meal_split_res.get().unwrap_or(false);
 

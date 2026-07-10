@@ -304,6 +304,82 @@ where
     Err(last_err)
 }
 
+/// A focused, FLAT single-nutrient answer. Deliberately not the nested
+/// `NutrientDetail` (value+unit) shape: the batched `lookup` asks for kcal plus a
+/// `custom_nutrients` MAP of nested value/unit objects, and qwen3 reliably corrupts
+/// that deep structure (observed live: `,{"zhelezo"` instead of `,"zhelezo":`). One
+/// nutrient, three plain numbers + a comment keeps the model focused and the JSON
+/// trivially well-formed. Values are per 100 g, already in the requested unit.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SingleNutrient {
+    /// Lowest reasonable amount per 100 g (a plain number in the requested unit).
+    min_value: f64,
+    /// Highest reasonable amount per 100 g (a plain number in the requested unit).
+    max_value: f64,
+    /// Most likely amount per 100 g (a plain number in the requested unit).
+    recommended: f64,
+    /// Short explanation of the value, in the requested language.
+    comment: String,
+}
+
+/// Look up ONE nutrient for a food, relying ONLY on the food NAME. Simplified,
+/// focused counterpart to `lookup`: a flat prompt + flat schema so the model isn't
+/// juggling five nutrients and a nested structure at once (which broke it). Returns
+/// the recommended amount per 100 g in `unit`. Retries on the transient empty /
+/// unparseable response the streaming path occasionally produces (same guard as
+/// `generate`). FAIL LOUDLY after the retries.
+pub async fn lookup_nutrient(food_name: &str, nutrient: &str, unit: &str) -> Result<f64, String> {
+    let lang = match crate::services::i18n::get_lang() {
+        crate::services::i18n::Lang::Ru => "Russian",
+        crate::services::i18n::Lang::En => "English",
+    };
+    let prompt = format!(
+        "You are a nutritional database. For the food item \"{food_name}\", give the amount of \
+         {nutrient} per 100 grams, as a plain number in {unit}.\n\n\
+         For raw/dry as-sold products (grains, rice, pasta, flour, meat, fish, legumes) use the \
+         RAW value unless the name says cooked/boiled/fried/steamed.\n\n\
+         Provide:\n\
+         - min_value: lowest reasonable amount (number, in {unit})\n\
+         - max_value: highest reasonable amount (number, in {unit})\n\
+         - recommended: the most likely amount (number, in {unit})\n\
+         - comment: brief explanation in {lang}\n\n\
+         Base the answer only on the food name \"{food_name}\". All values are per 100 g in {unit} \
+         — bare numbers, no unit text. Respond with ONLY a single minified JSON object and nothing \
+         else — no markdown, no prose."
+    );
+
+    const ATTEMPTS: usize = 3;
+    let mut last_err = String::new();
+    for _ in 0..ATTEMPTS {
+        let executor = build_executor()?;
+        let result = executor
+            .execute::<SingleNutrient>(prompt.clone())
+            .await
+            .map_err(|e| format!("LLM execute error: {e:?}"))?;
+
+        // Drain the streams so the pipeline can complete (no UI reporting needed).
+        let mut thinking_stream = result.thinking_stream;
+        wasm_bindgen_futures::spawn_local(async move { while thinking_stream.next().await.is_some() {} });
+        let mut content_stream = result.content_stream;
+        wasm_bindgen_futures::spawn_local(async move { while content_stream.next().await.is_some() {} });
+
+        let output = result.output.await.map_err(|e| format!("LLM output error: {e:?}"))?;
+        let raw = output.result.trim();
+        if raw.is_empty() {
+            last_err = "model returned an empty response".to_string();
+            continue;
+        }
+        let json_str = strip_code_fences(raw);
+        match serde_json::from_str::<SingleNutrient>(json_str)
+            .or_else(|_| serde_json::from_str::<SingleNutrient>(unwrap_schema_envelope(json_str)))
+        {
+            Ok(v) => return Ok(v.recommended),
+            Err(e) => last_err = format!("parse error: {e}, raw: {raw}"),
+        }
+    }
+    Err(last_err)
+}
+
 /// Per-food category verdict. All three tags are independent booleans (a raw
 /// fruit can be BOTH `snack` and `veg_fruit`).
 #[derive(Debug, Clone, Copy)]

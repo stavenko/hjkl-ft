@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use api_types::{AiLookupInput, Food, NutrientSpec};
+use api_types::Food;
 
 use super::indicators::{N_CALCIUM, N_FIBER, N_IRON, N_OMEGA3};
 use super::{ai, local};
@@ -59,49 +59,24 @@ pub fn nutrient_names() -> impl Iterator<Item = &'static str> {
     TARGETS.iter().map(|(n, _)| *n)
 }
 
-/// Look up the four nutrients for `food` (min/max/recommended + comment format) and
-/// store the recommended values, normalised to the canonical unit. FAIL LOUDLY: a
-/// lookup error is returned to the caller (logged, retried next sweep).
+/// Fill the missing nutrients for `food` — ONE focused request per nutrient
+/// (`ai::lookup_nutrient`), each asking for a single value in its canonical unit
+/// with the food NAME as the only anchor. This deliberately does NOT reuse the
+/// batched `ai::lookup`: asking for kcal + four nested nutrients at once makes qwen3
+/// corrupt the JSON structure; one nutrient at a time keeps it focused.
+///
+/// Progress is cached as each nutrient arrives, so a later failure never loses the
+/// values already fetched and they aren't re-requested. FAIL LOUDLY: the first
+/// nutrient error is returned (the queue's `with_retries` retries the rest).
 pub async fn enrich_food(food: &Food) -> Result<(), String> {
-    let specs: Vec<NutrientSpec> = TARGETS
-        .iter()
-        .map(|(name, u)| NutrientSpec {
-            key: api_types::nutrient_key::generate(name),
-            name: name.to_string(),
-            unit_label: u.label().to_string(),
-        })
-        .collect();
-    let input = AiLookupInput { name: food.name.clone(), custom_nutrients: specs };
-    let out = ai::lookup(&input, |_| {}).await?;
-
-    let mut values = BTreeMap::new();
-    for (name, canon) in TARGETS {
-        // Store 0 when the model omits a nutrient, so the food counts as enriched
-        // (present) and isn't re-queued forever.
-        let v = out
-            .nutrients
-            .get(*name)
-            .map(|d| normalize(d.recommended.value, &d.recommended.unit, *canon))
-            .unwrap_or(0.0);
-        values.insert(name.to_string(), v);
+    for (name, unit) in TARGETS {
+        if food.nutrients.contains_key(*name) {
+            continue; // already enriched (e.g. by a previous partial pass)
+        }
+        let value = ai::lookup_nutrient(&food.name, name, unit.label()).await?;
+        let mut one = BTreeMap::new();
+        one.insert(name.to_string(), value);
+        local::cache_food_nutrients(&food.id, one).await;
     }
-    local::cache_food_nutrients(&food.id, values).await;
     Ok(())
-}
-
-/// Convert a value to the canonical unit. Weight units are understood in RU and EN;
-/// an unrecognised unit is assumed to already be canonical (no scaling).
-fn normalize(value: f64, unit: &str, canon: Unit) -> f64 {
-    let u = unit.trim().to_lowercase();
-    let mg = match u.as_str() {
-        "kg" | "кг" => value * 1_000_000.0,
-        "g" | "г" | "гр" | "gram" | "grams" | "грамм" => value * 1000.0,
-        "mg" | "мг" => value,
-        "mkg" | "mcg" | "µg" | "ug" | "мкг" => value * 0.001,
-        _ => return value, // unknown unit → assume already canonical
-    };
-    match canon {
-        Unit::Mg => mg,
-        Unit::G => mg / 1000.0,
-    }
 }

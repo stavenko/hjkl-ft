@@ -39,6 +39,7 @@ enum Overlay {
     Persona,
     Notifications,
     Cycle,
+    Errors,
 }
 
 // 8 columns; each cell is a square whose side `--u` is derived from the viewport
@@ -106,6 +107,11 @@ pub fn DashboardPage() -> impl IntoView {
     let show_weight_modal = create_rw_signal(false);
     let show_steps_modal = create_rw_signal(false);
 
+    // Background-error log: the ⚠ tile appears (left of the bell) only when there
+    // are errors; tapping it opens the full list.
+    let errs = crate::services::errors::signal();
+    let has_errors = move || !errs.get().is_empty();
+
     view! {
         {move || {
             if persona_full() {
@@ -135,6 +141,15 @@ pub fn DashboardPage() -> impl IntoView {
                         <CyclePanel/>
                     </div>
                 }.into_view()
+            } else if overlay.get() == Overlay::Errors {
+                view! {
+                    <div style=EDITOR>
+                        <EditorHead title="errors.title"
+                            show_done=Signal::derive(|| true)
+                            on_done=move || overlay.set(Overlay::None)/>
+                        <ErrorsPanel/>
+                    </div>
+                }.into_view()
             } else {
                 // Collapsed grid: persona 1×1 + notifications bell 1×1.
                 view! {
@@ -144,6 +159,16 @@ pub fn DashboardPage() -> impl IntoView {
                                 on:click=move |_| overlay.set(Overlay::Persona)>
                                 {icon_user()}
                             </button>
+                            // Error tile (⚠, orange) — left of the bell (col 7), shown
+                            // only when the background queue recorded errors.
+                            {move || has_errors().then(|| view! {
+                                <button style=format!("{TILE} grid-column: 7 / 8; grid-row: span 1;")
+                                    attr:data-testid="dash-errors-widget"
+                                    on:click=move |_| overlay.set(Overlay::Errors)>
+                                    {icon_alert()}
+                                </button>
+                            })}
+
                             // Notifications bell lives in the FAR-RIGHT cell (col 8).
                             // It jiggles only until notifications are configured, and
                             // is drawn crossed-out (bell-off) while the kill-switch is on.
@@ -316,6 +341,56 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
     }
 }
 
+/// Full-panel list of background errors. Each row is tappable to copy its text to
+/// the clipboard; a «clear» button empties the log.
+#[component]
+fn ErrorsPanel() -> impl IntoView {
+    let errs = crate::services::errors::signal();
+    let copied = create_rw_signal(None::<usize>);
+    view! {
+        <p class="is-size-7 has-text-grey" style="margin: 0 0 10px;">{move || t("errors.hint")}</p>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            {move || {
+                let list = errs.get();
+                if list.is_empty() {
+                    return view! { <p class="is-size-6 has-text-grey">{move || t("errors.none")}</p> }.into_view();
+                }
+                list.into_iter().enumerate().map(|(i, e)| {
+                    let text = e.as_text();
+                    view! {
+                        <div
+                            style="background: var(--bulma-scheme-main); border-radius: 12px; padding: 12px 14px; cursor: pointer;"
+                            on:click=move |_| {
+                                let s = text.clone();
+                                copied.set(Some(i));
+                                spawn_local(async move { let _ = copy_to_clipboard(&s).await; });
+                            }>
+                            <p class="is-size-6 has-text-weight-semibold">{e.context.clone()}</p>
+                            <p class="is-size-7 has-text-grey" style="white-space: pre-wrap; word-break: break-word; margin-top: 2px;">
+                                {e.message.clone()}
+                            </p>
+                            {move || (copied.get() == Some(i)).then(|| view! {
+                                <span class="is-size-7 has-text-success">{move || t("errors.copied")}</span>
+                            })}
+                        </div>
+                    }
+                }).collect_view()
+            }}
+        </div>
+        <button class="button is-light is-fullwidth is-small" style="margin-top: 14px;"
+            on:click=move |_| crate::services::errors::clear()>
+            {move || t("errors.clear")}
+        </button>
+    }
+}
+
+async fn copy_to_clipboard(text: &str) -> Result<(), wasm_bindgen::JsValue> {
+    let window = web_sys::window().ok_or(wasm_bindgen::JsValue::NULL)?;
+    let clipboard = window.navigator().clipboard();
+    wasm_bindgen_futures::JsFuture::from(clipboard.write_text(text)).await?;
+    Ok(())
+}
+
 // ── Feather/Lucide line icons (24×24, currentColor, 2px round strokes) — the same
 // style as the bottom-nav icons, so the widgets stop looking like OS emoji. ──
 
@@ -328,6 +403,18 @@ fn icon_user() -> impl IntoView {
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
             <circle cx="12" cy="7" r="4"/>
+        </svg>
+    }
+}
+
+/// Feather `alert-triangle`, drawn orange — the background-errors tile.
+fn icon_alert() -> impl IntoView {
+    view! {
+        <svg xmlns=IC width="28" height="28" viewBox="0 0 24 24" fill="none"
+            stroke="#e8850d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
         </svg>
     }
 }

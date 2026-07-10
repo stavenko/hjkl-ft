@@ -221,6 +221,23 @@ pub async fn cache_food_tags(verdicts: &[(String, crate::services::ai::FoodTags)
     crate::services::sync::push_background();
 }
 
+/// Merge background-enriched nutrient values (name → per-100g amount, canonical
+/// unit) into a food and push. Written by the background enricher; overwrites the
+/// same keys idempotently.
+pub async fn cache_food_nutrients(id: &str, values: BTreeMap<String, f64>) {
+    if values.is_empty() {
+        return;
+    }
+    if let Some(mut food) = db::get::<Food>("foods", id).await {
+        for (k, v) in values {
+            food.nutrients.insert(k, v);
+        }
+        food.updated_at = now();
+        db::put("foods", &food).await;
+        crate::services::sync::push_background();
+    }
+}
+
 /// True if `food` is a drink by name.
 pub fn is_drink_food(food: &Food) -> bool {
     name_matches(&food.name, DRINK_SUBSTRINGS)

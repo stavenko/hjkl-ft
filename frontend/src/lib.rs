@@ -43,6 +43,7 @@ pub fn main() {
         services::update::init(); // create the update-available signal at the root
         services::story::init_attention(); // create the story-attention signal at the root
         services::classify::init(); // reset the background food-classification queue
+        services::errors::init(); // create the background-error log signal at the root
 
         // Reconcile with the server on launch when signed in: push local changes,
         // then pull the merged result (so changes — incl. deletions — made on other

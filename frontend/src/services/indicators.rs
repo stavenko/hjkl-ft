@@ -33,12 +33,20 @@ pub enum IndicatorState {
 }
 
 // ── Targets (WHO / user-set; adjustable) ─────────────────────────────────────
-const VEG_FRUIT_PER_DAY_G: f64 = 400.0; // WHO ≥400 g/day
 const FIBER_PER_DAY_G: f64 = 25.0; // WHO ≥25 g/day
 const CALCIUM_PER_DAY_MG: f64 = 1000.0; // user: 1 g/day for everyone
 const EGG_PER_WEEK_G: f64 = 350.0; // ~1 egg/day (≈50 g × 7)
-const OMEGA3_PER_WEEK_MG: f64 = 1750.0; // 250 mg/day (WHO EPA+DHA) × 7
-const RED_MEAT_LIMIT_PER_WEEK_G: f64 = 500.0; // WHO/WCRF: limit red+processed meat
+const OMEGA3_PER_WEEK_MG: f64 = 3500.0; // user: 3.5 g/week
+const RED_MEAT_LIMIT_PER_WEEK_G: f64 = 700.0; // user: up to 700 g/week
+
+/// Vegetables/fruit target (g/day): user-set — women 600, men 800. Unknown sex →
+/// 600 (the lower, so it isn't spuriously missed before the persona is complete).
+fn veg_fruit_per_day_g() -> f64 {
+    match profile::get_sex() {
+        Some(Sex::Male) => 800.0,
+        _ => 600.0,
+    }
+}
 
 /// Iron target (mg/day): premenopausal women 18, everyone else 8 (WHO/RDA). Unknown
 /// sex is treated as the higher (18) — conservative; the row only shows once the
@@ -52,15 +60,13 @@ fn iron_per_day_mg() -> f64 {
     }
 }
 
-// Nutrient display names → keys (must match the goals that fill them later).
+// Nutrient display names. `Food.nutrients` is keyed by the display name (same as
+// `goal.nutrient`), so these are used directly as the map keys. The background
+// enricher writes under the exact same names.
 pub const N_CALCIUM: &str = "Кальций";
 pub const N_IRON: &str = "Железо";
 pub const N_OMEGA3: &str = "Омега-3";
 pub const N_FIBER: &str = "Клетчатка";
-
-fn key(name: &str) -> String {
-    api_types::nutrient_key::generate(name)
-}
 
 // ── Pure state machines (unit-tested) ────────────────────────────────────────
 
@@ -113,10 +119,10 @@ pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
     let veg = gather_veg(&window).await;
     let eggs = gather_egg(&window).await;
     let meat = gather_meat(&window).await;
-    let cal = gather_nutrient(&window, &key(N_CALCIUM)).await;
-    let iron = gather_nutrient(&window, &key(N_IRON)).await;
-    let fib = gather_nutrient(&window, &key(N_FIBER)).await;
-    let omega = gather_nutrient(&window, &key(N_OMEGA3)).await;
+    let cal = gather_nutrient(&window, N_CALCIUM).await;
+    let iron = gather_nutrient(&window, N_IRON).await;
+    let fib = gather_nutrient(&window, N_FIBER).await;
+    let omega = gather_nutrient(&window, N_OMEGA3).await;
 
     let last7: Vec<NaiveDate> = window.iter().take(7).copied().collect();
 
@@ -126,7 +132,7 @@ pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
         ("eggs", weekly(&eggs, &diary_days, today, EGG_PER_WEEK_G, false, false)),
         ("iron", daily_nutrient(&iron, &last7, iron_per_day_mg())),
         ("red_meat", weekly(&meat, &diary_days, today, RED_MEAT_LIMIT_PER_WEEK_G, true, false)),
-        ("veg_fruit", daily_classifier(&veg, &last7, VEG_FRUIT_PER_DAY_G)),
+        ("veg_fruit", daily_classifier(&veg, &last7, veg_fruit_per_day_g())),
         ("fiber", daily_nutrient(&fib, &last7, FIBER_PER_DAY_G)),
     ]
 }

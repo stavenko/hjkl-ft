@@ -16,7 +16,55 @@ use std::collections::VecDeque;
 use api_types::Food;
 use leptos::spawn_local;
 
-use super::{ai, db, local};
+use super::{ai, db, errors, local};
+
+/// Online per `navigator.onLine` (assume online if unavailable).
+fn is_online() -> bool {
+    web_sys::window().map(|w| w.navigator().on_line()).unwrap_or(true)
+}
+
+/// Block until the browser reports connectivity again (polls; capped ~30 min).
+async fn wait_for_online() {
+    for _ in 0..600 {
+        if is_online() {
+            return;
+        }
+        ai::sleep_ms(3000).await;
+    }
+}
+
+/// Run one background AI op with up to 3 attempts. On failure:
+/// - if the device is OFFLINE → wait for connectivity, then try 3 more times
+///   (a lost connection must never burn a food's error slot);
+/// - if ONLINE but still failing (bad JSON / model error / transient) → record the
+///   error and give up (the next activation sweep retries it anyway).
+/// Returns `Some(value)` on success, `None` if given up.
+async fn with_retries<F, Fut, T>(mut op: F, ctx: &str) -> Option<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    loop {
+        let mut last = String::from("unknown error");
+        for attempt in 0..3 {
+            match op().await {
+                Ok(v) => return Some(v),
+                Err(e) => {
+                    last = e;
+                    if attempt < 2 {
+                        ai::sleep_ms(1500).await;
+                    }
+                }
+            }
+        }
+        if !is_online() {
+            wait_for_online().await;
+            continue; // connection is a temporary problem — retry the whole batch
+        }
+        errors::record(ctx, &last);
+        return None;
+    }
+}
 
 struct Queue {
     pending: VecDeque<String>,
@@ -73,39 +121,63 @@ async fn run_worker() {
             Q.with(|q| q.borrow_mut().running = false);
             return;
         };
-        // Load the food; skip if gone or already fully tagged (e.g. a re-logged
-        // known food, or one another device already classified).
+        // Load the food; skip if gone. One sequential background pass fills BOTH the
+        // category tags and the extra nutrients (calcium/iron/omega/fiber) — two AI
+        // calls at most, so the model isn't hit all at once.
         let Some(food) = db::get::<Food>("foods", &id).await else { continue };
-        if !needs_classification(&food) {
-            continue;
+
+        if needs_classification(&food) {
+            let name = food.name.clone();
+            let ctx = format!("Классификация: {name}");
+            let verdicts = with_retries(
+                move || {
+                    let n = name.clone();
+                    async move { ai::classify_food(&[n]).await }
+                },
+                &ctx,
+            ).await;
+            if let Some(tags) = verdicts {
+                if let Some(t) = tags.into_iter().next() {
+                    local::cache_food_tags(&[(id.clone(), t)]).await;
+                }
+            }
         }
-        match ai::classify_food(&[food.name.clone()]).await {
-            Ok(tags) if tags.len() == 1 => {
-                local::cache_food_tags(&[(id, tags[0])]).await;
-            }
-            Ok(other) => {
-                leptos::logging::warn!(
-                    "classify: expected 1 verdict for {}, got {}", food.name, other.len()
-                );
-            }
-            Err(e) => leptos::logging::warn!("classify failed for {}: {e}", food.name),
+
+        // `food.nutrients` is unchanged by classification, so the loaded copy is
+        // still current for the enrichment gate.
+        if super::enrich::needs_enrichment(&food) {
+            let ctx = format!("Нутриенты: {}", food.name);
+            let f = food.clone();
+            with_retries(
+                move || {
+                    let f = f.clone();
+                    async move { super::enrich::enrich_food(&f).await }
+                },
+                &ctx,
+            ).await;
         }
     }
 }
 
-/// Enqueue every not-yet-classified food logged today or yesterday. Called on app
-/// activation (launch + foreground) so anything logged offline, before this
-/// feature existed, or on another device eventually gets tagged.
+/// True if a food still needs any background AI processing (tags or nutrients).
+fn needs_processing(food: &Food) -> bool {
+    needs_classification(food) || super::enrich::needs_enrichment(food)
+}
+
+/// Enqueue every food logged in the last two weeks that still needs tags or
+/// nutrient enrichment. Called on app activation (launch + foreground) so anything
+/// logged offline, before this feature existed, or on another device gets processed
+/// — the window covers the daily indicators' 7-day span with margin.
 pub async fn sweep_diary_unclassified() {
     let today = chrono::Local::now().date_naive();
     let foods: std::collections::BTreeMap<String, Food> =
         local::list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect();
     let mut seen = std::collections::HashSet::new();
-    for i in 0..2 {
+    for i in 0..14 {
         let d = (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();
         for e in local::list_diary(&d).await {
             if let Some(food) = foods.get(&e.food_id) {
-                if needs_classification(food) && seen.insert(food.id.clone()) {
+                if needs_processing(food) && seen.insert(food.id.clone()) {
                     enqueue(food.id.clone());
                 }
             }
@@ -122,7 +194,7 @@ pub async fn sweep_recipe_ingredients() {
     let mut seen = std::collections::HashSet::new();
     for ing in local::list_recipe_ingredients().await {
         if let Some(food) = foods.get(&ing.food_id) {
-            if needs_classification(food) && seen.insert(food.id.clone()) {
+            if needs_processing(food) && seen.insert(food.id.clone()) {
                 enqueue(food.id.clone());
             }
         }

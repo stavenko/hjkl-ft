@@ -45,6 +45,10 @@ pub fn FoodPicker(
     let search = create_rw_signal(String::new());
     let drafts_ver = db::version("food_drafts");
     let drafts_res = create_resource(move || drafts_ver.get(), |_| async { local::list_drafts().await });
+    // Recipes that were cooked again (superseded_by set) — their finished food is
+    // hidden from the picker, so only the newest version of a re-cooked dish shows.
+    let recipes_ver = db::version("recipes");
+    let recipes_res = create_resource(move || recipes_ver.get(), |_| async { local::list_recipes().await });
     let diary_times_res = create_resource(
         move || db::version("diary").get(),
         |_| async { local::latest_diary_time_per_food().await },
@@ -57,10 +61,23 @@ pub fn FoodPicker(
         let food_ids: std::collections::HashSet<String> =
             foods.get().iter().map(|f| f.id.clone()).collect();
 
+        // Finished foods of recipes that were cooked again (have a successor) — the
+        // previous version drops out of search. Explicit `superseded_by` field, no
+        // name-matching; also hides duplicates that predate the field.
+        let superseded_food_ids: std::collections::HashSet<String> = recipes_res
+            .get()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| r.superseded_by.is_some())
+            .filter_map(|r| r.food_id)
+            .collect();
+
         let mut list: Vec<(Food, &'static str, String)> = Vec::new();
         for f in foods.get() {
             if f.archived { continue; }
             if exclude_restaurant && f.is_restaurant { continue; }
+            // Skip the finished food of a superseded (re-cooked) recipe.
+            if superseded_food_ids.contains(&f.id) { continue; }
             if !q.is_empty() && !f.name.to_lowercase().contains(&q) { continue; }
             let icon = if f.is_recipe { "\u{1f373}" } else { "\u{1f37d}\u{fe0f}" };
             let sort_key = diary_times.get(&f.id).cloned().unwrap_or_else(|| f.created_at.clone());

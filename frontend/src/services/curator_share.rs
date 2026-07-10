@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use crate::services::story_dsl::{self, Engine};
 use crate::services::weight_trend::{self, BalanceState, Direction, WeightTrend, DEFAULT_WINDOW_DAYS};
-use crate::services::{i18n, local, profile, story, summary};
+use crate::services::{i18n, local, profile, story};
 
 /// The datasets a curator can request. Mirrors the protocol's `dataset` field.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -192,21 +192,10 @@ async fn build_food() -> Value {
             }));
         }
 
-        // The day's assessment good/improve items, if a summary was generated.
-        let (good, improve) = match summary::get_day(&date).await.and_then(|s| summary::parse_day(&s.text)) {
-            Some(ds) => (
-                ds.good.into_iter().map(|it| it.text).collect::<Vec<String>>(),
-                ds.improve.into_iter().map(|it| it.text).collect::<Vec<String>>(),
-            ),
-            None => (Vec::new(), Vec::new()),
-        };
-
         days.push(json!({
             "date": date,
             "entries": entries,
             "totals": { "kcal": tk, "protein": tp, "fat": tf, "carbs": tc },
-            "good": good,
-            "improve": improve,
         }));
     }
     json!({ "days": days })

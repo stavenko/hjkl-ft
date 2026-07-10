@@ -48,16 +48,12 @@ pub fn RecipesPage() -> impl IntoView {
 
     let filtered = move || {
         let q = search.get().to_lowercase();
-        let rs = recipes();
-        // Hide finalized recipe if an in-progress clone with the same name exists
-        let in_progress_names: Vec<String> = rs.iter()
-            .filter(|r| !r.finalized)
-            .map(|r| r.name.clone())
-            .collect();
-        rs.into_iter().filter(|r| {
+        // Hide any recipe that was cooked again (`superseded_by` set → it has a
+        // successor). Only recipes without a successor are shown. Explicit field,
+        // not name-matching.
+        recipes().into_iter().filter(|r| {
             let matches_search = q.is_empty() || r.name.to_lowercase().contains(&q);
-            let hidden = r.finalized && in_progress_names.contains(&r.name);
-            matches_search && !hidden
+            matches_search && r.superseded_by.is_none()
         }).collect::<Vec<_>>()
     };
 

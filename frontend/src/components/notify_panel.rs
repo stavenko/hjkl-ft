@@ -161,12 +161,15 @@ pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> 
                 // Master «turn off all notifications» toggle. Sending it with the
                 // full schedule on every change means the backend never misses it.
                 <div style="padding: 12px 16px; display: flex; align-items: center; gap: 12px;">
-                    <span class="is-size-6" style="flex: 1;">{move || t("settings.notif_disable")}</span>
+                    <span class="is-size-6" style="flex: 1;">{move || t("settings.notif_enabled")}</span>
+                    // The toggle now reads "notifications ENABLED": ON (green, knob
+                    // right) = enabled = `!disabled`. The stored `disabled` flag and
+                    // the payload are unchanged — only the UI polarity is inverted.
                     <button attr:data-testid="notif-toggle-disabled"
                         style=move || format!(
                             "{}background: {};",
                             TOGGLE_BASE,
-                            if disabled.get() { "var(--bulma-danger)" } else { "var(--bulma-border)" }
+                            if disabled.get() { "var(--bulma-border)" } else { "var(--bulma-success)" }
                         )
                         on:click=move |_| {
                             disabled.update(|v| *v = !*v);
@@ -175,7 +178,7 @@ pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> 
                         <div style=move || format!(
                             "{}transform: {};",
                             TOGGLE_KNOB,
-                            if disabled.get() { "translateX(20px)" } else { "translateX(0)" }
+                            if disabled.get() { "translateX(0)" } else { "translateX(20px)" }
                         )></div>
                     </button>
                 </div>

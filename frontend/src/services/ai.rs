@@ -304,22 +304,37 @@ where
     Err(last_err)
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
-struct SnackVerdicts {
-    /// One boolean per input food, in the SAME order as given.
-    snacks: Vec<bool>,
+/// Per-food category verdict. All three tags are independent booleans (a raw
+/// fruit can be BOTH `snack` and `veg_fruit`).
+#[derive(Debug, Clone, Copy)]
+pub struct FoodTags {
+    /// Low-calorie snack (big filling volume for few calories).
+    pub snack: bool,
+    /// "Liquid calories": a caloric drink (soda, juice, sugary coffee, …).
+    pub liquid_cal: bool,
+    /// Vegetable or fruit (fresh, cooked, or an obvious veg/fruit dish).
+    pub veg_fruit: bool,
 }
 
-/// Classify each food NAME as a low-calorie snack or not. A snack here is judged
-/// by VOLUME vs calories — a light, filling thing to nibble between meals for few
-/// calories (raw veg/fruit, air-popped popcorn, rice cakes), NOT by calories per
-/// 100 g. Language-independent: the model judges meaning, guided by English
-/// examples, so it works regardless of the entry language. One bool per input.
+/// Three parallel boolean arrays, one entry per input food, in input order. The
+/// flat-array shape (no maps / nullable / $refs) is what the strict model server
+/// accepts.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct FoodVerdicts {
+    snack: Vec<bool>,
+    liquid_cal: Vec<bool>,
+    veg_fruit: Vec<bool>,
+}
+
+/// Classify each food NAME into the existing categories (snack / liquid calories /
+/// vegetable-fruit) in ONE batched request. Language-independent: the model judges
+/// meaning, guided by English examples. Returns one [`FoodTags`] per input, in the
+/// SAME order.
 ///
-/// Used to tag foods in the background while preparing the daily summary. FAIL
-/// LOUDLY: a model / parse error, or a count that doesn't match the input, is an
-/// `Err` (the caller surfaces it; the report won't silently mis-tag).
-pub async fn classify_snacks(names: &[String]) -> Result<Vec<bool>, String> {
+/// Used by the background `classify` queue as soon as a food is logged. FAIL
+/// LOUDLY: a model / parse error, or any array whose length doesn't match the
+/// input, is an `Err` (the caller surfaces it; nothing is silently mis-tagged).
+pub async fn classify_food(names: &[String]) -> Result<Vec<FoodTags>, String> {
     if names.is_empty() {
         return Ok(Vec::new());
     }
@@ -330,32 +345,41 @@ pub async fn classify_snacks(names: &[String]) -> Result<Vec<bool>, String> {
         .collect::<Vec<_>>()
         .join("\n");
     let prompt = format!(
-        "Decide for each food below whether it is a good low-calorie snack — something light \
-         to nibble between meals that kills the urge to chew without blowing the day.\n\
-         The single test is VOLUME vs CALORIES: a big, filling volume for relatively few \
-         calories (lots of water or air). Calories per 100 g is NOT the test — air-popped \
-         POPCORN, for example, IS such a snack, because a large airy volume costs few calories \
-         per serving.\n\
-         ARE this kind of snack (examples): cucumber, tomato, bell pepper, carrot, celery, \
-         radish, cabbage, lettuce, leafy greens, apple, pear, berries, orange, kiwi, grapefruit, \
-         popcorn (air-popped), rice cakes.\n\
-         NOT this kind of snack — calorie-dense things eaten in small dense portions: nuts, \
-         seeds, chocolate, candy, cookies, chips/crisps, crackers, granola bars; and also full \
-         meals and cooked dishes, bread/cereal/pasta, meat, fish, dairy, and any drink.\n\
-         Food names may be in ANY language — judge by meaning, not by wording.\n\n\
+        "For each food below, decide three independent yes/no categories. Food names may be in \
+         ANY language — judge by meaning, not by wording.\n\n\
+         1) \"snack\": a good low-calorie snack — something light to nibble between meals. The \
+         single test is VOLUME vs CALORIES: a big, filling volume for relatively few calories \
+         (lots of water or air). Calories per 100 g is NOT the test — air-popped popcorn IS such \
+         a snack. ARE (examples): cucumber, tomato, bell pepper, carrot, celery, radish, cabbage, \
+         lettuce, leafy greens, apple, pear, berries, orange, kiwi, grapefruit, popcorn \
+         (air-popped), rice cakes. NOT: nuts, seeds, chocolate, candy, cookies, chips, crackers, \
+         granola bars; full meals and cooked dishes, bread/cereal/pasta, meat, fish, dairy, drinks.\n\n\
+         2) \"liquid_cal\": \"liquid calories\" — TRUE for ONLY these three kinds of drink: \
+         (a) JUICE, including juice with pulp; (b) sugary/sweetened SODA (cola, lemonade, etc.); \
+         (c) any ALCOHOLIC drink, including alcoholic beer, wine, cocktails, spirits. \
+         Everything else is FALSE, INCLUDING: non-alcoholic beer; fermented-milk drinks (kefir, \
+         ayran, tan, acidophilus milk / ацидофилин, ryazhenka) and any drink that carries protein, \
+         live bacteria, or other nutrients — not just sugar/carbs; water, tea/coffee (even \
+         sweetened), milk, smoothies, cocoa, milkshakes, energy drinks; and any solid food.\n\n\
+         3) \"veg_fruit\": a vegetable or fruit — fresh, cooked, or an obvious vegetable/fruit \
+         dish (salad, stewed vegetables, fruit). NOT: cereals, grains, bread, meat, fish, dairy, \
+         sweets, or drinks.\n\n\
          Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object: a \"snacks\" array of booleans, exactly \
-         one per food, in the SAME order. Example for 3 foods: {{\"snacks\":[true,false,false]}}",
+         Respond with ONLY a single minified JSON object with three boolean arrays, each exactly \
+         one per food, in the SAME order. Example for 2 foods: \
+         {{\"snack\":[true,false],\"liquid_cal\":[false,true],\"veg_fruit\":[true,false]}}",
     );
-    let verdicts: SnackVerdicts = generate(prompt, |_| {}).await?;
-    if verdicts.snacks.len() != names.len() {
+    let v: FoodVerdicts = generate(prompt, |_| {}).await?;
+    let n = names.len();
+    if v.snack.len() != n || v.liquid_cal.len() != n || v.veg_fruit.len() != n {
         return Err(format!(
-            "snack classification returned {} verdicts for {} foods",
-            verdicts.snacks.len(),
-            names.len()
+            "food classification length mismatch for {n} foods: snack={}, liquid_cal={}, veg_fruit={}",
+            v.snack.len(), v.liquid_cal.len(), v.veg_fruit.len()
         ));
     }
-    Ok(verdicts.snacks)
+    Ok((0..n)
+        .map(|i| FoodTags { snack: v.snack[i], liquid_cal: v.liquid_cal[i], veg_fruit: v.veg_fruit[i] })
+        .collect())
 }
 
 // ── Support-chat: tools + agentic tool-use loop ──

@@ -58,6 +58,22 @@ pub struct Food {
     /// Russian name-substring match).
     #[serde(default)]
     pub is_snack: Option<bool>,
+    /// AI-assigned tag: "liquid calories". TRUE only for juice (incl. with pulp),
+    /// sugary soda, and alcoholic drinks (incl. alcoholic beer). NOT non-alcoholic
+    /// beer, fermented-milk drinks (kefir/ayran/tan/acidophilus/ryazhenka) or
+    /// anything carrying protein/bacteria/other nutrients, nor milk/smoothies/
+    /// sweetened coffee/energy drinks. `None` = not yet classified. Classified in
+    /// the background as soon as the food is logged (see the frontend `classify`
+    /// service). The old name+kcal heuristic (`is_high_cal_drink`) is kept only as
+    /// a rough fallback for still-untagged foods.
+    #[serde(default)]
+    pub is_liquid_cal: Option<bool>,
+    /// AI-assigned tag: vegetable / fruit (fresh, cooked, or an obvious veg/fruit
+    /// dish; not cereals, meat, fish, dairy, sweets or drinks). `None` = not yet
+    /// classified. Classified in the background when the food is logged. Replaces
+    /// the summary-time index judging as the stored source of truth.
+    #[serde(default)]
+    pub is_veg_fruit: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -78,6 +94,14 @@ pub struct Recipe {
     pub total_grams: Option<f64>,
     pub finalized: bool,
     pub food_id: Option<String>,
+    /// Set when this dish is cooked AGAIN: the id of the newer recipe that
+    /// inherited from (superseded) this one. A recipe with `superseded_by = Some(_)`
+    /// has a continuation and is hidden from the recipes list AND the diary food
+    /// search; recipes with `None` (no successor yet) are the ones shown. Explicit
+    /// parentage — never inferred from the (mutable) name. `serde(default)` so old
+    /// recipes load as `None` (no migration).
+    #[serde(default)]
+    pub superseded_by: Option<String>,
     pub ingredients: Vec<RecipeIngredient>,
     pub created_at: String,
     pub updated_at: String,
@@ -143,6 +167,8 @@ impl FoodDraft {
             archived: false,
             is_restaurant: false,
             is_snack: None,
+            is_liquid_cal: None,
+            is_veg_fruit: None,
             created_at: self.created_at.clone(),
             updated_at: String::new(),
         }

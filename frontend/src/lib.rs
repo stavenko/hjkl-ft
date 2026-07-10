@@ -42,7 +42,7 @@ pub fn main() {
         services::i18n::init_weight_unit();
         services::update::init(); // create the update-available signal at the root
         services::story::init_attention(); // create the story-attention signal at the root
-        services::summary::init_gen(); // create the summary-generator status signal at the root
+        services::classify::init(); // reset the background food-classification queue
 
         // Reconcile with the server on launch when signed in: push local changes,
         // then pull the merged result (so changes — incl. deletions — made on other
@@ -71,10 +71,10 @@ pub fn main() {
         services::update::check_background();
         services::story::refresh_attention();
 
-        // On activation, prepare yesterday's assessment if there's none yet —
-        // so it's ready before the user opens the day, not generated on open.
-        // (Runs as an app-scoped background generator; no-op if a record exists.)
-        services::summary::ensure_yesterday();
+        // On activation, classify any food logged today/yesterday that isn't tagged
+        // yet (offline entries, other devices, pre-feature foods). Runs one food at
+        // a time in the background.
+        leptos::spawn_local(services::classify::sweep_diary_unclassified());
     });
 }
 
@@ -98,8 +98,8 @@ fn install_foreground_sync() {
             if services::auth::get_token().is_some() {
                 services::sync::sync_now_background();
             }
-            // Prepare yesterday's assessment on resume too (no-op if it exists).
-            services::summary::ensure_yesterday();
+            // Classify any still-untagged recent food on resume too.
+            leptos::spawn_local(services::classify::sweep_diary_unclassified());
         }
     });
     let _ = document

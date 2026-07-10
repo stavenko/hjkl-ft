@@ -5,7 +5,7 @@ use leptos::*;
 use serde::{Deserialize, Serialize};
 
 use crate::services::story_dsl::{self, Engine};
-use crate::services::{db, local, profile, subscription, summary, sync};
+use crate::services::{db, local, profile, subscription, sync};
 
 /// Task flag: the user committed to wanting a new body (chapter 1, intro).
 pub const WANT_NEW_BODY: &str = "want_new_body";
@@ -248,13 +248,10 @@ async fn source_days() -> std::collections::BTreeMap<String, Vec<chrono::NaiveDa
         .collect();
     out.insert("diary".to_string(), diary);
 
-    // Per-day facts (from each stored day summary) back the veg/protein/drink sources.
-    let day_facts: Vec<(String, summary::DayFacts)> = db::list_all::<summary::Summary>("summaries")
-        .await
-        .into_iter()
-        .filter(|s| s.id.starts_with("day:"))
-        .filter_map(|s| summary::parse_day(&s.text).and_then(|d| d.facts).map(|f| (s.date, f)))
-        .collect();
+    // Per-day facts computed DETERMINISTICALLY from the diary + per-food category
+    // tags (`is_veg_fruit` / `is_liquid_cal`), so the veg/protein/drink streaks no
+    // longer depend on the (removed) daily AI assessment. One pass per logged day.
+    let diary_dates: Vec<String> = local::list_diary_dates().await;
 
     // Veg/fruit: sex-specific target (≥400 g women / ≥600 g men).
     let veg_target = match profile::get_sex() {
@@ -262,12 +259,6 @@ async fn source_days() -> std::collections::BTreeMap<String, Vec<chrono::NaiveDa
         Some(profile::Sex::Male) => 600.0,
         None => 600.0,
     };
-    let veg: Vec<chrono::NaiveDate> = day_facts
-        .iter()
-        .filter(|(_, f)| f.veg_fruit_grams >= veg_target)
-        .filter_map(|(d, _)| parse_date(d))
-        .collect();
-    out.insert("veg".to_string(), veg);
 
     // Protein target from estimated fat-free mass (Deurenberg BF% → FFM → 1.6 g/kg)
     // of the latest logged weight; 0 if no weight / incomplete profile.
@@ -275,40 +266,34 @@ async fn source_days() -> std::collections::BTreeMap<String, Vec<chrono::NaiveDa
         .last()
         .map(|e| profile::protein_target_from_profile(e.weight_kg))
         .unwrap_or(0);
+    let evening_third = protein_target_g as f64 / 3.0;
 
-    // Protein: days hitting the calculated target. Empty when target==0 (preserving
-    // the old `only when target>0` gate → streak 0).
-    let protein: Vec<chrono::NaiveDate> = if protein_target_g > 0 {
-        day_facts
-            .iter()
-            .filter(|(_, f)| f.protein >= protein_target_g as f64)
-            .filter_map(|(d, _)| parse_date(d))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let mut veg: Vec<chrono::NaiveDate> = Vec::new();
+    let mut protein: Vec<chrono::NaiveDate> = Vec::new();
+    let mut no_liquid_cal: Vec<chrono::NaiveDate> = Vec::new();
+    let mut evening_protein: Vec<chrono::NaiveDate> = Vec::new();
+    for d in &diary_dates {
+        let Some(nd) = parse_date(d) else { continue };
+        if local::veg_fruit_grams_on(d).await >= veg_target {
+            veg.push(nd);
+        }
+        // Protein / evening protein only count when a target exists (target==0 →
+        // empty, preserving the old gate → streak/count 0).
+        if protein_target_g > 0 {
+            if local::protein_grams_on(d).await >= protein_target_g as f64 {
+                protein.push(nd);
+            }
+            if local::evening_protein_on(d).await >= evening_third {
+                evening_protein.push(nd);
+            }
+        }
+        if !local::high_cal_drink_on(d).await {
+            no_liquid_cal.push(nd);
+        }
+    }
+    out.insert("veg".to_string(), veg);
     out.insert("protein".to_string(), protein);
-
-    // No liquid calories: days with NO high-calorie ("liquid-calorie") drink logged.
-    let no_liquid_cal: Vec<chrono::NaiveDate> = day_facts
-        .iter()
-        .filter(|(_, f)| !f.high_cal_drink)
-        .filter_map(|(d, _)| parse_date(d))
-        .collect();
     out.insert("no_liquid_cal".to_string(), no_liquid_cal);
-
-    // Evening protein: days whose evening protein reached ≥1/3 of the daily norm.
-    // Empty when target==0 (preserving the old gate → count 0). Used with COUNT.
-    let evening_protein: Vec<chrono::NaiveDate> = if protein_target_g > 0 {
-        let third = protein_target_g as f64 / 3.0;
-        day_facts
-            .iter()
-            .filter(|(_, f)| f.evening_protein_g >= third)
-            .filter_map(|(d, _)| parse_date(d))
-            .collect()
-    } else {
-        Vec::new()
-    };
     out.insert("evening_protein".to_string(), evening_protein);
 
     out
@@ -509,8 +494,11 @@ pub async fn gather() -> Progress {
     });
 
     let y = local::yesterday();
-    let report_ready = local::report_ready_on(&y).await;
-    let s4_done = report_ready && local::snack_logged_on(&y).await;
+    // "Yesterday had food logged" — the deterministic equivalent of the old
+    // `report_ready` gate (a daily report existed only for non-empty days). Without
+    // it, s5's "no liquid-cal drink" would be vacuously true on an empty day.
+    let food_logged_y = !local::list_diary(&y).await.is_empty();
+    let s4_done = food_logged_y && local::snack_logged_on(&y).await;
     // The drinks task counts a clean day only AFTER the ch2-drinks section was
     // opened, so it isn't pre-satisfied by yesterday at opening time. Baseline is
     // that section's `seen` flag (the old DRINKS_ARMED flag is gone).
@@ -518,7 +506,7 @@ pub async fn gather() -> Progress {
         Some(base) => chrono::NaiveDate::parse_from_str(&y, "%Y-%m-%d").map(|d| d > base).unwrap_or(false),
         None => false,
     };
-    let s5_done = report_ready && !local::high_cal_drink_on(&y).await && drinks_after_open;
+    let s5_done = food_logged_y && !local::high_cal_drink_on(&y).await && drinks_after_open;
 
     // Protein target from estimated fat-free mass (Deurenberg BF% → FFM → 1.6 g/kg)
     // of the latest logged weight. Kept here because it is a displayed target

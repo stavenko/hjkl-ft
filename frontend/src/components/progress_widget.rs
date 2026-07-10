@@ -124,6 +124,15 @@ pub fn ProgressWidget() -> impl IntoView {
                                 {move || t("dashboard.progress.calculate")}
                             </button>
                         })}
+                        // Documentation-style link (dashed underline) to the "how to
+                        // keep the diary" help hub.
+                        <div style="text-align: center; margin-top: 8px;">
+                            <a href="/help/diary" class="is-size-7"
+                                style="color: var(--bulma-text-weak); text-decoration: underline; \
+                                       text-decoration-style: dashed; text-underline-offset: 3px;">
+                                {move || t("help.link.diary")}
+                            </a>
+                        </div>
                     }.into_view()
                 }
             }}

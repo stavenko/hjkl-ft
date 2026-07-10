@@ -70,6 +70,9 @@ pub fn FoodEditor(
     /// user doesn't have to type the name twice).
     #[prop(optional, into)]
     initial_name: String,
+    /// Which tab to open on: 0 = "by name", 1 = "by photo". Defaults to 0.
+    #[prop(optional)]
+    initial_tab: u8,
 ) -> impl IntoView {
     let name = create_rw_signal(initial_name);
     let kcal = create_rw_signal(String::new());
@@ -85,7 +88,7 @@ pub fn FoodEditor(
     let draft_id = create_rw_signal(None::<String>);
 
     // Active tab: 0 = "by name" (text lookup), 1 = "by photo" (vision).
-    let active_tab = create_rw_signal(0u8);
+    let active_tab = create_rw_signal(initial_tab);
 
     // TWO independent detection channels so a name lookup and a photo lookup can
     // run at the SAME time: the user starts a name detection, switches to the
@@ -149,7 +152,9 @@ pub fn FoodEditor(
             recipe_id: None,
             archived: false,
             is_restaurant: false,
-            is_snack: None, // classified later, in the background, at summary time
+            is_snack: None, // classified in the background once logged (see `classify`)
+            is_liquid_cal: None,
+            is_veg_fruit: None,
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
         }
@@ -643,11 +648,11 @@ pub fn FoodEditor(
             // kept by making the card itself the rounded surface (scheme-main) with
             // transparent rows, rather than clipping opaque rows to the radius.
             <div style="background: var(--bulma-scheme-main); border-radius: 12px;">
-                <NutrientRow label=t("food_editor.calories") unit=t("common.unit.kcal") placeholder="165"
+                <NutrientRow label=t("food_editor.calories") unit=t("common.unit.kcal") placeholder="0"
                     value=kcal hint=ai_hint("kcal").into_view() last=false />
-                <NutrientRow label=t("food_editor.protein") unit=t("common.unit.g") placeholder="31"
+                <NutrientRow label=t("food_editor.protein") unit=t("common.unit.g") placeholder="0"
                     value=protein hint=ai_hint("protein").into_view() last=false />
-                <NutrientRow label=t("food_editor.fat") unit=t("common.unit.g") placeholder="3.6"
+                <NutrientRow label=t("food_editor.fat") unit=t("common.unit.g") placeholder="0"
                     value=fat hint=ai_hint("fat").into_view() last=false />
                 <NutrientRow label=t("food_editor.carbs") unit=t("common.unit.g") placeholder="0"
                     value=carbs hint=ai_hint("carbs").into_view()

@@ -62,7 +62,7 @@ pub fn WeightPage() -> impl IntoView {
                     leptos::logging::error!("first-weigh push: {}", e);
                 }
             }
-            nav("/diary", Default::default());
+            nav("/", Default::default());
         });
     };
 
@@ -98,7 +98,7 @@ pub fn WeightPage() -> impl IntoView {
                     class="is-size-5"
                     on:click={
                         let nav = navigate.clone();
-                        move |_| nav("/diary", Default::default())
+                        move |_| nav("/", Default::default())
                     }
                 >
                     <span class="has-text-link">{move || t("common.back")}</span>

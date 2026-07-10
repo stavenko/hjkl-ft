@@ -179,21 +179,29 @@ fn name_matches(name: &str, needles: &[&str]) -> bool {
 
 /// True if `food` is a low-calorie snack — by the cached AI tag (language-
 /// independent). `None` (not yet classified) counts as not-a-snack until tagged
-/// in the background while preparing the daily summary. See [`cache_snack_tags`].
+/// in the background by the `classify` queue. See [`cache_food_tags`].
 pub fn is_snack_food(food: &Food) -> bool {
     food.is_snack == Some(true)
 }
 
-/// Persist AI snack verdicts onto foods by id (`(food_id, is_snack)`), then push
-/// once so the tags propagate across devices. Used by the summary's background
-/// tagging step; foods not found are skipped.
-pub async fn cache_snack_tags(verdicts: &[(String, bool)]) {
+/// True if `food` is a vegetable / fruit — by the cached AI tag. `None` counts as
+/// not-veg-fruit until classified in the background.
+pub fn is_veg_fruit_food(food: &Food) -> bool {
+    food.is_veg_fruit == Some(true)
+}
+
+/// Persist AI category verdicts onto foods by id, then push once so the tags
+/// propagate across devices. Written by the background `classify` queue as soon as
+/// a food is logged; foods not found are skipped.
+pub async fn cache_food_tags(verdicts: &[(String, crate::services::ai::FoodTags)]) {
     if verdicts.is_empty() {
         return;
     }
-    for (id, is_snack) in verdicts {
+    for (id, tags) in verdicts {
         if let Some(mut food) = db::get::<Food>("foods", id).await {
-            food.is_snack = Some(*is_snack);
+            food.is_snack = Some(tags.snack);
+            food.is_liquid_cal = Some(tags.liquid_cal);
+            food.is_veg_fruit = Some(tags.veg_fruit);
             food.updated_at = now();
             db::put("foods", &food).await;
         }
@@ -206,10 +214,15 @@ pub fn is_drink_food(food: &Food) -> bool {
     name_matches(&food.name, DRINK_SUBSTRINGS)
 }
 
-/// A drink is HIGH-CAL ("liquid calories") if its per-100g kcal > 10 — the
-/// threshold the ch2 "soda & juice" lesson teaches.
+/// A drink is HIGH-CAL ("liquid calories"). Prefers the cached AI tag
+/// (`is_liquid_cal`); for foods not yet classified, falls back to the old
+/// name+kcal heuristic (drink name AND per-100g kcal > 10) so behaviour degrades
+/// gracefully before the background queue tags it.
 pub fn is_high_cal_drink(food: &Food) -> bool {
-    is_drink_food(food) && food.kcal > 10.0
+    match food.is_liquid_cal {
+        Some(v) => v,
+        None => is_drink_food(food) && food.kcal > 10.0,
+    }
 }
 
 /// A drink is ZERO-CAL if its per-100g kcal <= 5.
@@ -269,10 +282,27 @@ pub async fn evening_protein_on(date: &str) -> f64 {
     total
 }
 
-/// True once a daily report has been generated for `date` (a `summaries`
-/// record with id `day:<date>` exists).
-pub async fn report_ready_on(date: &str) -> bool {
-    crate::services::summary::get_day(date).await.is_some()
+/// Total EATEN grams of vegetable/fruit foods logged on `date` (honouring waste),
+/// by the cached AI `is_veg_fruit` tag. Backs the chapter-2 veg/fruit streak.
+pub async fn veg_fruit_grams_on(date: &str) -> f64 {
+    let foods = food_map().await;
+    list_diary(date).await.iter().filter_map(|e| {
+        foods.get(&e.food_id)
+            .filter(|f| is_veg_fruit_food(f))
+            .map(|_| (e.grams - e.waste_grams).max(0.0))
+    }).sum()
+}
+
+/// Total protein (grams) eaten on `date` — sum of `protein * eaten_grams / 100`
+/// over the day's diary entries (honouring waste).
+pub async fn protein_grams_on(date: &str) -> f64 {
+    let foods = food_map().await;
+    list_diary(date).await.iter().filter_map(|e| {
+        foods.get(&e.food_id).map(|f| {
+            let eaten = (e.grams - e.waste_grams).max(0.0);
+            f.protein * eaten / 100.0
+        })
+    }).sum()
 }
 
 /// Local "yesterday" (today - 1 day) as "YYYY-MM-DD".
@@ -352,6 +382,9 @@ pub async fn save_food_to_diary(
     if is_restaurant {
         crate::services::story::set_flag(crate::services::story::RESTAURANT_FOOD_ENTERED, true).await;
     }
+    // Classify this food's categories in the background (snack / liquid calories /
+    // vegetable-fruit) as soon as it's logged.
+    crate::services::classify::enqueue(food.id.clone());
     entry
 }
 
@@ -375,6 +408,8 @@ pub async fn update_diary_entry(
     if is_restaurant {
         crate::services::story::set_flag(crate::services::story::RESTAURANT_FOOD_ENTERED, true).await;
     }
+    // Editing may fork a new food variant (restaurant CoW) — classify it.
+    crate::services::classify::enqueue(entry.food_id.clone());
     Some(entry)
 }
 
@@ -483,6 +518,7 @@ pub async fn duplicate_diary_entry(entry_id: &str) -> Option<DiaryEntry> {
         updated_at: now(),
     };
     db::put("diary", &entry).await;
+    crate::services::classify::enqueue(entry.food_id.clone());
     Some(entry)
 }
 
@@ -515,6 +551,9 @@ pub async fn edit_food_for_entry(
         let copy = Food {
             id: new_id(),
             name, kcal, protein, fat, carbs, nutrients,
+            // The name changed → old category tags are stale; clear them so the
+            // background classifier re-tags this variant.
+            is_snack: None, is_liquid_cal: None, is_veg_fruit: None,
             created_at: now(),
             updated_at: now(),
             ..food.clone()
@@ -523,13 +562,16 @@ pub async fn edit_food_for_entry(
         entry.food_id = copy.id.clone();
         entry.updated_at = now();
         db::put("diary", &entry).await;
+        crate::services::classify::enqueue(copy.id);
     } else {
         let updated = Food {
             name, kcal, protein, fat, carbs, nutrients,
+            is_snack: None, is_liquid_cal: None, is_veg_fruit: None,
             updated_at: now(),
             ..food.clone()
         };
         db::put("foods", &updated).await;
+        crate::services::classify::enqueue(updated.id);
     }
     Some(())
 }
@@ -640,6 +682,8 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
             archived: false,
             is_restaurant: false,
             is_snack: None,
+            is_liquid_cal: None,
+            is_veg_fruit: None,
             created_at: now(),
             updated_at: now(),
         };
@@ -683,6 +727,7 @@ pub async fn new_recipe(name: &str) -> Recipe {
         total_grams: None,
         finalized: false,
         food_id: None,
+        superseded_by: None,
         ingredients: Vec::new(),
         created_at: now(),
         updated_at: now(),
@@ -715,10 +760,11 @@ pub async fn clone_recipe(id: &str) -> Option<Recipe> {
     let mut cloned = Recipe {
         id: new_id.clone(),
         name: source.name.clone(),
-        notes: source.notes,
+        notes: source.notes.clone(),
         total_grams: None,
         finalized: false,
         food_id: None,
+        superseded_by: None,
         ingredients: Vec::new(),
         created_at: ts.clone(),
         updated_at: ts.clone(),
@@ -736,6 +782,17 @@ pub async fn clone_recipe(id: &str) -> Option<Recipe> {
         };
         db::put("recipe_ingredients", &new_ing).await;
         cloned.ingredients.push(new_ing);
+    }
+
+    // Cooking again: mark the PARENT recipe as superseded by this new one. Explicit
+    // parentage (id of the successor), never inferred from the mutable name. The
+    // parent then drops out of the recipes list and the diary food search; its
+    // finished food stays referenced by past diary entries. (The stored "recipes"
+    // row keeps ingredients separately, so re-put here doesn't duplicate them.)
+    if let Some(mut parent) = db::get::<Recipe>("recipes", id).await {
+        parent.superseded_by = Some(new_id.clone());
+        parent.updated_at = now();
+        db::put("recipes", &parent).await;
     }
 
     Some(cloned)
@@ -819,6 +876,8 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         archived: false,
         is_restaurant: false,
         is_snack: None,
+        is_liquid_cal: None,
+        is_veg_fruit: None,
         created_at: now(),
         updated_at: now(),
     };
@@ -830,6 +889,11 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
     updated_recipe.food_id = Some(food.id.clone());
     updated_recipe.updated_at = now();
     db::put("recipes", &updated_recipe).await;
+
+    // NB: the previous version of a re-cooked dish is hidden purely at DISPLAY time
+    // (newest-recipe-per-name) in both the recipes list (`recipes.rs`) and the food
+    // picker (`food_picker.rs`) — no `archived` write here, so pre-existing
+    // duplicates are handled too and there's no data migration.
 
     // Finishing a recipe creates a dish — the "I cook" task 1 milestone.
     crate::services::story::set_flag(crate::services::story::COOKING_DISH_CREATED, true).await;

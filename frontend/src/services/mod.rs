@@ -3,6 +3,7 @@ pub mod api;
 pub mod app_flags;
 pub mod bug_report;
 pub mod chat;
+pub mod classify;
 pub mod auth;
 pub mod config;
 pub mod curator_share;

@@ -37,7 +37,7 @@ pub fn StepsPage() -> impl IntoView {
         let nav = nav_save.clone();
         leptos::spawn_local(async move {
             local::save_steps(&date, val).await;
-            nav("/diary", Default::default());
+            nav("/", Default::default());
         });
     };
 
@@ -55,7 +55,7 @@ pub fn StepsPage() -> impl IntoView {
                     class="is-size-5"
                     on:click={
                         let nav = navigate.clone();
-                        move |_| nav("/diary", Default::default())
+                        move |_| nav("/", Default::default())
                     }
                 >
                     <span class="has-text-link">{move || t("common.back")}</span>

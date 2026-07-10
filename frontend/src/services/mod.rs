@@ -10,6 +10,7 @@ pub mod curator_share;
 pub mod db;
 pub mod diag;
 pub mod i18n;
+pub mod indicators;
 pub mod local;
 pub mod meal_split;
 pub mod platform;

@@ -357,6 +357,20 @@ pub async fn red_meat_grams_on(date: &str) -> f64 {
     food_tag_grams_on(date, is_red_meat_food).await
 }
 
+/// Total amount of the custom nutrient `key` eaten on `date` — sum of
+/// `food.nutrients[key] * eaten_grams / 100` over the day's entries. Recipe dishes
+/// already carry the SUMMED ingredient nutrients per 100 g (see `finish_recipe`),
+/// so no composition expansion is needed here. Unit is whatever the nutrient uses.
+pub async fn nutrient_grams_on(date: &str, key: &str) -> f64 {
+    let foods = food_map().await;
+    list_diary(date).await.iter().filter_map(|e| {
+        foods.get(&e.food_id).and_then(|f| f.nutrients.get(key)).map(|v| {
+            let eaten = (e.grams - e.waste_grams).max(0.0);
+            v * eaten / 100.0
+        })
+    }).sum()
+}
+
 /// Total protein (grams) eaten on `date` — sum of `protein * eaten_grams / 100`
 /// over the day's diary entries (honouring waste).
 pub async fn protein_grams_on(date: &str) -> f64 {

@@ -97,15 +97,24 @@ pub enum AiPhase {
 }
 
 fn build_executor() -> Result<Qwen, String> {
+    build_executor_think(true)
+}
+
+/// Build the Qwen executor with reasoning on/off. Off (`think=false`) is used by the
+/// background nutrient enrichment: with thinking ON qwen3 sometimes emits a whole
+/// short answer into the reasoning channel and nothing into content (empty response);
+/// OFF makes it answer in content reliably. The ai-worker maps this `think` flag to
+/// `chat_template_kwargs.enable_thinking`.
+fn build_executor_think(think: bool) -> Result<Qwen, String> {
     let cfg = config::get();
     let token = auth::get_token().ok_or_else(|| "not authenticated".to_string())?;
     let executor = Qwen::builder()
         .api_base(&cfg.ai_base_url)
         .api_key(token)
         .model("@cf/qwen/qwen3-30b-a3b-fp8")
-        // Reasoning is on; emit reasoning tokens to the thinking stream so the
-        // caller can show a "thinking" phase.
-        .think(true)
+        // Emit reasoning tokens to the thinking stream (for the "thinking" UI phase)
+        // only when reasoning is enabled.
+        .think(think)
         // Workers AI defaults output to 2000 tokens; qwen3's reasoning alone can
         // eat all of it and truncate the answer (empty content → parse error).
         // Lift the ceiling so reasoning + answer always fit. (Needs the ai-worker
@@ -324,10 +333,10 @@ struct SingleNutrient {
 
 /// Look up ONE nutrient for a food, relying ONLY on the food NAME. Simplified,
 /// focused counterpart to `lookup`: a flat prompt + flat schema so the model isn't
-/// juggling five nutrients and a nested structure at once (which broke it). Returns
-/// the recommended amount per 100 g in `unit`. Retries on the transient empty /
-/// unparseable response the streaming path occasionally produces (same guard as
-/// `generate`). FAIL LOUDLY after the retries.
+/// juggling five nutrients and a nested structure at once (which broke it). Same
+/// streaming `execute` path as the working `lookup`. Returns the recommended amount
+/// per 100 g in `unit`. Retries on a transient empty / unparseable response. FAIL
+/// LOUDLY after the retries.
 pub async fn lookup_nutrient(food_name: &str, nutrient: &str, unit: &str) -> Result<f64, String> {
     let lang = match crate::services::i18n::get_lang() {
         crate::services::i18n::Lang::Ru => "Russian",
@@ -351,13 +360,16 @@ pub async fn lookup_nutrient(food_name: &str, nutrient: &str, unit: &str) -> Res
     const ATTEMPTS: usize = 3;
     let mut last_err = String::new();
     for _ in 0..ATTEMPTS {
-        let executor = build_executor()?;
+        // Thinking OFF: qwen3 with reasoning parks short answers in the reasoning
+        // channel (empty content ~⅔ of the time for some foods); off → content is
+        // filled reliably (verified 15/15 for «Сахар»).
+        let executor = build_executor_think(false)?;
         let result = executor
             .execute::<SingleNutrient>(prompt.clone())
             .await
             .map_err(|e| format!("LLM execute error: {e:?}"))?;
 
-        // Drain the streams so the pipeline can complete (no UI reporting needed).
+        // Drain both streams so the pipeline runs to completion (no UI reporting).
         let mut thinking_stream = result.thinking_stream;
         wasm_bindgen_futures::spawn_local(async move { while thinking_stream.next().await.is_some() {} });
         let mut content_stream = result.content_stream;

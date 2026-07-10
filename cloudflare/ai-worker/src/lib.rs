@@ -492,13 +492,19 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
     }
 
     // Reasoning control. A client may override explicitly via chat_template_kwargs;
-    // else if NO image, enable thinking; else (image present) pass none.
+    // else if NO image, honour the top-level `think` flag (arti-pipes sends it) —
+    // default ON, but a client that sets `think:false` gets thinking OFF. This
+    // matters because qwen3 with thinking sometimes emits ALL of a short answer into
+    // the reasoning channel and NOTHING into content (observed ~⅔ of the time for
+    // some foods), which surfaces as an empty response; thinking OFF makes the model
+    // put the answer in content reliably. Image requests pass no kwargs.
     if let Some(ctk) = body.get("chat_template_kwargs") {
         run_params.insert("chat_template_kwargs".to_string(), ctk.clone());
     } else if !images {
+        let enable_thinking = body.get("think").and_then(|t| t.as_bool()).unwrap_or(true);
         run_params.insert(
             "chat_template_kwargs".to_string(),
-            serde_json::json!({ "enable_thinking": true }),
+            serde_json::json!({ "enable_thinking": enable_thinking }),
         );
     }
 

@@ -47,11 +47,25 @@ const ROW: &str = "display: flex; align-items: center; justify-content: space-be
     padding: 12px 4px; color: inherit; text-decoration: none;";
 
 fn back_bar() -> impl IntoView {
+    // Back = previous page in history (consistent across all help pages); Close =
+    // leave help, back to the main screen. Shared by every help page.
+    let go_back = move |_| {
+        if let Some(win) = web_sys::window() {
+            if let Ok(history) = win.history() {
+                let _ = history.back();
+            }
+        }
+    };
     view! {
-        <button class="button is-light is-small" style="margin-bottom: 12px;"
-            on:click=move |_| use_navigate()("/", Default::default())>
-            "‹ " {move || t("help.back")}
-        </button>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+            <button class="button is-light is-small" on:click=go_back>
+                "‹ " {move || t("help.back")}
+            </button>
+            <button class="button is-light is-small" attr:aria-label="close"
+                on:click=move |_| use_navigate()("/", Default::default())>
+                "\u{2715}"
+            </button>
+        </div>
     }
 }
 
@@ -485,10 +499,18 @@ pub fn HelpArticlePage() -> impl IntoView {
                     {picker_demo()}
                 }.into_view(),
                 "food-ai" => view! {
+                    <div style=H2>{move || t("help.food.new_how_title")}</div>
+                    {para("help.food.new_how1")}
+                    {picker_demo()}
+                    {para("help.food.new_how2")}
                     {para("help.food.ai_text")}
                     {editor_demo("Омлет из двух яиц", 0)}
                 }.into_view(),
                 "food-photo" => view! {
+                    <div style=H2>{move || t("help.food.new_how_title")}</div>
+                    {para("help.food.new_how1")}
+                    {picker_demo()}
+                    {para("help.food.new_how2")}
                     {para("help.food.photo_text")}
                     {editor_demo("", 1)}
                 }.into_view(),

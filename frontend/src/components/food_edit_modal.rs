@@ -92,7 +92,10 @@ pub fn FoodEditModal(
                     {macro_row(nutrient_name("Protein").to_string(), unit_label("g").to_string(), protein)}
                     {macro_row(nutrient_name("Fat").to_string(), unit_label("g").to_string(), fat)}
                     {macro_row(nutrient_name("Carbs").to_string(), unit_label("g").to_string(), carbs)}
-                    {custom.into_iter().map(|(k, sig)| macro_row(k, String::new(), sig)).collect_view()}
+                    {custom.into_iter().map(|(k, sig)| {
+                        let unit = crate::services::enrich::nutrient_unit(&k).to_string();
+                        macro_row(k, unit, sig)
+                    }).collect_view()}
                 </section>
                 <footer class="modal-card-foot" style="justify-content: flex-end;">
                     <button class="button" on:click=move |_| on_close.call(())>{move || t("weight.cancel")}</button>

@@ -105,7 +105,10 @@ fn fmt(d: NaiveDate) -> String {
 /// Does the user have at least a week of diary history? (The indicators row is
 /// hidden before that.)
 pub async fn enough_history() -> bool {
-    local::list_diary_dates().await.len() >= 7
+    // Count DISTINCT days with entries — `list_diary_dates` returns one date per
+    // entry (with duplicates), so 7 items in a single day must NOT pass.
+    let days: HashSet<String> = local::list_diary_dates().await.into_iter().collect();
+    days.len() >= 7
 }
 
 /// Compute all seven indicator states, keyed the same as the widget icons.

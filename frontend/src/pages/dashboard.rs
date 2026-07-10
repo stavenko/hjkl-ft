@@ -192,19 +192,20 @@ pub fn DashboardPage() -> impl IntoView {
                                 <StepsWidget entries=Signal::derive(steps_entries)/>
                             </button>
 
-                            // Progress widget: full width, 6 rows tall.
-                            <div style="grid-column: 1 / 9; grid-row: 5 / 11;">
-                                <ProgressWidget/>
-                            </div>
-
-                            // Cycle widget (female only): full-width single line.
-                            {move || is_female().then(|| view! {
-                                <button style=format!("{WIDGET_TILE} grid-column: 1 / 9; grid-row: 11 / 12;")
-                                    on:click=move |_| overlay.set(Overlay::Cycle)>
-                                    <CycleLine/>
-                                </button>
-                            })}
                         </div>
+
+                        // Progress widget + cycle flow BELOW the grid (not inside it),
+                        // so the card grows to fit its content — the indicators row
+                        // sits at the very bottom instead of being clipped.
+                        <ProgressWidget/>
+
+                        // Cycle widget (female only): full-width single line.
+                        {move || is_female().then(|| view! {
+                            <button style=WIDGET_TILE
+                                on:click=move |_| overlay.set(Overlay::Cycle)>
+                                <CycleLine/>
+                            </button>
+                        })}
                     </div>
                 }.into_view()
             }
@@ -357,23 +358,34 @@ fn ErrorsPanel() -> impl IntoView {
                 }
                 list.into_iter().enumerate().map(|(i, e)| {
                     let text = e.as_text();
+                    // A real <button> — a <div on:click> is dead on iOS (Leptos
+                    // delegates clicks and iOS only bubbles them from interactive
+                    // elements). Tint the row green briefly to confirm the copy.
                     view! {
-                        <div
-                            style="background: var(--bulma-scheme-main); border-radius: 12px; padding: 12px 14px; cursor: pointer;"
+                        <button
+                            style=move || format!(
+                                "display: block; width: 100%; text-align: left; height: auto; \
+                                 white-space: normal; border: none; border-radius: 12px; padding: 12px 14px; \
+                                 cursor: pointer; font: inherit; color: inherit; transition: background 0.15s; \
+                                 background: {};",
+                                if copied.get() == Some(i) { "var(--bulma-success-soft)" } else { "var(--bulma-scheme-main)" }
+                            )
                             on:click=move |_| {
-                                copied.set(Some(i));
-                                // MUST call clipboard.writeText SYNCHRONOUSLY inside the
-                                // gesture — iOS Safari drops it if deferred (spawn_local).
+                                // Call clipboard.writeText SYNCHRONOUSLY inside the gesture
+                                // — iOS Safari drops it if deferred (spawn_local).
                                 copy_to_clipboard(&text);
+                                copied.set(Some(i));
                             }>
                             <p class="is-size-6 has-text-weight-semibold">{e.context.clone()}</p>
                             <p class="is-size-7 has-text-grey" style="white-space: pre-wrap; word-break: break-word; margin-top: 2px;">
                                 {e.message.clone()}
                             </p>
                             {move || (copied.get() == Some(i)).then(|| view! {
-                                <span class="is-size-7 has-text-success">{move || t("errors.copied")}</span>
+                                <p class="is-size-7 has-text-weight-bold has-text-success" style="margin-top: 4px;">
+                                    {move || t("errors.copied")}
+                                </p>
                             })}
-                        </div>
+                        </button>
                     }
                 }).collect_view()
             }}
@@ -385,15 +397,37 @@ fn ErrorsPanel() -> impl IntoView {
     }
 }
 
-/// Copy text to the clipboard. Called SYNCHRONOUSLY from the click handler (the
-/// returned promise is intentionally not awaited) so iOS Safari keeps the user
-/// gesture that its clipboard API requires.
+/// Copy text to the clipboard SYNCHRONOUSLY from the click handler. Uses two
+/// mechanisms for reliability on iOS PWAs: the async Clipboard API (fire-and-forget,
+/// invoked inside the gesture) AND a legacy hidden-textarea + `execCommand('copy')`
+/// fallback, which works in WKWebView/older Safari where the async API is flaky.
 fn copy_to_clipboard(text: &str) {
+    use wasm_bindgen::JsCast;
     let Some(window) = web_sys::window() else { return };
-    let clipboard = window.navigator().clipboard();
-    // Fire-and-forget: the promise settles after the handler returns, but the API
-    // was invoked within the gesture, which is what iOS checks.
-    let _ = clipboard.write_text(text);
+
+    // Modern async Clipboard API — the promise settles after the handler returns,
+    // but the API is invoked within the gesture, which is what iOS checks.
+    let _ = window.navigator().clipboard().write_text(text);
+
+    // Legacy fallback: select a hidden textarea and execCommand('copy').
+    let Some(document) = window.document() else { return };
+    if let Ok(el) = document.create_element("textarea") {
+        let ta: web_sys::HtmlTextAreaElement = el.unchecked_into();
+        ta.set_value(text);
+        let _ = ta.set_attribute("readonly", "");
+        let _ = ta.style().set_property("position", "fixed");
+        let _ = ta.style().set_property("top", "0");
+        let _ = ta.style().set_property("opacity", "0");
+        if let Some(body) = document.body() {
+            let _ = body.append_child(&ta);
+            ta.select();
+            let _ = ta.set_selection_range(0, text.len() as u32);
+            if let Ok(html_doc) = document.dyn_into::<web_sys::HtmlDocument>() {
+                let _ = html_doc.exec_command("copy");
+            }
+            let _ = body.remove_child(&ta);
+        }
+    }
 }
 
 // ── Feather/Lucide line icons (24×24, currentColor, 2px round strokes) — the same

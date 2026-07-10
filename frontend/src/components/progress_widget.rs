@@ -13,7 +13,7 @@ use crate::services::profile::{self, CourseGoal};
 use crate::services::{db, local, sync};
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 16px; \
-    padding: 16px; height: 100%; box-sizing: border-box; overflow-y: auto; \
+    padding: 16px; box-sizing: border-box; \
     display: flex; flex-direction: column; gap: 12px;";
 
 // ── Nutrition indicators ─────────────────────────────────────────────────────
@@ -148,11 +148,6 @@ pub fn ProgressWidget() -> impl IntoView {
 
     view! {
         <div style=CARD>
-            // Nutrition indicators row (only after ≥1 week of diary history).
-            {move || inds.get().flatten().map(|states| view! {
-                {indicators_row(states)}
-                <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
-            })}
             {move || match planka.get().flatten() {
                 // Already computed → show the resulting daily calorie target.
                 Some(n) => view! {
@@ -219,6 +214,11 @@ pub fn ProgressWidget() -> impl IntoView {
                     }.into_view()
                 }
             }}
+            // Nutrition indicators row at the BOTTOM (only after ≥1 week of diary).
+            {move || inds.get().flatten().map(|states| view! {
+                <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
+                {indicators_row(states)}
+            })}
         </div>
     }
 }

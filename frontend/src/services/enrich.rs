@@ -48,6 +48,17 @@ pub fn needs_enrichment(food: &Food) -> bool {
     TARGETS.iter().any(|(name, _)| !food.nutrients.contains_key(*name))
 }
 
+/// The canonical unit label ("мг"/"г") for an enriched nutrient, or "" if the
+/// nutrient isn't one we enrich (so the caller shows no unit).
+pub fn nutrient_unit(name: &str) -> &'static str {
+    TARGETS.iter().find(|(n, _)| *n == name).map(|(_, u)| u.label()).unwrap_or("")
+}
+
+/// The display names of the enriched nutrients (calcium/iron/omega-3/fiber).
+pub fn nutrient_names() -> impl Iterator<Item = &'static str> {
+    TARGETS.iter().map(|(n, _)| *n)
+}
+
 /// Look up the four nutrients for `food` (min/max/recommended + comment format) and
 /// store the recommended values, normalised to the canonical unit. FAIL LOUDLY: a
 /// lookup error is returned to the caller (logged, retried next sweep).

@@ -634,6 +634,21 @@ pub async fn edit_food_for_entry(
     let mut entry: DiaryEntry = db::get("diary", entry_id).await?;
     let food: Food = db::get("foods", &entry.food_id).await?;
 
+    // Our category tags AND the enriched nutrients (calcium/iron/omega-3/fiber) are
+    // bound to the product NAME. When the name changes they're stale, so clear them
+    // and let the background queue re-classify + re-enrich under the new name. When
+    // the name is unchanged we keep whatever was already computed.
+    let renamed = name != food.name;
+    let mut nutrients = nutrients;
+    let (is_snack, is_liquid_cal, is_veg_fruit, is_egg, is_red_meat) = if renamed {
+        for key in crate::services::enrich::nutrient_names() {
+            nutrients.remove(key);
+        }
+        (None, None, None, None, None)
+    } else {
+        (food.is_snack, food.is_liquid_cal, food.is_veg_fruit, food.is_egg, food.is_red_meat)
+    };
+
     let all_diary: Vec<DiaryEntry> = db::list_all("diary").await;
     let other_diary = all_diary
         .iter()
@@ -646,9 +661,7 @@ pub async fn edit_food_for_entry(
         let copy = Food {
             id: new_id(),
             name, kcal, protein, fat, carbs, nutrients,
-            // The name changed → old category tags are stale; clear them so the
-            // background classifier re-tags this variant.
-            is_snack: None, is_liquid_cal: None, is_veg_fruit: None, is_egg: None, is_red_meat: None,
+            is_snack, is_liquid_cal, is_veg_fruit, is_egg, is_red_meat,
             created_at: now(),
             updated_at: now(),
             ..food.clone()
@@ -661,7 +674,7 @@ pub async fn edit_food_for_entry(
     } else {
         let updated = Food {
             name, kcal, protein, fat, carbs, nutrients,
-            is_snack: None, is_liquid_cal: None, is_veg_fruit: None, is_egg: None, is_red_meat: None,
+            is_snack, is_liquid_cal, is_veg_fruit, is_egg, is_red_meat,
             updated_at: now(),
             ..food.clone()
         };

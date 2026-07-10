@@ -314,16 +314,21 @@ pub struct FoodTags {
     pub liquid_cal: bool,
     /// Vegetable or fruit (fresh, cooked, or an obvious veg/fruit dish).
     pub veg_fruit: bool,
+    /// Eggs / an egg product (omelette, scrambled/boiled eggs).
+    pub egg: bool,
+    /// Red or processed meat (beef/pork/lamb; sausage, ham, bacon, salami).
+    pub red_meat: bool,
 }
 
-/// Three parallel boolean arrays, one entry per input food, in input order. The
-/// flat-array shape (no maps / nullable / $refs) is what the strict model server
-/// accepts.
+/// Parallel boolean arrays, one entry per input food, in input order. The flat-array
+/// shape (no maps / nullable / $refs) is what the strict model server accepts.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FoodVerdicts {
     snack: Vec<bool>,
     liquid_cal: Vec<bool>,
     veg_fruit: Vec<bool>,
+    egg: Vec<bool>,
+    red_meat: Vec<bool>,
 }
 
 /// Classify each food NAME into the existing categories (snack / liquid calories /
@@ -364,21 +369,34 @@ pub async fn classify_food(names: &[String]) -> Result<Vec<FoodTags>, String> {
          3) \"veg_fruit\": a vegetable or fruit — fresh, cooked, or an obvious vegetable/fruit \
          dish (salad, stewed vegetables, fruit). NOT: cereals, grains, bread, meat, fish, dairy, \
          sweets, or drinks.\n\n\
+         4) \"egg\": eggs or an egg product — whole eggs, omelette, scrambled/fried/boiled eggs, \
+         egg whites. NOT: dishes where eggs are only a minor binder (cakes, batter, pasta) — judge \
+         the food ITSELF, an individual ingredient named «egg» IS true.\n\n\
+         5) \"red_meat\": red or processed meat — beef, pork, veal, lamb, mutton; and processed \
+         meat: sausage, wiener, frankfurter, ham, bacon, salami, bologna, pepperoni, pâté. NOT: \
+         chicken, turkey and other poultry; fish and seafood; eggs; plant food.\n\n\
          Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object with three boolean arrays, each exactly \
+         Respond with ONLY a single minified JSON object with five boolean arrays, each exactly \
          one per food, in the SAME order. Example for 2 foods: \
-         {{\"snack\":[true,false],\"liquid_cal\":[false,true],\"veg_fruit\":[true,false]}}",
+         {{\"snack\":[true,false],\"liquid_cal\":[false,true],\"veg_fruit\":[true,false],\
+         \"egg\":[false,false],\"red_meat\":[false,true]}}",
     );
     let v: FoodVerdicts = generate(prompt, |_| {}).await?;
     let n = names.len();
-    if v.snack.len() != n || v.liquid_cal.len() != n || v.veg_fruit.len() != n {
+    if v.snack.len() != n || v.liquid_cal.len() != n || v.veg_fruit.len() != n
+        || v.egg.len() != n || v.red_meat.len() != n
+    {
         return Err(format!(
-            "food classification length mismatch for {n} foods: snack={}, liquid_cal={}, veg_fruit={}",
-            v.snack.len(), v.liquid_cal.len(), v.veg_fruit.len()
+            "food classification length mismatch for {n} foods: snack={}, liquid_cal={}, \
+             veg_fruit={}, egg={}, red_meat={}",
+            v.snack.len(), v.liquid_cal.len(), v.veg_fruit.len(), v.egg.len(), v.red_meat.len()
         ));
     }
     Ok((0..n)
-        .map(|i| FoodTags { snack: v.snack[i], liquid_cal: v.liquid_cal[i], veg_fruit: v.veg_fruit[i] })
+        .map(|i| FoodTags {
+            snack: v.snack[i], liquid_cal: v.liquid_cal[i], veg_fruit: v.veg_fruit[i],
+            egg: v.egg[i], red_meat: v.red_meat[i],
+        })
         .collect())
 }
 

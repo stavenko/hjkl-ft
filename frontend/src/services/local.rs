@@ -190,6 +190,16 @@ pub fn is_veg_fruit_food(food: &Food) -> bool {
     food.is_veg_fruit == Some(true)
 }
 
+/// True if `food` is eggs / an egg product — by the cached AI tag.
+pub fn is_egg_food(food: &Food) -> bool {
+    food.is_egg == Some(true)
+}
+
+/// True if `food` is red / processed meat — by the cached AI tag.
+pub fn is_red_meat_food(food: &Food) -> bool {
+    food.is_red_meat == Some(true)
+}
+
 /// Persist AI category verdicts onto foods by id, then push once so the tags
 /// propagate across devices. Written by the background `classify` queue as soon as
 /// a food is logged; foods not found are skipped.
@@ -202,6 +212,8 @@ pub async fn cache_food_tags(verdicts: &[(String, crate::services::ai::FoodTags)
             food.is_snack = Some(tags.snack);
             food.is_liquid_cal = Some(tags.liquid_cal);
             food.is_veg_fruit = Some(tags.veg_fruit);
+            food.is_egg = Some(tags.egg);
+            food.is_red_meat = Some(tags.red_meat);
             food.updated_at = now();
             db::put("foods", &food).await;
         }
@@ -282,15 +294,67 @@ pub async fn evening_protein_on(date: &str) -> f64 {
     total
 }
 
-/// Total EATEN grams of vegetable/fruit foods logged on `date` (honouring waste),
-/// by the cached AI `is_veg_fruit` tag. Backs the chapter-2 veg/fruit streak.
-pub async fn veg_fruit_grams_on(date: &str) -> f64 {
+/// EATEN grams of foods matching `selector` on `date`, honouring waste and
+/// **expanding recipes by composition**: for a logged dish (a food with a
+/// `recipe_id`), each matching ingredient contributes `ing.grams × eaten /
+/// recipe.total_grams` — so e.g. the egg content of 200 g of a cake is counted from
+/// the recipe's egg ingredient, not from classifying the whole cake. Plain foods
+/// contribute their full eaten grams when they match. Ingredients are treated as
+/// leaf foods (no nested-recipe recursion in v1).
+pub async fn food_tag_grams_on(date: &str, selector: impl Fn(&Food) -> bool) -> f64 {
     let foods = food_map().await;
-    list_diary(date).await.iter().filter_map(|e| {
-        foods.get(&e.food_id)
-            .filter(|f| is_veg_fruit_food(f))
-            .map(|_| (e.grams - e.waste_grams).max(0.0))
-    }).sum()
+    let recipes: BTreeMap<String, Recipe> =
+        list_recipes().await.into_iter().map(|r| (r.id.clone(), r)).collect();
+    let mut ings_by_recipe: BTreeMap<String, Vec<RecipeIngredient>> = BTreeMap::new();
+    for ing in list_recipe_ingredients().await {
+        ings_by_recipe.entry(ing.recipe_id.clone()).or_default().push(ing);
+    }
+
+    let mut total = 0.0;
+    for e in list_diary(date).await {
+        let Some(food) = foods.get(&e.food_id) else { continue };
+        let eaten = (e.grams - e.waste_grams).max(0.0);
+        if eaten <= 0.0 {
+            continue;
+        }
+        match food.recipe_id.as_ref().and_then(|rid| recipes.get(rid)) {
+            // Logged dish → attribute matching ingredients by their share of the
+            // finished (cooked) weight.
+            Some(recipe) if recipe.total_grams.unwrap_or(0.0) > 0.0 => {
+                let tg = recipe.total_grams.unwrap();
+                if let Some(ings) = ings_by_recipe.get(&recipe.id) {
+                    let matched_raw: f64 = ings.iter()
+                        .filter(|ing| foods.get(&ing.food_id).is_some_and(|f| selector(f)))
+                        .map(|ing| ing.grams)
+                        .sum();
+                    total += matched_raw * eaten / tg;
+                }
+            }
+            // Plain food.
+            _ => {
+                if selector(food) {
+                    total += eaten;
+                }
+            }
+        }
+    }
+    total
+}
+
+/// EATEN grams of vegetable/fruit on `date` (recipe-composition aware).
+pub async fn veg_fruit_grams_on(date: &str) -> f64 {
+    food_tag_grams_on(date, is_veg_fruit_food).await
+}
+
+/// EATEN grams of eggs on `date` (recipe-composition aware): counts eggs used as
+/// recipe ingredients too (e.g. the eggs inside a slice of cake).
+pub async fn egg_grams_on(date: &str) -> f64 {
+    food_tag_grams_on(date, is_egg_food).await
+}
+
+/// EATEN grams of red / processed meat on `date` (recipe-composition aware).
+pub async fn red_meat_grams_on(date: &str) -> f64 {
+    food_tag_grams_on(date, is_red_meat_food).await
 }
 
 /// Total protein (grams) eaten on `date` — sum of `protein * eaten_grams / 100`
@@ -553,7 +617,7 @@ pub async fn edit_food_for_entry(
             name, kcal, protein, fat, carbs, nutrients,
             // The name changed → old category tags are stale; clear them so the
             // background classifier re-tags this variant.
-            is_snack: None, is_liquid_cal: None, is_veg_fruit: None,
+            is_snack: None, is_liquid_cal: None, is_veg_fruit: None, is_egg: None, is_red_meat: None,
             created_at: now(),
             updated_at: now(),
             ..food.clone()
@@ -566,7 +630,7 @@ pub async fn edit_food_for_entry(
     } else {
         let updated = Food {
             name, kcal, protein, fat, carbs, nutrients,
-            is_snack: None, is_liquid_cal: None, is_veg_fruit: None,
+            is_snack: None, is_liquid_cal: None, is_veg_fruit: None, is_egg: None, is_red_meat: None,
             updated_at: now(),
             ..food.clone()
         };
@@ -683,7 +747,7 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
             is_restaurant: false,
             is_snack: None,
             is_liquid_cal: None,
-            is_veg_fruit: None,
+            is_veg_fruit: None, is_egg: None, is_red_meat: None,
             created_at: now(),
             updated_at: now(),
         };
@@ -717,6 +781,11 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
 
 pub async fn list_recipes() -> Vec<Recipe> {
     db::list_all("recipes").await
+}
+
+/// All recipe ingredients across every recipe (id, recipe_id, food_id, grams).
+pub async fn list_recipe_ingredients() -> Vec<RecipeIngredient> {
+    db::list_all("recipe_ingredients").await
 }
 
 pub async fn new_recipe(name: &str) -> Recipe {
@@ -806,6 +875,9 @@ pub async fn add_ingredient_to_recipe(
     recipe_id: &str,
 ) -> RecipeIngredient {
     db::put("foods", food).await;
+    // Classify the ingredient itself (not just the finished dish), so a recipe's
+    // egg / red-meat / veg-fruit content can be counted by composition later.
+    crate::services::classify::enqueue(food.id.clone());
     let ing = RecipeIngredient {
         id: new_id(),
         recipe_id: recipe_id.to_string(),
@@ -878,6 +950,8 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         is_snack: None,
         is_liquid_cal: None,
         is_veg_fruit: None,
+        is_egg: None,
+        is_red_meat: None,
         created_at: now(),
         updated_at: now(),
     };
@@ -897,6 +971,12 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
 
     // Finishing a recipe creates a dish — the "I cook" task 1 milestone.
     crate::services::story::set_flag(crate::services::story::COOKING_DISH_CREATED, true).await;
+
+    // Ensure every ingredient is classified, so the dish's egg / red-meat / veg-fruit
+    // content can be counted by composition when it's logged.
+    for ing in &recipe.ingredients {
+        crate::services::classify::enqueue(ing.food_id.clone());
+    }
 
     Some(food)
 }

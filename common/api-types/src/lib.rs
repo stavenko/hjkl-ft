@@ -74,6 +74,16 @@ pub struct Food {
     /// the summary-time index judging as the stored source of truth.
     #[serde(default)]
     pub is_veg_fruit: Option<bool>,
+    /// AI-assigned tag: eggs (or an egg product — omelette, scrambled/boiled eggs).
+    /// `None` = not yet classified. Also classified for RECIPE INGREDIENTS, so the
+    /// egg content of a dish can be counted by composition.
+    #[serde(default)]
+    pub is_egg: Option<bool>,
+    /// AI-assigned tag: red or processed meat (beef, pork, lamb; sausages, ham,
+    /// bacon, salami, wieners). `None` = not yet classified. Classified for recipe
+    /// ingredients too, so a dish's red-meat content can be counted by composition.
+    #[serde(default)]
+    pub is_red_meat: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -169,6 +179,8 @@ impl FoodDraft {
             is_snack: None,
             is_liquid_cal: None,
             is_veg_fruit: None,
+            is_egg: None,
+            is_red_meat: None,
             created_at: self.created_at.clone(),
             updated_at: String::new(),
         }

@@ -32,6 +32,8 @@ fn demo_food(name: String, kcal: f64, protein: f64, fat: f64, carbs: f64) -> Foo
         is_snack: None,
         is_liquid_cal: None,
         is_veg_fruit: None,
+        is_egg: None,
+        is_red_meat: None,
         created_at: String::new(),
         updated_at: String::new(),
     }

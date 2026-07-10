@@ -15,6 +15,52 @@ const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 16px; \
     padding: 16px; height: 100%; box-sizing: border-box; overflow-y: auto; \
     display: flex; flex-direction: column; gap: 12px;";
 
+// ── Nutrition indicators (PREVIEW) ───────────────────────────────────────────
+// Seven line icons (Lucide, inlined — same line style as the nav) showing how the
+// user's food/drink is doing. Highlighted green / orange / red. Shown here always
+// for now, to evaluate icons + colours + placement; later they appear only after a
+// week of diary keeping.
+const IC_BONE: &str = r#"<path d="M17 10c.7-.7 1.69 0 2.5 0a2.5 2.5 0 1 0 0-5 .5.5 0 0 1-.5-.5 2.5 2.5 0 1 0-5 0c0 .81.7 1.8 0 2.5l-7 7c-.7.7-1.69 0-2.5 0a2.5 2.5 0 0 0 0 5c.28 0 .5.22.5.5a2.5 2.5 0 1 0 5 0c0-.81-.7-1.8 0-2.5Z"/>"#;
+const IC_FISH: &str = r#"<path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"/><path d="M18 12v.5"/><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"/><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"/><path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"/><path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"/>"#;
+const IC_EGG: &str = r#"<path d="M12 2C8 2 4 8 4 14a8 8 0 0 0 16 0c0-6-4-12-8-12"/>"#;
+const IC_DROPLET: &str = r#"<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>"#;
+const IC_HAM: &str = r#"<path d="M13.144 21.144A7.274 10.445 45 1 0 2.856 10.856"/><path d="M13.144 21.144A7.274 4.365 45 0 0 2.856 10.856a7.274 4.365 45 0 0 10.288 10.288"/><path d="M16.565 10.435 18.6 8.4a2.501 2.501 0 1 0 1.65-4.65 2.5 2.5 0 1 0-4.66 1.66l-2.024 2.025"/><path d="m8.5 16.5-1-1"/>"#;
+const IC_APPLE: &str = r#"<path d="M12 6.528V3a1 1 0 0 1 1-1"/><path d="M18.237 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.472A6 6 0 0 0 2 11a15.1 15.1 0 0 0 3.763 10 3 3 0 0 0 3.648.648 5.5 5.5 0 0 1 5.178 0A3 3 0 0 0 18.237 21"/>"#;
+const IC_WHEAT: &str = r#"<path d="M2 22 16 8"/><path d="M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L5 19l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M7.47 8.53 9 7l1.53 1.53a3.5 3.5 0 0 1 0 4.94L9 15l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M11.47 4.53 13 3l1.53 1.53a3.5 3.5 0 0 1 0 4.94L13 11l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M20 2h2v2a4 4 0 0 1-4 4h-2V6a4 4 0 0 1 4-4Z"/><path d="M11.47 17.47 13 19l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L5 19l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/><path d="M15.47 13.47 17 15l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L9 15l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/><path d="M19.47 9.47 21 11l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L13 11l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/>"#;
+
+const IND_GREEN: (&str, &str) = ("#1fa463", "rgba(31,164,99,0.15)");
+const IND_ORANGE: (&str, &str) = ("#e8850d", "rgba(232,133,13,0.15)");
+const IND_RED: (&str, &str) = ("#e0304f", "rgba(224,48,79,0.15)");
+
+fn indicator(paths: &'static str, label: &'static str, state: (&'static str, &'static str)) -> impl IntoView {
+    let (color, tint) = state;
+    view! {
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; min-width: 0;">
+            <div style=format!("width: 38px; height: 38px; border-radius: 50%; background: {tint}; \
+                    display: flex; align-items: center; justify-content: center;")>
+                <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none"
+                    stroke=color stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                    inner_html=paths></svg>
+            </div>
+            <span style=format!("font-size: 0.55rem; line-height: 1.1; text-align: center; color: var(--bulma-text-weak);")>{label}</span>
+        </div>
+    }
+}
+
+fn nutrition_indicators() -> impl IntoView {
+    view! {
+        <div style="display: flex; gap: 4px; justify-content: space-between;">
+            {indicator(IC_BONE, "Кальций", IND_GREEN)}
+            {indicator(IC_FISH, "Омега-3", IND_GREEN)}
+            {indicator(IC_EGG, "Яйца", IND_ORANGE)}
+            {indicator(IC_DROPLET, "Железо", IND_GREEN)}
+            {indicator(IC_HAM, "Мясо", IND_RED)}
+            {indicator(IC_APPLE, "Фр/овощи", IND_GREEN)}
+            {indicator(IC_WHEAT, "Клетчатка", IND_ORANGE)}
+        </div>
+    }
+}
+
 #[component]
 pub fn ProgressWidget() -> impl IntoView {
     // «X/7» counters refresh when any of the three stores change.
@@ -70,6 +116,9 @@ pub fn ProgressWidget() -> impl IntoView {
 
     view! {
         <div style=CARD>
+            // PREVIEW: nutrition indicators row (to evaluate icons/colours/placement).
+            {nutrition_indicators()}
+            <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
             {move || match planka.get().flatten() {
                 // Already computed → show the resulting daily calorie target.
                 Some(n) => view! {

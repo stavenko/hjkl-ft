@@ -155,6 +155,8 @@ pub fn FoodEditor(
             is_snack: None, // classified in the background once logged (see `classify`)
             is_liquid_cal: None,
             is_veg_fruit: None,
+            is_egg: None,
+            is_red_meat: None,
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
         }

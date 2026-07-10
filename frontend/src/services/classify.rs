@@ -40,6 +40,7 @@ pub fn init() {
 /// True if `food` still has an unassigned category tag.
 fn needs_classification(food: &Food) -> bool {
     food.is_snack.is_none() || food.is_liquid_cal.is_none() || food.is_veg_fruit.is_none()
+        || food.is_egg.is_none() || food.is_red_meat.is_none()
 }
 
 /// Enqueue a food id for background classification (no-op if already queued) and
@@ -107,6 +108,22 @@ pub async fn sweep_diary_unclassified() {
                 if needs_classification(food) && seen.insert(food.id.clone()) {
                     enqueue(food.id.clone());
                 }
+            }
+        }
+    }
+}
+
+/// Enqueue every not-yet-classified RECIPE INGREDIENT food, so a dish's egg /
+/// red-meat / veg-fruit content can be counted by composition. Called on activation
+/// (covers recipes built before the ingredients were classified).
+pub async fn sweep_recipe_ingredients() {
+    let foods: std::collections::BTreeMap<String, Food> =
+        local::list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect();
+    let mut seen = std::collections::HashSet::new();
+    for ing in local::list_recipe_ingredients().await {
+        if let Some(food) = foods.get(&ing.food_id) {
+            if needs_classification(food) && seen.insert(food.id.clone()) {
+                enqueue(food.id.clone());
             }
         }
     }

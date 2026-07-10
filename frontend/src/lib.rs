@@ -72,9 +72,10 @@ pub fn main() {
         services::story::refresh_attention();
 
         // On activation, classify any food logged today/yesterday that isn't tagged
-        // yet (offline entries, other devices, pre-feature foods). Runs one food at
-        // a time in the background.
+        // yet (offline entries, other devices, pre-feature foods) plus any recipe
+        // ingredient still untagged. Runs one food at a time in the background.
         leptos::spawn_local(services::classify::sweep_diary_unclassified());
+        leptos::spawn_local(services::classify::sweep_recipe_ingredients());
     });
 }
 

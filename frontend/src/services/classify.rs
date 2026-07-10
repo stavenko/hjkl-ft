@@ -112,8 +112,8 @@ pub fn enqueue(food_id: String) {
     }
 }
 
-/// Drain the queue one food at a time. A per-food error is logged (not silently
-/// swallowed) and the queue moves on, so one bad food can never wedge the rest.
+/// Drain the queue one food at a time (classify + nutrient enrichment). Every
+/// failure is recorded in the error log so it stays visible.
 async fn run_worker() {
     loop {
         let next = Q.with(|q| q.borrow_mut().pending.pop_front());
@@ -129,14 +129,9 @@ async fn run_worker() {
         if needs_classification(&food) {
             let name = food.name.clone();
             let ctx = format!("Классификация: {name}");
-            let verdicts = with_retries(
-                move || {
-                    let n = name.clone();
-                    async move { ai::classify_food(&[n]).await }
-                },
-                &ctx,
-            ).await;
-            if let Some(tags) = verdicts {
+            if let Some(tags) =
+                with_retries(move || { let n = name.clone(); async move { ai::classify_food(&[n]).await } }, &ctx).await
+            {
                 if let Some(t) = tags.into_iter().next() {
                     local::cache_food_tags(&[(id.clone(), t)]).await;
                 }
@@ -148,13 +143,7 @@ async fn run_worker() {
         if super::enrich::needs_enrichment(&food) {
             let ctx = format!("Нутриенты: {}", food.name);
             let f = food.clone();
-            with_retries(
-                move || {
-                    let f = f.clone();
-                    async move { super::enrich::enrich_food(&f).await }
-                },
-                &ctx,
-            ).await;
+            with_retries(move || { let f = f.clone(); async move { super::enrich::enrich_food(&f).await } }, &ctx).await;
         }
     }
 }

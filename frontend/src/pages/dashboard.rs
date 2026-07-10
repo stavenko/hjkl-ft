@@ -361,9 +361,10 @@ fn ErrorsPanel() -> impl IntoView {
                         <div
                             style="background: var(--bulma-scheme-main); border-radius: 12px; padding: 12px 14px; cursor: pointer;"
                             on:click=move |_| {
-                                let s = text.clone();
                                 copied.set(Some(i));
-                                spawn_local(async move { let _ = copy_to_clipboard(&s).await; });
+                                // MUST call clipboard.writeText SYNCHRONOUSLY inside the
+                                // gesture — iOS Safari drops it if deferred (spawn_local).
+                                copy_to_clipboard(&text);
                             }>
                             <p class="is-size-6 has-text-weight-semibold">{e.context.clone()}</p>
                             <p class="is-size-7 has-text-grey" style="white-space: pre-wrap; word-break: break-word; margin-top: 2px;">
@@ -384,11 +385,15 @@ fn ErrorsPanel() -> impl IntoView {
     }
 }
 
-async fn copy_to_clipboard(text: &str) -> Result<(), wasm_bindgen::JsValue> {
-    let window = web_sys::window().ok_or(wasm_bindgen::JsValue::NULL)?;
+/// Copy text to the clipboard. Called SYNCHRONOUSLY from the click handler (the
+/// returned promise is intentionally not awaited) so iOS Safari keeps the user
+/// gesture that its clipboard API requires.
+fn copy_to_clipboard(text: &str) {
+    let Some(window) = web_sys::window() else { return };
     let clipboard = window.navigator().clipboard();
-    wasm_bindgen_futures::JsFuture::from(clipboard.write_text(text)).await?;
-    Ok(())
+    // Fire-and-forget: the promise settles after the handler returns, but the API
+    // was invoked within the gesture, which is what iOS checks.
+    let _ = clipboard.write_text(text);
 }
 
 // ── Feather/Lucide line icons (24×24, currentColor, 2px round strokes) — the same

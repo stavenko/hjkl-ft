@@ -680,13 +680,14 @@ pub fn DiaryPage() -> impl IntoView {
                               let es = entries();
                               group_by_meal(&es).into_iter().map(|grp| {
                                   let title = t(grp.meal.i18n_key()).to_string();
+                                  let accent = grp.meal.accent().to_string();
                                   let kcal = nutrient_sum("Calories", &grp.entries, &fs);
                                   let protein = nutrient_sum("Protein", &grp.entries, &fs);
                                   let fat = nutrient_sum("Fat", &grp.entries, &fs);
                                   let carbs = nutrient_sum("Carbs", &grp.entries, &fs);
                                   let rows = grp.entries.into_iter().map(render_row).collect::<Vec<_>>();
                                   view! {
-                                      <MealPanel title=title kcal=kcal protein=protein fat=fat carbs=carbs>
+                                      <MealPanel title=title accent=accent kcal=kcal protein=protein fat=fat carbs=carbs>
                                           {rows}
                                       </MealPanel>
                                   }.into_view()

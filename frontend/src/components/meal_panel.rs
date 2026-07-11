@@ -3,8 +3,12 @@ use leptos::*;
 use crate::services::i18n;
 
 /// A collapsible meal panel: header (meal name + macro summary) over a body of
-/// diary rows. Tapping the header toggles collapse. Colours are deliberately
-/// restrained — a soft card on the page background, no accent fills.
+/// diary rows. Tapping the header toggles collapse.
+///
+/// Each meal carries a muted `accent` colour (a 6-digit `#rrggbb`) used for the
+/// panel border and a tinted header band, so the header reads as a distinct
+/// heading instead of blending into the first food row. `accent + "22"` /
+/// `accent + "55"` are 8-digit-hex alpha variants (soft tint / divider).
 ///
 /// The macro totals (kcal / protein / fat / carbs) are the aggregate for the
 /// meal, computed by the caller and passed in. The rows themselves come in as
@@ -13,6 +17,8 @@ use crate::services::i18n;
 pub fn MealPanel(
     /// Localised meal name (Завтрак / Обед / Ужин / …).
     title: String,
+    /// Muted per-meal accent colour, a 6-digit `#rrggbb` hex.
+    accent: String,
     /// Aggregate calories for the meal.
     kcal: f64,
     /// Aggregate protein (g).
@@ -36,22 +42,39 @@ pub fn MealPanel(
         i18n::nutrient_badge("Carbs"), carbs,
     );
 
+    let tint = format!("{accent}22"); // ~13% — soft header band
+    let divider = format!("{accent}55"); // ~33% — header/body separator
+    let container_style = format!(
+        "background: var(--bulma-scheme-main); border: 1px solid {accent}; border-radius: 12px; margin-bottom: 0.75rem; overflow: hidden;"
+    );
+    // Header band tint stays; the divider under it appears only when expanded,
+    // so a collapsed panel doesn't show a dangling underline.
+    let header_style = {
+        let tint = tint.clone();
+        let divider = divider.clone();
+        move || format!(
+            "width: 100%; height: auto; display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; text-decoration: none; border: none; background: {tint}; {}",
+            if collapsed.get() { String::new() } else { format!("border-bottom: 1px solid {divider};") }
+        )
+    };
+    let title_style = format!("color: {accent};");
+
     view! {
-        <div style="background: var(--bulma-scheme-main); border: 1px solid var(--bulma-border-weak); border-radius: 12px; margin-bottom: 0.75rem; overflow: hidden;">
+        <div style=container_style>
             // Header — tap toggles collapse. Uses a <button> so iOS fires the
             // delegated click reliably (bare <div on:click> is dead on iOS).
             <button
                 class="button is-ghost"
-                style="width: 100%; height: auto; display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; text-decoration: none; border: none; background: transparent;"
+                style=header_style
                 on:click=move |_| collapsed.update(|c| *c = !*c)
             >
                 <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; min-width: 0;">
-                    <span class="is-size-6 has-text-weight-bold has-text-left" style="color: var(--bulma-text-strong);">{title}</span>
+                    <span class="is-size-6 has-text-weight-bold has-text-left" style=title_style>{title}</span>
                     <span class="is-size-7 has-text-grey has-text-left">{macro_line}</span>
                 </div>
                 // Chevron: points down when expanded, right when collapsed.
                 <span style=move || format!(
-                    "flex-shrink: 0; margin-left: 0.75rem; color: var(--bulma-text-weak); transition: transform 0.2s; transform: rotate({}deg);",
+                    "flex-shrink: 0; margin-left: 0.75rem; color: {accent}; transition: transform 0.2s; transform: rotate({}deg);",
                     if collapsed.get() { -90 } else { 0 }
                 )>
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -59,7 +82,7 @@ pub fn MealPanel(
                     </svg>
                 </span>
             </button>
-            <div style=move || if collapsed.get() { "display: none;" } else { "padding: 0 1rem 0.5rem 1rem;" }>
+            <div style=move || if collapsed.get() { "display: none;" } else { "padding: 0.25rem 1rem 0.5rem 1rem;" }>
                 {children()}
             </div>
         </div>

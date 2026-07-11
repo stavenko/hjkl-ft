@@ -42,6 +42,19 @@ impl MealType {
             MealType::NightSnack => "meal.snack_night",
         }
     }
+
+    /// Muted per-meal accent colour (6-digit `#rrggbb`), used to tint the diary
+    /// panel border + header so each meal reads distinctly. Mid-tone shades so
+    /// they stay legible on both light and dark schemes; the three snack buckets
+    /// share one neutral slate.
+    pub fn accent(self) -> &'static str {
+        match self {
+            MealType::Breakfast => "#D99A2B",  // warm amber — morning
+            MealType::Lunch => "#4FA96A",      // green — midday
+            MealType::Dinner => "#6C7DC4",     // indigo — evening
+            MealType::PreLunchSnack | MealType::PreDinnerSnack | MealType::NightSnack => "#8A97A6", // slate — snacks
+        }
+    }
 }
 
 pub struct MealGroup {

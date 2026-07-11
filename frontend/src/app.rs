@@ -3,7 +3,7 @@ use leptos_router::*;
 
 use crate::pages;
 use crate::services::i18n::t;
-use crate::services::{auth, db, platform, story, subscription, update};
+use crate::services::{auth, db, net, platform, story, subscription, update};
 
 #[derive(Clone, Copy, PartialEq)]
 enum AppState {
@@ -19,6 +19,12 @@ enum AppState {
     /// "never drop the user into the app unsubscribed"). Only ever reached AFTER a
     /// completed status fetch. This is a blocking screen, not the app.
     Locked,
+    /// First-ever launch (no cached subscription) with NO network: we can't fetch
+    /// the config/status, so we can't verify the subscription — but that's a
+    /// NETWORK problem, not a "no subscription" one (a just-paid user almost
+    /// always has connectivity). Show a "connect to continue" screen with retry,
+    /// NOT Locked. Auto-advances to verification once the server is reachable.
+    OfflineNoVerify,
     Ready,
 }
 
@@ -50,13 +56,19 @@ fn initial_state() -> AppState {
         // No usable session for this context. In the installed PWA a browser-onboarding token
         // does NOT count — the PWA requires its own login (passkey or Telegram code).
         AppState::Auth
-    } else if has_active_sub() {
-        AppState::Ready
     } else {
-        // Session but the cache doesn't confirm an active sub. Do NOT assume Locked
-        // (that would flash the "no subscription" screen before we've asked the
-        // server) — show a spinner and verify the live status first.
-        AppState::Checking
+        // Offline-first subscription gate. Trust the cached status (stored in our
+        // per-user DB) so a returning user enters INSTANTLY without a network wait;
+        // a background daily re-check flips the gate if it changed.
+        //   active cache   → Ready (enter now)
+        //   inactive cache → Locked (completed check earlier said so)
+        //   no cache yet   → Checking (first-ever launch: verify before deciding,
+        //                    never flash "no subscription" from a cold cache)
+        match subscription::cached() {
+            Some(s) if s.active => AppState::Ready,
+            Some(_) => AppState::Locked,
+            None => AppState::Checking,
+        }
     }
 }
 
@@ -112,21 +124,59 @@ pub fn App() -> impl IntoView {
         }
     };
 
-    // While Checking, fetch the live subscription status and decide: active → into
-    // the app; confirmed-not-active (or the fetch failed → can't verify) → Locked.
-    // Because this only runs in the Checking state, the Locked screen is reached
-    // ONLY after a completed request — the "no subscription" message never flashes.
-    create_effect(move |_| {
-        if state.get() != AppState::Checking {
-            return;
-        }
-        spawn_local(async move {
-            match subscription::status().await {
-                Ok(s) if s.active => state.set(AppState::Ready),
-                Ok(_) => state.set(AppState::Locked),
-                Err(_) => state.set(AppState::Locked),
+    // React to a subscription-status change detected by the background daily
+    // re-check (subscription::maybe_recheck rewrites the cache + gate). Only ever
+    // moves between the two subscription-driven states — it never clobbers the
+    // Auth / PwaPrompt / Checking overlays. Skips its first (seed) run.
+    create_effect(move |prev: Option<bool>| {
+        let active = subscription::gate_signal().get();
+        if prev.is_some() {
+            match state.get_untracked() {
+                AppState::Ready if !active => state.set(AppState::Locked),
+                AppState::Locked if active => state.set(AppState::Ready),
+                _ => {}
             }
-        });
+        }
+        active
+    });
+
+    // First-ever verification (no cached subscription), driven REACTIVELY by the
+    // connectivity probe instead of a blind wait:
+    //   - probe unknown (None)   → keep the spinner (Checking)
+    //   - server reachable (true)→ fetch the live status → Ready / Locked
+    //   - server down (false)    → OfflineNoVerify: it's a NETWORK problem, not a
+    //     "no subscription" one; the screen offers retry and this same effect
+    //     re-verifies once the probe reports reachable again.
+    // `verifying` guards against a second concurrent status fetch.
+    let verifying = create_rw_signal(false);
+    create_effect(move |_| {
+        let online = net::is_online().get();
+        match state.get() {
+            AppState::Checking => match online {
+                Some(true) => {
+                    if !verifying.get_untracked() {
+                        verifying.set(true);
+                        spawn_local(async move {
+                            let r = subscription::status().await;
+                            verifying.set(false);
+                            match r {
+                                Ok(s) if s.active => state.set(AppState::Ready),
+                                Ok(_) => state.set(AppState::Locked),
+                                // Reachable-but-errored (e.g. payment worker down):
+                                // can't verify → treat as a connectivity problem,
+                                // never Locked without a completed "not active".
+                                Err(_) => state.set(AppState::OfflineNoVerify),
+                            }
+                        });
+                    }
+                }
+                Some(false) => state.set(AppState::OfflineNoVerify),
+                None => {} // probe in flight — keep the spinner
+            },
+            // Network came back → re-enter verification.
+            AppState::OfflineNoVerify if online == Some(true) => state.set(AppState::Checking),
+            _ => {}
+        }
     });
 
     view! {
@@ -180,6 +230,32 @@ pub fn App() -> impl IntoView {
                             }
                         >
                             {move || t("auth.login_title")}
+                        </button>
+                    </div>
+                </div>
+            }.into_view()),
+
+            // First-ever launch with no network → can't verify. This is a NETWORK
+            // problem (not "no subscription"): tell the user to connect, offer
+            // retry. Auto-advances once the probe reports the server reachable.
+            AppState::OfflineNoVerify => Some(view! {
+                <div attr:data-testid="app-offline-gate" style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center;">
+                    <div style="max-width: 24rem; width: 100%;">
+                        <span style="color: #E0A100; display: inline-flex; margin-bottom: 1rem;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                <line x1="12" y1="9" x2="12" y2="13"/>
+                                <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                        </span>
+                        <h1 class="title is-5" style="margin-bottom: 0.5rem;">{move || t("offline_gate.title")}</h1>
+                        <p class="has-text-grey mb-5" style="line-height: 1.6;">{move || t("offline_gate.body")}</p>
+                        <button
+                            attr:data-testid="offline-gate-retry"
+                            class="button is-link is-fullwidth"
+                            on:click=move |_| net::probe_background()
+                        >
+                            {move || t("offline_gate.retry")}
                         </button>
                     </div>
                 </div>

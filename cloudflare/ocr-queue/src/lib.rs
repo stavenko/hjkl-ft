@@ -192,6 +192,15 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return apply_cors(resp, &origin);
     }
 
+    // Unauthenticated liveness probe (frontend `net` service). Wildcard CORS +
+    // before secrets so it's a cheap, always-answerable 200 from any origin.
+    if req.method() == Method::Get && req.url().map(|u| u.path() == "/health").unwrap_or(false) {
+        let headers = Headers::new();
+        let _ = headers.set("Access-Control-Allow-Origin", "*");
+        let _ = headers.set("Cache-Control", "no-store");
+        return Ok(Response::ok("ok")?.with_headers(headers));
+    }
+
     if let Err(resp) = require_secrets(&env).await {
         return apply_cors(resp, &origin);
     }

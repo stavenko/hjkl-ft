@@ -408,6 +408,23 @@ fn en(key: &str) -> &'static str {
         "meal.lunch_sub" => "the daytime binge",
         "meal.dinner_sub" => "the nighttime binge",
 
+        // Connectivity warning (dashboard triangle)
+        "net.offline_title" => "Can't reach the server",
+        "net.offline_body_vpn" => "Your data is saved on the device. Try toggling your VPN on or off.",
+        "net.degraded_title" => "Some services are unavailable",
+        "net.degraded_body" => "Data is saved locally; temporarily unavailable:",
+        "net.worker.ai" => "AI",
+        "net.worker.sync" => "sync",
+        "net.worker.auth" => "sign-in",
+        "net.worker.payment" => "subscription",
+        "net.worker.ocr" => "label scan",
+        "net.worker.bug" => "bug reports",
+        "net.worker.support" => "support chat",
+        "net.worker.push" => "notifications",
+        "offline_gate.title" => "No connection",
+        "offline_gate.body" => "We can't reach the server to finish setting up. This is a network problem — check your internet or VPN and try again.",
+        "offline_gate.retry" => "Retry",
+
         // Diary: weekday prepositional (for "On Monday there were no entries")
         "diary.weekday_prep.mon" => "On Monday",
         "diary.weekday_prep.tue" => "On Tuesday",
@@ -1635,6 +1652,23 @@ fn ru(key: &str) -> &'static str {
         "meal.breakfast_sub" => "утренний жор",
         "meal.lunch_sub" => "дневной жор",
         "meal.dinner_sub" => "ночной жор",
+
+        // Connectivity warning (dashboard triangle)
+        "net.offline_title" => "Не удаётся подключиться к серверу",
+        "net.offline_body_vpn" => "Данные сохраняются на устройстве. Попробуйте включить или выключить VPN.",
+        "net.degraded_title" => "Часть сервисов недоступна",
+        "net.degraded_body" => "Данные сохраняются локально; временно недоступно:",
+        "net.worker.ai" => "ИИ",
+        "net.worker.sync" => "синхронизация",
+        "net.worker.auth" => "вход",
+        "net.worker.payment" => "подписка",
+        "net.worker.ocr" => "распознавание этикеток",
+        "net.worker.bug" => "отчёты об ошибках",
+        "net.worker.support" => "чат поддержки",
+        "net.worker.push" => "уведомления",
+        "offline_gate.title" => "Нет подключения",
+        "offline_gate.body" => "Не удаётся связаться с сервером, чтобы завершить настройку. Это проблема с сетью — проверьте интернет или VPN и повторите.",
+        "offline_gate.retry" => "Повторить",
 
         // Дневник: дни недели с предлогом
         "diary.weekday_prep.mon" => "В понедельник",

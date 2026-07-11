@@ -535,6 +535,8 @@ pub fn FoodEditor(
                         name.set(event_target_value(&ev));
                     }
                 />
+                <div style="position: relative;">
+                <crate::components::net_badge::NetOfflineBadge/>
                 <button type="button"
                     class="button is-link is-fullwidth is-size-7"
                     style="padding: 8px 0; border: none; border-radius: 10px; cursor: pointer;"
@@ -551,6 +553,7 @@ pub fn FoodEditor(
                         format!("\u{2728} {}", t("food_editor.detect_by_name"))
                     }}
                 </button>
+                </div>
                 {move || name_error.get().map(|e| view! {
                     <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-top: 10px; background: var(--bulma-danger-light); border-radius: 10px;">
                         {e}

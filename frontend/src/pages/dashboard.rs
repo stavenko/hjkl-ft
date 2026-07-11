@@ -25,7 +25,7 @@ use crate::components::weight_chart_modal::WeightChartModal;
 use crate::components::weight_widget::WeightWidget;
 use crate::services::i18n::t;
 use crate::services::profile::{self, CourseGoal, Sex};
-use crate::services::{db, local, story};
+use crate::services::{db, local, net, story};
 
 // Bare 4×3 tile wrapper: the weight/steps widgets bring their own card, so this
 // button is transparent and just fills the grid area to open the chart modal.
@@ -113,6 +113,41 @@ pub fn DashboardPage() -> impl IntoView {
     let has_errors = move || !errs.get().is_empty();
 
     view! {
+        // Connectivity warning — a ⚠ triangle at the top of the dashboard when the
+        // AI worker is unreachable (offline → check VPN) or, while online, when a
+        // secondary worker is down (degraded → data still saves locally).
+        {move || {
+            // Offline only when we KNOW it (Some(false)); None (unprobed) shows
+            // nothing. Degraded is independent.
+            let offline = net::is_online().get() == Some(false);
+            let down = net::degraded().get();
+            if !offline && down.is_empty() {
+                return ().into_view();
+            }
+            let title = if offline { t("net.offline_title") } else { t("net.degraded_title") };
+            let body = if offline {
+                t("net.offline_body_vpn").to_string()
+            } else {
+                let names = down.iter().map(|w| t(w.label_key())).collect::<Vec<_>>().join(", ");
+                format!("{} {}", t("net.degraded_body"), names)
+            };
+            view! {
+                <div attr:data-testid="dash-net-warning"
+                    style="display: flex; gap: 0.6rem; align-items: flex-start; background: var(--bulma-scheme-main); border: 1px solid #E0A100; border-left: 4px solid #E0A100; border-radius: 12px; padding: 0.75rem 0.9rem; margin-bottom: 12px;">
+                    <span style="color: #E0A100; flex-shrink: 0; margin-top: 1px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                            <line x1="12" y1="9" x2="12" y2="13"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                    </span>
+                    <div style="min-width: 0;">
+                        <div class="is-size-7 has-text-weight-bold">{title}</div>
+                        <div class="is-size-7 has-text-grey" style="line-height: 1.4;">{body}</div>
+                    </div>
+                </div>
+            }.into_view()
+        }}
         {move || {
             if persona_full() {
                 view! {

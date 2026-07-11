@@ -15,6 +15,7 @@ pub mod i18n;
 pub mod indicators;
 pub mod local;
 pub mod meal_split;
+pub mod net;
 pub mod platform;
 pub mod profile;
 pub mod push;

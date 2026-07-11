@@ -27,9 +27,16 @@ async fn post_json<O: DeserializeOwned>(path: &str, body: &str) -> Result<O, Str
     let request =
         web_sys::Request::new_with_str_and_init(&url, &opts).map_err(|e| format!("{e:?}"))?;
     let window = web_sys::window().expect("no window");
-    let resp_val = JsFuture::from(window.fetch_with_request(&request))
-        .await
-        .map_err(|e| format!("{e:?}"))?;
+    // A fetch REJECTION (not an HTTP error) means the sync worker is unreachable —
+    // drop its flag immediately so the degraded warning shows without waiting for
+    // the next scheduled probe.
+    let resp_val = match JsFuture::from(window.fetch_with_request(&request)).await {
+        Ok(v) => v,
+        Err(e) => {
+            super::net::note_failure(super::net::Worker::Sync);
+            return Err(format!("{e:?}"));
+        }
+    };
     let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
 
     let text = JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?)

@@ -145,6 +145,20 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         );
     }
 
+    // Unauthenticated liveness probe: the frontend's connectivity check (see the
+    // `net` service) hits this to decide "is the server reachable" — the AI worker
+    // is the critical one, so its reachability drives the app's online flag. Kept
+    // before JWT/secret checks so it stays a cheap, always-answerable 200. CORS is
+    // WILDCARD (not the restricted echo) because it's a public liveness check with
+    // no secrets, and it must answer probes from ANY origin — including the
+    // per-deploy Pages hash subdomains that aren't in the allow-list.
+    if req.method() == Method::Get && req.url().map(|u| u.path() == "/health").unwrap_or(false) {
+        let headers = Headers::new();
+        let _ = headers.set("Access-Control-Allow-Origin", "*");
+        let _ = headers.set("Cache-Control", "no-store");
+        return Ok(Response::ok("ok")?.with_headers(headers));
+    }
+
     if let Err(resp) = require_secrets(&env).await {
         return add_cors(resp, &origin);
     }

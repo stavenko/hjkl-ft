@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::cell::Cell;
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
@@ -41,21 +41,39 @@ pub struct FrontendConfig {
     pub app_origin: String,
 }
 
-static CONFIG: OnceLock<FrontendConfig> = OnceLock::new();
+thread_local! {
+    // The live config. WASM is single-threaded, so a thread_local Cell holding a
+    // leaked `&'static` gives us a `get() -> &'static FrontendConfig` that never
+    // moves (callers keep borrowing it) yet can be REPLACED at runtime: the
+    // background network fetch swaps in the fresh config without a reload. `set`
+    // leaks the previous value — a handful of tiny leaks over a session, which is
+    // fine for a config struct and buys an unchanged, allocation-free `get()`.
+    static CURRENT: Cell<Option<&'static FrontendConfig>> = const { Cell::new(None) };
+}
 
 pub fn get() -> &'static FrontendConfig {
-    CONFIG
-        .get()
+    CURRENT
+        .with(|c| c.get())
         .expect("Frontend config not initialized")
 }
 
-pub fn set(cfg: FrontendConfig) {
-    let _ = CONFIG.set(cfg);
+/// True once a config (cache/default/network) has been installed.
+pub fn is_initialized() -> bool {
+    CURRENT.with(|c| c.get().is_some())
 }
 
-pub fn load_from_cache() {
-    let cfg = read_ls().unwrap_or_default();
-    let _ = CONFIG.set(cfg);
+pub fn set(cfg: FrontendConfig) {
+    let leaked: &'static FrontendConfig = Box::leak(Box::new(cfg));
+    CURRENT.with(|c| c.set(Some(leaked)));
+}
+
+/// Install a config synchronously WITHOUT touching the network: the cached one if
+/// present, else `Default`. This is the offline-first bootstrap — it lets the UI
+/// mount immediately; the network fetch later REPLACES this via [`set`].
+pub fn load_or_default() {
+    if !is_initialized() {
+        set(read_ls().unwrap_or_default());
+    }
 }
 
 pub fn save_to_cache(cfg: &FrontendConfig) {

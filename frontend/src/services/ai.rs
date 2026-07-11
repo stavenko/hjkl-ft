@@ -1393,7 +1393,14 @@ async fn queue_request(
 
     let request = web_sys::Request::new_with_str_and_init(&url, &opts).map_err(|e| format!("{e:?}"))?;
     let window = web_sys::window().expect("no window");
-    let resp_val = JsFuture::from(window.fetch_with_request(&request)).await.map_err(|e| format!("{e:?}"))?;
+    // Fetch rejection = OCR queue worker unreachable — drop its flag now.
+    let resp_val = match JsFuture::from(window.fetch_with_request(&request)).await {
+        Ok(v) => v,
+        Err(e) => {
+            super::net::note_failure(super::net::Worker::Ocr);
+            return Err(format!("{e:?}"));
+        }
+    };
     let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
     let text = JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?).await.map_err(|e| format!("{e:?}"))?;
     let text = text.as_string().ok_or("response not string")?;
@@ -1422,7 +1429,14 @@ pub async fn summarize(prompt: &str) -> Result<String, String> {
     opts.set_headers(&headers);
     let request = web_sys::Request::new_with_str_and_init(&url, &opts).map_err(|e| format!("{e:?}"))?;
     let window = web_sys::window().expect("no window");
-    let resp_val = JsFuture::from(window.fetch_with_request(&request)).await.map_err(|e| format!("{e:?}"))?;
+    // Fetch rejection = AI worker unreachable → drop the global online flag now.
+    let resp_val = match JsFuture::from(window.fetch_with_request(&request)).await {
+        Ok(v) => v,
+        Err(e) => {
+            super::net::note_failure(super::net::Worker::Ai);
+            return Err(format!("{e:?}"));
+        }
+    };
     let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
     let text = JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?).await.map_err(|e| format!("{e:?}"))?;
     let text = text.as_string().ok_or("response not string")?;

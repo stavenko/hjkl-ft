@@ -103,6 +103,16 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return Ok(Response::empty()?.with_headers(headers).with_status(204));
     }
 
+    // Unauthenticated liveness probe (see the frontend `net` service). Wildcard
+    // CORS + before secrets/router so it's a cheap, always-answerable 200 from any
+    // origin (incl. per-deploy Pages hash subdomains).
+    if req.method() == Method::Get && req.url().map(|u| u.path() == "/health").unwrap_or(false) {
+        let headers = Headers::new();
+        let _ = headers.set("Access-Control-Allow-Origin", "*");
+        let _ = headers.set("Cache-Control", "no-store");
+        return Ok(Response::ok("ok")?.with_headers(headers));
+    }
+
     if let Err(resp) = require_secrets(&env).await {
         return Ok(resp);
     }

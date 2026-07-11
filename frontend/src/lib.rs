@@ -6,27 +6,24 @@ pub mod services;
 #[cfg(not(test))]
 use wasm_bindgen::prelude::wasm_bindgen;
 
+/// Poll interval for the update check (ms). 30s for now; will be raised to ~1h.
+#[cfg(not(test))]
+const UPDATE_POLL_MS: i32 = 30_000;
+/// Interval for the connectivity re-probe (ms). RU networks flap, so we re-check
+/// server reachability regularly to keep the offline warning honest.
+#[cfg(not(test))]
+const PROBE_POLL_MS: i32 = 15_000;
+
 #[cfg(not(test))]
 #[wasm_bindgen(start)]
 pub fn main() {
     console_error_panic_hook::set_once();
     leptos::spawn_local(async {
-        let (online, _) = futures::join!(
-            async {
-                match with_timeout(3000, services::config::fetch_from_network()).await {
-                    Some(Some(cfg)) => {
-                        services::config::save_to_cache(&cfg);
-                        services::config::set(cfg);
-                        true
-                    }
-                    _ => {
-                        services::config::load_from_cache();
-                        false
-                    }
-                }
-            },
-            sleep_ms(800),
-        );
+        // ---- Critical path (under the splash): LOCAL ONLY, no network. <1s. ----
+        // Config synchronously from cache-or-default so `config::get()` never
+        // panics and network code has a base to read (empty until the background
+        // fetch REPLACES it). The UI must not wait for the network or the config.
+        services::config::load_or_default();
 
         services::db::init().await;
         services::app_flags::reload().await;
@@ -35,25 +32,30 @@ pub fn main() {
         // signed-in account on the device — so migrate it in (one-time, rescues
         // local-only stores like progress photos), then keep using the per-user DB.
         if let Some(uid) = services::auth::get_user_id() {
+            // This runs UNDER the splash (part of "teal-izing the DB"). The one-time
+            // bootstrap→per-user migration copies stores, which can grow on a large
+            // history — measure it, so a slow migration surfaces instead of hiding
+            // behind a blank splash. If it regularly exceeds this, move its progress
+            // into the splash rather than the critical path.
+            let t0 = js_sys::Date::now();
             services::db::activate_for_user(&uid, true).await;
+            let dt = js_sys::Date::now() - t0;
+            if dt > 500.0 {
+                leptos::logging::warn!("db::activate_for_user took {dt:.0}ms under the splash");
+            }
             services::app_flags::activate().await;
         }
         services::i18n::init_lang();
         services::i18n::init_weight_unit();
-        services::update::init(); // create the update-available signal at the root
-        services::story::init_attention(); // create the story-attention signal at the root
+        services::update::init(); // update-available signal at the root
+        services::net::init(); // connectivity signals at the root
+        services::subscription::init(); // subscription gate signal at the root
+        services::story::init_attention(); // story-attention signal at the root
         services::classify::init(); // reset the background food-classification queue
-        services::errors::init(); // create the background-error log signal at the root
+        services::errors::init(); // background-error log signal at the root
 
-        // Reconcile with the server on launch when signed in: push local changes,
-        // then pull the merged result (so changes — incl. deletions — made on other
-        // devices arrive). A signed-out / offline launch simply skips sync.
-        if online && services::auth::get_token().is_some() {
-            if let Err(e) = services::sync::sync_now().await {
-                leptos::logging::warn!("Launch sync failed: {e}");
-            }
-        }
-
+        // The database is ready → drop the splash and show the UI IMMEDIATELY.
+        // Everything below is background and MUST NOT block the first paint.
         if let Some(splash) = web_sys::window()
             .and_then(|w| w.document())
             .and_then(|d| d.get_element_by_id("splash"))
@@ -63,21 +65,52 @@ pub fn main() {
 
         leptos::mount_to_body(app::App);
 
-        // Re-reconcile with the server when the app regains focus, so a device
-        // that was backgrounded picks up changes made on other devices; and
-        // reload if a newer build was deployed (covers iOS PWA resumed from
-        // memory, which never re-navigates).
-        install_foreground_sync();
-        install_notif_receipt_poll();
-        services::update::check_background();
         services::story::refresh_attention();
 
-        // On activation, classify any food logged today/yesterday that isn't tagged
-        // yet (offline entries, other devices, pre-feature foods) plus any recipe
-        // ingredient still untagged. Runs one food at a time in the background.
+        // Background listeners/timers: focus re-sync, notification receipts,
+        // connectivity re-probe on online/offline + a periodic probe, and the
+        // update poll.
+        install_foreground_sync();
+        install_notif_receipt_poll();
+        install_connectivity_listeners();
+        install_periodic_probe();
+        install_update_poll();
+
+        // ---- Background network bootstrap: prepare the connection, then use it. ----
+        leptos::spawn_local(bootstrap_network());
+    });
+}
+
+/// Prepare the network in the background and, once the server is reachable, start
+/// the network interactions. Never blocks the UI.
+#[cfg(not(test))]
+async fn bootstrap_network() {
+    // 1. Fetch the real config from the network and swap it in live (+cache for
+    //    next launch). Until this lands the base URLs may be the cached/empty set.
+    if let Some(cfg) = services::config::fetch_from_network().await {
+        services::config::save_to_cache(&cfg);
+        services::config::set(cfg);
+    }
+
+    // 2. Probe reachability: AI worker → is_online; secondary workers → degraded.
+    services::net::probe().await;
+
+    // 3. Server reachable → begin network interactions.
+    if services::net::online_now() {
+        // First update check right after establishing the connection.
+        services::update::check().await;
+        // Subscription: first-ever verify or the daily re-check (flips the gate).
+        services::subscription::maybe_recheck().await;
+        // Reconcile with the server when signed in: push then pull the merged dump.
+        if services::auth::get_token().is_some() {
+            if let Err(e) = services::sync::sync_now().await {
+                leptos::logging::warn!("Launch sync failed: {e}");
+            }
+        }
+        // Classify any recent/untagged food now that the AI worker is reachable.
         leptos::spawn_local(services::classify::sweep_diary_unclassified());
         leptos::spawn_local(services::classify::sweep_recipe_ingredients());
-    });
+    }
 }
 
 #[cfg(not(test))]
@@ -94,12 +127,17 @@ fn install_foreground_sync() {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         if !hidden {
-            // Reload first if a new build shipped; otherwise reconcile with the server.
+            // Re-probe connectivity FIRST: a resumed device may have lost/regained
+            // the network (VPN toggled, tunnel dropped) — refresh is_online so the
+            // warning is honest and the follow-ups gate correctly.
+            services::net::probe_background();
             services::update::check_background();
             services::story::refresh_attention();
             if services::auth::get_token().is_some() {
                 services::sync::sync_now_background();
             }
+            // Daily subscription re-check (no-op unless a day has passed).
+            leptos::spawn_local(services::subscription::maybe_recheck());
             // Classify any still-untagged recent food on resume too.
             leptos::spawn_local(services::classify::sweep_diary_unclassified());
         }
@@ -147,25 +185,55 @@ fn install_notif_receipt_poll() {
     cb.forget();
 }
 
+/// Re-probe server reachability on the browser's `online`/`offline` events. These
+/// events are only a TRIGGER (they report the NIC, not our servers) — the probe
+/// is the source of truth.
 #[cfg(not(test))]
-async fn with_timeout<F: std::future::Future>(ms: u32, future: F) -> Option<F::Output> {
-    use futures::future::{Either, FutureExt};
-    futures::pin_mut!(future);
-    let sleep = sleep_ms(ms);
-    futures::pin_mut!(sleep);
-    match futures::future::select(future, sleep).await {
-        Either::Left((output, _)) => Some(output),
-        Either::Right((_, _)) => None,
-    }
+fn install_connectivity_listeners() {
+    use wasm_bindgen::prelude::Closure;
+    use wasm_bindgen::JsCast;
+
+    let Some(window) = web_sys::window() else { return };
+    let cb = Closure::<dyn FnMut()>::new(move || {
+        services::net::probe_background();
+    });
+    let _ = window.add_event_listener_with_callback("online", cb.as_ref().unchecked_ref());
+    let _ = window.add_event_listener_with_callback("offline", cb.as_ref().unchecked_ref());
+    cb.forget();
 }
 
+/// Periodically re-probe reachability so a silently dropped connection (common on
+/// RU mobile networks) surfaces the warning without needing a resume.
 #[cfg(not(test))]
-async fn sleep_ms(ms: u32) {
-    let promise = js_sys::Promise::new(&mut |resolve, _| {
-        web_sys::window()
-            .unwrap()
-            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms as i32)
-            .unwrap();
+fn install_periodic_probe() {
+    use wasm_bindgen::prelude::Closure;
+    use wasm_bindgen::JsCast;
+
+    let Some(window) = web_sys::window() else { return };
+    let cb = Closure::<dyn Fn()>::new(move || {
+        services::net::probe_background();
     });
-    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+    let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        PROBE_POLL_MS,
+    );
+    cb.forget();
+}
+
+/// Poll `/version.json` on a timer so a freshly deployed build is offered without
+/// a resume. `check_background` no-ops while offline.
+#[cfg(not(test))]
+fn install_update_poll() {
+    use wasm_bindgen::prelude::Closure;
+    use wasm_bindgen::JsCast;
+
+    let Some(window) = web_sys::window() else { return };
+    let cb = Closure::<dyn Fn()>::new(move || {
+        services::update::check_background();
+    });
+    let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        UPDATE_POLL_MS,
+    );
+    cb.forget();
 }

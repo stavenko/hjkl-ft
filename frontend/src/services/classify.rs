@@ -18,9 +18,10 @@ use leptos::spawn_local;
 
 use super::{ai, db, errors, local};
 
-/// Online per `navigator.onLine` (assume online if unavailable).
+/// Online per the global connectivity probe (AI worker reachable) — the real
+/// signal for background classification, which itself calls the AI worker.
 fn is_online() -> bool {
-    web_sys::window().map(|w| w.navigator().on_line()).unwrap_or(true)
+    super::net::online_now()
 }
 
 /// Block until the browser reports connectivity again (polls; capped ~30 min).

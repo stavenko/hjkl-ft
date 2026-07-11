@@ -323,6 +323,8 @@ pub fn ChatInput(
                     } else if has_content() {
                         let send_btn = send_btn.clone();
                         view! {
+                            <span style="position: relative; display: inline-flex;">
+                            <crate::components::net_badge::NetOfflineBadge/>
                             <button type="button" attr:data-testid="chat-send"
                                 style=move || if sending.get() { format!("{send_btn} opacity: 0.5; pointer-events: none;") } else { send_btn.clone() }
                                 title=move || t("chat.send")
@@ -332,6 +334,7 @@ pub fn ChatInput(
                                     <path d="M22 2 11 13"/>
                                 </svg>
                             </button>
+                            </span>
                         }.into_view()
                     } else {
                         view! {

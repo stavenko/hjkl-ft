@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+
+use leptos::*;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -6,6 +9,75 @@ use wasm_bindgen_futures::JsFuture;
 use super::{app_flags, auth, config};
 
 const LS_KEY: &str = "ft_subscription";
+/// When the cached status was last confirmed against the server (ms epoch).
+const CHECKED_AT_KEY: &str = "ft_subscription_checked_at";
+/// Re-verify the subscription at most once per day, on connectivity.
+const RECHECK_MS: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
+
+thread_local! {
+    // Reactive gate the App watches: true = active subscription. Seeded from the
+    // cache at init so a returning user enters instantly (offline-first); a daily
+    // re-check flips it, which drops the App into `Locked` (or back to `Ready`).
+    // Created at the ROOT via init(), like `update`/`net` signals.
+    static GATE: RefCell<Option<RwSignal<bool>>> = const { RefCell::new(None) };
+}
+
+/// Create the reactive subscription gate in the root scope, seeded from the
+/// cached status. Call once from main() before mounting.
+pub fn init() {
+    GATE.with(|c| {
+        if c.borrow().is_none() {
+            let active = cached().map(|s| s.active).unwrap_or(false);
+            *c.borrow_mut() = Some(create_rw_signal(active));
+        }
+    });
+}
+
+/// Reactive gate: true when the session holds an active subscription. The App
+/// effect observes this to lock/unlock the interface when the status changes.
+pub fn gate_signal() -> RwSignal<bool> {
+    GATE.with(|c| c.borrow().expect("subscription::init() must run before gate_signal()"))
+}
+
+fn set_gate(active: bool) {
+    GATE.with(|c| {
+        if let Some(sig) = *c.borrow() {
+            sig.set(active);
+        }
+    });
+}
+
+fn now_ms() -> f64 {
+    js_sys::Date::now()
+}
+
+/// When the cached status was last confirmed against the server, if ever.
+fn last_checked_at() -> Option<f64> {
+    app_flags::get(CHECKED_AT_KEY)?.parse::<f64>().ok()
+}
+
+/// True when we have never verified, or the last check is older than a day.
+/// Callers additionally require connectivity + a session.
+pub fn recheck_due() -> bool {
+    match last_checked_at() {
+        Some(t) => now_ms() - t >= RECHECK_MS,
+        None => true,
+    }
+}
+
+/// Re-verify the subscription against the server IF a session exists and the last
+/// check is a day old. Called on each "came online" event (see `net`/bootstrap).
+/// `status()` rewrites the cache + stamp + gate, so a changed status
+/// automatically locks/unlocks the App via [`gate_signal`]. FAIL-loud on error
+/// (logged) — a transient failure leaves the last-known status in place.
+pub async fn maybe_recheck() {
+    if auth::get_token().is_none() || !recheck_due() {
+        return;
+    }
+    if let Err(e) = status().await {
+        leptos::logging::warn!("subscription recheck failed: {e}");
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
@@ -40,6 +112,10 @@ pub fn cached() -> Option<Status> {
 fn cache(status: &Status) {
     let Ok(json) = serde_json::to_string(status) else { return };
     app_flags::set(LS_KEY, &json);
+    // Stamp the verification time and update the reactive gate so a changed
+    // status flips the App between Ready and Locked.
+    app_flags::set(CHECKED_AT_KEY, &now_ms().to_string());
+    set_gate(status.active);
 }
 
 pub async fn status() -> Result<Status, String> {
@@ -167,9 +243,15 @@ async fn request_inner<T: serde::de::DeserializeOwned>(
     let request = web_sys::Request::new_with_str_and_init(&url, &opts)
         .map_err(|e| format!("{e:?}"))?;
     let window = web_sys::window().expect("no window");
-    let resp_val = JsFuture::from(window.fetch_with_request(&request))
-        .await
-        .map_err(|e| format!("{e:?}"))?;
+    // A fetch rejection means the payment worker is unreachable — drop its flag
+    // immediately (surfaces the degraded warning before the next probe).
+    let resp_val = match JsFuture::from(window.fetch_with_request(&request)).await {
+        Ok(v) => v,
+        Err(e) => {
+            super::net::note_failure(super::net::Worker::Payment);
+            return Err(format!("{e:?}"));
+        }
+    };
     let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
 
     let text = JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?)

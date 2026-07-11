@@ -57,12 +57,15 @@ pub fn CalorieChart(series: Signal<Vec<(String, f64)>>) -> impl IntoView {
     };
 
     view! {
-        <div style="display: flex; flex-direction: column; gap: 6px;">
+        // Kill the iOS Safari text-selection loupe on touch-drag: disable webkit
+        // selection AND the touch callout (the plain `user-select` isn't enough on
+        // Safari — it needs the -webkit- prefixes).
+        <div style="display: flex; flex-direction: column; gap: 6px; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;">
             <svg
                 node_ref=svg_ref
                 viewBox=format!("0 0 {VW} {VH}")
                 width="100%"
-                style="display: block; touch-action: none; user-select: none;"
+                style="display: block; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;"
                 on:pointerdown=move |ev: web_sys::PointerEvent| {
                     ev.prevent_default();
                     if let Some(el) = svg_ref.get() {

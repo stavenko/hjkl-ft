@@ -671,19 +671,24 @@ pub fn DiaryPage() -> impl IntoView {
                           };
 
                           if meal_split_on() {
-                              // Grouped by derived meal. A header per non-empty
-                              // group (name + playful subtitle for the 3 mains),
-                              // followed by that group's rows.
+                              // Grouped by derived meal. Each group is a collapsible
+                              // panel: header (meal name + aggregated КБЖУ) over its
+                              // rows.
                               use crate::services::meal_split::group_by_meal;
+                              use crate::components::meal_panel::MealPanel;
+                              let fs = foods();
                               let es = entries();
                               group_by_meal(&es).into_iter().map(|grp| {
-                                  let name_key = grp.meal.i18n_key();
+                                  let title = t(grp.meal.i18n_key()).to_string();
+                                  let kcal = nutrient_sum("Calories", &grp.entries, &fs);
+                                  let protein = nutrient_sum("Protein", &grp.entries, &fs);
+                                  let fat = nutrient_sum("Fat", &grp.entries, &fs);
+                                  let carbs = nutrient_sum("Carbs", &grp.entries, &fs);
                                   let rows = grp.entries.into_iter().map(render_row).collect::<Vec<_>>();
                                   view! {
-                                      <div style="padding: 1rem 0 0.25rem 0;">
-                                          <span class="is-size-6 has-text-weight-bold">{move || t(name_key)}</span>
-                                      </div>
-                                      {rows}
+                                      <MealPanel title=title kcal=kcal protein=protein fat=fat carbs=carbs>
+                                          {rows}
+                                      </MealPanel>
                                   }.into_view()
                               }).collect::<Vec<_>>()
                           } else {

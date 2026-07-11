@@ -59,6 +59,9 @@ pub fn DiaryAddPage() -> impl IntoView {
     let disabled_ids = Signal::derive(Vec::<String>::new);
 
     let show_editor = create_rw_signal(false);
+    // Search query lives here (not inside FoodPicker) so the input can sit in the
+    // sticky page header and stay pinned while the results scroll.
+    let search = create_rw_signal(String::new());
 
     let on_pick = {
         let navigate = navigate.clone();
@@ -78,14 +81,40 @@ pub fn DiaryAddPage() -> impl IntoView {
 
     view! {
         <div style=PAGE_BG>
-            <div style="position: sticky; top: 0; z-index: 1; background: var(--bulma-background); display: flex; align-items: center; padding: 12px 16px;">
-                <button
-                    style="appearance: none; -webkit-appearance: none; border: none; background: none; cursor: pointer; padding: 4px; font: inherit;"
-                    class="is-size-5"
-                    on:click={ let nav = navigate.clone(); move |_| nav("/diary", Default::default()) }
-                >
-                    <span class="has-text-link">{move || format!("\u{2039} {}", t("diary_add.back"))}</span>
-                </button>
+            // Sticky header: the back button AND the search input, so the search
+            // row stays pinned at the top while the results scroll under it.
+            <div style="position: sticky; top: 0; z-index: 10; background: var(--bulma-background); padding: 12px 16px;">
+                <div style="display: flex; align-items: center;">
+                    <button
+                        style="appearance: none; -webkit-appearance: none; border: none; background: none; cursor: pointer; padding: 4px; font: inherit;"
+                        class="is-size-5"
+                        on:click={ let nav = navigate.clone(); move |_| nav("/diary", Default::default()) }
+                    >
+                        <span class="has-text-link">{move || format!("\u{2039} {}", t("diary_add.back"))}</span>
+                    </button>
+                </div>
+                // Search input — hidden while the new-food editor is open (it has
+                // its own name field). Bound to the shared `search` signal.
+                <Show when=move || !show_editor.get()>
+                    <div style="display: flex; gap: 6px; align-items: center; margin-top: 8px;">
+                        <input
+                            attr:data-testid="diary-add-input-search"
+                            type="text"
+                            placeholder=t("diary_add.search_placeholder")
+                            class="is-size-6"
+                            style="flex: 1; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none;"
+                            prop:value=move || search.get()
+                            on:input=move |ev| search.set(event_target_value(&ev))
+                        />
+                        <Show when=move || !search.get().is_empty()>
+                            <button
+                                attr:data-testid="diary-add-btn-clear-search"
+                                style="background: none; border: none; font-size: 18px; color: var(--bulma-text-weak); cursor: pointer; padding: 4px 8px;"
+                                on:click=move |_| search.set(String::new())
+                            >"\u{00d7}"</button>
+                        </Show>
+                    </div>
+                </Show>
             </div>
 
             <div style="padding: 0 16px 5rem 16px;">
@@ -99,6 +128,8 @@ pub fn DiaryAddPage() -> impl IntoView {
                     on_pick=on_pick
                     on_food_created=on_food_created
                     show_editor=show_editor
+                    search=search
+                    render_search_row=false
                 />
             </div>
         </div>

@@ -35,14 +35,24 @@ pub fn FoodPicker(
     /// Whether the new-food editor is shown. Owned by the caller so chrome can
     /// react (title swap, hide the search row, redirect tap-outside).
     show_editor: RwSignal<bool>,
+    /// Optional externally-owned search query. Pass this together with
+    /// `render_search_row=false` when the caller renders the search input itself
+    /// (e.g. inside a sticky page header) — the picker then only filters by it.
+    #[prop(optional)]
+    search: Option<RwSignal<String>>,
+    /// Whether the picker renders its own search input row. Set false when the
+    /// caller supplies the input (see `search`).
+    #[prop(default = true)]
+    render_search_row: bool,
 ) -> impl IntoView {
+    // Use the caller's search signal if given, else own one.
+    let search = search.unwrap_or_else(|| create_rw_signal(String::new()));
     // Foods picked during THIS picker session. A food is shown as added (and its
     // "+" disabled) only if it's in `disabled_ids` (e.g. recipe ingredients) OR
     // it was picked in this session. This signal lives with the picker instance,
     // so it resets automatically when the picker is unmounted and recreated.
     let picked = create_rw_signal(std::collections::HashSet::<String>::new());
 
-    let search = create_rw_signal(String::new());
     let drafts_ver = db::version("food_drafts");
     let drafts_res = create_resource(move || drafts_ver.get(), |_| async { local::list_drafts().await });
     // Recipes that were cooked again (superseded_by set) — their finished food is
@@ -121,8 +131,9 @@ pub fn FoodPicker(
     };
 
     view! {
-        // Search row — hidden while the new-food editor is open.
-        <Show when=move || !show_editor.get()>
+        // Search row — hidden while the new-food editor is open, and entirely
+        // omitted when the caller renders its own input (`render_search_row=false`).
+        <Show when=move || render_search_row && !show_editor.get()>
             <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 0.75rem;">
                 <input
                     attr:data-testid="diary-add-input-search"

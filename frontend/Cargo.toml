@@ -63,6 +63,9 @@ web-sys = { version = "0.3", features = [
     "PushSubscriptionOptionsInit",
     "NotificationPermission",
     "Notification",
+    "Element",
+    "DomRect",
+    "PointerEvent",
 ] }
 gloo-net = "0.6"
 uuid = { version = "1", features = ["v7", "js"] }

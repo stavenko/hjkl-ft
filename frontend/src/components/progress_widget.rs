@@ -203,6 +203,7 @@ pub fn ProgressWidget() -> impl IntoView {
                                 </p>
                                 <div style="display: flex; justify-content: center; margin-top: 6px;">
                                     <button attr:aria-label="?" on:click=go_help
+                                        on:pointerup=|ev: web_sys::PointerEvent| ev.stop_propagation()
                                         style="width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer; \
                                                background: var(--bulma-link); color: #fff; font-size: 1.5rem; \
                                                font-weight: 700; line-height: 1;">
@@ -226,6 +227,7 @@ pub fn ProgressWidget() -> impl IntoView {
                                 {all_done.then(|| view! {
                                     <button class="button is-link is-fullwidth" style="margin-top: 4px;"
                                         prop:disabled=move || busy.get()
+                                        on:pointerup=|ev: web_sys::PointerEvent| ev.stop_propagation()
                                         on:click=calculate>
                                         {move || t("dashboard.progress.calculate")}
                                     </button>
@@ -234,6 +236,7 @@ pub fn ProgressWidget() -> impl IntoView {
                                 // keep the diary" help hub.
                                 <div style="text-align: center; margin-top: 8px;">
                                     <a href="/help/diary" class="is-size-7"
+                                        on:pointerup=|ev: web_sys::PointerEvent| ev.stop_propagation()
                                         style="color: var(--bulma-text-weak); text-decoration: underline; \
                                                text-decoration-style: dashed; text-underline-offset: 3px;">
                                         {move || t("help.link.diary")}

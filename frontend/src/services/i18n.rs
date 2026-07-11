@@ -424,6 +424,10 @@ fn en(key: &str) -> &'static str {
         "offline_gate.title" => "No connection",
         "offline_gate.body" => "We can't reach the server to finish setting up. This is a network problem — check your internet or VPN and try again.",
         "offline_gate.retry" => "Retry",
+        "dashboard.calories_title" => "Calories",
+        "chart.average" => "avg",
+        "chart.no_data" => "No data yet",
+        "chart.hint" => "Touch the chart to see a day",
 
         // Diary: weekday prepositional (for "On Monday there were no entries")
         "diary.weekday_prep.mon" => "On Monday",
@@ -1669,6 +1673,10 @@ fn ru(key: &str) -> &'static str {
         "offline_gate.title" => "Нет подключения",
         "offline_gate.body" => "Не удаётся связаться с сервером, чтобы завершить настройку. Это проблема с сетью — проверьте интернет или VPN и повторите.",
         "offline_gate.retry" => "Повторить",
+        "dashboard.calories_title" => "Калории",
+        "chart.average" => "среднее",
+        "chart.no_data" => "Пока нет данных",
+        "chart.hint" => "Коснитесь графика, чтобы увидеть день",
 
         // Дневник: дни недели с предлогом
         "diary.weekday_prep.mon" => "В понедельник",

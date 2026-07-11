@@ -18,6 +18,7 @@ use leptos::*;
 
 use crate::components::cycle_widget::{CycleLine, CyclePanel};
 use crate::components::notify_panel::NotifyPanel;
+use crate::components::calorie_chart::CalorieChart;
 use crate::components::progress_widget::ProgressWidget;
 use crate::components::steps_chart_modal::StepsChartModal;
 use crate::components::steps_widget::StepsWidget;
@@ -77,6 +78,7 @@ enum Overlay {
     Notifications,
     Cycle,
     Errors,
+    Progress,
 }
 
 // 8 columns; each cell is a square whose side `--u` is derived from the viewport
@@ -148,6 +150,19 @@ pub fn DashboardPage() -> impl IntoView {
     let show_weight_modal = create_rw_signal(false);
     let show_steps_modal = create_rw_signal(false);
 
+    // Daily-calorie series for the expanded «Калории» view (last 30 days). Fetched
+    // ONLY while that overlay is open (30 IndexedDB reads), refreshed when the diary
+    // or foods change.
+    let diary_ver = db::version("diary");
+    let foods_ver = db::version("foods");
+    let cal_series_res = create_resource(
+        move || (overlay.get() == Overlay::Progress, diary_ver.get(), foods_ver.get()),
+        |(open, _, _)| async move {
+            if open { local::daily_kcal_series(30).await } else { Vec::new() }
+        },
+    );
+    let cal_series = move || cal_series_res.get().unwrap_or_default();
+
     // Problems tile: the ⚠ tile (left of the bell) appears when there are
     // background errors OR a network problem. Network problems are shown in the
     // SAME list (ErrorsPanel) — no banner covering the interface.
@@ -190,6 +205,15 @@ pub fn DashboardPage() -> impl IntoView {
                             show_done=Signal::derive(|| true)
                             on_done=move || overlay.set(Overlay::None)/>
                         <ErrorsPanel/>
+                    </div>
+                }.into_view()
+            } else if overlay.get() == Overlay::Progress {
+                view! {
+                    <div style=EDITOR>
+                        <EditorHead title="dashboard.calories_title"
+                            show_done=Signal::derive(|| true)
+                            on_done=move || overlay.set(Overlay::None)/>
+                        <CalorieChart series=Signal::derive(cal_series)/>
                     </div>
                 }.into_view()
             } else {
@@ -241,7 +265,14 @@ pub fn DashboardPage() -> impl IntoView {
                         // Progress widget + cycle flow BELOW the grid (not inside it),
                         // so the card grows to fit its content — the indicators row
                         // sits at the very bottom instead of being clipped.
-                        <ProgressWidget/>
+                        //
+                        // Tapping the card opens the expanded «Калории» view. Uses
+                        // `pointerup` (native, fires on iOS unlike a delegated <div>
+                        // click); the help link/buttons inside stop propagation so
+                        // they keep their own action.
+                        <div on:pointerup=move |_| overlay.set(Overlay::Progress)>
+                            <ProgressWidget/>
+                        </div>
 
                         // Cycle widget (female only): full-width single line.
                         {move || is_female().then(|| view! {

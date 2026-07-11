@@ -74,6 +74,29 @@ pub async fn list_diary_dates() -> Vec<String> {
         .collect()
 }
 
+/// Per-day total effective kcal over the last `window_days` calendar days ending
+/// today, OLDEST first (`(date, kcal)`). Days with no diary entries are `0.0`
+/// (drawn as an empty slot). Same per-entry formula as [`avg_daily_kcal`] — honours
+/// waste and the restaurant surcharge — so the chart matches the diary totals.
+pub async fn daily_kcal_series(window_days: i64) -> Vec<(String, f64)> {
+    let foods = food_map().await;
+    let today = chrono::Local::now().date_naive();
+    let mut out = Vec::with_capacity(window_days as usize);
+    for i in (0..window_days).rev() {
+        let d = (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();
+        let diary = list_diary(&d).await;
+        let mut kc = 0.0;
+        for e in &diary {
+            if let Some(food) = foods.get(&e.food_id) {
+                let eaten = (e.grams - e.waste_grams).max(0.0);
+                kc += food.effective_kcal() * eaten / 100.0;
+            }
+        }
+        out.push((d, kc));
+    }
+    out
+}
+
 /// Average daily effective kcal over the last `window_days` calendar days,
 /// counting ONLY days that have diary entries. Per-day kcal is the sum of each
 /// entry's `effective_kcal() * (grams - waste_grams).max(0) / 100` — exactly how

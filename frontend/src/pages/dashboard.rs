@@ -155,13 +155,15 @@ pub fn DashboardPage() -> impl IntoView {
     // or foods change.
     let diary_ver = db::version("diary");
     let foods_ver = db::version("foods");
+    // Returns `Some(series)` once loaded while the overlay is open, `None` when
+    // closed OR still loading — so the view shows a spinner during the read
+    // instead of the "no data" text flashing before the series arrives.
     let cal_series_res = create_resource(
         move || (overlay.get() == Overlay::Progress, diary_ver.get(), foods_ver.get()),
         |(open, _, _)| async move {
-            if open { local::daily_kcal_series(30).await } else { Vec::new() }
+            if open { Some(local::daily_kcal_series(30).await) } else { None }
         },
     );
-    let cal_series = move || cal_series_res.get().unwrap_or_default();
 
     // Problems tile: the ⚠ tile (left of the bell) appears when there are
     // background errors OR a network problem. Network problems are shown in the
@@ -213,7 +215,24 @@ pub fn DashboardPage() -> impl IntoView {
                         <EditorHead title="dashboard.calories_title"
                             show_done=Signal::derive(|| true)
                             on_done=move || overlay.set(Overlay::None)/>
-                        <CalorieChart series=Signal::derive(cal_series)/>
+                        {move || {
+                            // Loaded (`flatten` = Some) → chart (which itself shows
+                            // "no data" only when there are genuinely zero logged
+                            // days). Still loading → spinner, not the "no data" text.
+                            if cal_series_res.get().flatten().is_some() {
+                                view! {
+                                    <CalorieChart series=Signal::derive(move || {
+                                        cal_series_res.get().flatten().unwrap_or_default()
+                                    })/>
+                                }.into_view()
+                            } else {
+                                view! {
+                                    <div style="display: flex; justify-content: center; padding: 2rem;">
+                                        <div class="ft-spinner"></div>
+                                    </div>
+                                }.into_view()
+                            }
+                        }}
                     </div>
                 }.into_view()
             } else {

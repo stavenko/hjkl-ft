@@ -80,21 +80,28 @@ pub async fn list_diary_dates() -> Vec<String> {
 /// waste and the restaurant surcharge — so the chart matches the diary totals.
 pub async fn daily_kcal_series(window_days: i64) -> Vec<(String, f64)> {
     let foods = food_map().await;
-    let today = chrono::Local::now().date_naive();
-    let mut out = Vec::with_capacity(window_days as usize);
-    for i in (0..window_days).rev() {
-        let d = (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();
-        let diary = list_diary(&d).await;
-        let mut kc = 0.0;
-        for e in &diary {
-            if let Some(food) = foods.get(&e.food_id) {
-                let eaten = (e.grams - e.waste_grams).max(0.0);
-                kc += food.effective_kcal() * eaten / 100.0;
-            }
+    // ONE read of the whole diary + in-memory bucketing (not `window_days`
+    // separate index queries) so the chart loads in a single frame.
+    let all: Vec<DiaryEntry> = db::list_all("diary").await;
+    let mut by_date: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for e in &all {
+        if e.deleted {
+            continue;
         }
-        out.push((d, kc));
+        if let Some(food) = foods.get(&e.food_id) {
+            let eaten = (e.grams - e.waste_grams).max(0.0);
+            *by_date.entry(e.date.clone()).or_insert(0.0) += food.effective_kcal() * eaten / 100.0;
+        }
     }
-    out
+    let today = chrono::Local::now().date_naive();
+    (0..window_days)
+        .rev()
+        .map(|i| {
+            let d = (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();
+            let kc = by_date.get(&d).copied().unwrap_or(0.0);
+            (d, kc)
+        })
+        .collect()
 }
 
 /// Average daily effective kcal over the last `window_days` calendar days,

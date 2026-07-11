@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use leptos::*;
 use leptos_router::*;
 use api_types::*;
@@ -5,8 +8,18 @@ use api_types::*;
 use crate::components::food_weight_modal::FoodWeightModal;
 use crate::components::summary_block::SummaryBlock;
 use crate::components::food_edit_modal::FoodEditModal;
+use crate::services::sticky::{sticky, sticky_keyed};
 use crate::services::{local, sync, story};
 use crate::services::i18n::t;
+
+// Process-lifetime caches so navigating back to the diary paints the last-known
+// day + food list on the FIRST frame instead of flashing the empty-day state
+// (the centered green «+») before the IndexedDB read resolves (see
+// `services::sticky`). Diary entries are keyed by date.
+thread_local! {
+    static DIARY_CACHE: RefCell<HashMap<String, Vec<DiaryEntry>>> = RefCell::new(HashMap::new());
+    static FOODS_CACHE: RefCell<Option<Vec<Food>>> = const { RefCell::new(None) };
+}
 
 fn format_date_relative(date_str: &str) -> String {
     crate::services::i18n::relative_date(date_str)
@@ -150,9 +163,14 @@ pub fn DiaryPage() -> impl IntoView {
     // The day's diary entries are always grouped into derived meals.
     let meal_split_on = move || true;
 
-    let foods = move || foods_res.get().unwrap_or_default();
+    // `_data` is `None` only before the first-ever load of that key (→ render
+    // nothing); after that it's the fresh-or-last-known value, so switching to the
+    // diary shows the day at once instead of flashing the empty-day invitation.
+    let foods_data = move || sticky(&FOODS_CACHE, foods_res.get());
+    let entries_data = move || sticky_keyed(&DIARY_CACHE, &date.get(), entries_res.get());
+    let foods = move || foods_data().unwrap_or_default();
     let goals = move || goals_res.get().unwrap_or_default();
-    let entries = move || entries_res.get().unwrap_or_default();
+    let entries = move || entries_data().unwrap_or_default();
     let today_entries = move || today_entries_res.get().unwrap_or_default();
     let week_entries = move || week_entries_res.get().unwrap_or_default();
 
@@ -421,7 +439,13 @@ pub fn DiaryPage() -> impl IntoView {
 
             // Weight & steps widgets moved to the dashboard (pages::dashboard).
 
-            {move || if entries().is_empty() {
+            {move || if entries_data().is_none() || foods_data().is_none() {
+                // Still loading the day / food list for the first time: render
+                // nothing rather than the empty-day invitation (the centered green
+                // «+»), which would otherwise flash before the entries arrive.
+                // Sticky caches make this instant on any later navigation.
+                ().into_view()
+            } else if entries().is_empty() {
                 if is_today() {
                     // Today empty: invitation to add first entry
                     view! {

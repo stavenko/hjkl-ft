@@ -17,6 +17,7 @@
 //!     nothing (stay empty) until then, instead of a placeholder.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::thread::LocalKey;
 
 /// Fold a resource's current `Option<T>` through a persistent last-value cache.
@@ -28,5 +29,22 @@ pub fn sticky<T: Clone>(cache: &'static LocalKey<RefCell<Option<T>>>, current: O
             Some(v)
         }
         None => cache.with(|c| c.borrow().clone()),
+    }
+}
+
+/// Like [`sticky`] but the cache is keyed (e.g. the diary entries per date), so
+/// each key keeps its own last-known value. `None` is returned only until that
+/// key has loaded once.
+pub fn sticky_keyed<T: Clone>(
+    cache: &'static LocalKey<RefCell<HashMap<String, T>>>,
+    key: &str,
+    current: Option<T>,
+) -> Option<T> {
+    match current {
+        Some(v) => {
+            cache.with(|c| c.borrow_mut().insert(key.to_string(), v.clone()));
+            Some(v)
+        }
+        None => cache.with(|c| c.borrow().get(key).cloned()),
     }
 }

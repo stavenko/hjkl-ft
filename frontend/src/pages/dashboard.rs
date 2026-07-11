@@ -23,9 +23,46 @@ use crate::components::steps_chart_modal::StepsChartModal;
 use crate::components::steps_widget::StepsWidget;
 use crate::components::weight_chart_modal::WeightChartModal;
 use crate::components::weight_widget::WeightWidget;
+use std::cell::RefCell;
+
+use api_types::{StepEntry, WeightEntry};
+
+use crate::services::errors::AppError;
 use crate::services::i18n::t;
 use crate::services::profile::{self, CourseGoal, Sex};
+use crate::services::sticky::sticky;
 use crate::services::{db, local, net, story};
+
+/// Current network problems as error-log entries, so they appear in the SAME list
+/// as background errors (and drive the ⚠ tile) instead of a banner over the UI.
+/// Reads the `net` signals, so it auto-clears when connectivity is restored — no
+/// mutation of the persistent error log. `None` (unprobed) is not a problem.
+fn net_problem_entries() -> Vec<AppError> {
+    let mut v = Vec::new();
+    if net::is_online().get() == Some(false) {
+        v.push(AppError {
+            context: t("net.offline_title").to_string(),
+            message: t("net.offline_body_vpn").to_string(),
+        });
+    }
+    let down = net::degraded().get();
+    if !down.is_empty() {
+        let names = down.iter().map(|w| t(w.label_key())).collect::<Vec<_>>().join(", ");
+        v.push(AppError {
+            context: t("net.degraded_title").to_string(),
+            message: format!("{} {}", t("net.degraded_body"), names),
+        });
+    }
+    v
+}
+
+// Process-lifetime caches for the async widget data, so re-navigating to the
+// dashboard paints the widgets with the last-known values on the FIRST frame
+// instead of flashing an empty/placeholder state (see `services::sticky`).
+thread_local! {
+    static WEIGHT_CACHE: RefCell<Option<Vec<WeightEntry>>> = const { RefCell::new(None) };
+    static STEPS_CACHE: RefCell<Option<Vec<StepEntry>>> = const { RefCell::new(None) };
+}
 
 // Bare 4×3 tile wrapper: the weight/steps widgets bring their own card, so this
 // button is transparent and just fills the grid area to open the chart modal.
@@ -100,54 +137,24 @@ pub fn DashboardPage() -> impl IntoView {
     // their stores change; the tiles open the same chart modals.
     let weight_ver = db::version("weight_entries");
     let weight_res = create_resource(move || weight_ver.get(), |_| async { local::list_weight_entries().await });
-    let weight_entries = move || weight_res.get().unwrap_or_default();
+    // `_data` is `None` only before the first-ever load (→ render nothing); after
+    // that it's the fresh-or-last-known Vec, so switching panels shows data at once.
+    let weight_data = move || sticky(&WEIGHT_CACHE, weight_res.get());
+    let weight_entries = move || weight_data().unwrap_or_default();
     let steps_ver = db::version("step_entries");
     let steps_res = create_resource(move || steps_ver.get(), |_| async { local::list_step_entries().await });
-    let steps_entries = move || steps_res.get().unwrap_or_default();
+    let steps_data = move || sticky(&STEPS_CACHE, steps_res.get());
+    let steps_entries = move || steps_data().unwrap_or_default();
     let show_weight_modal = create_rw_signal(false);
     let show_steps_modal = create_rw_signal(false);
 
-    // Background-error log: the ⚠ tile appears (left of the bell) only when there
-    // are errors; tapping it opens the full list.
+    // Problems tile: the ⚠ tile (left of the bell) appears when there are
+    // background errors OR a network problem. Network problems are shown in the
+    // SAME list (ErrorsPanel) — no banner covering the interface.
     let errs = crate::services::errors::signal();
-    let has_errors = move || !errs.get().is_empty();
+    let has_errors = move || !errs.get().is_empty() || !net_problem_entries().is_empty();
 
     view! {
-        // Connectivity warning — a ⚠ triangle at the top of the dashboard when the
-        // AI worker is unreachable (offline → check VPN) or, while online, when a
-        // secondary worker is down (degraded → data still saves locally).
-        {move || {
-            // Offline only when we KNOW it (Some(false)); None (unprobed) shows
-            // nothing. Degraded is independent.
-            let offline = net::is_online().get() == Some(false);
-            let down = net::degraded().get();
-            if !offline && down.is_empty() {
-                return ().into_view();
-            }
-            let title = if offline { t("net.offline_title") } else { t("net.degraded_title") };
-            let body = if offline {
-                t("net.offline_body_vpn").to_string()
-            } else {
-                let names = down.iter().map(|w| t(w.label_key())).collect::<Vec<_>>().join(", ");
-                format!("{} {}", t("net.degraded_body"), names)
-            };
-            view! {
-                <div attr:data-testid="dash-net-warning"
-                    style="display: flex; gap: 0.6rem; align-items: flex-start; background: var(--bulma-scheme-main); border: 1px solid #E0A100; border-left: 4px solid #E0A100; border-radius: 12px; padding: 0.75rem 0.9rem; margin-bottom: 12px;">
-                    <span style="color: #E0A100; flex-shrink: 0; margin-top: 1px;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                            <line x1="12" y1="9" x2="12" y2="13"/>
-                            <line x1="12" y1="17" x2="12.01" y2="17"/>
-                        </svg>
-                    </span>
-                    <div style="min-width: 0;">
-                        <div class="is-size-7 has-text-weight-bold">{title}</div>
-                        <div class="is-size-7 has-text-grey" style="line-height: 1.4;">{body}</div>
-                    </div>
-                </div>
-            }.into_view()
-        }}
         {move || {
             if persona_full() {
                 view! {
@@ -219,12 +226,14 @@ pub fn DashboardPage() -> impl IntoView {
                             <button style=format!("{WIDGET_TILE} grid-column: 1 / 5; grid-row: 2 / 5;")
                                 attr:data-testid="dash-weight-widget"
                                 on:click=move |_| show_weight_modal.set(true)>
-                                <WeightWidget entries=Signal::derive(weight_entries)/>
+                                // Empty until the first data load (then sticky keeps it
+                                // filled across navigations) — no placeholder flash.
+                                {move || weight_data().map(|_| view! { <WeightWidget entries=Signal::derive(weight_entries)/> })}
                             </button>
                             <button style=format!("{WIDGET_TILE} grid-column: 5 / 9; grid-row: 2 / 5;")
                                 attr:data-testid="dash-steps-widget"
                                 on:click=move |_| show_steps_modal.set(true)>
-                                <StepsWidget entries=Signal::derive(steps_entries)/>
+                                {move || steps_data().map(|_| view! { <StepsWidget entries=Signal::derive(steps_entries)/> })}
                             </button>
 
                         </div>
@@ -387,7 +396,10 @@ fn ErrorsPanel() -> impl IntoView {
         <p class="is-size-7 has-text-grey" style="margin: 0 0 10px;">{move || t("errors.hint")}</p>
         <div style="display: flex; flex-direction: column; gap: 8px;">
             {move || {
-                let list = errs.get();
+                // Network problems first (live, from `net`), then the recorded
+                // background errors — one combined list.
+                let mut list = net_problem_entries();
+                list.extend(errs.get());
                 if list.is_empty() {
                     return view! { <p class="is-size-6 has-text-grey">{move || t("errors.none")}</p> }.into_view();
                 }

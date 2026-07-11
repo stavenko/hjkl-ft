@@ -4,13 +4,26 @@
 //! that runs the same first-planka algorithm the story used
 //! (`local::calorie_planka_suggestion` → `local::set_calorie_goal`).
 
+use std::cell::RefCell;
+
 use leptos::*;
 use leptos_router::use_navigate;
 
 use crate::services::i18n::t;
 use crate::services::indicators::{self, IndicatorState};
 use crate::services::profile::{self, CourseGoal};
+use crate::services::sticky::sticky;
 use crate::services::{db, local, sync};
+
+// Process-lifetime caches so re-navigating to the dashboard paints the widget's
+// real state on the first frame instead of the 0/7 / "add food" placeholder that
+// then snaps to the loaded state (see `services::sticky`).
+thread_local! {
+    static PLANKA_CACHE: RefCell<Option<Option<f64>>> = const { RefCell::new(None) };
+    static HASFOOD_CACHE: RefCell<Option<bool>> = const { RefCell::new(None) };
+    static COUNTS_CACHE: RefCell<Option<(u32, u32, u32)>> = const { RefCell::new(None) };
+    static INDS_CACHE: RefCell<Option<Option<Vec<(String, IndicatorState)>>>> = const { RefCell::new(None) };
+}
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 16px; \
     padding: 16px; box-sizing: border-box; \
@@ -87,7 +100,6 @@ pub fn ProgressWidget() -> impl IntoView {
         move || (food_ver.get(), weight_ver.get(), steps_ver.get()),
         |_| async { local::progress_week_counts().await },
     );
-    let c = move || counts.get().unwrap_or((0, 0, 0));
 
     // Before the very first food entry we show how to add food instead of counters.
     let has_food = create_resource(
@@ -98,6 +110,12 @@ pub fn ProgressWidget() -> impl IntoView {
     // The planka, once set, flips the widget to its "done" state.
     let goals_ver = db::version("goals");
     let planka = create_resource(move || goals_ver.get(), |_| async { local::calorie_goal_amount().await });
+
+    // Sticky views of the resources: `None` only until the first successful load
+    // (→ render nothing), then fresh-or-last-known across navigations.
+    let planka_s = move || sticky(&PLANKA_CACHE, planka.get());
+    let hasfood_s = move || sticky(&HASFOOD_CACHE, has_food.get());
+    let counts_s = move || sticky(&COUNTS_CACHE, counts.get());
 
     // Nutrition indicators: None until a week of diary history exists; then the 7
     // states. Refreshes when the diary or foods (tags) change.
@@ -114,6 +132,7 @@ pub fn ProgressWidget() -> impl IntoView {
             }
         },
     );
+    let inds_s = move || sticky(&INDS_CACHE, inds.get());
 
     let busy = create_rw_signal(false);
     let calculate = move |_| {
@@ -147,78 +166,89 @@ pub fn ProgressWidget() -> impl IntoView {
     };
 
     view! {
-        <div style=CARD>
-            {move || match planka.get().flatten() {
-                // Already computed → show the resulting daily calorie target.
-                Some(n) => view! {
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <span class="is-size-6 has-text-grey">{move || t("dashboard.progress.done_title")}</span>
-                        <span class="is-size-3 has-text-weight-bold">
-                            {format!("{} {}", n.round() as i64, t("dashboard.progress.kcal_day"))}
-                        </span>
-                        <span class="is-size-7 has-text-grey">{move || t("dashboard.progress.done_hint")}</span>
-                    </div>
-                }.into_view(),
-                // Before the first food entry: explain how to add food + «?».
-                None if !has_food.get().unwrap_or(false) => {
-                    let go_help = move |_| use_navigate()("/help/food", Default::default());
-                    view! {
-                        <p class="is-size-6" style="line-height: 1.5; margin: 0;">
-                            {move || t("dashboard.progress.help_1")}
-                        </p>
-                        <p class="is-size-6" style="line-height: 1.5; margin: 0;">
-                            {move || t("dashboard.progress.help_2")}
-                        </p>
-                        <p class="is-size-6" style="line-height: 1.5; margin: 0;">
-                            {move || t("dashboard.progress.help_3")}
-                        </p>
-                        <div style="display: flex; justify-content: center; margin-top: 6px;">
-                            <button attr:aria-label="?" on:click=go_help
-                                style="width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer; \
-                                       background: var(--bulma-link); color: #fff; font-size: 1.5rem; \
-                                       font-weight: 700; line-height: 1;">
-                                "?"
-                            </button>
-                        </div>
-                    }.into_view()
-                }
-                // Still collecting the week of observations.
-                None => {
-                    let (food, weight, steps) = c();
-                    let all_done = food >= 7 && weight >= 7 && steps >= 7;
-                    view! {
-                        <p class="is-size-7 has-text-grey" style="line-height: 1.45; margin: 0;">
-                            {move || t("dashboard.progress.intro").replace("{word}", goal_word())}
-                        </p>
-                        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 2px;">
-                            {counter("dashboard.progress.nutrition", food)}
-                            {counter("weight.widget_title", weight)}
-                            {counter("steps.title", steps)}
-                        </div>
-                        {all_done.then(|| view! {
-                            <button class="button is-link is-fullwidth" style="margin-top: 4px;"
-                                prop:disabled=move || busy.get()
-                                on:click=calculate>
-                                {move || t("dashboard.progress.calculate")}
-                            </button>
-                        })}
-                        // Documentation-style link (dashed underline) to the "how to
-                        // keep the diary" help hub.
-                        <div style="text-align: center; margin-top: 8px;">
-                            <a href="/help/diary" class="is-size-7"
-                                style="color: var(--bulma-text-weak); text-decoration: underline; \
-                                       text-decoration-style: dashed; text-underline-offset: 3px;">
-                                {move || t("help.link.diary")}
-                            </a>
-                        </div>
-                    }.into_view()
-                }
-            }}
-            // Nutrition indicators row at the BOTTOM (only after ≥1 week of diary).
-            {move || inds.get().flatten().map(|states| view! {
-                <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
-                {indicators_row(states)}
-            })}
-        </div>
+        {move || {
+            // Render nothing until the primary data has loaded ONCE. After that the
+            // sticky caches keep these `Some`, so navigating back to the dashboard
+            // paints the real state immediately — no 0/7 / "add food" flash.
+            let (Some(planka_v), Some(has_food_v), Some((food, weight, steps))) =
+                (planka_s(), hasfood_s(), counts_s())
+            else {
+                return ().into_view();
+            };
+            view! {
+                <div style=CARD>
+                    {match planka_v {
+                        // Already computed → show the resulting daily calorie target.
+                        Some(n) => view! {
+                            <div style="display: flex; flex-direction: column; gap: 6px;">
+                                <span class="is-size-6 has-text-grey">{move || t("dashboard.progress.done_title")}</span>
+                                <span class="is-size-3 has-text-weight-bold">
+                                    {format!("{} {}", n.round() as i64, t("dashboard.progress.kcal_day"))}
+                                </span>
+                                <span class="is-size-7 has-text-grey">{move || t("dashboard.progress.done_hint")}</span>
+                            </div>
+                        }.into_view(),
+                        // Before the first food entry: explain how to add food + «?».
+                        None if !has_food_v => {
+                            let go_help = move |_| use_navigate()("/help/food", Default::default());
+                            view! {
+                                <p class="is-size-6" style="line-height: 1.5; margin: 0;">
+                                    {move || t("dashboard.progress.help_1")}
+                                </p>
+                                <p class="is-size-6" style="line-height: 1.5; margin: 0;">
+                                    {move || t("dashboard.progress.help_2")}
+                                </p>
+                                <p class="is-size-6" style="line-height: 1.5; margin: 0;">
+                                    {move || t("dashboard.progress.help_3")}
+                                </p>
+                                <div style="display: flex; justify-content: center; margin-top: 6px;">
+                                    <button attr:aria-label="?" on:click=go_help
+                                        style="width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer; \
+                                               background: var(--bulma-link); color: #fff; font-size: 1.5rem; \
+                                               font-weight: 700; line-height: 1;">
+                                        "?"
+                                    </button>
+                                </div>
+                            }.into_view()
+                        }
+                        // Still collecting the week of observations.
+                        None => {
+                            let all_done = food >= 7 && weight >= 7 && steps >= 7;
+                            view! {
+                                <p class="is-size-7 has-text-grey" style="line-height: 1.45; margin: 0;">
+                                    {move || t("dashboard.progress.intro").replace("{word}", goal_word())}
+                                </p>
+                                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 2px;">
+                                    {counter("dashboard.progress.nutrition", food)}
+                                    {counter("weight.widget_title", weight)}
+                                    {counter("steps.title", steps)}
+                                </div>
+                                {all_done.then(|| view! {
+                                    <button class="button is-link is-fullwidth" style="margin-top: 4px;"
+                                        prop:disabled=move || busy.get()
+                                        on:click=calculate>
+                                        {move || t("dashboard.progress.calculate")}
+                                    </button>
+                                })}
+                                // Documentation-style link (dashed underline) to the "how to
+                                // keep the diary" help hub.
+                                <div style="text-align: center; margin-top: 8px;">
+                                    <a href="/help/diary" class="is-size-7"
+                                        style="color: var(--bulma-text-weak); text-decoration: underline; \
+                                               text-decoration-style: dashed; text-underline-offset: 3px;">
+                                        {move || t("help.link.diary")}
+                                    </a>
+                                </div>
+                            }.into_view()
+                        }
+                    }}
+                    // Nutrition indicators row at the BOTTOM (only after ≥1 week of diary).
+                    {move || inds_s().flatten().map(|states| view! {
+                        <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
+                        {indicators_row(states)}
+                    })}
+                </div>
+            }.into_view()
+        }}
     }
 }

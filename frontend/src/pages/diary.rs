@@ -508,7 +508,11 @@ pub fn DiaryPage() -> impl IntoView {
                                                 style=move || if foods().iter().any(|f| f.id == fid5 && f.is_restaurant) { crate::components::food_list_item::RESTAURANT_NAME_STYLE } else { "" }>
                                                 {move || food_name(&fid)}
                                             </span>
-                                            <div class="tags mt-1" style="margin-bottom: 0;">
+                                            // Single-line КБЖУ: no wrap (Bulma `.tags`
+                                            // wraps), tight gap; overflow hidden so a
+                                            // rare extra (custom) badge clips instead
+                                            // of dropping to a second line.
+                                            <div style="display: flex; flex-wrap: nowrap; gap: 4px; margin-top: 4px; min-width: 0; overflow: hidden;">
                                                 {move || {
                                                     let fs = foods();
                                                     let food = fs.iter().find(|f| f.id == fid2);
@@ -516,7 +520,10 @@ pub fn DiaryPage() -> impl IntoView {
                                                     let mut badges = Vec::new();
                                                     use crate::services::i18n;
                                                     if let Some(f) = food {
-                                                        badges.push((i18n::nutrient_badge("Calories"), f.effective_kcal() * factor, i18n::unit_label("kcal")));
+                                                        // Calories: drop the wide «ккал» unit (the К label already
+                                                        // means calories) so all four badges fit on one line; keep
+                                                        // «г» on the macros.
+                                                        badges.push((i18n::nutrient_badge("Calories"), f.effective_kcal() * factor, ""));
                                                         badges.push((i18n::nutrient_badge("Protein"), f.protein * factor, i18n::unit_label("g")));
                                                         badges.push((i18n::nutrient_badge("Fat"), f.fat * factor, i18n::unit_label("g")));
                                                         badges.push((i18n::nutrient_badge("Carbs"), f.carbs * factor, i18n::unit_label("g")));
@@ -534,13 +541,22 @@ pub fn DiaryPage() -> impl IntoView {
                                                             (label, val, i18n::unit_label(goal.unit.label()).to_string())
                                                         })
                                                         .collect();
-                                                    let badge_view = |(l, v, u): &(&str, f64, &str)| view! {
-                                                        <span class="tag is-small">
-                                                            {format!("{} {:.0}", l, v)}
-                                                            " "
-                                                            <span class="has-text-grey-light">{u.to_string()}</span>
-                                                        </span>
-                                                    }.into_view();
+                                                    // Compact pill (tighter padding than
+                                                    // Bulma's tag, no wrap, no shrink) so
+                                                    // all four fit on one line inside the
+                                                    // meal panel.
+                                                    let badge_view = |(l, v, u): &(&str, f64, &str)| {
+                                                        let u = u.to_string();
+                                                        view! {
+                                                            <span class="tag is-small"
+                                                                style="white-space: nowrap; flex-shrink: 0; margin: 0; padding-left: 6px; padding-right: 6px;">
+                                                                {format!("{} {:.0}", l, v)}
+                                                                {(!u.is_empty()).then(|| view! {
+                                                                    <span class="has-text-grey-light" style="margin-left: 2px;">{u}</span>
+                                                                })}
+                                                            </span>
+                                                        }.into_view()
+                                                    };
                                                     badges.iter()
                                                         .map(|b| badge_view(b))
                                                         .chain(custom_badges.iter().map(|(l, v, u)| {

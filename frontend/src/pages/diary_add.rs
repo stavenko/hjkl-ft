@@ -62,6 +62,8 @@ pub fn DiaryAddPage() -> impl IntoView {
     // Search query lives here (not inside FoodPicker) so the input can sit in the
     // sticky page header and stay pinned while the results scroll.
     let search = create_rw_signal(String::new());
+    // Ref to the (uncontrolled) search input, so «×» can clear the DOM value.
+    let search_ref = create_node_ref::<leptos::html::Input>();
 
     let on_pick = {
         let navigate = navigate.clone();
@@ -97,20 +99,34 @@ pub fn DiaryAddPage() -> impl IntoView {
                 // its own name field). Bound to the shared `search` signal.
                 <Show when=move || !show_editor.get()>
                     <div style="display: flex; gap: 6px; align-items: center; margin-top: 8px;">
+                        // UNCONTROLLED input: we do NOT reactively re-set `value` on
+                        // every keystroke. A reactive `prop:value` fights the iOS
+                        // keyboard (autocorrect/composition), which could reorder the
+                        // typed chars (e.g. «ба» → «аб») so the filter finds nothing.
+                        // The browser owns the text; `on:input` feeds the signal; the
+                        // «×» clears the DOM value via the node ref. `prop:value` is a
+                        // ONE-TIME seed (get_untracked) so re-showing the row after the
+                        // editor closes restores the current query.
                         <input
+                            node_ref=search_ref
                             attr:data-testid="diary-add-input-search"
                             type="text"
                             placeholder=t("diary_add.search_placeholder")
                             class="is-size-6"
                             style="flex: 1; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none;"
-                            prop:value=move || search.get()
+                            prop:value=search.get_untracked()
                             on:input=move |ev| search.set(event_target_value(&ev))
                         />
                         <Show when=move || !search.get().is_empty()>
                             <button
                                 attr:data-testid="diary-add-btn-clear-search"
                                 style="background: none; border: none; font-size: 18px; color: var(--bulma-text-weak); cursor: pointer; padding: 4px 8px;"
-                                on:click=move |_| search.set(String::new())
+                                on:click=move |_| {
+                                    search.set(String::new());
+                                    if let Some(el) = search_ref.get() {
+                                        el.set_value("");
+                                    }
+                                }
                             >"\u{00d7}"</button>
                         </Show>
                     </div>

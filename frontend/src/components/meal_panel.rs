@@ -44,18 +44,27 @@ pub fn MealPanel(
 
     let tint = format!("{accent}22"); // ~13% — soft header band
     let divider = format!("{accent}55"); // ~33% — header/body separator
+    // NOTE: no `overflow: hidden` here — it would clip the diary rows' action
+    // menu (e.g. «повторить сегодня»), which drops BELOW its row. Instead the
+    // header rounds its own top corners so the tinted band respects the border.
     let container_style = format!(
-        "background: var(--bulma-scheme-main); border: 1px solid {accent}; border-radius: 12px; margin-bottom: 0.75rem; overflow: hidden;"
+        "background: var(--bulma-scheme-main); border: 1px solid {accent}; border-radius: 12px; margin-bottom: 0.75rem;"
     );
     // Header band tint stays; the divider under it appears only when expanded,
-    // so a collapsed panel doesn't show a dangling underline.
+    // so a collapsed panel doesn't show a dangling underline. Round the top
+    // corners (all four when collapsed, since then the header IS the whole panel)
+    // to match the container now that it no longer clips.
     let header_style = {
         let tint = tint.clone();
         let divider = divider.clone();
-        move || format!(
-            "width: 100%; height: auto; display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; text-decoration: none; border: none; background: {tint}; {}",
-            if collapsed.get() { String::new() } else { format!("border-bottom: 1px solid {divider};") }
-        )
+        move || {
+            let collapsed = collapsed.get();
+            let radius = if collapsed { "11px" } else { "11px 11px 0 0" };
+            format!(
+                "width: 100%; height: auto; display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; text-decoration: none; border: none; border-radius: {radius}; background: {tint}; {}",
+                if collapsed { String::new() } else { format!("border-bottom: 1px solid {divider};") }
+            )
+        }
     };
     let title_style = format!("color: {accent};");
 

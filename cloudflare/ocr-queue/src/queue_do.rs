@@ -6,6 +6,15 @@ use worker::*;
 // MUST match the TS CHUNK exactly — a mismatch corrupts reassembled images.
 const CHUNK: usize = 700_000;
 
+/// A `processing` job whose `updated_at` hasn't advanced (no `/progress`
+/// heartbeat, no `/complete`) for this long is treated as dropped by the poller
+/// — the on-prem model hung, the poller restarted, or a `/complete` was lost —
+/// and is requeued so it self-heals instead of showing «распознаётся» forever.
+const STALE_MS: i64 = 120_000;
+/// After this many requeues, fail the job instead of retrying forever (a poison
+/// image that keeps hanging the model), so the client stops waiting.
+const MAX_ATTEMPTS: i64 = 3;
+
 fn now_ms() -> i64 {
     Date::now().as_millis() as i64
 }
@@ -33,6 +42,10 @@ struct Job {
     result: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    /// How many times this job has been (re)queued to the poller. Old records
+    /// without the field deserialize as 0.
+    #[serde(default)]
+    attempts: i64,
 }
 
 #[durable_object]
@@ -51,6 +64,60 @@ impl QueueDO {
             .ok()
             .flatten()
             .unwrap_or_default())
+    }
+
+    /// Ids currently handed to the poller (status `processing`). Mirrors `queue`;
+    /// used to find dropped jobs to requeue (see [`requeue_stale`]).
+    async fn processing_ids(&self) -> Result<Vec<String>> {
+        Ok(self
+            .state
+            .storage()
+            .get::<Vec<String>>("processing")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default())
+    }
+
+    /// Requeue (or, past [`MAX_ATTEMPTS`], fail) jobs stuck in `processing` with no
+    /// update for [`STALE_MS`]. Called at the start of `/claim`, which the poller
+    /// hits every few seconds, so a dropped job recovers within seconds without an
+    /// alarm. A job still actively streaming `/progress` refreshes `updated_at` and
+    /// is left alone.
+    async fn requeue_stale(&self) -> Result<()> {
+        let now = now_ms();
+        let processing = self.processing_ids().await?;
+        let mut still = Vec::new();
+        let mut q = self.queue_ids().await?;
+        let mut q_changed = false;
+        for id in processing {
+            let Some(mut job) = self.get_job(&id).await? else { continue };
+            if job.status != "processing" {
+                continue; // already terminal / requeued elsewhere → drop from list
+            }
+            if now - job.updated_at <= STALE_MS {
+                still.push(id);
+                continue;
+            }
+            job.attempts += 1;
+            job.updated_at = now;
+            if job.attempts > MAX_ATTEMPTS {
+                job.status = "error".into();
+                job.error = Some("recognition timed out".into());
+                self.put_job(&id, &job).await?;
+            } else {
+                job.status = "queued".into();
+                job.started_at = None;
+                self.put_job(&id, &job).await?;
+                q.push(id.clone());
+                q_changed = true;
+            }
+        }
+        self.state.storage().put("processing", &still).await?;
+        if q_changed {
+            self.state.storage().put("queue", &q).await?;
+        }
+        Ok(())
     }
 
     async fn get_job(&self, id: &str) -> Result<Option<Job>> {
@@ -163,6 +230,7 @@ impl DurableObject for QueueDO {
                 answer_tokens: None,
                 result: None,
                 error: None,
+                attempts: 0,
             };
             self.put_job(&id, &job).await?;
             let mut q = self.queue_ids().await?;
@@ -173,6 +241,8 @@ impl DurableObject for QueueDO {
 
         // ---- /claim ----
         if path == "/claim" {
+            // Self-heal first: recover jobs the poller dropped mid-flight.
+            self.requeue_stale().await?;
             let mut q = self.queue_ids().await?;
             while !q.is_empty() {
                 let id = q.remove(0);
@@ -186,6 +256,12 @@ impl DurableObject for QueueDO {
                 job.updated_at = now_ms();
                 self.put_job(&id, &job).await?;
                 self.state.storage().put("queue", &q).await?;
+                // Track as in-flight so a dropped job can be requeued later.
+                let mut p = self.processing_ids().await?;
+                if !p.contains(&id) {
+                    p.push(id.clone());
+                }
+                self.state.storage().put("processing", &p).await?;
                 return Response::from_json(&serde_json::json!({
                     "job_id": id,
                     "custom_nutrients": job.custom_nutrients,
@@ -273,6 +349,11 @@ impl DurableObject for QueueDO {
             }
             job.updated_at = now_ms();
             self.put_job(&job_id, &job).await?;
+            // No longer in flight → drop from the processing list so the stale
+            // sweep never touches a finished job.
+            let mut p = self.processing_ids().await?;
+            p.retain(|x| x != &job_id);
+            self.state.storage().put("processing", &p).await?;
             // Free the image chunks once the job is finished.
             for i in 0..job.chunks {
                 let _ = self.state.storage().delete(&format!("img:{job_id}:{i}")).await;

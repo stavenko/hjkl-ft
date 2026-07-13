@@ -1,13 +1,14 @@
-//! Radial progress gauge: a grey track that fills with `color` as `value`
-//! approaches `target`. Used on the dashboard progress widget for calories and
-//! the daily-nutrient indicators. Empty (all grey) at value 0, so a set of
-//! gauges reads as "greyed out, filling in as the day's data arrives".
+//! Horizontal progress gauge: a grey track that fills with `color` from the left
+//! as `value` approaches `target`. Used on the dashboard progress widget for
+//! calories and the daily-nutrient goals. Empty (all grey) at value 0, so a
+//! stack of gauges reads as "greyed out, filling in as the day's data arrives".
 
 use leptos::*;
 
-/// `size` px square. `value`/`target` in the same unit; the arc fills to
-/// `min(value/target, 1)`. `color` is the fill (the metric's colour); the track
-/// is grey. The centre shows `value` over `/ target unit`, with `label` beneath.
+/// A full-width bar. `value`/`target` in the same unit; the fill spans
+/// `min(value/target, 1)` of the track. `color` is the fill (the metric's
+/// colour); the track is grey. The header line shows `label` on the left and
+/// `value / target unit` on the right.
 #[component]
 pub fn Gauge(
     value: f64,
@@ -15,34 +16,28 @@ pub fn Gauge(
     label: String,
     unit: String,
     color: String,
-    #[prop(default = 92.0)] size: f64,
+    /// Bar thickness in px (calories get a thicker bar than the daily goals).
+    #[prop(default = 8.0)] height: f64,
 ) -> impl IntoView {
-    // Normalize negative zero (an empty nutrient sum can be -0.0) so the centre
+    // Normalize negative zero (an empty nutrient sum can be -0.0) so the label
     // reads "0", not "-0".
     let value = value + 0.0;
     let frac = if target > 0.0 { (value / target).clamp(0.0, 1.0) } else { 0.0 };
-    const R: f64 = 42.0;
-    let circ = 2.0 * std::f64::consts::PI * R; // ≈ 263.9
-    let dash = frac * circ;
-    let sw = 9.0;
+    let pct = frac * 100.0;
+    let radius = height / 2.0;
 
     view! {
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0;">
-            <div style=format!("position: relative; width: {size}px; height: {size}px;")>
-                <svg viewBox="0 0 100 100" width="100%" height="100%" style="transform: rotate(-90deg);">
-                    <circle cx="50" cy="50" r=R fill="none" stroke="var(--bulma-border-weak)" stroke-width=sw/>
-                    <circle cx="50" cy="50" r=R fill="none" stroke=color stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-dasharray=format!("{dash} {circ}")
-                        style="transition: stroke-dasharray 0.4s;"/>
-                </svg>
-                <div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;">
-                    <span class="has-text-weight-bold" style="font-size: 1.05rem; line-height: 1.1;">{format!("{value:.0}")}</span>
-                    <span class="is-size-7 has-text-grey" style="line-height: 1.1;">{format!("/ {target:.0}")}</span>
-                    <span class="has-text-grey-light" style="font-size: 0.6rem;">{unit}</span>
-                </div>
+        <div style="display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;">
+                <span class="is-size-7 has-text-weight-medium" style="color: var(--bulma-text-weak);">{label}</span>
+                <span class="is-size-7" style="white-space: nowrap;">
+                    <span class="has-text-weight-bold">{format!("{value:.0}")}</span>
+                    <span class="has-text-grey">{format!(" / {target:.0} {unit}")}</span>
+                </span>
             </div>
-            <span class="is-size-7 has-text-grey has-text-weight-medium">{label}</span>
+            <div style=format!("height: {height}px; border-radius: {radius}px; background: var(--bulma-border-weak); overflow: hidden;")>
+                <div style=format!("height: 100%; width: {pct:.1}%; background: {color}; border-radius: {radius}px; transition: width 0.4s;")></div>
+            </div>
         </div>
     }
 }

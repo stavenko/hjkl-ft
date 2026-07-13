@@ -102,12 +102,12 @@ fn gauge_label(key: &str) -> &'static str {
     }
 }
 
-/// Grid of daily-nutrient gauges (protein, veg/fruit, calcium, iron, fiber), two
-/// per row. Each fills toward its per-day target; the ring is the indicator's
+/// Vertical stack of daily-nutrient bars (protein, veg/fruit, calcium, iron,
+/// fiber). Each fills toward its per-day target; the bar is the indicator's
 /// colour, or grey while the metric has no data yet.
 fn daily_gauges_grid(gauges: Vec<indicators::DailyGauge>) -> impl IntoView {
     view! {
-        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 4px; justify-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 12px;">
             {gauges.into_iter().map(|g| {
                 let (color, _) = state_colors(g.state);
                 view! {
@@ -115,7 +115,7 @@ fn daily_gauges_grid(gauges: Vec<indicators::DailyGauge>) -> impl IntoView {
                         value=g.value target=g.target
                         label=gauge_label(g.key).to_string()
                         unit=g.unit.to_string()
-                        color=color.to_string() size=86.0/>
+                        color=color.to_string()/>
                 }
             }).collect_view()}
         </div>
@@ -235,17 +235,17 @@ pub fn ProgressWidget() -> impl IntoView {
                             let eaten = today_kcal.get().unwrap_or(0.0);
                             let color = if eaten > n { "#e0304f" } else { "#1fa463" }.to_string();
                             view! {
-                                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                                    <span class="is-size-7 has-text-grey has-text-weight-medium" style="align-self: flex-start;">
+                                <div style="display: flex; flex-direction: column; gap: 10px;">
+                                    <span class="is-size-7 has-text-grey has-text-weight-medium">
                                         {move || t("dashboard.progress.done_title")}
                                     </span>
                                     <crate::components::gauge::Gauge
                                         value=eaten target=n
                                         label=t("dashboard.calories_title").to_string()
                                         unit=t("common.unit.kcal").to_string()
-                                        color=color size=118.0/>
+                                        color=color height=12.0/>
                                 </div>
-                                // Daily-nutrient gauges below the calorie one.
+                                // Daily-nutrient bars below the calorie one.
                                 {move || gauges_s().map(daily_gauges_grid)}
                             }.into_view()
                         },

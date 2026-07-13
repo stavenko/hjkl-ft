@@ -158,7 +158,8 @@ pub fn DashboardPage() -> impl IntoView {
     let cal_series_res = create_resource(
         move || (overlay.get() == Overlay::Progress, diary_ver.get(), foods_ver.get()),
         |(open, _, _)| async move {
-            if open { Some(local::daily_kcal_series(30).await) } else { None }
+            // Default view: the last week (7 days) on the x-axis.
+            if open { Some(local::daily_kcal_series(7).await) } else { None }
         },
     );
 

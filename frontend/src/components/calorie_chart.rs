@@ -1,7 +1,8 @@
 //! Interactive daily-calorie bar chart for the expanded dashboard widget.
 //!
 //! Bars = total kcal eaten per day (oldest → newest, today rightmost). A dashed
-//! line marks the average over the LOGGED days (kcal > 0) and is labelled. Touch
+//! line marks the average over the logged days (kcal > 0) EXCLUDING today (a
+//! still-partial day), and is labelled. Touch
 //! (or drag) anywhere on the chart moves a cursor that snaps to the nearest day
 //! and shows that day's date + kcal — the "what did I eat that day" readout.
 
@@ -97,7 +98,13 @@ pub fn CalorieChart(series: Signal<Vec<(String, f64)>>) -> impl IntoView {
                     }
 
                     let max = data.iter().map(|(_, k)| *k).fold(0.0_f64, f64::max).max(1.0);
-                    let avg = logged.iter().sum::<f64>() / logged.len() as f64;
+                    // Average over the shown days EXCLUDING today (the last point is
+                    // today — a still-partial day that would drag the mean down).
+                    // Unlogged (zero) days don't count.
+                    let logged_past: Vec<f64> =
+                        data[..n - 1].iter().map(|(_, k)| *k).filter(|k| *k > 0.0).collect();
+                    let avg = (!logged_past.is_empty())
+                        .then(|| logged_past.iter().sum::<f64>() / logged_past.len() as f64);
                     let mapy = move |k: f64| PB - (k / max) * (PB - PT);
                     let bw = (PR - PL) / n as f64;
                     let bar_w = (bw * 0.62).max(1.0);
@@ -113,17 +120,19 @@ pub fn CalorieChart(series: Signal<Vec<(String, f64)>>) -> impl IntoView {
                         }
                     }).collect_view();
 
-                    let avg_y = mapy(avg);
-                    let avg_line = view! {
-                        <g>
-                            <line x1=PL y1=avg_y x2=PR y2=avg_y
-                                stroke=AVG stroke-width="1.2" stroke-dasharray="4 3"/>
-                            <text x=PR y=avg_y - 3.0 text-anchor="end"
-                                fill=AVG font-size="10.5" font-weight="600">
-                                {format!("{} {:.0} {}", t("chart.average"), avg, t("common.unit.kcal"))}
-                            </text>
-                        </g>
-                    };
+                    let avg_line = avg.map(|avg| {
+                        let avg_y = mapy(avg);
+                        view! {
+                            <g>
+                                <line x1=PL y1=avg_y x2=PR y2=avg_y
+                                    stroke=AVG stroke-width="1.2" stroke-dasharray="4 3"/>
+                                <text x=PR y=avg_y - 3.0 text-anchor="end"
+                                    fill=AVG font-size="10.5" font-weight="600">
+                                    {format!("{} {:.0} {}", t("chart.average"), avg, t("common.unit.kcal"))}
+                                </text>
+                            </g>
+                        }
+                    });
 
                     // X-axis: first + last date only, to keep it uncluttered.
                     let axis = view! {

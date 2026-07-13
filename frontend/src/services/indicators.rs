@@ -320,14 +320,14 @@ pub async fn unlocked_indicator_states() -> Vec<(&'static str, IndicatorState)> 
 }
 
 /// One indicator's per-day history for the expanded view's histogram: the 7
-/// COMPLETED days (oldest → newest). Each day carries `(date, value, met)`, where
-/// `met` is the FROZEN target flag (see [`day_cached`]) — so the bar colours don't
-/// shift when the target later changes. `missed` = days with `met == false`.
+/// COMPLETED days (oldest → newest). Each day carries `(date, value, ratio)`, where
+/// `ratio` is the FROZEN `value / target` (see [`day_cached`]) — so the bar colours
+/// don't shift when the target later changes. `missed` = days with `ratio < 1.0`.
 #[derive(Clone)]
 pub struct IndicatorSeries {
     pub key: &'static str,
     pub state: IndicatorState,
-    pub days: Vec<(String, f64, bool)>,
+    pub days: Vec<(String, f64, Option<f64>)>,
     pub missed: u32,
 }
 
@@ -341,11 +341,9 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
         let mut days = Vec::with_capacity(dates.len());
         for d in &dates {
             let (value, ratio) = day_cached(key, &fmt(*d)).await;
-            // `met` (not-red) unless the frozen ratio is strictly below 1.0.
-            let met = ratio.map_or(true, |r| r >= 1.0);
-            days.push((fmt(*d), value, met));
+            days.push((fmt(*d), value, ratio));
         }
-        let missed = days.iter().filter(|(_, _, met)| !*met).count() as u32;
+        let missed = days.iter().filter(|(_, _, ratio)| ratio.map_or(false, |r| r < 1.0)).count() as u32;
         out.push(IndicatorSeries {
             key,
             state: indicator_state(key).await,

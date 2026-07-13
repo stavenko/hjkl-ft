@@ -1,7 +1,9 @@
 //! Interactive per-day bar chart. Each point is `(date, value, ratio)` where `ratio`
-//! is the FROZEN `value / target` for that day (so colours don't shift when the
-//! target later changes): met (≥ 1.0) is GREEN, a shallow miss (≥ 0.5) ORANGE, a
-//! deep miss RED, and an unevaluable day (`None`) neutral grey. The day-of-week sits
+//! is the FROZEN `value / target` for that day (so met/unmet doesn't shift when the
+//! target later changes): a met day (ratio ≥ 1.0) is GREEN, an unevaluable day
+//! (`None`) neutral grey, and a MISSED day is drawn in `miss_color` — a single colour
+//! for the whole chart, chosen by the caller from the indicator's overall state
+//! (orange or red by how chronic the miss is), NOT per-day. The day-of-week sits
 //! under each bar; tap / drag moves a cursor showing that day's date + value.
 
 use leptos::*;
@@ -35,23 +37,27 @@ const PB: f64 = 58.0; // bar baseline; weekday labels sit below
 
 const BAR_NEUTRAL: &str = "#cfd8e3"; // unevaluable day (no target)
 const BAR_MET: &str = "#1fa463"; // green — target met (ratio ≥ 1.0)
-const BAR_MILD: &str = "#e8850d"; // orange — shallow miss (ratio ≥ 0.5)
-const BAR_DEEP: &str = "#e0304f"; // red — deep miss (ratio < 0.5)
 const BAR_ACTIVE: &str = "#3b6fd4";
 
-/// Bar colour from the frozen ratio: green (met) / orange (shallow) / red (deep) /
-/// neutral (no target). Deeper shortfall → redder.
-fn bar_color(ratio: Option<f64>) -> &'static str {
+/// Bar colour: green when the day met its target (ratio ≥ 1.0), neutral grey when
+/// unevaluable (no target), otherwise `miss_color` — the single per-chart colour the
+/// caller derived from the indicator's overall state (orange/red).
+fn bar_color<'a>(ratio: Option<f64>, miss_color: &'a str) -> &'a str {
     match ratio {
         None => BAR_NEUTRAL,
         Some(r) if r >= 1.0 => BAR_MET,
-        Some(r) if r >= 0.5 => BAR_MILD,
-        Some(_) => BAR_DEEP,
+        Some(_) => miss_color,
     }
 }
 
 #[component]
-pub fn DayBars(series: Signal<Vec<(String, f64, Option<f64>)>>, unit: String) -> impl IntoView {
+pub fn DayBars(
+    series: Signal<Vec<(String, f64, Option<f64>)>>,
+    unit: String,
+    /// Colour for MISSED days — one colour for the whole chart, from the indicator's
+    /// overall state (orange for an occasional miss, red for a chronic one).
+    miss_color: String,
+) -> impl IntoView {
     let active = create_rw_signal(None::<usize>);
     let svg_ref = create_node_ref::<leptos::svg::Svg>();
 
@@ -112,7 +118,7 @@ pub fn DayBars(series: Signal<Vec<(String, f64, Option<f64>)>>, unit: String) ->
                         let cx = PL + (i as f64 + 0.5) * bw;
                         let y = mapy(*v);
                         let h = (PB - y).max(0.0);
-                        let fill = if sel == Some(i) { BAR_ACTIVE } else { bar_color(*ratio) };
+                        let fill = if sel == Some(i) { BAR_ACTIVE } else { bar_color(*ratio, &miss_color) }.to_string();
                         view! {
                             <g>
                                 <rect x=cx - bar_w / 2.0 y=y width=bar_w height=h rx="1.5" fill=fill/>

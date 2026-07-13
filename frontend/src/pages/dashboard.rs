@@ -409,7 +409,8 @@ pub fn DashboardPage() -> impl IntoView {
                                         </div>
                                         <div style="flex: 1; min-width: 0;">
                                             <DayBars series=Signal::derive(move || days.clone())
-                                                unit="г".to_string()/>
+                                                unit="г".to_string()
+                                                miss_color=stroke.to_string()/>
                                         </div>
                                         <InfoHint text=reason/>
                                     </div>

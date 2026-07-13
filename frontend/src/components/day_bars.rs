@@ -91,7 +91,8 @@ pub fn DayBars(series: Signal<Vec<(String, f64, bool)>>, unit: String) -> impl I
                     let max = data.iter().map(|(_, v, _)| *v).fold(0.0_f64, f64::max).max(1.0);
                     let mapy = move |v: f64| PB - (v / max) * (PB - PT);
                     let bw = (PR - PL) / n as f64;
-                    let bar_w = (bw * 0.62).max(1.0);
+                    // Narrower bars (≈1.5× thinner than the 0.62 default).
+                    let bar_w = (bw * 0.40).max(1.0);
                     let sel = active.get();
 
                     let bars = data.iter().enumerate().map(|(i, (date, v, met))| {

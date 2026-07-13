@@ -395,9 +395,12 @@ pub fn DashboardPage() -> impl IntoView {
                                 let (stroke, tint) = progress_widget::state_colors(s.state);
                                 let reason = indicator_reason(s.key, s.state, s.missed);
                                 let days = s.days.clone();
-                                // One row: [icon] [histogram] [?].
+                                // Each indicator on its own bordered panel so the two
+                                // don't blur together: [icon] [histogram] [?].
                                 view! {
-                                    <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div style="display: flex; align-items: center; gap: 8px; \
+                                            border: 0.5px solid var(--bulma-border-weak); border-radius: 12px; \
+                                            padding: 8px 10px; background: var(--bulma-scheme-main-bis);">
                                         <div style=format!("width: 28px; height: 28px; min-width: 28px; border-radius: 50%; \
                                                 background: {tint}; display: flex; align-items: center; justify-content: center;")>
                                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"

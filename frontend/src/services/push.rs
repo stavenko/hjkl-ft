@@ -4,11 +4,50 @@ use wasm_bindgen_futures::JsFuture;
 
 const KEY_PUSH_SUBSCRIBED: &str = "push_subscribed";
 const KEY_PUSH_ONBOARDING_DISMISSED: &str = "push_onboarding_dismissed";
+const KEY_NOTIF_RECEIVED: &str = "notif_received";
+
+use std::cell::RefCell;
+
+use leptos::{create_rw_signal, RwSignal, SignalGetUntracked, SignalSet};
 
 use super::app_flags;
 
 fn window() -> web_sys::Window {
     web_sys::window().expect("no window")
+}
+
+// ── "A push has been received on this device" ────────────────────────────────
+// Confirms the push setup actually works (the enable/test button hides, the
+// dashboard bell stops jiggling). This is push-feature state — owned HERE, backed
+// by the per-device `app_flags`, not by the story.
+thread_local! {
+    static RECEIVED: RefCell<Option<RwSignal<bool>>> = const { RefCell::new(None) };
+}
+
+/// Create the received-notification signal at the root, seeded from the persisted
+/// flag. Call once from main() after `app_flags` is loaded, before mounting.
+pub fn init_received() {
+    RECEIVED.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some(create_rw_signal(app_flags::get_bool(KEY_NOTIF_RECEIVED)));
+        }
+    });
+}
+
+/// Reactive flag: a notification has been received on this device.
+pub fn received_signal() -> RwSignal<bool> {
+    RECEIVED.with(|c| c.borrow().expect("push::init_received() must run first"))
+}
+
+/// Non-reactive read of [`received_signal`].
+pub fn was_received() -> bool {
+    received_signal().get_untracked()
+}
+
+/// Record that a push was received (persisted + reactive). Idempotent.
+pub fn mark_received() {
+    app_flags::set_bool(KEY_NOTIF_RECEIVED, true);
+    received_signal().set(true);
 }
 
 /// Check whether the Push API is available in this browser. Requires a service

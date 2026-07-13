@@ -23,14 +23,8 @@ const TOGGLE_KNOB: &str = "width: 27px; height: 27px; border-radius: 14px; backg
 pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> impl IntoView {
     // Whether a notification has been received in the background — only used to
     // optionally hide the enable/test button (see `hide_check_after_received`).
-    let story_ver = db::version("story");
-    let notif_received = create_rw_signal(false);
-    create_effect(move |_| {
-        story_ver.get();
-        spawn_local(async move {
-            notif_received.set(story::get_flag(story::NOTIFICATION_RECEIVED).await);
-        });
-    });
+    // Owned by the push service (per device), not the story.
+    let notif_received = push::received_signal();
 
     // Enable/test button state.
     let push_ver = create_rw_signal(0u32);
@@ -107,18 +101,19 @@ pub fn NotifyPanel(#[prop(default = false)] hide_check_after_received: bool) -> 
                                         // is idempotent and refreshes the server's endpoint.
                                         push::subscribe().await?;
                                         crate::services::diag::note("subscribe ok");
-                                        let setup_done = story::get_flag(story::LANGUAGE_CONFIGURED).await
-                                            && story::get_flag(story::NOTIFICATION_RECEIVED).await;
-                                        let (body, url): (&str, String) = if setup_done {
+                                        let (body, url): (&str, String) = if push::was_received() {
                                             (t("settings.notif_push_plain"), "/".to_string())
                                         } else {
+                                            // First test push: carry a receipt code so the
+                                            // poll marks this device as "received", and land
+                                            // on the dashboard (not the story).
                                             let rand = format!(
                                                 "{:04x}",
                                                 0x1000 + (js_sys::Math::random() * 61439.0) as u32,
                                             );
                                             (
                                                 t("settings.notif_push_task"),
-                                                format!("/story/setup?ntf=tc.setup.notif.{rand}"),
+                                                format!("/?ntf=tc.setup.notif.{rand}"),
                                             )
                                         };
                                         push::send_test(body, &url).await

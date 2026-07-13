@@ -48,6 +48,7 @@ pub fn main() {
         services::update::init(); // update-available signal at the root
         services::net::init(); // connectivity signals at the root
         services::subscription::init(); // subscription gate signal at the root
+        services::push::init_received(); // "notification received on this device" signal
         services::classify::init(); // reset the background food-classification queue
         services::errors::init(); // background-error log signal at the root
 
@@ -161,6 +162,8 @@ fn install_notif_receipt_poll() {
         }
         let _ = storage.remove_item("rn_notif_received");
         services::diag::note(&format!("WASM poll consumed {code}"));
+        // Receiving ANY push confirms this device's notification setup works.
+        services::push::mark_received();
         // code = "<kind>.<section>.<task>.<rand>" — the task id is the 3rd segment.
         let task = code.split('.').nth(2).unwrap_or_default().to_string();
         if let Some(flag) = services::story::flag_for_task(&task) {

@@ -116,17 +116,14 @@ pub fn DashboardPage() -> impl IntoView {
     };
 
     // Notifications state for the bell: `configured` (a test notification was
-    // received → stop jiggling) and `disabled` (the master kill-switch → cross the
-    // bell out). Both re-read when the story flags or the schedule record change.
+    // received → stop jiggling; owned by the push service) and `disabled` (the
+    // master kill-switch → cross the bell out; re-read when the schedule changes).
     let meta_ver = db::version("_sync_meta");
-    let story_ver = db::version("story");
-    let notif_configured = create_rw_signal(false);
+    let notif_configured = crate::services::push::received_signal();
     let notif_disabled = create_rw_signal(false);
     create_effect(move |_| {
         meta_ver.get();
-        story_ver.get();
         spawn_local(async move {
-            notif_configured.set(story::get_flag(story::NOTIFICATION_RECEIVED).await);
             let d = db::get::<serde_json::Value>("_sync_meta", "notification_schedule")
                 .await
                 .and_then(|v| v.get("disabled").and_then(|x| x.as_bool()))

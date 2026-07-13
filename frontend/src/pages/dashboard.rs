@@ -393,24 +393,23 @@ pub fn DashboardPage() -> impl IntoView {
                             let detail = d.series.iter().map(|s| {
                                 let (paths, _) = progress_widget::icon_for(s.key);
                                 let (stroke, tint) = progress_widget::state_colors(s.state);
-                                let label = gauge_label(s.key);
                                 let reason = indicator_reason(s.key, s.state, s.missed);
                                 let days = s.days.clone();
                                 let target = s.target;
+                                // One row: [icon] [histogram] [?].
                                 view! {
-                                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                                        <div style="display: flex; align-items: center; gap: 8px;">
-                                            <div style=format!("width: 28px; height: 28px; min-width: 28px; border-radius: 50%; \
-                                                    background: {tint}; display: flex; align-items: center; justify-content: center;")>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                                                    fill="none" stroke=stroke stroke-width="2" stroke-linecap="round"
-                                                    stroke-linejoin="round" inner_html=paths></svg>
-                                            </div>
-                                            <span class="is-size-7 has-text-weight-medium" style="color: var(--bulma-text-weak);">{label}</span>
-                                            <InfoHint text=reason/>
+                                    <div style="display: flex; align-items: center; gap: 10px;">
+                                        <div style=format!("width: 28px; height: 28px; min-width: 28px; border-radius: 50%; \
+                                                background: {tint}; display: flex; align-items: center; justify-content: center;")>
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                                fill="none" stroke=stroke stroke-width="2" stroke-linecap="round"
+                                                stroke-linejoin="round" inner_html=paths></svg>
                                         </div>
-                                        <DayBars series=Signal::derive(move || days.clone())
-                                            target=target unit="г".to_string()/>
+                                        <div style="flex: 1; min-width: 0;">
+                                            <DayBars series=Signal::derive(move || days.clone())
+                                                target=target unit="г".to_string()/>
+                                        </div>
+                                        <InfoHint text=reason/>
                                     </div>
                                 }
                             }).collect_view();

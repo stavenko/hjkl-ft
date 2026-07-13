@@ -14,13 +14,15 @@ fn short_date(s: &str) -> String {
     }
 }
 
-// Plot geometry (scaled to container width). Compact — several stack in the view.
+// Plot geometry (scaled to container width). Compact — it sits inline between the
+// indicator icon and the "?", so it's short: no static axis labels (the tap tooltip
+// shows the date), just enough top room for that tooltip.
 const VW: f64 = 340.0;
-const VH: f64 = 116.0;
-const PL: f64 = 12.0;
-const PR: f64 = 328.0;
-const PT: f64 = 22.0; // room for the tooltip
-const PB: f64 = 92.0; // room for the x-axis labels
+const VH: f64 = 60.0;
+const PL: f64 = 4.0;
+const PR: f64 = 336.0;
+const PT: f64 = 16.0; // room for the tooltip
+const PB: f64 = 58.0;
 
 const BAR: &str = "#cfd8e3";
 const BAR_MISS: &str = "#e0304f";
@@ -111,13 +113,6 @@ pub fn DayBars(
                         }
                     });
 
-                    let axis = view! {
-                        <g fill="var(--bulma-text-weak)" font-size="10">
-                            <text x=PL y=VH - 6.0 text-anchor="start">{short_date(&data[0].0)}</text>
-                            <text x=PR y=VH - 6.0 text-anchor="end">{short_date(&data[n - 1].0)}</text>
-                        </g>
-                    };
-
                     let unit = unit.clone();
                     let cursor = sel.map(|i| {
                         let (date, v) = &data[i];
@@ -140,7 +135,6 @@ pub fn DayBars(
                         <g>
                             {bars}
                             {target_line}
-                            {axis}
                             {cursor}
                         </g>
                     }.into_view()

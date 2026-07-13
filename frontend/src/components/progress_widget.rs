@@ -22,7 +22,7 @@ thread_local! {
     static PLANKA_CACHE: RefCell<Option<Option<f64>>> = const { RefCell::new(None) };
     static HASFOOD_CACHE: RefCell<Option<bool>> = const { RefCell::new(None) };
     static COUNTS_CACHE: RefCell<Option<(u32, u32, u32)>> = const { RefCell::new(None) };
-    static INDS_CACHE: RefCell<Option<Option<Vec<(String, IndicatorState)>>>> = const { RefCell::new(None) };
+    static INDS_CACHE: RefCell<Option<Vec<(&'static str, IndicatorState)>>> = const { RefCell::new(None) };
     static GAUGES_CACHE: RefCell<Option<Vec<indicators::DailyGauge>>> = const { RefCell::new(None) };
 }
 
@@ -41,6 +41,8 @@ const IC_DROPLET: &str = r#"<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4
 const IC_HAM: &str = r#"<path d="M13.144 21.144A7.274 10.445 45 1 0 2.856 10.856"/><path d="M13.144 21.144A7.274 4.365 45 0 0 2.856 10.856a7.274 4.365 45 0 0 10.288 10.288"/><path d="M16.565 10.435 18.6 8.4a2.501 2.501 0 1 0 1.65-4.65 2.5 2.5 0 1 0-4.66 1.66l-2.024 2.025"/><path d="m8.5 16.5-1-1"/>"#;
 const IC_APPLE: &str = r#"<path d="M12 6.528V3a1 1 0 0 1 1-1"/><path d="M18.237 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.472A6 6 0 0 0 2 11a15.1 15.1 0 0 0 3.763 10 3 3 0 0 0 3.648.648 5.5 5.5 0 0 1 5.178 0A3 3 0 0 0 18.237 21"/>"#;
 const IC_WHEAT: &str = r#"<path d="M2 22 16 8"/><path d="M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L5 19l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M7.47 8.53 9 7l1.53 1.53a3.5 3.5 0 0 1 0 4.94L9 15l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M11.47 4.53 13 3l1.53 1.53a3.5 3.5 0 0 1 0 4.94L13 11l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M20 2h2v2a4 4 0 0 1-4 4h-2V6a4 4 0 0 1 4-4Z"/><path d="M11.47 17.47 13 19l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L5 19l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/><path d="M15.47 13.47 17 15l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L9 15l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/><path d="M19.47 9.47 21 11l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L13 11l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/>"#;
+// Lucide "beef" — the protein indicator.
+const IC_BEEF: &str = r#"<circle cx="12.5" cy="8.5" r="2.5"/><path d="M12.5 2a6.5 6.5 0 0 0-6.22 4.6c-1.1 3.13-.78 3.9-3.18 6.08A3 3 0 0 0 5 18c4 0 8.4-1.8 11.4-4.3A6.5 6.5 0 0 0 12.5 2Z"/><path d="m18.5 6 2.19 4.5a6.48 6.48 0 0 1 .31 2 6.49 6.49 0 0 1-2.6 5.2C15.4 20.2 11 22 7 22a3 3 0 0 1-2.68-1.66L2.4 16.5"/>"#;
 
 /// (stroke, tint background) for an indicator state.
 fn state_colors(s: IndicatorState) -> (&'static str, &'static str) {
@@ -55,6 +57,7 @@ fn state_colors(s: IndicatorState) -> (&'static str, &'static str) {
 /// (icon svg paths, short label) for an indicator key.
 fn icon_for(k: &str) -> (&'static str, &'static str) {
     match k {
+        "protein" => (IC_BEEF, "Белок"),
         "calcium" => (IC_BONE, "Кальций"),
         "omega3" => (IC_FISH, "Омега-3"),
         "eggs" => (IC_EGG, "Яйца"),
@@ -80,11 +83,11 @@ fn indicator(paths: &'static str, label: &'static str, state: IndicatorState) ->
     }
 }
 
-fn indicators_row(states: Vec<(String, IndicatorState)>) -> impl IntoView {
+fn indicators_row(states: Vec<(&'static str, IndicatorState)>) -> impl IntoView {
     view! {
         <div style="display: flex; gap: 4px; justify-content: space-between;">
             {states.into_iter().map(|(k, st)| {
-                let (paths, label) = icon_for(&k);
+                let (paths, label) = icon_for(k);
                 indicator(paths, label, st)
             }).collect_view()}
         </div>
@@ -159,20 +162,14 @@ pub fn ProgressWidget() -> impl IntoView {
     let hasfood_s = move || sticky(&HASFOOD_CACHE, has_food.get());
     let counts_s = move || sticky(&COUNTS_CACHE, counts.get());
 
-    // Nutrition indicators: None until a week of diary history exists; then the 7
-    // states. Refreshes when the diary or foods (tags) change.
+    // Nutrition indicators (consistency over time): the states for the currently
+    // UNLOCKED indicators, read through the per-day cache. Async — `None` until the
+    // aggregate resolves, so the row paints grey first, then colours in. Refreshes
+    // when the diary, foods (tags/nutrients) or weight (protein target) change.
     let foods_ver = db::version("foods");
-    let inds = create_resource(
-        move || (food_ver.get(), foods_ver.get()),
-        |_| async {
-            if indicators::enough_history().await {
-                let states: Vec<(String, IndicatorState)> = indicators::compute().await
-                    .into_iter().map(|(k, s)| (k.to_string(), s)).collect();
-                Some(states)
-            } else {
-                None
-            }
-        },
+    let inds = create_local_resource(
+        move || (food_ver.get(), foods_ver.get(), weight_ver.get()),
+        |_| async { indicators::unlocked_indicator_states().await },
     );
     let inds_s = move || sticky(&INDS_CACHE, inds.get());
 
@@ -307,15 +304,23 @@ pub fn ProgressWidget() -> impl IntoView {
                             }.into_view()
                         }
                     }}
-                    // Nutrition indicators (all of them) as icons at the BOTTOM,
-                    // once there's ≥1 week of diary history. These measure the
-                    // user's CONSISTENCY over time (green/orange/red) — a different
-                    // purpose from the daily gauges above (which show what's still
-                    // left to hit TODAY), so an overlapping metric appearing in both
-                    // is intentional, not a duplicate.
-                    {move || inds_s().flatten().map(|states| view! {
-                        <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
-                        {indicators_row(states)}
+                    // Nutrition indicators (CONSISTENCY over time) as icons at the
+                    // bottom, once there's any diary history. Drawn from the fixed
+                    // unlocked list so they appear GREY immediately, then colour in
+                    // when the cached aggregate resolves. Different purpose from the
+                    // gauges above (what's still left TODAY), so an overlapping metric
+                    // in both is intentional, not a duplicate.
+                    {(has_food_v).then(|| {
+                        let states: std::collections::HashMap<&'static str, IndicatorState> =
+                            inds_s().unwrap_or_default().into_iter().collect();
+                        let row: Vec<(&'static str, IndicatorState)> = indicators::UNLOCKED_INDICATORS
+                            .iter()
+                            .map(|k| (*k, states.get(k).copied().unwrap_or(IndicatorState::Unknown)))
+                            .collect();
+                        view! {
+                            <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
+                            {indicators_row(row)}
+                        }
                     })}
                 </div>
             }.into_view()

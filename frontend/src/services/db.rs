@@ -30,7 +30,7 @@ fn bump(store_name: &str) {
 /// The legacy, device-global database. Used before login (no user identity yet)
 /// and as the one-time migration source for users created before per-user scoping.
 const BOOTSTRAP_DB: &str = "hjkl-ft";
-const DB_VERSION: u32 = 12;
+const DB_VERSION: u32 = 13;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -134,6 +134,11 @@ fn builder(name: &str) -> rexie::RexieBuilder {
         .add_object_store(ObjectStore::new("support_messages").key_path("seq"))
         .add_object_store(ObjectStore::new("support_outbox").key_path("client_id"))
         .add_object_store(ObjectStore::new("support_meta").key_path("key"))
+        // Per-indicator per-day aggregate cache (one store per indicator, keyed by
+        // date). Derived, per-device, NOT synced — recomputed on demand from the
+        // diary/foods when a day is missing (see `services::indicators` cache).
+        .add_object_store(ObjectStore::new("ind_protein").key_path("date"))
+        .add_object_store(ObjectStore::new("ind_veg_fruit").key_path("date"))
 }
 
 async fn open(name: &str) -> Rexie {

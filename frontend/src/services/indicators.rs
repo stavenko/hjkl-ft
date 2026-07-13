@@ -140,8 +140,137 @@ pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
     ]
 }
 
-/// One daily-goal gauge: today's amount toward `target`, plus the 7-day state
-/// that colours it. `state == Unknown` → the metric has no data yet (grey ring).
+// ── Progressive disclosure ───────────────────────────────────────────────────
+// Which metrics are currently surfaced in the widget. The product opens more over
+// time; today only the week-1 set. Calories is the planka gauge (drawn directly by
+// the widget, not via `daily_gauges`).
+pub const UNLOCKED_GAUGES: &[&str] = &["protein", "veg_fruit"];
+pub const UNLOCKED_INDICATORS: &[&str] = &["protein", "veg_fruit"];
+
+// ── Per-indicator per-day cache ──────────────────────────────────────────────
+// Each cacheable indicator has its OWN store (`ind_<key>`), keyed by date, holding
+// the completed-day aggregate so it isn't recomputed on every render. Today is
+// never cached (it's still changing). Invalidated per-day on diary edits and
+// wholesale on food changes (nutrients/tags shift many days at once).
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct IndDay {
+    date: String,
+    value: f64,
+}
+
+/// Indicator keys that have a per-day cache store. Keep in sync with the `ind_*`
+/// object stores in `db::builder` and with [`invalidate_day`]/[`clear_cache`].
+const CACHED_STORES: &[&str] = &["ind_protein", "ind_veg_fruit"];
+
+/// The cache store for `key`, or None if the indicator isn't cached.
+fn cache_store(key: &str) -> Option<&'static str> {
+    match key {
+        "protein" => Some("ind_protein"),
+        "veg_fruit" => Some("ind_veg_fruit"),
+        _ => None,
+    }
+}
+
+/// Raw per-day aggregate for `key` on `date` — the number compared to the target.
+async fn compute_day_value(key: &str, date: &str) -> f64 {
+    match key {
+        "protein" => local::protein_grams_on(date).await,
+        "veg_fruit" => local::veg_fruit_grams_on(date).await,
+        "calcium" => local::nutrient_grams_on(date, N_CALCIUM).await,
+        "iron" => local::nutrient_grams_on(date, N_IRON).await,
+        "fiber" => local::nutrient_grams_on(date, N_FIBER).await,
+        _ => 0.0,
+    }
+}
+
+/// Cached-or-computed per-day value. For a cacheable indicator a hit returns the
+/// stored value; a miss computes it and stores it. `date` is expected to be a
+/// COMPLETED day — the caller never caches today (it's still changing).
+async fn day_value_cached(key: &str, date: &str) -> f64 {
+    let Some(store) = cache_store(key) else {
+        return compute_day_value(key, date).await;
+    };
+    if let Some(rec) = crate::services::db::get::<IndDay>(store, date).await {
+        return rec.value;
+    }
+    let value = compute_day_value(key, date).await;
+    crate::services::db::put(store, &IndDay { date: date.to_string(), value }).await;
+    value
+}
+
+/// Drop cached values for `date` across every indicator cache — call when the
+/// diary for that day changes.
+pub async fn invalidate_day(date: &str) {
+    for store in CACHED_STORES {
+        crate::services::db::delete(store, date).await;
+    }
+}
+
+/// Clear every indicator cache — call when a food's nutrients/tags change (a food
+/// edit or a background classification), since that can shift many days' values.
+pub async fn clear_cache() {
+    for store in CACHED_STORES {
+        crate::services::db::clear(store).await;
+    }
+}
+
+/// The daily target for `key` (0 → not computable yet, e.g. protein before the
+/// profile/weight is set).
+async fn target_for(key: &str) -> f64 {
+    match key {
+        "protein" => local::list_weight_entries()
+            .await
+            .into_iter()
+            .last()
+            .map(|e| profile::protein_target_from_profile(e.weight_kg) as f64)
+            .unwrap_or(0.0),
+        "veg_fruit" => veg_fruit_per_day_g(),
+        "calcium" => CALCIUM_PER_DAY_MG,
+        "iron" => iron_per_day_mg(),
+        "fiber" => FIBER_PER_DAY_G,
+        _ => 0.0,
+    }
+}
+
+/// Classifier metrics (veg/fruit) always have data → never Unknown. Nutrient
+/// metrics can be Unknown (grey) when there's no data in the window.
+fn is_classifier(key: &str) -> bool {
+    key == "veg_fruit"
+}
+
+/// Indicator colour for `key` over the 7 COMPLETED days ending yesterday, read
+/// through the per-day cache. Unknown (grey) when the target is unset or a nutrient
+/// metric has no data yet.
+pub async fn indicator_state(key: &str) -> IndicatorState {
+    let target = target_for(key).await;
+    if target <= 0.0 {
+        return IndicatorState::Unknown;
+    }
+    let today = chrono::Local::now().date_naive();
+    let days: Vec<NaiveDate> = (1..=7).map(|i| today - Duration::days(i)).collect();
+    let mut values = Vec::with_capacity(days.len());
+    for d in &days {
+        values.push(day_value_cached(key, &fmt(*d)).await);
+    }
+    if !is_classifier(key) && values.iter().sum::<f64>() == 0.0 {
+        return IndicatorState::Unknown;
+    }
+    let misses = values.iter().filter(|v| **v < target).count() as u32;
+    daily_state(misses)
+}
+
+/// States for the currently-unlocked indicators, in display order (cached).
+pub async fn unlocked_indicator_states() -> Vec<(&'static str, IndicatorState)> {
+    let mut out = Vec::new();
+    for key in UNLOCKED_INDICATORS.iter().copied() {
+        out.push((key, indicator_state(key).await));
+    }
+    out
+}
+
+/// One daily gauge: TODAY's amount toward `target`, plus the indicator's state to
+/// colour it. `state == Unknown` → grey (no data / target unset yet).
 #[derive(Clone)]
 pub struct DailyGauge {
     pub key: &'static str,
@@ -151,76 +280,28 @@ pub struct DailyGauge {
     pub state: IndicatorState,
 }
 
-/// Today's progress toward each DAILY nutrient target (protein, veg/fruit,
-/// calcium, iron, fiber), for the dashboard gauges. Each carries the same 7-day
-/// indicator state as [`compute`] so the ring is drawn in the indicator's colour
-/// (grey while the metric has no data at all — e.g. calcium before enrichment).
-pub async fn daily_gauges() -> Vec<DailyGauge> {
-    let today = chrono::Local::now().date_naive();
-    let last7: Vec<NaiveDate> = (0..7).map(|i| today - Duration::days(i)).collect();
-    let td = fmt(today);
-
-    // Protein target = 1.6 g/kg of estimated fat-free mass (Deurenberg BF%) of the
-    // latest logged weight; 0 when weight/profile is incomplete (→ Unknown/grey).
-    let protein_target = local::list_weight_entries()
-        .await
-        .into_iter()
-        .last()
-        .map(|e| profile::protein_target_from_profile(e.weight_kg))
-        .unwrap_or(0) as f64;
-    let protein_today = local::protein_grams_on(&td).await;
-    let mut protein_week = Vec::with_capacity(7);
-    for d in &last7 {
-        protein_week.push(local::protein_grams_on(&fmt(*d)).await);
+fn unit_for(key: &str) -> &'static str {
+    match key {
+        "calcium" | "iron" => "мг",
+        _ => "г",
     }
-    let protein_state = if protein_target <= 0.0 {
-        IndicatorState::Unknown
-    } else {
-        daily_state(protein_week.iter().filter(|v| **v < protein_target).count() as u32)
-    };
+}
 
-    let veg = gather_veg(&last7).await;
-    let cal = gather_nutrient(&last7, N_CALCIUM).await;
-    let iron = gather_nutrient(&last7, N_IRON).await;
-    let fib = gather_nutrient(&last7, N_FIBER).await;
-
-    vec![
-        DailyGauge {
-            key: "protein",
-            value: protein_today,
-            target: protein_target,
-            unit: "г",
-            state: protein_state,
-        },
-        DailyGauge {
-            key: "veg_fruit",
-            value: local::veg_fruit_grams_on(&td).await,
-            target: veg_fruit_per_day_g(),
-            unit: "г",
-            state: daily_classifier(&veg, &last7, veg_fruit_per_day_g()),
-        },
-        DailyGauge {
-            key: "calcium",
-            value: local::nutrient_grams_on(&td, N_CALCIUM).await,
-            target: CALCIUM_PER_DAY_MG,
-            unit: "мг",
-            state: daily_nutrient(&cal, &last7, CALCIUM_PER_DAY_MG),
-        },
-        DailyGauge {
-            key: "iron",
-            value: local::nutrient_grams_on(&td, N_IRON).await,
-            target: iron_per_day_mg(),
-            unit: "мг",
-            state: daily_nutrient(&iron, &last7, iron_per_day_mg()),
-        },
-        DailyGauge {
-            key: "fiber",
-            value: local::nutrient_grams_on(&td, N_FIBER).await,
-            target: FIBER_PER_DAY_G,
-            unit: "г",
-            state: daily_nutrient(&fib, &last7, FIBER_PER_DAY_G),
-        },
-    ]
+/// Today's progress toward each UNLOCKED daily target, for the dashboard gauges.
+/// The value is TODAY only (live); the colour is the indicator's 7-day state.
+pub async fn daily_gauges() -> Vec<DailyGauge> {
+    let today = fmt(chrono::Local::now().date_naive());
+    let mut out = Vec::new();
+    for key in UNLOCKED_GAUGES.iter().copied() {
+        out.push(DailyGauge {
+            key,
+            value: compute_day_value(key, &today).await,
+            target: target_for(key).await,
+            unit: unit_for(key),
+            state: indicator_state(key).await,
+        });
+    }
+    out
 }
 
 /// Daily state for a CLASSIFIER metric (data always available → never Unknown).

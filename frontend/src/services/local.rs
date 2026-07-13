@@ -272,6 +272,9 @@ pub async fn cache_food_tags(verdicts: &[(String, crate::services::ai::FoodTags)
             db::put("foods", &food).await;
         }
     }
+    // Tags (veg/fruit etc.) just changed → per-day indicator aggregates for any day
+    // containing these foods are now stale.
+    crate::services::indicators::clear_cache().await;
     crate::services::sync::push_background();
 }
 
@@ -288,6 +291,9 @@ pub async fn cache_food_nutrients(id: &str, values: BTreeMap<String, f64>) {
         }
         food.updated_at = now();
         db::put("foods", &food).await;
+        // Nutrient values changed → indicator aggregates for days with this food
+        // are stale.
+        crate::services::indicators::clear_cache().await;
         crate::services::sync::push_background();
     }
 }
@@ -551,6 +557,8 @@ pub async fn update_diary_entry(
     entry.waste_grams = waste_grams;
     entry.updated_at = now();
     db::put("diary", &entry).await;
+    // The day's aggregates changed → drop its cached indicator values.
+    crate::services::indicators::invalidate_day(&entry.date).await;
     if waste_grams > 0.0 {
         crate::services::story::set_flag(crate::services::story::BONES_WASTE_ENTERED, true).await;
     }
@@ -601,6 +609,7 @@ pub async fn remove_food_diary(entry_id: &str) -> Result<(), String> {
     }
     record_deletion("diary", entry_id).await;
     db::delete("diary", entry_id).await;
+    crate::services::indicators::invalidate_day(&entry.date).await;
     Ok(())
 }
 
@@ -648,6 +657,8 @@ pub async fn delete_diary_data(cutoff: Option<&str>) {
             db::delete("summaries", &s.id).await;
         }
     }
+    // A bulk delete can touch arbitrary past days → drop the whole indicator cache.
+    crate::services::indicators::clear_cache().await;
 }
 
 /// Duplicate a diary entry as a NEW entry today with a fresh time (food and

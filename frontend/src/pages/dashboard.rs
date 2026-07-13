@@ -18,7 +18,9 @@ use leptos::*;
 
 use crate::components::cycle_widget::{CycleLine, CyclePanel};
 use crate::components::notify_panel::NotifyPanel;
+use crate::components::day_bars::DayBars;
 use crate::components::gauge::Gauge;
+use crate::components::info_hint::InfoHint;
 use crate::components::progress_widget::{self, ProgressWidget};
 use crate::components::steps_chart_modal::StepsChartModal;
 use crate::components::steps_widget::StepsWidget;
@@ -44,7 +46,7 @@ struct DetailData {
     planka: Option<f64>,
     eaten: f64,
     gauges: Vec<indicators::DailyGauge>,
-    inds: Vec<(&'static str, IndicatorState)>,
+    series: Vec<indicators::IndicatorSeries>,
     calorie_hint: String,
     protein_hint: String,
     veg_hint: String,
@@ -121,28 +123,37 @@ fn veg_hint_text() -> String {
     )
 }
 
-/// The advisory sentence for a daily indicator's 7-day consistency state.
-fn advisory_text(key: &str, state: IndicatorState) -> &'static str {
+/// The "?" explanation for a daily indicator's colour — how many of the last 7 days
+/// missed the target, the green/orange/red rule, and why it matters.
+fn indicator_reason(key: &str, state: IndicatorState, missed: u32) -> String {
     use IndicatorState::*;
-    match (key, state) {
-        ("protein", Green) => "Вы стабильно набираете норму белка — так держать.",
-        ("protein", Orange) => {
-            "Иногда вам не хватает белка. Старайтесь добирать норму — это важно для мышц."
+    let metric = match key {
+        "protein" => "белка",
+        "veg_fruit" => "овощей и фруктов",
+        _ => "нормы",
+    };
+    let head = match state {
+        Green => format!("Зелёный: за последнюю неделю вы каждый день добирали норму {metric}."),
+        Orange => format!(
+            "Оранжевый: за последнюю неделю вы {missed} из 7 дней не добрали норму {metric} \
+             (1–3 дня → оранжевый)."
+        ),
+        Red => format!(
+            "Красный: за последнюю неделю вы {missed} из 7 дней не добрали норму {metric} \
+             (4 и более → красный)."
+        ),
+        Unknown => return "Пока недостаточно данных, чтобы оценить.".to_string(),
+    };
+    let tail = match (key, state) {
+        ("protein", Orange) | ("protein", Red) => {
+            " Регулярный недобор белка грозит потерей мышц и сказывается на здоровье в долгую."
         }
-        ("protein", Red) => {
-            "Вы регулярно едите слишком мало белка. Если продолжать так делать, можно потерять \
-             мышцы. Это может сказаться на долгосрочном здоровье."
+        ("veg_fruit", Orange) | ("veg_fruit", Red) => {
+            " Нехватка овощей и фруктов — это дефицит клетчатки и витаминов."
         }
-        ("protein", Unknown) => "Пока недостаточно данных по белку.",
-        ("veg_fruit", Green) => "Вы стабильно едите достаточно овощей и фруктов — отлично.",
-        ("veg_fruit", Orange) => "Иногда вам не хватает овощей и фруктов. Добавьте их в рацион.",
-        ("veg_fruit", Red) => {
-            "Вы регулярно едите мало овощей и фруктов. Это нехватка клетчатки и витаминов, что \
-             вредит здоровью в долгосрочной перспективе."
-        }
-        ("veg_fruit", Unknown) => "Пока недостаточно данных по овощам и фруктам.",
         _ => "",
-    }
+    };
+    format!("{head}{tail}")
 }
 
 /// Current network problems as error-log entries, so they appear in the SAME list
@@ -285,7 +296,7 @@ pub fn DashboardPage() -> impl IntoView {
                 planka,
                 eaten: local::kcal_on(&today).await,
                 gauges: indicators::daily_gauges().await,
-                inds: indicators::unlocked_indicator_states().await,
+                series: indicators::unlocked_indicator_series().await,
                 calorie_hint: calorie_hint_text(planka).await,
                 protein_hint: protein_hint_text().await,
                 veg_hint: veg_hint_text(),
@@ -379,20 +390,27 @@ pub fn DashboardPage() -> impl IntoView {
                                         value_color=val.map(String::from)/>
                                 }
                             }).collect_view();
-                            let detail = d.inds.iter().map(|(k, st)| {
-                                let (paths, _) = progress_widget::icon_for(k);
-                                let (stroke, tint) = progress_widget::state_colors(*st);
+                            let detail = d.series.iter().map(|s| {
+                                let (paths, _) = progress_widget::icon_for(s.key);
+                                let (stroke, tint) = progress_widget::state_colors(s.state);
+                                let label = gauge_label(s.key);
+                                let reason = indicator_reason(s.key, s.state, s.missed);
+                                let days = s.days.clone();
+                                let target = s.target;
                                 view! {
-                                    <div style="display: flex; gap: 10px; align-items: flex-start;">
-                                        <div style=format!("width: 32px; height: 32px; min-width: 32px; border-radius: 50%; \
-                                                background: {tint}; display: flex; align-items: center; justify-content: center;")>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
-                                                fill="none" stroke=stroke stroke-width="2" stroke-linecap="round"
-                                                stroke-linejoin="round" inner_html=paths></svg>
+                                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <div style=format!("width: 28px; height: 28px; min-width: 28px; border-radius: 50%; \
+                                                    background: {tint}; display: flex; align-items: center; justify-content: center;")>
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                                    fill="none" stroke=stroke stroke-width="2" stroke-linecap="round"
+                                                    stroke-linejoin="round" inner_html=paths></svg>
+                                            </div>
+                                            <span class="is-size-7 has-text-weight-medium" style="color: var(--bulma-text-weak);">{label}</span>
+                                            <InfoHint text=reason/>
                                         </div>
-                                        <span class="is-size-7 has-text-grey" style="line-height: 1.4;">
-                                            {advisory_text(k, *st)}
-                                        </span>
+                                        <DayBars series=Signal::derive(move || days.clone())
+                                            target=target unit="г".to_string()/>
                                     </div>
                                 }
                             }).collect_view();

@@ -282,6 +282,46 @@ pub async fn unlocked_indicator_states() -> Vec<(&'static str, IndicatorState)> 
     out
 }
 
+/// One indicator's per-day history for the expanded view's histogram: the 7
+/// COMPLETED days (oldest → newest) with each day's value, plus the target, state,
+/// and how many of those days MISSED the target.
+#[derive(Clone)]
+pub struct IndicatorSeries {
+    pub key: &'static str,
+    pub target: f64,
+    pub state: IndicatorState,
+    pub days: Vec<(String, f64)>,
+    pub missed: u32,
+}
+
+/// Per-day series for every unlocked indicator (cached), for the histograms.
+pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
+    let today = chrono::Local::now().date_naive();
+    // Oldest → newest: today-7 … today-1.
+    let dates: Vec<NaiveDate> = (1..=7).rev().map(|i| today - Duration::days(i)).collect();
+    let mut out = Vec::new();
+    for key in UNLOCKED_INDICATORS.iter().copied() {
+        let target = target_for(key).await;
+        let mut days = Vec::with_capacity(dates.len());
+        for d in &dates {
+            days.push((fmt(*d), day_value_cached(key, &fmt(*d)).await));
+        }
+        let missed = if target > 0.0 {
+            days.iter().filter(|(_, v)| *v < target).count() as u32
+        } else {
+            0
+        };
+        out.push(IndicatorSeries {
+            key,
+            target,
+            state: indicator_state(key).await,
+            days,
+            missed,
+        });
+    }
+    out
+}
+
 /// One daily gauge: TODAY's amount toward `target`, plus the indicator's state to
 /// colour it. `state == Unknown` → grey (no data / target unset yet).
 #[derive(Clone)]

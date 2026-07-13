@@ -113,13 +113,15 @@ fn daily_gauges_grid(gauges: Vec<indicators::DailyGauge>) -> impl IntoView {
     view! {
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 14px;">
             {gauges.into_iter().map(|g| {
-                let (color, _) = state_colors(g.state);
+                // At-least goals: neutral until met, green when met (bar + value).
+                let (bar, val) = crate::components::gauge::at_least_colors(g.value, g.target);
                 view! {
                     <crate::components::gauge::Gauge
                         value=g.value target=g.target
                         label=gauge_label(g.key).to_string()
                         unit=g.unit.to_string()
-                        color=color.to_string()/>
+                        color=bar.to_string()
+                        value_color=val.map(String::from)/>
                 }
             }).collect_view()}
         </div>
@@ -264,7 +266,8 @@ pub fn ProgressWidget() -> impl IntoView {
                                             value=eaten target=n
                                             label=t("dashboard.calories_title").to_string()
                                             unit=t("common.unit.kcal").to_string()
-                                            color=color height=12.0/>
+                                            color=color height=12.0
+                                            value_color={(eaten > n).then(|| "#e0304f".to_string())}/>
                                     </div>
                                 }.into_view()
                             };

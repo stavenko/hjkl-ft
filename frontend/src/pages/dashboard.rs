@@ -60,15 +60,6 @@ fn gauge_label(key: &str) -> &'static str {
     }
 }
 
-fn gauge_color(state: IndicatorState) -> &'static str {
-    match state {
-        IndicatorState::Green => "#1fa463",
-        IndicatorState::Orange => "#e8850d",
-        IndicatorState::Red => "#e0304f",
-        IndicatorState::Unknown => "#9aa0a6",
-    }
-}
-
 /// The calorie "?" text — depends on the course goal AND the current weight trend,
 /// and shows the actual average intake + resulting planka.
 async fn calorie_hint_text(planka: Option<f64>) -> String {
@@ -377,12 +368,15 @@ pub fn DashboardPage() -> impl IntoView {
                             let (protein_hint, veg_hint) = (d.protein_hint.clone(), d.veg_hint.clone());
                             let daily = d.gauges.iter().map(|g| {
                                 let hint = if g.key == "protein" { protein_hint.clone() } else { veg_hint.clone() };
+                                // At-least goals: neutral until met, green when met.
+                                let (bar, val) = crate::components::gauge::at_least_colors(g.value, g.target);
                                 view! {
                                     <Gauge value=g.value target=g.target
                                         label=gauge_label(g.key).to_string()
                                         unit=g.unit.to_string()
-                                        color=gauge_color(g.state).to_string()
-                                        hint=hint/>
+                                        color=bar.to_string()
+                                        hint=hint
+                                        value_color=val.map(String::from)/>
                                 }
                             }).collect_view();
                             let detail = d.inds.iter().map(|(k, st)| {
@@ -407,7 +401,8 @@ pub fn DashboardPage() -> impl IntoView {
                                     <Gauge value=d.eaten target=target
                                         label="Калории".to_string() unit="ккал".to_string()
                                         color=cal_color height=12.0
-                                        hint=d.calorie_hint.clone()/>
+                                        hint=d.calorie_hint.clone()
+                                        value_color={(d.eaten > target).then(|| "#e0304f".to_string())}/>
                                     {daily}
                                     <div>
                                         <div style="border-top: 0.5px solid var(--bulma-border-weak); margin-bottom: 14px;"></div>

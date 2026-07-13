@@ -5,6 +5,18 @@
 
 use leptos::*;
 
+/// (bar colour, value colour) for an "at least" daily gauge (protein / veg-fruit):
+/// a NEUTRAL grey fill while the day's amount is below the target, turning GREEN
+/// (bar + value number) once the target is met. `value colour` is `None` when the
+/// value keeps its default colour.
+pub fn at_least_colors(value: f64, target: f64) -> (&'static str, Option<&'static str>) {
+    if target > 0.0 && value >= target {
+        ("#1fa463", Some("#1fa463"))
+    } else {
+        ("#9aa0a6", None)
+    }
+}
+
 /// A full-width bar. `value`/`target` in the same unit; the fill spans
 /// `min(value/target, 1)` of the track. `color` is the fill (the metric's
 /// colour); the track is grey. The header line shows `label` on the left and
@@ -23,7 +35,14 @@ pub fn Gauge(
     #[prop(default = 8.0)] height: f64,
     /// Optional "why this target" explanation, shown via a "?" tooltip.
     #[prop(optional, into)] hint: Option<String>,
+    /// Optional colour for the VALUE number (the eaten amount) — e.g. red when the
+    /// calorie planka is exceeded, green when an "at least" goal is met. The target
+    /// (`/ NNN`) always keeps its usual grey.
+    #[prop(default = None)] value_color: Option<String>,
 ) -> impl IntoView {
+    let value_style = value_color
+        .map(|c| format!("color: {c};"))
+        .unwrap_or_default();
     // Normalize negative zero (an empty nutrient sum can be -0.0) so the label
     // reads "0", not "-0".
     let value = value + 0.0;
@@ -52,11 +71,14 @@ pub fn Gauge(
         view! {
             {move || open.get().then(|| {
                 let t = text.clone();
+                // Dismiss on a tap ANYWHERE — the full-screen backdrop AND the card
+                // itself. `pointerup` (not `click`) so it fires on iOS, where a tap on
+                // a bare <div> never raises a delegated click.
                 view! {
-                    <div on:click=move |_| open.set(false)
-                        style="position: fixed; inset: 0; z-index: 40;"></div>
-                    <div on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
-                        style="position: absolute; z-index: 41; top: 24px; left: 0; right: 0; \
+                    <div on:pointerup=move |_| open.set(false)
+                        style="position: fixed; inset: 0; z-index: 40; cursor: pointer;"></div>
+                    <div on:pointerup=move |_| open.set(false)
+                        style="position: absolute; z-index: 41; top: 24px; left: 0; right: 0; cursor: pointer; \
                             background: var(--bulma-scheme-main); border: 0.5px solid var(--bulma-border-weak); \
                             box-shadow: 0 10px 30px rgba(0,0,0,0.22); border-radius: 12px; padding: 12px 14px;">
                         <span class="is-size-7 has-text-grey" style="line-height: 1.45; white-space: pre-line;">{t}</span>
@@ -74,7 +96,7 @@ pub fn Gauge(
                     {hint_btn}
                 </span>
                 <span class="is-size-7" style="white-space: nowrap;">
-                    <span class="has-text-weight-bold">{format!("{value:.0}")}</span>
+                    <span class="has-text-weight-bold" style=value_style>{format!("{value:.0}")}</span>
                     <span class="has-text-grey">{format!(" / {target:.0} {unit}")}</span>
                 </span>
             </div>

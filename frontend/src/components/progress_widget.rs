@@ -307,17 +307,15 @@ pub fn ProgressWidget() -> impl IntoView {
                             }.into_view()
                         }
                     }}
-                    // Weekly-goal indicators (omega-3 / eggs / red meat) as icons at
-                    // the BOTTOM (only after ≥1 week of diary). The daily goals are
-                    // shown above as gauges, so they're filtered out here.
-                    {move || inds_s().flatten().map(|states| {
-                        let weekly: Vec<(String, IndicatorState)> = states.into_iter()
-                            .filter(|(k, _)| matches!(k.as_str(), "omega3" | "eggs" | "red_meat"))
-                            .collect();
-                        view! {
-                            <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
-                            {indicators_row(weekly)}
-                        }
+                    // Nutrition indicators (all of them) as icons at the BOTTOM,
+                    // once there's ≥1 week of diary history. These measure the
+                    // user's CONSISTENCY over time (green/orange/red) — a different
+                    // purpose from the daily gauges above (which show what's still
+                    // left to hit TODAY), so an overlapping metric appearing in both
+                    // is intentional, not a duplicate.
+                    {move || inds_s().flatten().map(|states| view! {
+                        <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
+                        {indicators_row(states)}
                     })}
                 </div>
             }.into_view()

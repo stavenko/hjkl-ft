@@ -401,9 +401,9 @@ pub fn DashboardPage() -> impl IntoView {
                                     <div style="display: flex; align-items: center; gap: 8px; \
                                             border: 0.5px solid var(--bulma-border-weak); border-radius: 12px; \
                                             padding: 8px 10px; background: var(--bulma-scheme-main-bis);">
-                                        <div style=format!("width: 28px; height: 28px; min-width: 28px; border-radius: 50%; \
+                                        <div style=format!("width: 40px; height: 40px; min-width: 40px; border-radius: 50%; \
                                                 background: {tint}; display: flex; align-items: center; justify-content: center;")>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"
                                                 fill="none" stroke=stroke stroke-width="2" stroke-linecap="round"
                                                 stroke-linejoin="round" inner_html=paths></svg>
                                         </div>
@@ -426,7 +426,7 @@ pub fn DashboardPage() -> impl IntoView {
                                     {daily}
                                     <div>
                                         <div style="border-top: 0.5px solid var(--bulma-border-weak); margin-bottom: 14px;"></div>
-                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 12px;">
+                                        <div style="display: flex; flex-direction: column; gap: 12px;">
                                             {detail}
                                         </div>
                                     </div>

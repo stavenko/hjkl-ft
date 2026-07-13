@@ -26,14 +26,14 @@ fn weekday_ru(s: &str) -> &'static str {
         .unwrap_or("")
 }
 
-// Plot geometry (scaled to container width). Compact — it sits inline between the
-// indicator icon and the "?", with a row of weekday labels under the bars.
+// Plot geometry (scaled to container width). One indicator per row, so it's ~1.5×
+// taller than the old two-up layout, with a row of readable weekday labels below.
 const VW: f64 = 340.0;
-const VH: f64 = 76.0;
+const VH: f64 = 108.0;
 const PL: f64 = 4.0;
 const PR: f64 = 336.0;
-const PT: f64 = 16.0; // room for the tap tooltip
-const PB: f64 = 58.0; // bar baseline; weekday labels sit below
+const PT: f64 = 18.0; // room for the tap tooltip
+const PB: f64 = 82.0; // bar baseline; weekday labels sit below
 
 const BAR_NEUTRAL: &str = "#cfd8e3"; // unevaluable day (no target)
 const BAR_MET: &str = "#1fa463"; // green — target met (ratio ≥ 1.0)
@@ -122,8 +122,8 @@ pub fn DayBars(
                         view! {
                             <g>
                                 <rect x=cx - bar_w / 2.0 y=y width=bar_w height=h rx="1.5" fill=fill/>
-                                <text x=cx y=VH - 4.0 text-anchor="middle" font-size="9"
-                                    fill="var(--bulma-text-weak)">{weekday_ru(date)}</text>
+                                <text x=cx y=VH - 6.0 text-anchor="middle" font-size="14"
+                                    fill="var(--bulma-text)">{weekday_ru(date)}</text>
                             </g>
                         }
                     }).collect_view();

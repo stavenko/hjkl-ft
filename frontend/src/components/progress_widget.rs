@@ -102,12 +102,13 @@ fn gauge_label(key: &str) -> &'static str {
     }
 }
 
-/// Vertical stack of daily-nutrient bars (protein, veg/fruit, calcium, iron,
-/// fiber). Each fills toward its per-day target; the bar is the indicator's
-/// colour, or grey while the metric has no data yet.
+/// Grid of daily-nutrient bars (protein, veg/fruit, calcium, iron, fiber), two
+/// per row so they fit vertically (calories stay full-width above). Each fills
+/// toward its per-day target; the bar is the indicator's colour, or grey while
+/// the metric has no data yet.
 fn daily_gauges_grid(gauges: Vec<indicators::DailyGauge>) -> impl IntoView {
     view! {
-        <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 14px;">
             {gauges.into_iter().map(|g| {
                 let (color, _) = state_colors(g.state);
                 view! {

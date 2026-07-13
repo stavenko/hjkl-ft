@@ -395,7 +395,6 @@ pub fn DashboardPage() -> impl IntoView {
                                 let (stroke, tint) = progress_widget::state_colors(s.state);
                                 let reason = indicator_reason(s.key, s.state, s.missed);
                                 let days = s.days.clone();
-                                let target = s.target;
                                 // One row: [icon] [histogram] [?].
                                 view! {
                                     <div style="display: flex; align-items: center; gap: 10px;">
@@ -407,7 +406,7 @@ pub fn DashboardPage() -> impl IntoView {
                                         </div>
                                         <div style="flex: 1; min-width: 0;">
                                             <DayBars series=Signal::derive(move || days.clone())
-                                                target=target unit="г".to_string()/>
+                                                unit="г".to_string()/>
                                         </div>
                                         <InfoHint text=reason/>
                                     </div>

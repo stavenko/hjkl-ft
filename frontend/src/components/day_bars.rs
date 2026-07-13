@@ -1,7 +1,8 @@
-//! Interactive per-day bar chart with target-based colouring. Bars for days that
-//! MISS the target are drawn red; the rest neutral. A dashed line marks the target.
-//! Tap / drag moves a cursor showing that day's date + value — the same interaction
-//! as the calorie chart. Used under each daily indicator in the expanded view.
+//! Interactive per-day bar chart. Each point is `(date, value, met)`: a day whose
+//! target was NOT met (`met == false`) is drawn RED, the rest neutral. `met` is the
+//! FROZEN flag stored when the day was summarized, so bar colours don't shift when
+//! the target later changes. The day-of-week sits under each bar; tap / drag moves a
+//! cursor showing that day's date + value (same interaction as the calorie chart).
 
 use leptos::*;
 
@@ -14,30 +15,30 @@ fn short_date(s: &str) -> String {
     }
 }
 
+/// Russian two-letter weekday for a "YYYY-MM-DD" date.
+fn weekday_ru(s: &str) -> &'static str {
+    use chrono::Datelike;
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .ok()
+        .map(|d| ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"][d.weekday().num_days_from_monday() as usize])
+        .unwrap_or("")
+}
+
 // Plot geometry (scaled to container width). Compact — it sits inline between the
-// indicator icon and the "?", so it's short: no static axis labels (the tap tooltip
-// shows the date), just enough top room for that tooltip.
+// indicator icon and the "?", with a row of weekday labels under the bars.
 const VW: f64 = 340.0;
-const VH: f64 = 60.0;
+const VH: f64 = 76.0;
 const PL: f64 = 4.0;
 const PR: f64 = 336.0;
-const PT: f64 = 16.0; // room for the tooltip
-const PB: f64 = 58.0;
+const PT: f64 = 16.0; // room for the tap tooltip
+const PB: f64 = 58.0; // bar baseline; weekday labels sit below
 
 const BAR: &str = "#cfd8e3";
 const BAR_MISS: &str = "#e0304f";
 const BAR_ACTIVE: &str = "#3b6fd4";
-const TARGET_LINE: &str = "#9aa0a6";
 
-/// `over_is_bad`: false (default) means an "at least" goal — a day MISSES when its
-/// value is BELOW the target (protein / veg-fruit). True means "at most" (calories).
 #[component]
-pub fn DayBars(
-    series: Signal<Vec<(String, f64)>>,
-    target: f64,
-    #[prop(default = false)] over_is_bad: bool,
-    unit: String,
-) -> impl IntoView {
+pub fn DayBars(series: Signal<Vec<(String, f64, bool)>>, unit: String) -> impl IntoView {
     let active = create_rw_signal(None::<usize>);
     let svg_ref = create_node_ref::<leptos::svg::Svg>();
 
@@ -87,35 +88,29 @@ pub fn DayBars(
                     if n == 0 {
                         return ().into_view();
                     }
-                    let max = data.iter().map(|(_, v)| *v).fold(0.0_f64, f64::max).max(target).max(1.0);
+                    let max = data.iter().map(|(_, v, _)| *v).fold(0.0_f64, f64::max).max(1.0);
                     let mapy = move |v: f64| PB - (v / max) * (PB - PT);
                     let bw = (PR - PL) / n as f64;
                     let bar_w = (bw * 0.62).max(1.0);
                     let sel = active.get();
-                    let miss = move |v: f64| {
-                        target > 0.0 && if over_is_bad { v > target } else { v < target }
-                    };
 
-                    let bars = data.iter().enumerate().map(|(i, (_, v))| {
+                    let bars = data.iter().enumerate().map(|(i, (date, v, met))| {
                         let cx = PL + (i as f64 + 0.5) * bw;
                         let y = mapy(*v);
                         let h = (PB - y).max(0.0);
-                        let fill = if sel == Some(i) { BAR_ACTIVE } else if miss(*v) { BAR_MISS } else { BAR };
+                        let fill = if sel == Some(i) { BAR_ACTIVE } else if *met { BAR } else { BAR_MISS };
                         view! {
-                            <rect x=cx - bar_w / 2.0 y=y width=bar_w height=h rx="1.5" fill=fill/>
+                            <g>
+                                <rect x=cx - bar_w / 2.0 y=y width=bar_w height=h rx="1.5" fill=fill/>
+                                <text x=cx y=VH - 4.0 text-anchor="middle" font-size="9"
+                                    fill="var(--bulma-text-weak)">{weekday_ru(date)}</text>
+                            </g>
                         }
                     }).collect_view();
 
-                    let target_line = (target > 0.0).then(|| {
-                        let ty = mapy(target);
-                        view! {
-                            <line x1=PL y1=ty x2=PR y2=ty stroke=TARGET_LINE stroke-width="1" stroke-dasharray="4 3"/>
-                        }
-                    });
-
                     let unit = unit.clone();
                     let cursor = sel.map(|i| {
-                        let (date, v) = &data[i];
+                        let (date, v, _) = &data[i];
                         let cx = PL + (i as f64 + 0.5) * bw;
                         let tip_x = cx.clamp(PL + 42.0, PR - 42.0);
                         let label = format!("{} · {:.0} {}", short_date(date), v, unit);
@@ -131,13 +126,7 @@ pub fn DayBars(
                         }
                     });
 
-                    view! {
-                        <g>
-                            {bars}
-                            {target_line}
-                            {cursor}
-                        </g>
-                    }.into_view()
+                    view! { <g>{bars}{cursor}</g> }.into_view()
                 }}
             </svg>
         </div>

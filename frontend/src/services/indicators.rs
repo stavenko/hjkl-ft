@@ -157,6 +157,12 @@ pub const UNLOCKED_INDICATORS: &[&str] = &["protein", "veg_fruit"];
 struct IndDay {
     date: String,
     value: f64,
+    /// Whether the day met its target — FROZEN when the day is first summarized,
+    /// using the target valid at that moment. NOT recomputed if the target later
+    /// changes (the goal / weight can move, but "did I hit it that day" must not).
+    /// `None` = a legacy record written before this flag existed.
+    #[serde(default)]
+    met: Option<bool>,
 }
 
 /// Indicator keys that have a per-day cache store. Keep in sync with the `ind_*`
@@ -184,19 +190,39 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
     }
 }
 
-/// Cached-or-computed per-day value. For a cacheable indicator a hit returns the
-/// stored value; a miss computes it and stores it. `date` is expected to be a
-/// COMPLETED day — the caller never caches today (it's still changing).
-async fn day_value_cached(key: &str, date: &str) -> f64 {
+/// Cached-or-computed per-day `(value, met)`. A hit returns the stored pair with
+/// the FROZEN `met` flag; a miss computes the value, freezes `met` against the
+/// CURRENT target, and stores both. `date` is expected to be a COMPLETED day — the
+/// caller never caches today (it's still changing).
+///
+/// `met` is frozen deliberately: the target (protein from weight, veg from sex, the
+/// calorie planka) can change later, but whether a past day hit its target must not
+/// be recomputed retrospectively.
+async fn day_cached(key: &str, date: &str) -> (f64, bool) {
     let Some(store) = cache_store(key) else {
-        return compute_day_value(key, date).await;
+        let value = compute_day_value(key, date).await;
+        return (value, met_now(key, value).await);
     };
     if let Some(rec) = crate::services::db::get::<IndDay>(store, date).await {
-        return rec.value;
+        if let Some(met) = rec.met {
+            return (rec.value, met);
+        }
+        // Legacy record without a frozen flag → freeze it now and re-store.
+        let met = met_now(key, rec.value).await;
+        crate::services::db::put(store, &IndDay { date: date.to_string(), value: rec.value, met: Some(met) }).await;
+        return (rec.value, met);
     }
     let value = compute_day_value(key, date).await;
-    crate::services::db::put(store, &IndDay { date: date.to_string(), value }).await;
-    value
+    let met = met_now(key, value).await;
+    crate::services::db::put(store, &IndDay { date: date.to_string(), value, met: Some(met) }).await;
+    (value, met)
+}
+
+/// Whether `value` meets `key`'s target RIGHT NOW (used only to freeze a day's
+/// flag the first time it's summarized).
+async fn met_now(key: &str, value: f64) -> bool {
+    let target = target_for(key).await;
+    target > 0.0 && value >= target
 }
 
 /// Drop cached values for `date` across every indicator cache — call when the
@@ -256,20 +282,26 @@ fn is_classifier(key: &str) -> bool {
 /// through the per-day cache. Unknown (grey) when the target is unset or a nutrient
 /// metric has no data yet.
 pub async fn indicator_state(key: &str) -> IndicatorState {
-    let target = target_for(key).await;
-    if target <= 0.0 {
+    // Not evaluable yet (e.g. protein before the profile/weight is set).
+    if target_for(key).await <= 0.0 {
         return IndicatorState::Unknown;
     }
     let today = chrono::Local::now().date_naive();
     let days: Vec<NaiveDate> = (1..=7).map(|i| today - Duration::days(i)).collect();
-    let mut values = Vec::with_capacity(days.len());
+    let mut mets = Vec::with_capacity(days.len());
+    let mut any_data = false;
     for d in &days {
-        values.push(day_value_cached(key, &fmt(*d)).await);
+        let (value, met) = day_cached(key, &fmt(*d)).await;
+        if value > 0.0 {
+            any_data = true;
+        }
+        mets.push(met);
     }
-    if !is_classifier(key) && values.iter().sum::<f64>() == 0.0 {
+    if !is_classifier(key) && !any_data {
         return IndicatorState::Unknown;
     }
-    let misses = values.iter().filter(|v| **v < target).count() as u32;
+    // Colour off the FROZEN per-day flags, not a fresh compare to the current target.
+    let misses = mets.iter().filter(|met| !**met).count() as u32;
     daily_state(misses)
 }
 
@@ -283,14 +315,14 @@ pub async fn unlocked_indicator_states() -> Vec<(&'static str, IndicatorState)> 
 }
 
 /// One indicator's per-day history for the expanded view's histogram: the 7
-/// COMPLETED days (oldest → newest) with each day's value, plus the target, state,
-/// and how many of those days MISSED the target.
+/// COMPLETED days (oldest → newest). Each day carries `(date, value, met)`, where
+/// `met` is the FROZEN target flag (see [`day_cached`]) — so the bar colours don't
+/// shift when the target later changes. `missed` = days with `met == false`.
 #[derive(Clone)]
 pub struct IndicatorSeries {
     pub key: &'static str,
-    pub target: f64,
     pub state: IndicatorState,
-    pub days: Vec<(String, f64)>,
+    pub days: Vec<(String, f64, bool)>,
     pub missed: u32,
 }
 
@@ -301,19 +333,14 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
     let dates: Vec<NaiveDate> = (1..=7).rev().map(|i| today - Duration::days(i)).collect();
     let mut out = Vec::new();
     for key in UNLOCKED_INDICATORS.iter().copied() {
-        let target = target_for(key).await;
         let mut days = Vec::with_capacity(dates.len());
         for d in &dates {
-            days.push((fmt(*d), day_value_cached(key, &fmt(*d)).await));
+            let (value, met) = day_cached(key, &fmt(*d)).await;
+            days.push((fmt(*d), value, met));
         }
-        let missed = if target > 0.0 {
-            days.iter().filter(|(_, v)| *v < target).count() as u32
-        } else {
-            0
-        };
+        let missed = days.iter().filter(|(_, _, met)| !*met).count() as u32;
         out.push(IndicatorSeries {
             key,
-            target,
             state: indicator_state(key).await,
             days,
             missed,

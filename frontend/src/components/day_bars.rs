@@ -29,11 +29,11 @@ fn weekday_ru(s: &str) -> &'static str {
 // Plot geometry (scaled to container width). One indicator per row, so it's ~1.5×
 // taller than the old two-up layout, with a row of readable weekday labels below.
 const VW: f64 = 340.0;
-const VH: f64 = 108.0;
+const VH: f64 = 112.0;
 const PL: f64 = 4.0;
 const PR: f64 = 336.0;
-const PT: f64 = 18.0; // room for the tap tooltip
-const PB: f64 = 82.0; // bar baseline; weekday labels sit below
+const PT: f64 = 28.0; // top band reserved for the tap tooltip (text sits above the bars)
+const PB: f64 = 92.0; // bar baseline; weekday labels sit below
 
 const BAR_NEUTRAL: &str = "#cfd8e3"; // unevaluable day (no target)
 const BAR_MET: &str = "#1fa463"; // green — target met (ratio ≥ 1.0)
@@ -132,7 +132,7 @@ pub fn DayBars(
                     let cursor = sel.map(|i| {
                         let (date, v, _) = &data[i];
                         let cx = PL + (i as f64 + 0.5) * bw;
-                        let tip_x = cx.clamp(PL + 42.0, PR - 42.0);
+                        let tip_x = cx.clamp(PL + 52.0, PR - 52.0);
                         let label = format!("{} · {:.0} {}", short_date(date), v, unit);
                         view! {
                             <g>

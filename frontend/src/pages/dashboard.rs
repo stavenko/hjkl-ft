@@ -422,7 +422,7 @@ pub fn DashboardPage() -> impl IntoView {
                                     {daily}
                                     <div>
                                         <div style="border-top: 0.5px solid var(--bulma-border-weak); margin-bottom: 14px;"></div>
-                                        <div style="display: flex; flex-direction: column; gap: 14px;">
+                                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 12px;">
                                             {detail}
                                         </div>
                                     </div>

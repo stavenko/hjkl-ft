@@ -157,12 +157,14 @@ pub const UNLOCKED_INDICATORS: &[&str] = &["protein", "veg_fruit"];
 struct IndDay {
     date: String,
     value: f64,
-    /// Whether the day met its target — FROZEN when the day is first summarized,
-    /// using the target valid at that moment. NOT recomputed if the target later
-    /// changes (the goal / weight can move, but "did I hit it that day" must not).
-    /// `None` = a legacy record written before this flag existed.
+    /// The DEGREE to which the day hit its target: `value / target`, FROZEN with the
+    /// target valid at summarization time (1.0 = exactly on target, 0.5 = half, 1.5 =
+    /// one-and-a-half). Frozen, not recomputed, when the target later changes. Storing
+    /// the ratio (with the value) lets us both show the degree and reconstruct that
+    /// day's target (`target = value / ratio`). `None` = a legacy record (or a day
+    /// summarized while the target was unknown).
     #[serde(default)]
-    met: Option<bool>,
+    ratio: Option<f64>,
 }
 
 /// Indicator keys that have a per-day cache store. Keep in sync with the `ind_*`
@@ -190,39 +192,41 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
     }
 }
 
-/// Cached-or-computed per-day `(value, met)`. A hit returns the stored pair with
-/// the FROZEN `met` flag; a miss computes the value, freezes `met` against the
-/// CURRENT target, and stores both. `date` is expected to be a COMPLETED day — the
-/// caller never caches today (it's still changing).
+/// Cached-or-computed per-day `(value, ratio)`, where `ratio = value / target` is
+/// FROZEN at summarization time (`None` while the target is unknown). A hit returns
+/// the stored pair; a miss computes the value, freezes the ratio, and stores both.
+/// `date` is expected to be a COMPLETED day — the caller never caches today.
 ///
-/// `met` is frozen deliberately: the target (protein from weight, veg from sex, the
-/// calorie planka) can change later, but whether a past day hit its target must not
-/// be recomputed retrospectively.
-async fn day_cached(key: &str, date: &str) -> (f64, bool) {
+/// The ratio is frozen deliberately: the target (protein from weight, veg from sex,
+/// the calorie planka) can change later, but the degree to which a past day hit its
+/// target must not be recomputed retrospectively.
+async fn day_cached(key: &str, date: &str) -> (f64, Option<f64>) {
     let Some(store) = cache_store(key) else {
         let value = compute_day_value(key, date).await;
-        return (value, met_now(key, value).await);
+        return (value, ratio_now(key, value).await);
     };
     if let Some(rec) = crate::services::db::get::<IndDay>(store, date).await {
-        if let Some(met) = rec.met {
-            return (rec.value, met);
+        if rec.ratio.is_some() {
+            return (rec.value, rec.ratio);
         }
-        // Legacy record without a frozen flag → freeze it now and re-store.
-        let met = met_now(key, rec.value).await;
-        crate::services::db::put(store, &IndDay { date: date.to_string(), value: rec.value, met: Some(met) }).await;
-        return (rec.value, met);
+        // Legacy / not-yet-frozen record → freeze now (if the target is known) and store.
+        let ratio = ratio_now(key, rec.value).await;
+        if ratio.is_some() {
+            crate::services::db::put(store, &IndDay { date: date.to_string(), value: rec.value, ratio }).await;
+        }
+        return (rec.value, ratio);
     }
     let value = compute_day_value(key, date).await;
-    let met = met_now(key, value).await;
-    crate::services::db::put(store, &IndDay { date: date.to_string(), value, met: Some(met) }).await;
-    (value, met)
+    let ratio = ratio_now(key, value).await;
+    crate::services::db::put(store, &IndDay { date: date.to_string(), value, ratio }).await;
+    (value, ratio)
 }
 
-/// Whether `value` meets `key`'s target RIGHT NOW (used only to freeze a day's
-/// flag the first time it's summarized).
-async fn met_now(key: &str, value: f64) -> bool {
+/// `value / target` at the CURRENT target — `None` when the target isn't known yet.
+/// Used only to freeze a day's ratio the first time it's summarized.
+async fn ratio_now(key: &str, value: f64) -> Option<f64> {
     let target = target_for(key).await;
-    target > 0.0 && value >= target
+    (target > 0.0).then(|| value / target)
 }
 
 /// Drop cached values for `date` across every indicator cache — call when the
@@ -288,20 +292,21 @@ pub async fn indicator_state(key: &str) -> IndicatorState {
     }
     let today = chrono::Local::now().date_naive();
     let days: Vec<NaiveDate> = (1..=7).map(|i| today - Duration::days(i)).collect();
-    let mut mets = Vec::with_capacity(days.len());
+    let mut ratios = Vec::with_capacity(days.len());
     let mut any_data = false;
     for d in &days {
-        let (value, met) = day_cached(key, &fmt(*d)).await;
+        let (value, ratio) = day_cached(key, &fmt(*d)).await;
         if value > 0.0 {
             any_data = true;
         }
-        mets.push(met);
+        ratios.push(ratio);
     }
     if !is_classifier(key) && !any_data {
         return IndicatorState::Unknown;
     }
-    // Colour off the FROZEN per-day flags, not a fresh compare to the current target.
-    let misses = mets.iter().filter(|met| !**met).count() as u32;
+    // Colour off the FROZEN per-day ratios (< 1.0 = missed), not a fresh compare to
+    // the current target.
+    let misses = ratios.iter().filter(|r| r.map_or(false, |x| x < 1.0)).count() as u32;
     daily_state(misses)
 }
 
@@ -335,7 +340,9 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
     for key in UNLOCKED_INDICATORS.iter().copied() {
         let mut days = Vec::with_capacity(dates.len());
         for d in &dates {
-            let (value, met) = day_cached(key, &fmt(*d)).await;
+            let (value, ratio) = day_cached(key, &fmt(*d)).await;
+            // `met` (not-red) unless the frozen ratio is strictly below 1.0.
+            let met = ratio.map_or(true, |r| r >= 1.0);
             days.push((fmt(*d), value, met));
         }
         let missed = days.iter().filter(|(_, _, met)| !*met).count() as u32;

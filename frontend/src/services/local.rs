@@ -79,10 +79,11 @@ pub async fn list_diary_dates() -> Vec<String> {
 /// (drawn as an empty slot). Same per-entry formula as [`avg_daily_kcal`] — honours
 /// waste and the restaurant surcharge — so the chart matches the diary totals.
 pub async fn daily_kcal_series(window_days: i64) -> Vec<(String, f64)> {
-    let foods = food_map().await;
     // ONE read of the whole diary + in-memory bucketing (not `window_days`
     // separate index queries) so the chart loads in a single frame.
     let all: Vec<DiaryEntry> = db::list_all("diary").await;
+    // Only the foods actually referenced by these entries (a slice, not the table).
+    let foods = foods_by_ids(all.iter().filter(|e| !e.deleted).map(|e| e.food_id.clone())).await;
     let mut by_date: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     for e in &all {
         if e.deleted {
@@ -106,14 +107,16 @@ pub async fn daily_kcal_series(window_days: i64) -> Vec<(String, f64)> {
 
 /// Total effective kcal eaten on `date` (same per-entry formula as the diary).
 pub async fn kcal_on(date: &str) -> f64 {
-    let foods = food_map().await;
-    let mut kc = 0.0;
-    for e in &list_diary(date).await {
-        if let Some(food) = foods.get(&e.food_id) {
-            kc += food.effective_kcal() * (e.grams - e.waste_grams).max(0.0) / 100.0;
-        }
-    }
-    kc
+    let entries = list_diary(date).await;
+    let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
+    entries
+        .iter()
+        .filter_map(|e| {
+            foods
+                .get(&e.food_id)
+                .map(|food| food.effective_kcal() * (e.grams - e.waste_grams).max(0.0) / 100.0)
+        })
+        .sum()
 }
 
 /// Average daily effective kcal over the last `window_days` calendar days,
@@ -122,7 +125,6 @@ pub async fn kcal_on(date: &str) -> f64 {
 /// the diary/summary computes calories (honouring waste and the restaurant
 /// surcharge). Returns `None` when no day in the window has any diary entry.
 pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
-    let foods = food_map().await;
     let today = chrono::Local::now().date_naive();
     // Only COMPLETED days: today is still in progress (maybe just breakfast so
     // far), and averaging a partial day would drag the mean down. So the window
@@ -131,25 +133,33 @@ pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
         .map(|i| (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string())
         .collect();
 
-    let mut day_totals: Vec<f64> = Vec::new();
+    // Diaries for the days that have entries, then only the foods they reference.
+    let mut diaries: Vec<Vec<DiaryEntry>> = Vec::new();
     for d in &dates {
         let diary = list_diary(d).await;
-        if diary.is_empty() {
-            continue;
+        if !diary.is_empty() {
+            diaries.push(diary);
         }
-        let mut kc = 0.0;
-        for e in &diary {
-            if let Some(food) = foods.get(&e.food_id) {
-                let eaten = (e.grams - e.waste_grams).max(0.0);
-                kc += food.effective_kcal() * eaten / 100.0;
-            }
-        }
-        day_totals.push(kc);
     }
-
-    if day_totals.is_empty() {
+    if diaries.is_empty() {
         return None;
     }
+    let foods = foods_by_ids(diaries.iter().flatten().map(|e| e.food_id.clone())).await;
+
+    let day_totals: Vec<f64> = diaries
+        .iter()
+        .map(|diary| {
+            diary
+                .iter()
+                .filter_map(|e| {
+                    foods
+                        .get(&e.food_id)
+                        .map(|food| food.effective_kcal() * (e.grams - e.waste_grams).max(0.0) / 100.0)
+                })
+                .sum()
+        })
+        .collect();
+
     let sum: f64 = day_totals.iter().sum();
     Some(sum / day_totals.len() as f64)
 }
@@ -270,11 +280,11 @@ pub async fn cache_food_tags(verdicts: &[(String, crate::services::ai::FoodTags)
             food.is_red_meat = Some(tags.red_meat);
             food.updated_at = now();
             db::put("foods", &food).await;
+            // Tags (veg/fruit etc.) changed → only the days THIS food was eaten on
+            // need re-summarizing.
+            crate::services::indicators::invalidate_food(id).await;
         }
     }
-    // Tags (veg/fruit etc.) just changed → per-day indicator aggregates for any day
-    // containing these foods are now stale.
-    crate::services::indicators::clear_cache().await;
     crate::services::sync::push_background();
 }
 
@@ -291,9 +301,9 @@ pub async fn cache_food_nutrients(id: &str, values: BTreeMap<String, f64>) {
         }
         food.updated_at = now();
         db::put("foods", &food).await;
-        // Nutrient values changed → indicator aggregates for days with this food
-        // are stale.
-        crate::services::indicators::clear_cache().await;
+        // Nutrient values changed → only the days this food was eaten on need
+        // re-summarizing.
+        crate::services::indicators::invalidate_food(id).await;
         crate::services::sync::push_background();
     }
 }
@@ -319,41 +329,48 @@ pub fn is_zero_cal_drink(food: &Food) -> bool {
     is_drink_food(food) && food.kcal <= 5.0
 }
 
-/// Build a food-id → Food lookup over all stored foods.
-async fn food_map() -> BTreeMap<String, Food> {
-    list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect()
+/// Fetch ONLY the foods with these ids (deduped), each by primary key — a bounded
+/// slice, never the whole `foods` table. Missing ids are skipped. Every per-day
+/// aggregate loads just the handful of foods its own diary slice references, so
+/// cost scales with what was eaten that day, not with the size of the foods table.
+async fn foods_by_ids(ids: impl IntoIterator<Item = String>) -> BTreeMap<String, Food> {
+    let unique: std::collections::HashSet<String> = ids.into_iter().collect();
+    let mut map = BTreeMap::new();
+    for id in unique {
+        if let Some(f) = db::get::<Food>("foods", &id).await {
+            map.insert(id, f);
+        }
+    }
+    map
 }
 
 /// True if the diary for `date` contains at least one SNACK food.
 pub async fn snack_logged_on(date: &str) -> bool {
-    let foods = food_map().await;
-    list_diary(date).await.iter().any(|e| {
-        foods.get(&e.food_id).map_or(false, is_snack_food)
-    })
+    let entries = list_diary(date).await;
+    let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
+    entries.iter().any(|e| foods.get(&e.food_id).map_or(false, is_snack_food))
 }
 
 /// True if the diary for `date` contains at least one HIGH-CAL drink.
 pub async fn high_cal_drink_on(date: &str) -> bool {
-    let foods = food_map().await;
-    list_diary(date).await.iter().any(|e| {
-        foods.get(&e.food_id).map_or(false, is_high_cal_drink)
-    })
+    let entries = list_diary(date).await;
+    let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
+    entries.iter().any(|e| foods.get(&e.food_id).map_or(false, is_high_cal_drink))
 }
 
 /// True if the diary for `date` contains at least one ZERO-CAL drink.
 pub async fn zero_cal_drink_on(date: &str) -> bool {
-    let foods = food_map().await;
-    list_diary(date).await.iter().any(|e| {
-        foods.get(&e.food_id).map_or(false, is_zero_cal_drink)
-    })
+    let entries = list_diary(date).await;
+    let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
+    entries.iter().any(|e| foods.get(&e.food_id).map_or(false, is_zero_cal_drink))
 }
 
 /// Evening protein (grams) on `date`: sum of `protein * eaten_grams / 100`
 /// (honouring waste, like the diary) over entries whose derived meal bucket is
 /// Dinner or NightSnack.
 pub async fn evening_protein_on(date: &str) -> f64 {
-    let foods = food_map().await;
     let diary = list_diary(date).await;
+    let foods = foods_by_ids(diary.iter().map(|e| e.food_id.clone())).await;
     let groups = crate::services::meal_split::group_by_meal(&diary);
     use crate::services::meal_split::MealType;
     let mut total = 0.0;
@@ -379,16 +396,33 @@ pub async fn evening_protein_on(date: &str) -> f64 {
 /// contribute their full eaten grams when they match. Ingredients are treated as
 /// leaf foods (no nested-recipe recursion in v1).
 pub async fn food_tag_grams_on(date: &str, selector: impl Fn(&Food) -> bool) -> f64 {
-    let foods = food_map().await;
-    let recipes: BTreeMap<String, Recipe> =
-        list_recipes().await.into_iter().map(|r| (r.id.clone(), r)).collect();
+    let entries = list_diary(date).await;
+    // The day's own foods (needed to know which entries are recipe dishes).
+    let mut foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
+
+    // Only the recipes those dishes reference, and only their ingredients (by
+    // index) — never the whole recipes/ingredients tables.
+    let recipe_ids: std::collections::HashSet<String> =
+        foods.values().filter_map(|f| f.recipe_id.clone()).collect();
+    let mut recipes: BTreeMap<String, Recipe> = BTreeMap::new();
     let mut ings_by_recipe: BTreeMap<String, Vec<RecipeIngredient>> = BTreeMap::new();
-    for ing in list_recipe_ingredients().await {
-        ings_by_recipe.entry(ing.recipe_id.clone()).or_default().push(ing);
+    for rid in &recipe_ids {
+        if let Some(r) = db::get::<Recipe>("recipes", rid).await {
+            recipes.insert(rid.clone(), r);
+        }
+        ings_by_recipe.insert(
+            rid.clone(),
+            db::list_by_index("recipe_ingredients", "recipe_id", rid).await,
+        );
+    }
+    // Leaf ingredient foods, so the selector can be evaluated on them too.
+    let ing_ids: Vec<String> = ings_by_recipe.values().flatten().map(|i| i.food_id.clone()).collect();
+    for (id, f) in foods_by_ids(ing_ids).await {
+        foods.entry(id).or_insert(f);
     }
 
     let mut total = 0.0;
-    for e in list_diary(date).await {
+    for e in entries {
         let Some(food) = foods.get(&e.food_id) else { continue };
         let eaten = (e.grams - e.waste_grams).max(0.0);
         if eaten <= 0.0 {
@@ -439,8 +473,9 @@ pub async fn red_meat_grams_on(date: &str) -> f64 {
 /// already carry the SUMMED ingredient nutrients per 100 g (see `finish_recipe`),
 /// so no composition expansion is needed here. Unit is whatever the nutrient uses.
 pub async fn nutrient_grams_on(date: &str, key: &str) -> f64 {
-    let foods = food_map().await;
-    list_diary(date).await.iter().filter_map(|e| {
+    let entries = list_diary(date).await;
+    let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
+    entries.iter().filter_map(|e| {
         foods.get(&e.food_id).and_then(|f| f.nutrients.get(key)).map(|v| {
             let eaten = (e.grams - e.waste_grams).max(0.0);
             v * eaten / 100.0
@@ -451,8 +486,9 @@ pub async fn nutrient_grams_on(date: &str, key: &str) -> f64 {
 /// Total protein (grams) eaten on `date` — sum of `protein * eaten_grams / 100`
 /// over the day's diary entries (honouring waste).
 pub async fn protein_grams_on(date: &str) -> f64 {
-    let foods = food_map().await;
-    list_diary(date).await.iter().filter_map(|e| {
+    let entries = list_diary(date).await;
+    let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
+    entries.iter().filter_map(|e| {
         foods.get(&e.food_id).map(|f| {
             let eaten = (e.grams - e.waste_grams).max(0.0);
             f.protein * eaten / 100.0

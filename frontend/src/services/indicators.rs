@@ -207,11 +207,24 @@ pub async fn invalidate_day(date: &str) {
     }
 }
 
-/// Clear every indicator cache — call when a food's nutrients/tags change (a food
-/// edit or a background classification), since that can shift many days' values.
+/// Clear every indicator cache — call for a bulk change (e.g. a range delete) that
+/// can touch arbitrary past days.
 pub async fn clear_cache() {
     for store in CACHED_STORES {
         crate::services::db::clear(store).await;
+    }
+}
+
+/// Invalidate cached days affected by a change to `food_id` — every distinct diary
+/// date that food appears on (via the diary `food_id` index). A change to a food
+/// only ever affects the days it was eaten, so classifying/​editing a food logged
+/// today invalidates only today (not a completed day) and the cache stays warm.
+pub async fn invalidate_food(food_id: &str) {
+    let entries: Vec<api_types::DiaryEntry> =
+        crate::services::db::list_by_index("diary", "food_id", food_id).await;
+    let dates: HashSet<String> = entries.into_iter().map(|e| e.date).collect();
+    for d in dates {
+        invalidate_day(&d).await;
     }
 }
 

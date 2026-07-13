@@ -1230,6 +1230,40 @@ pub async fn set_calorie_goal(amount: f64) {
             .await;
         }
     }
+    // The planka now matches the current goal/trend again.
+    set_planka_stale(false);
+}
+
+// ── "Planka needs recalculating" signal ──────────────────────────────────────
+// Raised when the course goal changes (the old planka no longer fits the new
+// goal); cleared whenever the planka is (re)computed. Persisted per device.
+const PLANKA_STALE_KEY: &str = "planka_stale";
+thread_local! {
+    static PLANKA_STALE: std::cell::RefCell<Option<leptos::RwSignal<bool>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Create the signal at the root, seeded from the persisted flag. Call from main().
+pub fn init_planka_stale() {
+    PLANKA_STALE.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some(leptos::create_rw_signal(
+                crate::services::app_flags::get_bool(PLANKA_STALE_KEY),
+            ));
+        }
+    });
+}
+
+/// Reactive flag: the planka should be recomputed (the course goal changed).
+pub fn planka_stale_signal() -> leptos::RwSignal<bool> {
+    PLANKA_STALE.with(|c| c.borrow().expect("init_planka_stale() must run first"))
+}
+
+/// Set/clear the "planka needs recalculating" flag (persisted + reactive).
+pub fn set_planka_stale(v: bool) {
+    use leptos::SignalSet;
+    crate::services::app_flags::set_bool(PLANKA_STALE_KEY, v);
+    planka_stale_signal().set(v);
 }
 
 /// Create or update the daily Steps `AtLeast` goal to `amount` steps. A real

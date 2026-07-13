@@ -49,6 +49,7 @@ pub fn main() {
         services::net::init(); // connectivity signals at the root
         services::subscription::init(); // subscription gate signal at the root
         services::push::init_received(); // "notification received on this device" signal
+        services::local::init_planka_stale(); // "planka needs recompute" signal at the root
         services::classify::init(); // reset the background food-classification queue
         services::errors::init(); // background-error log signal at the root
 

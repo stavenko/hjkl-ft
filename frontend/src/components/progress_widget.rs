@@ -193,6 +193,9 @@ pub fn ProgressWidget() -> impl IntoView {
             busy.set(false);
         });
     };
+    // Raised when the course goal changes → the calorie planka no longer fits, so
+    // the widget prompts a recompute instead of showing the (stale) calorie gauge.
+    let planka_stale = local::planka_stale_signal();
 
     let goal_word = move || match profile::get_goal() {
         CourseGoal::Lose => t("dashboard.progress.word_lose"),
@@ -230,19 +233,43 @@ pub fn ProgressWidget() -> impl IntoView {
                         // in place of the old plain number. Green while under the
                         // target, red once over (it's an «at most» goal).
                         Some(n) => {
-                            let eaten = today_kcal.get().unwrap_or(0.0);
-                            let color = if eaten > n { "#e0304f" } else { "#1fa463" }.to_string();
+                            let calorie = if planka_stale.get() {
+                                // Goal changed → the planka is out of date. Show a prompt +
+                                // recompute button in place of the calorie gauge.
+                                view! {
+                                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                                        <span class="is-size-7 has-text-grey has-text-weight-medium">
+                                            {move || t("dashboard.progress.done_title")}
+                                        </span>
+                                        <p class="is-size-7" style="margin: 0; line-height: 1.4;">
+                                            {move || t("dashboard.progress.recalc_needed")}
+                                        </p>
+                                        <button class="button is-link is-fullwidth"
+                                            prop:disabled=move || busy.get()
+                                            on:pointerup=|ev: web_sys::PointerEvent| ev.stop_propagation()
+                                            on:click=calculate>
+                                            {move || t("dashboard.progress.recalc")}
+                                        </button>
+                                    </div>
+                                }.into_view()
+                            } else {
+                                let eaten = today_kcal.get().unwrap_or(0.0);
+                                let color = if eaten > n { "#e0304f" } else { "#1fa463" }.to_string();
+                                view! {
+                                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                                        <span class="is-size-7 has-text-grey has-text-weight-medium">
+                                            {move || t("dashboard.progress.done_title")}
+                                        </span>
+                                        <crate::components::gauge::Gauge
+                                            value=eaten target=n
+                                            label=t("dashboard.calories_title").to_string()
+                                            unit=t("common.unit.kcal").to_string()
+                                            color=color height=12.0/>
+                                    </div>
+                                }.into_view()
+                            };
                             view! {
-                                <div style="display: flex; flex-direction: column; gap: 10px;">
-                                    <span class="is-size-7 has-text-grey has-text-weight-medium">
-                                        {move || t("dashboard.progress.done_title")}
-                                    </span>
-                                    <crate::components::gauge::Gauge
-                                        value=eaten target=n
-                                        label=t("dashboard.calories_title").to_string()
-                                        unit=t("common.unit.kcal").to_string()
-                                        color=color height=12.0/>
-                                </div>
+                                {calorie}
                                 // Daily-nutrient bars below the calorie one.
                                 {move || gauges_s().map(daily_gauges_grid)}
                             }.into_view()

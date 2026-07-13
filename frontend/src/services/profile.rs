@@ -134,14 +134,19 @@ pub fn get_goal() -> CourseGoal {
     })
 }
 
-/// Store the course goal.
+/// Store the course goal. A CHANGE flags the calorie planka as needing a recompute
+/// (the old planka was derived for the previous goal).
 pub fn set_goal(goal: CourseGoal) {
+    let changed = get_goal() != goal;
     let v = match goal {
         CourseGoal::Lose => "lose",
         CourseGoal::Gain => "gain",
         CourseGoal::Maintain => "maintain",
     };
     write(|r| r.goal = Some(v.to_string()));
+    if changed {
+        crate::services::local::set_planka_stale(true);
+    }
 }
 
 /// First day of the current menstrual cycle (YYYY-MM-DD), if set.

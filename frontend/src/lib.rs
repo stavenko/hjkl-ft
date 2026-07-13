@@ -6,11 +6,9 @@ pub mod services;
 #[cfg(not(test))]
 use wasm_bindgen::prelude::wasm_bindgen;
 
-/// Poll interval for the update check (ms). 30s for now; will be raised to ~1h.
-#[cfg(not(test))]
-const UPDATE_POLL_MS: i32 = 30_000;
 /// Interval for the connectivity re-probe (ms). RU networks flap, so we re-check
-/// server reachability regularly to keep the offline warning honest.
+/// server reachability regularly to keep the offline warning honest. Pings ONLY
+/// the AI worker (one request per tick).
 #[cfg(not(test))]
 const PROBE_POLL_MS: i32 = 15_000;
 
@@ -68,13 +66,13 @@ pub fn main() {
         services::story::refresh_attention();
 
         // Background listeners/timers: focus re-sync, notification receipts,
-        // connectivity re-probe on online/offline + a periodic probe, and the
-        // update poll.
+        // connectivity re-probe on online/offline + a periodic probe. The update
+        // check runs ONCE at start (in bootstrap_network below) — no polling; a
+        // manual "check for update" lives in Settings.
         install_foreground_sync();
         install_notif_receipt_poll();
         install_connectivity_listeners();
         install_periodic_probe();
-        install_update_poll();
 
         // ---- Background network bootstrap: prepare the connection, then use it. ----
         leptos::spawn_local(bootstrap_network());
@@ -131,7 +129,6 @@ fn install_foreground_sync() {
             // the network (VPN toggled, tunnel dropped) — refresh is_online so the
             // warning is honest and the follow-ups gate correctly.
             services::net::probe_background();
-            services::update::check_background();
             services::story::refresh_attention();
             if services::auth::get_token().is_some() {
                 services::sync::sync_now_background();
@@ -216,24 +213,6 @@ fn install_periodic_probe() {
     let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
         cb.as_ref().unchecked_ref(),
         PROBE_POLL_MS,
-    );
-    cb.forget();
-}
-
-/// Poll `/version.json` on a timer so a freshly deployed build is offered without
-/// a resume. `check_background` no-ops while offline.
-#[cfg(not(test))]
-fn install_update_poll() {
-    use wasm_bindgen::prelude::Closure;
-    use wasm_bindgen::JsCast;
-
-    let Some(window) = web_sys::window() else { return };
-    let cb = Closure::<dyn Fn()>::new(move || {
-        services::update::check_background();
-    });
-    let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
-        cb.as_ref().unchecked_ref(),
-        UPDATE_POLL_MS,
     );
     cb.forget();
 }

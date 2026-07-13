@@ -66,18 +66,6 @@ impl Worker {
     }
 }
 
-/// Secondary workers probed for the degraded list (AI is handled separately as
-/// the primary online signal).
-const SECONDARY: &[Worker] = &[
-    Worker::Sync,
-    Worker::Auth,
-    Worker::Payment,
-    Worker::Ocr,
-    Worker::Bug,
-    Worker::Support,
-    Worker::Push,
-];
-
 thread_local! {
     // Tri-state: `None` = not probed yet (we genuinely don't know — draw no
     // warning AND treat as not-online, so nothing goes to the network on a guess);
@@ -148,27 +136,20 @@ async fn reachable(base: &str) -> bool {
     )
 }
 
-/// Probe the AI worker (→ [`is_online`]) and, if online, the secondary workers
-/// (→ [`degraded`]). Fire-and-forget via [`probe_background`] from the bootstrap,
+/// Probe ONLY the AI worker (→ [`is_online`]). We deliberately don't proactively
+/// probe the secondary workers — that was 8 `/health` requests per tick, a large
+/// share of the account's daily request budget for a single user. The `degraded`
+/// list is instead populated by REAL request failures (see [`note_failure`]) and
+/// reset on reconnect. Fire-and-forget via [`probe_background`] from the bootstrap,
 /// resume, connectivity events, and the periodic timer.
 pub async fn probe() {
+    let was = is_online().get_untracked();
     let ai_ok = reachable(Worker::Ai.base()).await;
     is_online().set(Some(ai_ok));
-
-    if !ai_ok {
-        // Can't reach the critical worker — the triangle already says "offline";
-        // don't also enumerate the rest (likely all blocked by the same VPN gap).
+    if ai_ok && was != Some(true) {
+        // (Re)connected — drop stale degraded entries; real failures re-add them.
         degraded().set(Vec::new());
-        return;
     }
-
-    let mut down = Vec::new();
-    for &w in SECONDARY {
-        if !reachable(w.base()).await {
-            down.push(w);
-        }
-    }
-    degraded().set(down);
 }
 
 /// Fire-and-forget connectivity probe.
@@ -226,13 +207,6 @@ mod tests {
         Worker::Support,
         Worker::Push,
     ];
-
-    #[test]
-    fn primary_ai_not_in_secondary() {
-        // AI drives is_online on its own; if it were also in SECONDARY the degraded
-        // list would double-count it and contradict the offline warning.
-        assert!(!SECONDARY.contains(&Worker::Ai));
-    }
 
     #[test]
     fn label_keys_are_unique() {

@@ -23,6 +23,7 @@ thread_local! {
     static HASFOOD_CACHE: RefCell<Option<bool>> = const { RefCell::new(None) };
     static COUNTS_CACHE: RefCell<Option<(u32, u32, u32)>> = const { RefCell::new(None) };
     static INDS_CACHE: RefCell<Option<Option<Vec<(String, IndicatorState)>>>> = const { RefCell::new(None) };
+    static GAUGES_CACHE: RefCell<Option<Vec<indicators::DailyGauge>>> = const { RefCell::new(None) };
 }
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 16px; \
@@ -90,6 +91,37 @@ fn indicators_row(states: Vec<(String, IndicatorState)>) -> impl IntoView {
     }
 }
 
+/// Short label under a daily gauge.
+fn gauge_label(key: &str) -> &'static str {
+    match key {
+        "protein" => "Белок",
+        "veg_fruit" => "Фр/овощи",
+        "calcium" => "Кальций",
+        "iron" => "Железо",
+        _ => "Клетчатка",
+    }
+}
+
+/// Grid of daily-nutrient gauges (protein, veg/fruit, calcium, iron, fiber), two
+/// per row. Each fills toward its per-day target; the ring is the indicator's
+/// colour, or grey while the metric has no data yet.
+fn daily_gauges_grid(gauges: Vec<indicators::DailyGauge>) -> impl IntoView {
+    view! {
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 4px; justify-items: center;">
+            {gauges.into_iter().map(|g| {
+                let (color, _) = state_colors(g.state);
+                view! {
+                    <crate::components::gauge::Gauge
+                        value=g.value target=g.target
+                        label=gauge_label(g.key).to_string()
+                        unit=g.unit.to_string()
+                        color=color.to_string() size=86.0/>
+                }
+            }).collect_view()}
+        </div>
+    }
+}
+
 #[component]
 pub fn ProgressWidget() -> impl IntoView {
     // «X/7» counters refresh when any of the three stores change.
@@ -110,6 +142,15 @@ pub fn ProgressWidget() -> impl IntoView {
     // The planka, once set, flips the widget to its "done" state.
     let goals_ver = db::version("goals");
     let planka = create_resource(move || goals_ver.get(), |_| async { local::calorie_goal_amount().await });
+
+    // Calories eaten TODAY (for the done-state gauge). Refreshes on diary edits.
+    let today_kcal = create_resource(
+        move || food_ver.get(),
+        |_| async {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            local::kcal_on(&today).await
+        },
+    );
 
     // Sticky views of the resources: `None` only until the first successful load
     // (→ render nothing), then fresh-or-last-known across navigations.
@@ -133,6 +174,15 @@ pub fn ProgressWidget() -> impl IntoView {
         },
     );
     let inds_s = move || sticky(&INDS_CACHE, inds.get());
+
+    // Daily-nutrient gauges (today's amount vs each per-day target). Depends on the
+    // diary, the foods (nutrient values / tags) and the latest weight (protein
+    // target is derived from fat-free mass). Grey until data appears per metric.
+    let gauges = create_local_resource(
+        move || (food_ver.get(), foods_ver.get(), weight_ver.get()),
+        |_| async { indicators::daily_gauges().await },
+    );
+    let gauges_s = move || sticky(&GAUGES_CACHE, gauges.get());
 
     let busy = create_rw_signal(false);
     let calculate = move |_| {
@@ -178,16 +228,27 @@ pub fn ProgressWidget() -> impl IntoView {
             view! {
                 <div style=CARD>
                     {match planka_v {
-                        // Already computed → show the resulting daily calorie target.
-                        Some(n) => view! {
-                            <div style="display: flex; flex-direction: column; gap: 6px;">
-                                <span class="is-size-6 has-text-grey">{move || t("dashboard.progress.done_title")}</span>
-                                <span class="is-size-3 has-text-weight-bold">
-                                    {format!("{} {}", n.round() as i64, t("dashboard.progress.kcal_day"))}
-                                </span>
-                                <span class="is-size-7 has-text-grey">{move || t("dashboard.progress.done_hint")}</span>
-                            </div>
-                        }.into_view(),
+                        // Planka computed → a calorie GAUGE (eaten today / target),
+                        // in place of the old plain number. Green while under the
+                        // target, red once over (it's an «at most» goal).
+                        Some(n) => {
+                            let eaten = today_kcal.get().unwrap_or(0.0);
+                            let color = if eaten > n { "#e0304f" } else { "#1fa463" }.to_string();
+                            view! {
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                                    <span class="is-size-7 has-text-grey has-text-weight-medium" style="align-self: flex-start;">
+                                        {move || t("dashboard.progress.done_title")}
+                                    </span>
+                                    <crate::components::gauge::Gauge
+                                        value=eaten target=n
+                                        label=t("dashboard.calories_title").to_string()
+                                        unit=t("common.unit.kcal").to_string()
+                                        color=color size=118.0/>
+                                </div>
+                                // Daily-nutrient gauges below the calorie one.
+                                {move || gauges_s().map(daily_gauges_grid)}
+                            }.into_view()
+                        },
                         // Before the first food entry: explain how to add food + «?».
                         None if !has_food_v => {
                             let go_help = move |_| use_navigate()("/help/food", Default::default());
@@ -245,10 +306,17 @@ pub fn ProgressWidget() -> impl IntoView {
                             }.into_view()
                         }
                     }}
-                    // Nutrition indicators row at the BOTTOM (only after ≥1 week of diary).
-                    {move || inds_s().flatten().map(|states| view! {
-                        <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
-                        {indicators_row(states)}
+                    // Weekly-goal indicators (omega-3 / eggs / red meat) as icons at
+                    // the BOTTOM (only after ≥1 week of diary). The daily goals are
+                    // shown above as gauges, so they're filtered out here.
+                    {move || inds_s().flatten().map(|states| {
+                        let weekly: Vec<(String, IndicatorState)> = states.into_iter()
+                            .filter(|(k, _)| matches!(k.as_str(), "omega3" | "eggs" | "red_meat"))
+                            .collect();
+                        view! {
+                            <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
+                            {indicators_row(weekly)}
+                        }
                     })}
                 </div>
             }.into_view()

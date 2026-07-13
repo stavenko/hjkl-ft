@@ -44,6 +44,22 @@ fn read_diag_log() -> String {
 pub fn SettingsPage() -> impl IntoView {
     let navigate = use_navigate();
 
+    // Manual "check for update" (there's no polling anymore — only a check at
+    // launch + this button). Sets `checking` while the /version.json fetch runs;
+    // if a newer build exists, `update::available()` flips and the row shows
+    // «Обновить».
+    let checking = create_rw_signal(false);
+    let check_update = move |_| {
+        if checking.get_untracked() {
+            return;
+        }
+        checking.set(true);
+        spawn_local(async move {
+            update::check().await;
+            checking.set(false);
+        });
+    };
+
     // Diagnostics («Разработка»): the notif/deep-link breadcrumb log, refreshable.
     let diag_log = create_rw_signal(read_diag_log());
     let refresh_diag = move |_| diag_log.set(read_diag_log());
@@ -178,16 +194,32 @@ pub fn SettingsPage() -> impl IntoView {
                             </p>
                         </div>
                     </div>
-                    {move || update::available().get().then(|| view! {
-                        <button
-                            attr:data-testid="settings-btn-update"
-                            class="button is-link is-small"
-                            style="flex-shrink: 0;"
-                            on:click=move |_| update::reload()
-                        >
-                            {move || t("settings.version_update")}
-                        </button>
-                    })}
+                    // Update available → «Обновить» (reload); otherwise a manual
+                    // «Проверить обновление» (there is no background polling).
+                    {move || if update::available().get() {
+                        view! {
+                            <button
+                                attr:data-testid="settings-btn-update"
+                                class="button is-link is-small"
+                                style="flex-shrink: 0;"
+                                on:click=move |_| update::reload()
+                            >
+                                {move || t("settings.version_update")}
+                            </button>
+                        }.into_view()
+                    } else {
+                        view! {
+                            <button
+                                attr:data-testid="settings-btn-check-update"
+                                class="button is-light is-small"
+                                style="flex-shrink: 0;"
+                                prop:disabled=move || checking.get()
+                                on:click=check_update
+                            >
+                                {move || if checking.get() { t("settings.version_checking") } else { t("settings.version_check") }}
+                            </button>
+                        }.into_view()
+                    }}
                 </div>
             </div>
 

@@ -104,6 +104,18 @@ pub async fn daily_kcal_series(window_days: i64) -> Vec<(String, f64)> {
         .collect()
 }
 
+/// Total effective kcal eaten on `date` (same per-entry formula as the diary).
+pub async fn kcal_on(date: &str) -> f64 {
+    let foods = food_map().await;
+    let mut kc = 0.0;
+    for e in &list_diary(date).await {
+        if let Some(food) = foods.get(&e.food_id) {
+            kc += food.effective_kcal() * (e.grams - e.waste_grams).max(0.0) / 100.0;
+        }
+    }
+    kc
+}
+
 /// Average daily effective kcal over the last `window_days` calendar days,
 /// counting ONLY days that have diary entries. Per-day kcal is the sum of each
 /// entry's `effective_kcal() * (grams - waste_grams).max(0) / 100` — exactly how
@@ -112,7 +124,10 @@ pub async fn daily_kcal_series(window_days: i64) -> Vec<(String, f64)> {
 pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
     let foods = food_map().await;
     let today = chrono::Local::now().date_naive();
-    let dates: Vec<String> = (0..window_days)
+    // Only COMPLETED days: today is still in progress (maybe just breakfast so
+    // far), and averaging a partial day would drag the mean down. So the window
+    // is the `window_days` days ENDING YESTERDAY (today-1 … today-window_days).
+    let dates: Vec<String> = (1..=window_days)
         .map(|i| (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string())
         .collect();
 
@@ -142,18 +157,19 @@ pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
 /// Compute the daily calorie planka from the average daily kcal and the weight
 /// balance. In a deficit the planka is the average itself; for maintenance or a
 /// surplus it is 5% below the average. The result is rounded to the nearest
-/// 10 kcal. Pure (no I/O) so it is unit-testable.
+/// 50 kcal. Pure (no I/O) so it is unit-testable.
 pub fn calorie_planka(avg_kcal: f64, balance: crate::services::weight_trend::BalanceState) -> f64 {
     use crate::services::weight_trend::BalanceState;
     let raw = if balance == BalanceState::Deficit { avg_kcal } else { avg_kcal * 0.95 };
-    (raw / 10.0).round() * 10.0
+    (raw / 50.0).round() * 50.0
 }
 
 /// The suggested daily calorie planka shown (and accepted) in ch3: average intake
-/// over the last 7 logged days, adjusted for the current weight balance via
-/// [`calorie_planka`] (deficit → keep; maintenance/surplus → −5%, rounded to 10).
-/// `None` when there are no logged days yet. Single source of truth so the widget's
-/// displayed figure and the value it accepts cannot drift apart.
+/// over the last 7 COMPLETED days (today excluded — it's still in progress),
+/// adjusted for the current weight balance via [`calorie_planka`] (deficit → keep;
+/// maintenance/surplus → −5%, rounded to 50). `None` when there are no logged days
+/// yet. Single source of truth so the widget's displayed figure and the value it
+/// accepts cannot drift apart.
 pub async fn calorie_planka_suggestion() -> Option<f64> {
     use crate::services::weight_trend::{self, DEFAULT_WINDOW_DAYS};
     let avg = avg_daily_kcal(7).await?;
@@ -1326,22 +1342,23 @@ mod tests {
     use crate::services::weight_trend::BalanceState;
 
     #[test]
-    fn calorie_planka_deficit_is_avg_rounded_to_10() {
-        // Deficit -> avg itself, rounded to nearest 10.
+    fn calorie_planka_deficit_is_avg_rounded_to_50() {
+        // Deficit -> avg itself, rounded to nearest 50.
         assert_eq!(calorie_planka(2000.0, BalanceState::Deficit), 2000.0);
-        assert_eq!(calorie_planka(1994.0, BalanceState::Deficit), 1990.0);
-        assert_eq!(calorie_planka(1996.0, BalanceState::Deficit), 2000.0);
+        assert_eq!(calorie_planka(2490.0, BalanceState::Deficit), 2500.0); // 49.8 -> 50
+        assert_eq!(calorie_planka(2470.0, BalanceState::Deficit), 2450.0); // 49.4 -> 49
+        assert_eq!(calorie_planka(2475.0, BalanceState::Deficit), 2500.0); // 49.5 -> 50
     }
 
     #[test]
-    fn calorie_planka_non_deficit_is_minus_5pct_rounded_to_10() {
-        // Maintenance / Surplus -> avg * 0.95, rounded to nearest 10.
+    fn calorie_planka_non_deficit_is_minus_5pct_rounded_to_50() {
+        // Maintenance / Surplus -> avg * 0.95, rounded to nearest 50.
         // 2000 * 0.95 = 1900.0
         assert_eq!(calorie_planka(2000.0, BalanceState::Maintenance), 1900.0);
         assert_eq!(calorie_planka(2000.0, BalanceState::Surplus), 1900.0);
         // 2100 * 0.95 = 1995.0 -> rounds to 2000.
         assert_eq!(calorie_planka(2100.0, BalanceState::Maintenance), 2000.0);
-        // 2050 * 0.95 = 1947.5 -> rounds to 1950.
+        // 2050 * 0.95 = 1947.5 -> 38.95 -> 39 -> 1950.
         assert_eq!(calorie_planka(2050.0, BalanceState::Surplus), 1950.0);
     }
 }

@@ -140,6 +140,89 @@ pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
     ]
 }
 
+/// One daily-goal gauge: today's amount toward `target`, plus the 7-day state
+/// that colours it. `state == Unknown` → the metric has no data yet (grey ring).
+#[derive(Clone)]
+pub struct DailyGauge {
+    pub key: &'static str,
+    pub value: f64, // eaten TODAY, in `unit`
+    pub target: f64,
+    pub unit: &'static str,
+    pub state: IndicatorState,
+}
+
+/// Today's progress toward each DAILY nutrient target (protein, veg/fruit,
+/// calcium, iron, fiber), for the dashboard gauges. Each carries the same 7-day
+/// indicator state as [`compute`] so the ring is drawn in the indicator's colour
+/// (grey while the metric has no data at all — e.g. calcium before enrichment).
+pub async fn daily_gauges() -> Vec<DailyGauge> {
+    let today = chrono::Local::now().date_naive();
+    let last7: Vec<NaiveDate> = (0..7).map(|i| today - Duration::days(i)).collect();
+    let td = fmt(today);
+
+    // Protein target = 1.6 g/kg of estimated fat-free mass (Deurenberg BF%) of the
+    // latest logged weight; 0 when weight/profile is incomplete (→ Unknown/grey).
+    let protein_target = local::list_weight_entries()
+        .await
+        .into_iter()
+        .last()
+        .map(|e| profile::protein_target_from_profile(e.weight_kg))
+        .unwrap_or(0) as f64;
+    let protein_today = local::protein_grams_on(&td).await;
+    let mut protein_week = Vec::with_capacity(7);
+    for d in &last7 {
+        protein_week.push(local::protein_grams_on(&fmt(*d)).await);
+    }
+    let protein_state = if protein_target <= 0.0 {
+        IndicatorState::Unknown
+    } else {
+        daily_state(protein_week.iter().filter(|v| **v < protein_target).count() as u32)
+    };
+
+    let veg = gather_veg(&last7).await;
+    let cal = gather_nutrient(&last7, N_CALCIUM).await;
+    let iron = gather_nutrient(&last7, N_IRON).await;
+    let fib = gather_nutrient(&last7, N_FIBER).await;
+
+    vec![
+        DailyGauge {
+            key: "protein",
+            value: protein_today,
+            target: protein_target,
+            unit: "г",
+            state: protein_state,
+        },
+        DailyGauge {
+            key: "veg_fruit",
+            value: local::veg_fruit_grams_on(&td).await,
+            target: veg_fruit_per_day_g(),
+            unit: "г",
+            state: daily_classifier(&veg, &last7, veg_fruit_per_day_g()),
+        },
+        DailyGauge {
+            key: "calcium",
+            value: local::nutrient_grams_on(&td, N_CALCIUM).await,
+            target: CALCIUM_PER_DAY_MG,
+            unit: "мг",
+            state: daily_nutrient(&cal, &last7, CALCIUM_PER_DAY_MG),
+        },
+        DailyGauge {
+            key: "iron",
+            value: local::nutrient_grams_on(&td, N_IRON).await,
+            target: iron_per_day_mg(),
+            unit: "мг",
+            state: daily_nutrient(&iron, &last7, iron_per_day_mg()),
+        },
+        DailyGauge {
+            key: "fiber",
+            value: local::nutrient_grams_on(&td, N_FIBER).await,
+            target: FIBER_PER_DAY_G,
+            unit: "г",
+            state: daily_nutrient(&fib, &last7, FIBER_PER_DAY_G),
+        },
+    ]
+}
+
 /// Daily state for a CLASSIFIER metric (data always available → never Unknown).
 fn daily_classifier(values: &HashMap<String, f64>, last7: &[NaiveDate], target: f64) -> IndicatorState {
     let misses = last7.iter()

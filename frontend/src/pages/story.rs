@@ -19,12 +19,6 @@ fn tr(l: &Loc) -> String {
 
 #[component]
 pub fn StoryPage() -> impl IntoView {
-    // Opening the hub acknowledges completed tasks (clears the nav-icon dot).
-    spawn_local(async move {
-        story::ack_done_tasks().await;
-        story::refresh_attention();
-    });
-
     // Reactive engine snapshot, rebuilt whenever any sensor source changes.
     let snap = create_rw_signal(None::<story_dsl::EngineSnapshot>);
     let reload = move || spawn_local(async move { snap.set(Some(story::engine_snapshot().await)); });

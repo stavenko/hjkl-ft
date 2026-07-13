@@ -48,7 +48,6 @@ pub fn main() {
         services::update::init(); // update-available signal at the root
         services::net::init(); // connectivity signals at the root
         services::subscription::init(); // subscription gate signal at the root
-        services::story::init_attention(); // story-attention signal at the root
         services::classify::init(); // reset the background food-classification queue
         services::errors::init(); // background-error log signal at the root
 
@@ -62,8 +61,6 @@ pub fn main() {
         }
 
         leptos::mount_to_body(app::App);
-
-        services::story::refresh_attention();
 
         // Background listeners/timers: focus re-sync, notification receipts,
         // connectivity re-probe on online/offline + a periodic probe. The update
@@ -129,7 +126,6 @@ fn install_foreground_sync() {
             // the network (VPN toggled, tunnel dropped) — refresh is_online so the
             // warning is honest and the follow-ups gate correctly.
             services::net::probe_background();
-            services::story::refresh_attention();
             if services::auth::get_token().is_some() {
                 services::sync::sync_now_background();
             }

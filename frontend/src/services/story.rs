@@ -1,10 +1,8 @@
-use std::cell::RefCell;
 use std::collections::HashSet;
 
-use leptos::*;
 use serde::{Deserialize, Serialize};
 
-use crate::services::story_dsl::{self, Engine};
+use crate::services::story_dsl;
 use crate::services::{db, local, profile, subscription, sync};
 
 /// Task flag: the user committed to wanting a new body (chapter 1, intro).
@@ -553,11 +551,6 @@ pub async fn gather() -> Progress {
 fn seen_key(route: &str) -> String {
     format!("seen:{route}")
 }
-/// Story flag key marking that a completed task has been acknowledged (the user
-/// has since opened the Story page).
-fn ack_key(task: &str) -> String {
-    format!("ack:{task}")
-}
 
 /// Every section route (`/story/<id>`) across all chapters, from the DSL.
 pub fn all_section_routes() -> Vec<String> {
@@ -599,107 +592,6 @@ pub async fn mark_section_seen(route: &str) {
     }
 }
 
-/// Persist a flag without an immediate sync push (used for batch writes).
-async fn put_flag(key: &str, value: bool) {
-    let updated_at = chrono::Utc::now().to_rfc3339();
-    db::put("story", &Flag { key: key.to_string(), value, updated_at }).await;
-}
-
-/// Acknowledge every currently-completed task — clears the "task done" marker.
-/// Called when the user opens the Story page. Writes in one batch, pushes once.
-pub async fn ack_done_tasks() {
-    let snap = engine_snapshot().await;
-    let story = story_dsl::story();
-    let e = Engine::new(story, &snap);
-    let mut wrote = false;
-    for t in &story.tasks {
-        if e.task_closed(&t.id) {
-            let k = ack_key(&t.id);
-            if !get_flag(&k).await {
-                put_flag(&k, true).await;
-                wrote = true;
-            }
-        }
-    }
-    if wrote {
-        sync::push_background();
-    }
-}
-
-/// Whether the Story deserves an attention marker right now.
-#[derive(Default, Clone, Copy)]
-pub struct Attention {
-    /// A section is unlocked (openable) but the user hasn't opened it yet.
-    pub unread_section: bool,
-    /// A task is completed but hasn't been acknowledged (Story not yet opened since).
-    pub unacked_task: bool,
-}
-
-impl Attention {
-    pub fn any(&self) -> bool {
-        self.unread_section || self.unacked_task
-    }
-}
-
-/// Compute the current attention state from the DB.
-pub async fn attention() -> Attention {
-    let snap = engine_snapshot().await;
-    let story = story_dsl::story();
-    let e = Engine::new(story, &snap);
-    let seen = seen_routes().await;
-
-    // A section is "unread" when it's unlocked but its page hasn't been opened.
-    let mut unread_section = false;
-    for ch in &story.chapters {
-        if !e.chapter_open(ch) {
-            continue;
-        }
-        for (i, sec) in ch.sections.iter().enumerate() {
-            if e.section_unlocked(ch, i) && !seen.contains(&format!("/story/{}", sec.id)) {
-                unread_section = true;
-            }
-        }
-    }
-
-    // A task is "unacked" when it's closed but the user hasn't opened the Story since.
-    let mut unacked_task = false;
-    for t in &story.tasks {
-        if e.task_closed(&t.id) && !get_flag(&ack_key(&t.id)).await {
-            unacked_task = true;
-            break;
-        }
-    }
-
-    Attention { unread_section, unacked_task }
-}
-
-thread_local! {
-    // Reactive "the Story has something new" flag, shown as a dot on the nav-story
-    // icon. Created at the ROOT via init_attention() (like db::version / update),
-    // never lazily inside a reactive closure.
-    static ATTENTION: RefCell<Option<RwSignal<bool>>> = const { RefCell::new(None) };
-}
-
-/// Create the shared attention flag in the root scope. Call once from main().
-pub fn init_attention() {
-    ATTENTION.with(|c| {
-        if c.borrow().is_none() {
-            *c.borrow_mut() = Some(create_rw_signal(false));
-        }
-    });
-}
-
-/// Reactive flag: true when the Story has an unread section or an unacked task.
-pub fn attention_signal() -> RwSignal<bool> {
-    ATTENTION.with(|c| c.borrow().expect("story::init_attention() must run first"))
-}
-
-/// Recompute the attention flag from the DB (fire-and-forget).
-pub fn refresh_attention() {
-    spawn_local(async move {
-        attention_signal().set(attention().await.any());
-    });
-}
 
 #[cfg(test)]
 mod tests {

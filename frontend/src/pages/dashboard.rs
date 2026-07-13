@@ -18,9 +18,8 @@ use leptos::*;
 
 use crate::components::cycle_widget::{CycleLine, CyclePanel};
 use crate::components::notify_panel::NotifyPanel;
-use crate::components::calorie_chart::CalorieChart;
 use crate::components::gauge::Gauge;
-use crate::components::progress_widget::ProgressWidget;
+use crate::components::progress_widget::{self, ProgressWidget};
 use crate::components::steps_chart_modal::StepsChartModal;
 use crate::components::steps_widget::StepsWidget;
 use crate::components::weight_chart_modal::WeightChartModal;
@@ -34,13 +33,22 @@ use crate::services::i18n::t;
 use crate::services::profile::{self, CourseGoal, Sex};
 use crate::services::indicators::{self, IndicatorState};
 use crate::services::sticky::sticky;
+use crate::services::weight_trend::{self, BalanceState};
 use crate::services::{db, local, net, story};
 
 // ── Expanded-view helpers (gauge labels / colours + "?" explanations) ─────────
 
-/// Why the calorie planka is the number it is (shown in its "?" tooltip).
-const CALORIE_HINT: &str = "Планка калорий — это ваше среднее потребление за 7 полных дней \
-    наблюдений. Если вес держится или растёт, берём на 5% меньше. Округляем до 50 ккал.";
+/// Everything the expanded view needs once the planka is set.
+#[derive(Clone)]
+struct DetailData {
+    planka: Option<f64>,
+    eaten: f64,
+    gauges: Vec<indicators::DailyGauge>,
+    inds: Vec<(&'static str, IndicatorState)>,
+    calorie_hint: String,
+    protein_hint: String,
+    veg_hint: String,
+}
 
 fn gauge_label(key: &str) -> &'static str {
     match key {
@@ -61,24 +69,88 @@ fn gauge_color(state: IndicatorState) -> &'static str {
     }
 }
 
-/// The "?" explanation for a daily gauge's target.
-fn gauge_hint(key: &str) -> &'static str {
-    match key {
-        "protein" => "Цель по белку — 1,6 г на кг безжировой массы. Её оцениваем из вашего \
-            роста, веса, возраста и пола (формула Deurenberg для % жира), затем берём 1,6 г \
-            на каждый кг сухой массы.",
-        "veg_fruit" => "Норма фруктов и овощей — 800 г в день для мужчин и 600 г для женщин.",
-        _ => "",
-    }
+/// The calorie "?" text — depends on the course goal AND the current weight trend,
+/// and shows the actual average intake + resulting planka.
+async fn calorie_hint_text(planka: Option<f64>) -> String {
+    let avg = local::avg_daily_kcal(7).await;
+    let entries = local::list_weight_entries().await;
+    let balance = weight_trend::weight_trend(&entries, weight_trend::DEFAULT_WINDOW_DAYS).balance();
+    let goal = match profile::get_goal() {
+        CourseGoal::Lose => "похудение",
+        CourseGoal::Maintain => "удержание веса",
+        CourseGoal::Gain => "набор веса",
+    };
+    // The planka keeps the average when you're ALREADY in a deficit; otherwise it's
+    // 5% below (mirrors `local::calorie_planka`).
+    let (trend, minus) = match balance {
+        BalanceState::Deficit => ("вы уже в дефиците — вес снижается", ""),
+        BalanceState::Surplus => ("мы заметили, что вы в профиците — вес растёт", " − 5%"),
+        BalanceState::Maintenance => {
+            ("мы заметили, что вы в балансе калорий — вес стоит на месте", " − 5%")
+        }
+    };
+    let avg_s = avg.map(|a| format!("{a:.0}")).unwrap_or_else(|| "—".to_string());
+    let planka_s = planka.map(|p| format!("{p:.0}")).unwrap_or_else(|| "—".to_string());
+    format!(
+        "Поскольку ваша цель — {goal}, а {trend}, мы устанавливаем планку в ваше среднее \
+         потребление за 7 дней{minus}.\n\nВаше среднее потребление калорий: {avg_s} ккал.\n\
+         И поэтому ваша планка: {planka_s} ккал."
+    )
 }
 
-/// (status word, colour) for a daily indicator's 7-day consistency state.
-fn indicator_status(state: IndicatorState) -> (&'static str, &'static str) {
-    match state {
-        IndicatorState::Green => ("в норме", "#1fa463"),
-        IndicatorState::Orange => ("иногда мимо", "#e8850d"),
-        IndicatorState::Red => ("часто мимо", "#e0304f"),
-        IndicatorState::Unknown => ("нет данных", "#9aa0a6"),
+/// The protein "?" text — the fat-free-mass derivation, with the user's numbers.
+async fn protein_hint_text() -> String {
+    let Some(w) = local::list_weight_entries().await.last().map(|e| e.weight_kg) else {
+        return "Заполните вес и профиль, чтобы рассчитать норму белка.".to_string();
+    };
+    let target = profile::protein_target_from_profile(w);
+    if target == 0 {
+        return "Заполните профиль (рост, вес, возраст, пол), чтобы рассчитать норму белка."
+            .to_string();
+    }
+    let ffm = target as f64 / 1.6;
+    let h = profile::get_height_cm().map(|h| format!("{h:.0} см")).unwrap_or_default();
+    let age = profile::get_age_years().map(|a| format!("{a}")).unwrap_or_default();
+    format!(
+        "Норму белка считаем от безжировой массы тела. По вашим данным (рост {h}, возраст \
+         {age}, вес {w:.0} кг) безжировая масса ≈ {ffm:.0} кг, а планка — 1,6 г белка на кг.\n\n\
+         Ваша планка по белку: {target} г."
+    )
+}
+
+/// The veg/fruit "?" text — sex-specific.
+fn veg_hint_text() -> String {
+    let who = match profile::get_sex() {
+        Some(Sex::Female) => "Женщинам",
+        _ => "Мужчинам",
+    };
+    format!(
+        "{who} рекомендуется употреблять 400–600 г овощей и фруктов в день. Они могут быть в \
+         готовом или сыром виде."
+    )
+}
+
+/// The advisory sentence for a daily indicator's 7-day consistency state.
+fn advisory_text(key: &str, state: IndicatorState) -> &'static str {
+    use IndicatorState::*;
+    match (key, state) {
+        ("protein", Green) => "Вы стабильно набираете норму белка — так держать.",
+        ("protein", Orange) => {
+            "Иногда вам не хватает белка. Старайтесь добирать норму — это важно для мышц."
+        }
+        ("protein", Red) => {
+            "Вы регулярно едите слишком мало белка. Если продолжать так делать, можно потерять \
+             мышцы. Это может сказаться на долгосрочном здоровье."
+        }
+        ("protein", Unknown) => "Пока недостаточно данных по белку.",
+        ("veg_fruit", Green) => "Вы стабильно едите достаточно овощей и фруктов — отлично.",
+        ("veg_fruit", Orange) => "Иногда вам не хватает овощей и фруктов. Добавьте их в рацион.",
+        ("veg_fruit", Red) => {
+            "Вы регулярно едите мало овощей и фруктов. Это нехватка клетчатки и витаминов, что \
+             вредит здоровью в долгосрочной перспективе."
+        }
+        ("veg_fruit", Unknown) => "Пока недостаточно данных по овощам и фруктам.",
+        _ => "",
     }
 }
 
@@ -195,26 +267,12 @@ pub fn DashboardPage() -> impl IntoView {
     let show_weight_modal = create_rw_signal(false);
     let show_steps_modal = create_rw_signal(false);
 
-    // Daily-calorie series for the expanded «Калории» view (last 30 days). Fetched
-    // ONLY while that overlay is open (30 IndexedDB reads), refreshed when the diary
-    // or foods change.
+    // The expanded «Калории» view (opened by tapping the widget): the same gauges as
+    // the widget + a breakdown of the daily indicators + the "?" explanations.
+    // Fetched ONLY while the overlay is open, refreshed when the diary / foods /
+    // weight / goals change.
     let diary_ver = db::version("diary");
     let foods_ver = db::version("foods");
-    // Returns `Some(series)` once loaded while the overlay is open, `None` when
-    // closed OR still loading — so the view shows a spinner during the read
-    // instead of the "no data" text flashing before the series arrives.
-    let cal_series_res = create_resource(
-        move || (overlay.get() == Overlay::Progress, diary_ver.get(), foods_ver.get()),
-        |(open, _, _)| async move {
-            // Default view: the last week (7 days) on the x-axis.
-            if open { Some(local::daily_kcal_series(7).await) } else { None }
-        },
-    );
-
-    // The rest of the expanded view (once the planka is set): the same gauges as the
-    // widget + the daily indicators. `Some((planka, eaten_today, gauges, indicators))`
-    // once loaded while the overlay is open.
-    let weight_ver = db::version("weight_entries");
     let goals_ver = db::version("goals");
     let detail_res = create_local_resource(
         move || {
@@ -231,12 +289,16 @@ pub fn DashboardPage() -> impl IntoView {
                 return None;
             }
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-            Some((
-                local::calorie_goal_amount().await,
-                local::kcal_on(&today).await,
-                indicators::daily_gauges().await,
-                indicators::unlocked_indicator_states().await,
-            ))
+            let planka = local::calorie_goal_amount().await;
+            Some(DetailData {
+                planka,
+                eaten: local::kcal_on(&today).await,
+                gauges: indicators::daily_gauges().await,
+                inds: indicators::unlocked_indicator_states().await,
+                calorie_hint: calorie_hint_text(planka).await,
+                protein_hint: protein_hint_text().await,
+                veg_hint: veg_hint_text(),
+            })
         },
     );
 
@@ -291,65 +353,70 @@ pub fn DashboardPage() -> impl IntoView {
                             show_done=Signal::derive(|| true)
                             on_done=move || overlay.set(Overlay::None)/>
                         {move || {
-                            // Wait for the detail data. Still loading → spinner (not the
-                            // "no data" flash).
-                            let Some((planka, eaten, gauges, inds)) = detail_res.get().flatten()
-                            else {
+                            // Wait for the detail data. Still loading → spinner.
+                            let Some(d) = detail_res.get().flatten() else {
                                 return view! {
                                     <div style="display: flex; justify-content: center; padding: 2rem;">
                                         <div class="ft-spinner"></div>
                                     </div>
                                 }.into_view();
                             };
-                            let chart = view! {
-                                <CalorieChart series=Signal::derive(move || {
-                                    cal_series_res.get().flatten().unwrap_or_default()
-                                })/>
+                            let Some(target) = d.planka else {
+                                // No planka yet (still collecting the week).
+                                return view! {
+                                    <p class="is-size-7 has-text-grey" style="padding: 1.5rem 0.5rem; text-align: center;">
+                                        "Планка ещё не рассчитана — ведите дневник неделю."
+                                    </p>
+                                }.into_view();
                             };
-                            match planka {
-                                // Planka set → the same gauges as the widget (each with a
-                                // "?" explaining its target), the calorie history chart, and
-                                // a detailed breakdown of the daily indicators.
-                                Some(target) => {
-                                    let cal_color =
-                                        if eaten > target { "#e0304f" } else { "#1fa463" }.to_string();
-                                    let daily = gauges.into_iter().map(|g| view! {
-                                        <Gauge value=g.value target=g.target
-                                            label=gauge_label(g.key).to_string()
-                                            unit=g.unit.to_string()
-                                            color=gauge_color(g.state).to_string()
-                                            hint=gauge_hint(g.key).to_string()/>
-                                    }).collect_view();
-                                    let detail = inds.into_iter().map(|(k, st)| {
-                                        let (txt, c) = indicator_status(st);
-                                        view! {
-                                            <div style="display: flex; justify-content: space-between; align-items: baseline;">
-                                                <span class="is-size-7">{gauge_label(k)}</span>
-                                                <span class="is-size-7 has-text-weight-semibold" style:color=c>{txt}</span>
-                                            </div>
-                                        }
-                                    }).collect_view();
-                                    view! {
-                                        <div style="display: flex; flex-direction: column; gap: 18px; padding: 4px 2px;">
-                                            <Gauge value=eaten target=target
-                                                label="Калории".to_string() unit="ккал".to_string()
-                                                color=cal_color height=12.0
-                                                hint=CALORIE_HINT.to_string()/>
-                                            {daily}
-                                            {chart}
-                                            <div>
-                                                <div style="border-top: 0.5px solid var(--bulma-border-weak); margin-bottom: 12px;"></div>
-                                                <span class="is-size-7 has-text-grey has-text-weight-medium">"Индикаторы"</span>
-                                                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
-                                                    {detail}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    }.into_view()
+                            // Planka set → the same gauges as the widget (each with a "?"
+                            // explaining where its target came from) + an advisory breakdown
+                            // of the daily indicators. Order the hint by gauge key.
+                            let cal_color =
+                                if d.eaten > target { "#e0304f" } else { "#1fa463" }.to_string();
+                            let (protein_hint, veg_hint) = (d.protein_hint.clone(), d.veg_hint.clone());
+                            let daily = d.gauges.iter().map(|g| {
+                                let hint = if g.key == "protein" { protein_hint.clone() } else { veg_hint.clone() };
+                                view! {
+                                    <Gauge value=g.value target=g.target
+                                        label=gauge_label(g.key).to_string()
+                                        unit=g.unit.to_string()
+                                        color=gauge_color(g.state).to_string()
+                                        hint=hint/>
                                 }
-                                // No planka yet (still collecting the week) → just the chart.
-                                None => chart.into_view(),
-                            }
+                            }).collect_view();
+                            let detail = d.inds.iter().map(|(k, st)| {
+                                let (paths, _) = progress_widget::icon_for(k);
+                                let (stroke, tint) = progress_widget::state_colors(*st);
+                                view! {
+                                    <div style="display: flex; gap: 10px; align-items: flex-start;">
+                                        <div style=format!("width: 32px; height: 32px; min-width: 32px; border-radius: 50%; \
+                                                background: {tint}; display: flex; align-items: center; justify-content: center;")>
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                                                fill="none" stroke=stroke stroke-width="2" stroke-linecap="round"
+                                                stroke-linejoin="round" inner_html=paths></svg>
+                                        </div>
+                                        <span class="is-size-7 has-text-grey" style="line-height: 1.4;">
+                                            {advisory_text(k, *st)}
+                                        </span>
+                                    </div>
+                                }
+                            }).collect_view();
+                            view! {
+                                <div style="display: flex; flex-direction: column; gap: 18px; padding: 4px 2px;">
+                                    <Gauge value=d.eaten target=target
+                                        label="Калории".to_string() unit="ккал".to_string()
+                                        color=cal_color height=12.0
+                                        hint=d.calorie_hint.clone()/>
+                                    {daily}
+                                    <div>
+                                        <div style="border-top: 0.5px solid var(--bulma-border-weak); margin-bottom: 14px;"></div>
+                                        <div style="display: flex; flex-direction: column; gap: 14px;">
+                                            {detail}
+                                        </div>
+                                    </div>
+                                </div>
+                            }.into_view()
                         }}
                     </div>
                 }.into_view()

@@ -46,19 +46,28 @@ pub fn Gauge(
             </button>
         }
     });
-    let hint_box = hint.map(|text| {
+    // A floating popup (not inline): a full-screen backdrop to dismiss + a card
+    // anchored under the gauge header, overlaying the content rather than pushing it.
+    let hint_popup = hint.map(|text| {
         view! {
-            {move || open.get().then(|| view! {
-                <div style="background: var(--bulma-scheme-main-ter, rgba(0,0,0,0.04)); \
-                        border-radius: 8px; padding: 8px 10px;">
-                    <span class="is-size-7 has-text-grey" style="line-height: 1.4;">{text.clone()}</span>
-                </div>
+            {move || open.get().then(|| {
+                let t = text.clone();
+                view! {
+                    <div on:click=move |_| open.set(false)
+                        style="position: fixed; inset: 0; z-index: 40;"></div>
+                    <div on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
+                        style="position: absolute; z-index: 41; top: 24px; left: 0; right: 0; \
+                            background: var(--bulma-scheme-main); border: 0.5px solid var(--bulma-border-weak); \
+                            box-shadow: 0 10px 30px rgba(0,0,0,0.22); border-radius: 12px; padding: 12px 14px;">
+                        <span class="is-size-7 has-text-grey" style="line-height: 1.45; white-space: pre-line;">{t}</span>
+                    </div>
+                }
             })}
         }
     });
 
     view! {
-        <div style="display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0;">
+        <div style="position: relative; display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0;">
             <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;">
                 <span style="display: inline-flex; align-items: center; gap: 6px;">
                     <span class="is-size-7 has-text-weight-medium" style="color: var(--bulma-text-weak);">{label}</span>
@@ -72,7 +81,7 @@ pub fn Gauge(
             <div style=format!("height: {height}px; border-radius: {radius}px; background: var(--bulma-border-weak); overflow: hidden;")>
                 <div style=format!("height: 100%; width: {pct:.1}%; background: {color}; border-radius: {radius}px; transition: width 0.4s;")></div>
             </div>
-            {hint_box}
+            {hint_popup}
         </div>
     }
 }

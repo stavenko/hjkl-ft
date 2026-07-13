@@ -19,6 +19,7 @@ use leptos::*;
 use crate::components::cycle_widget::{CycleLine, CyclePanel};
 use crate::components::notify_panel::NotifyPanel;
 use crate::components::calorie_chart::CalorieChart;
+use crate::components::gauge::Gauge;
 use crate::components::progress_widget::ProgressWidget;
 use crate::components::steps_chart_modal::StepsChartModal;
 use crate::components::steps_widget::StepsWidget;
@@ -31,8 +32,55 @@ use api_types::{StepEntry, WeightEntry};
 use crate::services::errors::AppError;
 use crate::services::i18n::t;
 use crate::services::profile::{self, CourseGoal, Sex};
+use crate::services::indicators::{self, IndicatorState};
 use crate::services::sticky::sticky;
 use crate::services::{db, local, net, story};
+
+// ── Expanded-view helpers (gauge labels / colours + "?" explanations) ─────────
+
+/// Why the calorie planka is the number it is (shown in its "?" tooltip).
+const CALORIE_HINT: &str = "Планка калорий — это ваше среднее потребление за 7 полных дней \
+    наблюдений. Если вес держится или растёт, берём на 5% меньше. Округляем до 50 ккал.";
+
+fn gauge_label(key: &str) -> &'static str {
+    match key {
+        "protein" => "Белок",
+        "veg_fruit" => "Фр/овощи",
+        "calcium" => "Кальций",
+        "iron" => "Железо",
+        _ => "Клетчатка",
+    }
+}
+
+fn gauge_color(state: IndicatorState) -> &'static str {
+    match state {
+        IndicatorState::Green => "#1fa463",
+        IndicatorState::Orange => "#e8850d",
+        IndicatorState::Red => "#e0304f",
+        IndicatorState::Unknown => "#9aa0a6",
+    }
+}
+
+/// The "?" explanation for a daily gauge's target.
+fn gauge_hint(key: &str) -> &'static str {
+    match key {
+        "protein" => "Цель по белку — 1,6 г на кг безжировой массы. Её оцениваем из вашего \
+            роста, веса, возраста и пола (формула Deurenberg для % жира), затем берём 1,6 г \
+            на каждый кг сухой массы.",
+        "veg_fruit" => "Норма фруктов и овощей — 800 г в день для мужчин и 600 г для женщин.",
+        _ => "",
+    }
+}
+
+/// (status word, colour) for a daily indicator's 7-day consistency state.
+fn indicator_status(state: IndicatorState) -> (&'static str, &'static str) {
+    match state {
+        IndicatorState::Green => ("в норме", "#1fa463"),
+        IndicatorState::Orange => ("иногда мимо", "#e8850d"),
+        IndicatorState::Red => ("часто мимо", "#e0304f"),
+        IndicatorState::Unknown => ("нет данных", "#9aa0a6"),
+    }
+}
 
 /// Current network problems as error-log entries, so they appear in the SAME list
 /// as background errors (and drive the ⚠ tile) instead of a banner over the UI.
@@ -163,6 +211,35 @@ pub fn DashboardPage() -> impl IntoView {
         },
     );
 
+    // The rest of the expanded view (once the planka is set): the same gauges as the
+    // widget + the daily indicators. `Some((planka, eaten_today, gauges, indicators))`
+    // once loaded while the overlay is open.
+    let weight_ver = db::version("weight_entries");
+    let goals_ver = db::version("goals");
+    let detail_res = create_local_resource(
+        move || {
+            (
+                overlay.get() == Overlay::Progress,
+                diary_ver.get(),
+                foods_ver.get(),
+                weight_ver.get(),
+                goals_ver.get(),
+            )
+        },
+        |(open, _, _, _, _)| async move {
+            if !open {
+                return None;
+            }
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            Some((
+                local::calorie_goal_amount().await,
+                local::kcal_on(&today).await,
+                indicators::daily_gauges().await,
+                indicators::unlocked_indicator_states().await,
+            ))
+        },
+    );
+
     // Problems tile: the ⚠ tile (left of the bell) appears when there are
     // background errors OR a network problem. Network problems are shown in the
     // SAME list (ErrorsPanel) — no banner covering the interface.
@@ -214,21 +291,64 @@ pub fn DashboardPage() -> impl IntoView {
                             show_done=Signal::derive(|| true)
                             on_done=move || overlay.set(Overlay::None)/>
                         {move || {
-                            // Loaded (`flatten` = Some) → chart (which itself shows
-                            // "no data" only when there are genuinely zero logged
-                            // days). Still loading → spinner, not the "no data" text.
-                            if cal_series_res.get().flatten().is_some() {
-                                view! {
-                                    <CalorieChart series=Signal::derive(move || {
-                                        cal_series_res.get().flatten().unwrap_or_default()
-                                    })/>
-                                }.into_view()
-                            } else {
-                                view! {
+                            // Wait for the detail data. Still loading → spinner (not the
+                            // "no data" flash).
+                            let Some((planka, eaten, gauges, inds)) = detail_res.get().flatten()
+                            else {
+                                return view! {
                                     <div style="display: flex; justify-content: center; padding: 2rem;">
                                         <div class="ft-spinner"></div>
                                     </div>
-                                }.into_view()
+                                }.into_view();
+                            };
+                            let chart = view! {
+                                <CalorieChart series=Signal::derive(move || {
+                                    cal_series_res.get().flatten().unwrap_or_default()
+                                })/>
+                            };
+                            match planka {
+                                // Planka set → the same gauges as the widget (each with a
+                                // "?" explaining its target), the calorie history chart, and
+                                // a detailed breakdown of the daily indicators.
+                                Some(target) => {
+                                    let cal_color =
+                                        if eaten > target { "#e0304f" } else { "#1fa463" }.to_string();
+                                    let daily = gauges.into_iter().map(|g| view! {
+                                        <Gauge value=g.value target=g.target
+                                            label=gauge_label(g.key).to_string()
+                                            unit=g.unit.to_string()
+                                            color=gauge_color(g.state).to_string()
+                                            hint=gauge_hint(g.key).to_string()/>
+                                    }).collect_view();
+                                    let detail = inds.into_iter().map(|(k, st)| {
+                                        let (txt, c) = indicator_status(st);
+                                        view! {
+                                            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                                                <span class="is-size-7">{gauge_label(k)}</span>
+                                                <span class="is-size-7 has-text-weight-semibold" style:color=c>{txt}</span>
+                                            </div>
+                                        }
+                                    }).collect_view();
+                                    view! {
+                                        <div style="display: flex; flex-direction: column; gap: 18px; padding: 4px 2px;">
+                                            <Gauge value=eaten target=target
+                                                label="Калории".to_string() unit="ккал".to_string()
+                                                color=cal_color height=12.0
+                                                hint=CALORIE_HINT.to_string()/>
+                                            {daily}
+                                            {chart}
+                                            <div>
+                                                <div style="border-top: 0.5px solid var(--bulma-border-weak); margin-bottom: 12px;"></div>
+                                                <span class="is-size-7 has-text-grey has-text-weight-medium">"Индикаторы"</span>
+                                                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+                                                    {detail}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    }.into_view()
+                                }
+                                // No planka yet (still collecting the week) → just the chart.
+                                None => chart.into_view(),
                             }
                         }}
                     </div>

@@ -1,10 +1,10 @@
-//! Interactive daily-calorie bar chart for the expanded dashboard widget.
+//! Interactive daily bar chart for the expanded dashboard widgets.
 //!
-//! Bars = total kcal eaten per day (oldest → newest, today rightmost). A dashed
-//! line marks the average over the logged days (kcal > 0) EXCLUDING today (a
-//! still-partial day), and is labelled. Touch
-//! (or drag) anywhere on the chart moves a cursor that snaps to the nearest day
-//! and shows that day's date + kcal — the "what did I eat that day" readout.
+//! Bars = the per-day value (oldest → newest, today rightmost). A dashed line
+//! marks the average over the logged days (value > 0) EXCLUDING today (a
+//! still-partial day), and is labelled. Touch (or drag) anywhere on the chart
+//! moves a cursor that snaps to the nearest day and shows that day's date +
+//! value. `unit` labels the tooltip and the average line (e.g. "ккал", "шагов").
 
 use leptos::*;
 
@@ -32,7 +32,7 @@ const BAR_ACTIVE: &str = "#3b6fd4";
 const AVG: &str = "#e0699b";
 
 #[component]
-pub fn CalorieChart(series: Signal<Vec<(String, f64)>>) -> impl IntoView {
+pub fn BarChart(series: Signal<Vec<(String, f64)>>, unit: String) -> impl IntoView {
     let active = create_rw_signal(None::<usize>);
     let svg_ref = create_node_ref::<leptos::svg::Svg>();
 
@@ -84,7 +84,9 @@ pub fn CalorieChart(series: Signal<Vec<(String, f64)>>) -> impl IntoView {
                 on:pointerup=move |_| active.set(None)
                 on:pointercancel=move |_| active.set(None)
             >
-                {move || {
+                {
+                    let unit = unit.clone();
+                    move || {
                     let data = series.get();
                     let n = data.len();
                     let logged: Vec<f64> = data.iter().map(|(_, k)| *k).filter(|k| *k > 0.0).collect();
@@ -120,6 +122,7 @@ pub fn CalorieChart(series: Signal<Vec<(String, f64)>>) -> impl IntoView {
                         }
                     }).collect_view();
 
+                    let avg_unit = unit.clone();
                     let avg_line = avg.map(|avg| {
                         let avg_y = mapy(avg);
                         view! {
@@ -128,7 +131,7 @@ pub fn CalorieChart(series: Signal<Vec<(String, f64)>>) -> impl IntoView {
                                     stroke=AVG stroke-width="1.2" stroke-dasharray="4 3"/>
                                 <text x=PR y=avg_y - 3.0 text-anchor="end"
                                     fill=AVG font-size="10.5" font-weight="600">
-                                    {format!("{} {:.0} {}", t("chart.average"), avg, t("common.unit.kcal"))}
+                                    {format!("{} {:.0} {}", t("chart.average"), avg, avg_unit)}
                                 </text>
                             </g>
                         }
@@ -143,11 +146,12 @@ pub fn CalorieChart(series: Signal<Vec<(String, f64)>>) -> impl IntoView {
                     };
 
                     // Cursor + tooltip for the selected day.
+                    let tip_unit = unit.clone();
                     let cursor = sel.map(|i| {
                         let (date, k) = &data[i];
                         let cx = PL + (i as f64 + 0.5) * bw;
                         let tip_x = cx.clamp(PL + 42.0, PR - 42.0);
-                        let label = format!("{} · {:.0} {}", short_date(date), k, t("common.unit.kcal"));
+                        let label = format!("{} · {:.0} {}", short_date(date), k, tip_unit);
                         view! {
                             <g>
                                 <line x1=cx y1=PT - 4.0 x2=cx y2=PB stroke=BAR_ACTIVE stroke-width="1"/>

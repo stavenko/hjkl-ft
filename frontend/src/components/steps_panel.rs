@@ -2,7 +2,7 @@ use leptos::*;
 use leptos_router::*;
 use api_types::StepEntry;
 
-use crate::components::steps_widget::chart_svg_steps;
+use crate::components::bar_chart::BarChart;
 use crate::components::mini_chart::short_date;
 use crate::services::i18n::t;
 
@@ -27,7 +27,8 @@ pub fn StepsPanel(
         <div style="display: flex; flex-direction: column; gap: 14px; padding: 4px 2px;">
             // Chart + record button + explanation.
             <div>
-                <div inner_html=move || chart_svg_steps(&entries.get())></div>
+                <BarChart series=Signal::derive(move || steps_series(&entries.get()))
+                    unit=t("common.unit.steps").to_string()/>
                 <button
                     class="button is-link is-fullwidth"
                     style="margin-top: 16px;"
@@ -73,6 +74,13 @@ pub fn StepsPanel(
             </table>
         </div>
     }
+}
+
+/// `(date, steps)` pairs oldest → newest for the bar chart.
+fn steps_series(entries: &[StepEntry]) -> Vec<(String, f64)> {
+    let mut es = entries.to_vec();
+    es.sort_by(|a, b| a.date.cmp(&b.date));
+    es.into_iter().map(|e| (e.date, e.steps as f64)).collect()
 }
 
 /// Local HH:MM from an RFC3339 (UTC) timestamp.

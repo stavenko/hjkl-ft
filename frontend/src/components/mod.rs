@@ -22,7 +22,7 @@ pub mod weight_widget;
 pub mod summary_block;
 pub mod meal_panel;
 pub mod net_badge;
-pub mod calorie_chart;
+pub mod bar_chart;
 pub mod day_bars;
 pub mod info_hint;
 pub mod gauge;

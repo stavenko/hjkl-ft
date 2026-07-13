@@ -22,9 +22,9 @@ use crate::components::day_bars::DayBars;
 use crate::components::gauge::Gauge;
 use crate::components::info_hint::InfoHint;
 use crate::components::progress_widget::{self, ProgressWidget};
-use crate::components::steps_chart_modal::StepsChartModal;
+use crate::components::steps_panel::StepsPanel;
 use crate::components::steps_widget::StepsWidget;
-use crate::components::weight_chart_modal::WeightChartModal;
+use crate::components::weight_panel::WeightPanel;
 use crate::components::weight_widget::WeightWidget;
 use std::cell::RefCell;
 
@@ -201,6 +201,8 @@ enum Overlay {
     Cycle,
     Errors,
     Progress,
+    Weight,
+    Steps,
 }
 
 // 8 columns; each cell is a square whose side `--u` is derived from the viewport
@@ -266,8 +268,6 @@ pub fn DashboardPage() -> impl IntoView {
     let steps_res = create_resource(move || steps_ver.get(), |_| async { local::list_step_entries().await });
     let steps_data = move || sticky(&STEPS_CACHE, steps_res.get());
     let steps_entries = move || steps_data().unwrap_or_default();
-    let show_weight_modal = create_rw_signal(false);
-    let show_steps_modal = create_rw_signal(false);
 
     // The expanded «Калории» view (opened by tapping the widget): the same gauges as
     // the widget + a breakdown of the daily indicators + the "?" explanations.
@@ -435,6 +435,26 @@ pub fn DashboardPage() -> impl IntoView {
                         }}
                     </div>
                 }.into_view()
+            } else if overlay.get() == Overlay::Weight {
+                view! {
+                    <div style=EDITOR>
+                        <EditorHead title="weight.widget_title"
+                            show_done=Signal::derive(|| true)
+                            on_done=move || overlay.set(Overlay::None)/>
+                        <WeightPanel entries=Signal::derive(weight_entries)
+                            on_close=Callback::new(move |_| overlay.set(Overlay::None))/>
+                    </div>
+                }.into_view()
+            } else if overlay.get() == Overlay::Steps {
+                view! {
+                    <div style=EDITOR>
+                        <EditorHead title="steps.title"
+                            show_done=Signal::derive(|| true)
+                            on_done=move || overlay.set(Overlay::None)/>
+                        <StepsPanel entries=Signal::derive(steps_entries)
+                            on_close=Callback::new(move |_| overlay.set(Overlay::None))/>
+                    </div>
+                }.into_view()
             } else {
                 // Collapsed grid: persona 1×1 + notifications bell 1×1.
                 view! {
@@ -468,14 +488,14 @@ pub fn DashboardPage() -> impl IntoView {
                             // Weight & steps widgets: 4×3 tiles side by side under the top row.
                             <button style=format!("{WIDGET_TILE} grid-column: 1 / 5; grid-row: 2 / 5;")
                                 attr:data-testid="dash-weight-widget"
-                                on:click=move |_| show_weight_modal.set(true)>
+                                on:click=move |_| overlay.set(Overlay::Weight)>
                                 // Empty until the first data load (then sticky keeps it
                                 // filled across navigations) — no placeholder flash.
                                 {move || weight_data().map(|_| view! { <WeightWidget entries=Signal::derive(weight_entries)/> })}
                             </button>
                             <button style=format!("{WIDGET_TILE} grid-column: 5 / 9; grid-row: 2 / 5;")
                                 attr:data-testid="dash-steps-widget"
-                                on:click=move |_| show_steps_modal.set(true)>
+                                on:click=move |_| overlay.set(Overlay::Steps)>
                                 {move || steps_data().map(|_| view! { <StepsWidget entries=Signal::derive(steps_entries)/> })}
                             </button>
 
@@ -504,16 +524,6 @@ pub fn DashboardPage() -> impl IntoView {
                 }.into_view()
             }
         }}
-
-        // Chart modals (shared with what the diary used to show), on top of everything.
-        {move || show_weight_modal.get().then(|| view! {
-            <WeightChartModal entries=Signal::derive(weight_entries)
-                on_close=Callback::new(move |_| show_weight_modal.set(false))/>
-        })}
-        {move || show_steps_modal.get().then(|| view! {
-            <StepsChartModal entries=Signal::derive(steps_entries)
-                on_close=Callback::new(move |_| show_steps_modal.set(false))/>
-        })}
     }
 }
 

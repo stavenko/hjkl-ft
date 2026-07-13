@@ -171,19 +171,27 @@ pub async fn calorie_goal_amount() -> Option<f64> {
 }
 
 /// Progress toward the "one week of observations" the planka needs: for each of
-/// food / weight / steps, how many of the last 7 calendar days (today + 6) have an
-/// entry, capped at 7. Drives the dashboard progress widget's «X/7» counters.
+/// food / weight / steps, how many distinct days have an entry, capped at 7.
+///
+/// The window is the last 8 calendar days but the target is 7 ("7 of the last 8").
+/// Why 8, not 7: weight is logged for TODAY (a morning measurement) while steps
+/// are logged for the COMPLETED previous day — so a diligent user's steps trail
+/// weight by a day. A strict 7-day window (today+6) can never let such steps reach
+/// 7/7 (today has no steps yet, and the 7th-back day slides out). The extra day
+/// absorbs that one-day offset so seven consecutive days of logging shows 7/7 for
+/// every metric.
 pub async fn progress_week_counts() -> (u32, u32, u32) {
     let today = chrono::Local::now().date_naive();
     let window: std::collections::BTreeSet<chrono::NaiveDate> =
-        (0..7).map(|i| today - chrono::Duration::days(i)).collect();
+        (0..8).map(|i| today - chrono::Duration::days(i)).collect();
     let count = |dates: &[String]| -> u32 {
         dates
             .iter()
             .filter_map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
             .filter(|d| window.contains(d))
             .collect::<std::collections::BTreeSet<_>>()
-            .len() as u32
+            .len()
+            .min(7) as u32
     };
     let food = count(&list_diary_dates().await);
     let weight = count(&list_weight_entries().await.into_iter().map(|e| e.date).collect::<Vec<_>>());

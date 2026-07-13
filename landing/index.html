@@ -66,7 +66,12 @@
   .nav-links a{color:var(--muted);font-weight:600;font-size:15px}
   .nav-links a:hover{color:var(--ink)}
   .nav .btn{padding:11px 20px;font-size:15px}
-  @media(max-width:780px){.nav-links{display:none}}
+  .nav-right{display:flex;align-items:center;gap:12px}
+  .cur-switch{display:inline-flex;align-items:center;gap:2px;background:var(--surface);border:1.5px solid var(--line);border-radius:var(--radius-pill);padding:3px}
+  .cur-switch button{border:none;background:transparent;cursor:pointer;font-family:inherit;font-weight:700;font-size:15px;color:var(--muted);min-width:34px;padding:7px 10px;border-radius:var(--radius-pill);line-height:1;transition:background .15s,color .15s}
+  .cur-switch button:hover{color:var(--ink)}
+  .cur-switch button[aria-pressed="true"]{background:var(--accent);color:#04331F}
+  @media(max-width:780px){.nav-links{display:none}.nav .js-pay{display:none}}
 
   /* hero */
   .hero{position:relative;overflow:hidden;padding:88px 0 96px;text-align:center}
@@ -204,6 +209,11 @@
   .modal-x:hover{background:var(--bg);color:var(--ink)}
   .modal h3{font-size:23px;font-weight:800;letter-spacing:-.02em;margin:0 0 10px;color:var(--ink)}
   .modal-lead{color:var(--ink-2);font-size:15px;line-height:1.55;margin:0 0 20px}
+  .modal-consent{margin:0 0 18px;display:flex;flex-direction:column;gap:12px}
+  .consent-row{display:flex;align-items:flex-start;gap:10px;font-size:14px;line-height:1.45;color:var(--ink-2);cursor:pointer}
+  .consent-row input{flex:0 0 auto;width:19px;height:19px;margin:1px 0 0;accent-color:var(--accent);cursor:pointer}
+  .consent-row a{color:var(--accent-ink);font-weight:600;text-decoration:underline}
+  .modal-go.is-disabled{opacity:.5;pointer-events:none;box-shadow:none}
   .modal-label{display:block;font-size:13.5px;font-weight:700;color:var(--ink);margin-bottom:7px}
   .modal-label span{color:var(--muted);font-weight:500}
   .modal-input{width:100%;box-sizing:border-box;padding:13px 15px;font-size:16px;font-family:inherit;border:1.5px solid var(--line);
@@ -223,7 +233,14 @@
       <a href="#why">Почему работает</a>
       <a href="#faq">Вопросы</a>
     </nav>
-    <a class="btn btn-primary js-pay" href="#start">Начать похудение</a>
+    <div class="nav-right">
+      <div class="cur-switch" role="group" aria-label="Валюта">
+        <button type="button" data-cur="RUB" aria-pressed="true">₽</button>
+        <button type="button" data-cur="EUR" aria-pressed="false">€</button>
+        <button type="button" data-cur="USD" aria-pressed="false">$</button>
+      </div>
+      <a class="btn btn-primary js-pay" href="#start">Начать похудение</a>
+    </div>
   </div>
 </header>
 
@@ -386,8 +403,8 @@
   <div class="wrap foot">
     <div class="logo"><span class="mark"></span>re:Norma</div>
     <div class="foot-links">
-      <a href="#">Оферта</a>
-      <a href="#">Политика конфиденциальности</a>
+      <a href="/offer.html">Оферта</a>
+      <a href="/privacy.html">Политика конфиденциальности</a>
     </div>
     <div class="cc">© re:Norma</div>
   </div>
@@ -404,11 +421,56 @@
     <button class="modal-x" id="pm-close" type="button" aria-label="Закрыть">×</button>
     <h3 id="pm-title">Переходим в Telegram</h3>
     <p class="modal-lead">Для оформления подписки мы направим вас в мини-приложение Telegram. Там вы введёте промокод (если есть) и оплатите подписку.</p>
-    <a id="pm-go" class="btn btn-primary modal-go" href="https://t.me/renorma_payment_helper_bot/pay" target="_blank" rel="noopener">Открыть в Telegram →</a>
+    <div class="modal-consent">
+      <label class="consent-row">
+        <input type="checkbox" id="pm-consent-offer">
+        <span>Я принимаю условия <a href="/offer.html" target="_blank" rel="noopener">публичной оферты</a></span>
+      </label>
+      <label class="consent-row">
+        <input type="checkbox" id="pm-consent-privacy">
+        <span>Я согласен с <a href="/privacy.html" target="_blank" rel="noopener">политикой конфиденциальности</a></span>
+      </label>
+    </div>
+    <a id="pm-go" class="btn btn-primary modal-go is-disabled" href="https://t.me/renorma_payment_helper_bot/pay" target="_blank" rel="noopener" aria-disabled="true">Открыть в Telegram →</a>
   </div>
 </div>
 
 <script>
+  // ── Currency switch → CTA price label ───────────────────────────────────────
+  // List prices per currency from the lava.top offer (major units, what the
+  // customer pays). NOT fetched live: the landing has no public price endpoint
+  // and the mini-app one needs Telegram initData. Keep in sync with the offer.
+  (function () {
+    var PRICES = { RUB: 4900, EUR: 59, USD: 69 };
+    var STORE_KEY = "renorma_currency";
+
+    function fmt(cur) {
+      if (cur === "RUB") return PRICES.RUB.toLocaleString("ru-RU") + " ₽";
+      if (cur === "EUR") return "€" + PRICES.EUR;
+      return "$" + PRICES.USD;
+    }
+
+    function apply(cur) {
+      if (!PRICES[cur]) cur = "RUB";
+      var label = "Похудеть за " + fmt(cur);
+      Array.prototype.forEach.call(document.querySelectorAll(".js-pay, #pay-btn"), function (b) {
+        b.textContent = b.id === "pay-btn" ? label + " →" : label;
+      });
+      Array.prototype.forEach.call(document.querySelectorAll(".cur-switch button"), function (t) {
+        t.setAttribute("aria-pressed", t.dataset.cur === cur ? "true" : "false");
+      });
+      try { localStorage.setItem(STORE_KEY, cur); } catch (e) {}
+    }
+
+    var saved;
+    try { saved = localStorage.getItem(STORE_KEY); } catch (e) {}
+    apply(PRICES[saved] ? saved : "RUB");
+
+    Array.prototype.forEach.call(document.querySelectorAll(".cur-switch button"), function (t) {
+      t.addEventListener("click", function () { apply(t.dataset.cur); });
+    });
+  })();
+
   // ── Subscribe CTA → explainer modal → Telegram Mini App ─────────────────────
   // Checkout no longer happens on the landing: the whole pay flow (promo code +
   // payment + post-payment onboarding) lives in the Telegram Mini App. The CTA
@@ -417,7 +479,26 @@
     var modal = document.getElementById("pay-modal");
     if (!modal) return;
 
+    // Consent gate: the "Открыть в Telegram" link stays disabled until the user
+    // accepts BOTH the offer and the privacy policy. Reset on every open.
+    var goBtn = document.getElementById("pm-go");
+    var cOffer = document.getElementById("pm-consent-offer");
+    var cPrivacy = document.getElementById("pm-consent-privacy");
+    function syncGo() {
+      var ok = cOffer.checked && cPrivacy.checked;
+      goBtn.classList.toggle("is-disabled", !ok);
+      goBtn.setAttribute("aria-disabled", ok ? "false" : "true");
+    }
+    cOffer.addEventListener("change", syncGo);
+    cPrivacy.addEventListener("change", syncGo);
+    goBtn.addEventListener("click", function (e) {
+      if (goBtn.classList.contains("is-disabled")) e.preventDefault();
+    });
+
     function openModal() {
+      cOffer.checked = false;
+      cPrivacy.checked = false;
+      syncGo();
       modal.hidden = false;
       document.body.style.overflow = "hidden";
     }

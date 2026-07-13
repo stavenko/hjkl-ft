@@ -39,6 +39,63 @@ pub fn chart_block(dates: &[&str], values: &[f64]) -> String {
     )
 }
 
+/// A self-contained BAR chart block (compact histogram + HTML date labels), for
+/// tiles where a count-per-day reads better as bars than a line (e.g. steps).
+/// Bars grow from a zero baseline. Empty data draws the same axes placeholder.
+pub fn bar_block(dates: &[&str], values: &[f64]) -> String {
+    if values.is_empty() {
+        return format!(
+            r#"<div><svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">{AXES}</svg><div style="{LABEL_ROW}"><span></span><span></span></div></div>"#
+        );
+    }
+    let svg = bar_chart_svg(values);
+    let first = short_date(dates.first().copied().unwrap_or(""));
+    let last = if dates.len() > 1 {
+        short_date(dates.last().copied().unwrap_or(""))
+    } else {
+        String::new()
+    };
+    format!(
+        r#"<div>{svg}<div style="{LABEL_ROW}"><span>{first}</span><span>{last}</span></div></div>"#
+    )
+}
+
+fn bar_chart_svg(values: &[f64]) -> String {
+    let w = 300.0_f64;
+    let h = 80.0_f64;
+    let n = values.len();
+    // Bars grow from zero, scaled to the tallest day.
+    let max_val = values.iter().copied().fold(0.0_f64, f64::max).max(1.0);
+
+    let slot = w / n as f64;
+    let bar_w = (slot * 0.6).max(1.0);
+
+    let bars: String = values
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            let cx = (i as f64 + 0.5) * slot;
+            let bh = (v / max_val) * h;
+            let y = h - bh;
+            format!(
+                r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="1" fill="var(--bulma-link)"/>"#,
+                cx - bar_w / 2.0,
+                y,
+                bar_w,
+                bh.max(0.0),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        r#"<svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">
+  {AXES}
+  {bars}
+</svg>"#
+    )
+}
+
 fn line_chart_svg(values: &[f64]) -> String {
     let min_val = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max_val = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);

@@ -6,7 +6,6 @@ use leptos_router::*;
 use api_types::*;
 
 use crate::components::food_weight_modal::FoodWeightModal;
-use crate::components::summary_block::SummaryBlock;
 use crate::components::food_edit_modal::FoodEditModal;
 use crate::services::sticky::{sticky, sticky_keyed};
 use crate::services::{local, sync, story};
@@ -474,7 +473,6 @@ pub fn DiaryPage() -> impl IntoView {
                                     {move || format!("{} {}", format_date_past_prefix(&date.get()), t("diary.empty_past"))}
                                 </p>
                             </div>
-                            <SummaryBlock date=Signal::derive(move || date.get()) />
                         </div>
                     }.into_view()
                 }
@@ -736,17 +734,11 @@ pub fn DiaryPage() -> impl IntoView {
                               entries().into_iter().map(render_row).collect::<Vec<_>>()
                           }
                         }}
-
-                        // Daily AI summary + weekly report — past days only.
-                        {move || (!is_today()).then(|| view! {
-                            <SummaryBlock date=Signal::derive(move || date.get()) />
-                        })}
                     </div>
 
                     // Floating green "+" FAB. MUST be drawn STRICTLY for "today":
-                    // you can only log food into the current day. On past days we
-                    // show only the day assessment (the SummaryBlock above) and NO
-                    // add button — `is_today()` gates it here. (Bug fixed: this used
+                    // you can only log food into the current day. On past days there's
+                    // NO add button — `is_today()` gates it here. (Bug fixed: this used
                     // to render on every day with entries, not just today.)
                     <Show when=move || is_today()>
                         <button

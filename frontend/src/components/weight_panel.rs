@@ -47,7 +47,7 @@ pub fn WeightPanel(
             }
             WeightTrend::Estimated { direction, slope_kg_per_week, confidence, .. } => {
                 if confidence < CONFIDENT {
-                    t("weight.trend.unclear").to_string()
+                    t("weight.trend.stable").to_string()
                 } else {
                     let (arrow, key) = dir_label(direction);
                     let rate = u.from_kg(slope_kg_per_week.abs());

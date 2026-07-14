@@ -64,6 +64,23 @@ pub fn DiaryAddPage() -> impl IntoView {
     let search = create_rw_signal(String::new());
     // Ref to the (uncontrolled) search input, so «×» can clear the DOM value.
     let search_ref = create_node_ref::<leptos::html::Input>();
+    // Sentinel at the very top of the page; on every query change we scroll it
+    // into view so the filtered results start from the TOP. Without this, after
+    // scrolling down a long list and then typing, the (now short) filtered list
+    // stays scrolled past its top — the matches sit above the fold and only the
+    // «Новая еда» footer shows.
+    let top_ref = create_node_ref::<leptos::html::Div>();
+    create_effect(move |prev: Option<String>| {
+        let q = search.get();
+        if prev.as_deref().map_or(false, |p| p != q) {
+            request_animation_frame(move || {
+                if let Some(el) = top_ref.get() {
+                    el.scroll_into_view_with_bool(true);
+                }
+            });
+        }
+        q
+    });
 
     let on_pick = {
         let navigate = navigate.clone();
@@ -83,6 +100,8 @@ pub fn DiaryAddPage() -> impl IntoView {
 
     view! {
         <div style=PAGE_BG>
+            // Scroll-to-top sentinel (see the `top_ref` effect).
+            <div node_ref=top_ref style="height: 0;"></div>
             // Sticky header: the back button AND the search input, so the search
             // row stays pinned at the top while the results scroll under it.
             <div style="position: sticky; top: 0; z-index: 10; background: var(--bulma-background); padding: 12px 16px;">

@@ -75,6 +75,23 @@ pub fn FoodEditor(
     initial_tab: u8,
 ) -> impl IntoView {
     let name = create_rw_signal(initial_name);
+    // The name field is a textarea that auto-grows from one line to (at most) two,
+    // so a long product name wraps instead of scrolling sideways next to the button.
+    let name_ta = create_node_ref::<leptos::html::Textarea>();
+    let autosize_name = move || {
+        if let Some(el) = name_ta.get() {
+            let el: &web_sys::HtmlTextAreaElement = &el; // deref past leptos' own .style()
+            let style = el.style();
+            let _ = style.set_property("height", "auto");
+            let h = el.scroll_height().min(64); // ~two lines, then it scrolls
+            let _ = style.set_property("height", &format!("{h}px"));
+        }
+    };
+    // Resize on any name change (typing OR the initial seed from the search query).
+    create_effect(move |_| {
+        name.get();
+        request_animation_frame(move || autosize_name());
+    });
     let kcal = create_rw_signal(String::new());
     let protein = create_rw_signal(String::new());
     let fat = create_rw_signal(String::new());
@@ -527,37 +544,39 @@ pub fn FoodEditor(
 
             // Tab 1 — "By name": name field + detect-from-name button.
             <div style=move || if active_tab.get() == 0 { "" } else { "display: none;" }>
-                <input type="text"
-                    placeholder=t("food_editor.product_name")
-                    class="is-size-6"
-                    style="width: 100%; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none; box-sizing: border-box; margin-bottom: 10px;"
-                    prop:value=move || name.get()
-                    on:input=move |ev| {
-                        // Keep `draft_id` so the auto-sync effect propagates the new
-                        // name into BOTH the draft and the Food created from it. (We
-                        // used to clear it here, which orphaned the draft with the old
-                        // name and left its Food un-renamed.)
-                        name.set(event_target_value(&ev));
-                    }
-                />
-                <div style="position: relative;">
-                <crate::components::net_badge::NetOfflineBadge/>
-                <button type="button"
-                    class="button is-link is-fullwidth is-size-7"
-                    style="padding: 8px 0; border: none; border-radius: 10px; cursor: pointer;"
-                    disabled=move || name_loading.get() || name.get().is_empty()
-                    on:click=on_detect_name
-                >
-                    {move || if name_loading.get() {
-                        match name_phase.get() {
-                            0 => format!("\u{231b} {}s", name_elapsed()),
-                            1 => format!("\u{1f9e0} Thinking ({} tok) \u{00b7} {}s", name_think.get(), name_elapsed()),
-                            _ => format!("\u{270d}\u{fe0f} Answer ({} tok) \u{00b7} {}s", name_answer.get(), name_elapsed()),
+                // Name + «Заполнить» on one row (~75% / ~25%). The name is a textarea
+                // that grows to a second line for long names; the button stays pinned
+                // to the top of the row (align-items: flex-start).
+                <div style="display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px;">
+                    <textarea
+                        node_ref=name_ta
+                        rows="1"
+                        placeholder=t("food_editor.product_name")
+                        class="is-size-6"
+                        style="flex: 3 1 0; min-width: 0; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none; box-sizing: border-box; resize: none; overflow-y: auto; max-height: 64px; line-height: 1.5; font-family: inherit;"
+                        prop:value=move || name.get()
+                        on:input=move |ev| {
+                            // Keep `draft_id` so the auto-sync effect propagates the new
+                            // name into BOTH the draft and the Food created from it.
+                            name.set(event_target_value(&ev));
+                            autosize_name();
                         }
-                    } else {
-                        format!("\u{2728} {}", t("food_editor.detect_by_name"))
-                    }}
-                </button>
+                    ></textarea>
+                    <div style="flex: 1 1 0; min-width: 0; position: relative;">
+                        <crate::components::net_badge::NetOfflineBadge/>
+                        <button type="button"
+                            class="button is-link is-fullwidth is-size-7"
+                            style="padding: 8px 6px; border: none; border-radius: 10px; cursor: pointer; height: 40px; white-space: nowrap;"
+                            disabled=move || name_loading.get() || name.get().is_empty()
+                            on:click=on_detect_name
+                        >
+                            {move || if name_loading.get() {
+                                format!("\u{231b} {}s", name_elapsed())
+                            } else {
+                                t("food_editor.detect_short").to_string()
+                            }}
+                        </button>
+                    </div>
                 </div>
                 {move || name_error.get().map(|e| view! {
                     <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-top: 10px; background: var(--bulma-danger-light); border-radius: 10px;">

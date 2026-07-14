@@ -597,28 +597,30 @@ pub fn FoodEditor(
                 <input type="file" accept="image/*" multiple=true
                     id="food-photo-input" style="display: none;" on:change=on_file_change />
 
-                // Photos + add button in ONE wrapping grid: the «📷» tile follows the
-                // thumbnails, so it starts on the left and is pushed to the right as
-                // photos are added, wrapping to the next row once the row is full.
-                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 10px;">
-                    {move || photos_base64.get().into_iter().enumerate().map(|(i, b64)| view! {
-                        <div style="position: relative; width: 56px; height: 56px;">
-                            <img src=format!("data:image/jpeg;base64,{b64}")
-                                style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
-                            <button type="button"
-                                style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
-                                on:click=move |_| {
-                                    photos_base64.update(|v| { if i < v.len() { v.remove(i); } });
-                                    photo_count.set(photos_base64.get_untracked().len());
-                                }
-                            >"\u{00d7}"</button>
-                        </div>
-                    }).collect_view()}
+                // Row: photo thumbnails (left, grow, wrap to a 2nd line) + «Добавить
+                // фото» on the right, pinned to the top — the same shape as the name
+                // tab. New photos land to the LEFT of the button.
+                <div style="display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px;">
+                    <div style="flex: 5 1 0; min-width: 0; display: flex; gap: 8px; flex-wrap: wrap;">
+                        {move || photos_base64.get().into_iter().enumerate().map(|(i, b64)| view! {
+                            <div style="position: relative; width: 56px; height: 56px;">
+                                <img src=format!("data:image/jpeg;base64,{b64}")
+                                    style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
+                                <button type="button"
+                                    style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
+                                    on:click=move |_| {
+                                        photos_base64.update(|v| { if i < v.len() { v.remove(i); } });
+                                        photo_count.set(photos_base64.get_untracked().len());
+                                    }
+                                >"\u{00d7}"</button>
+                            </div>
+                        }).collect_view()}
+                    </div>
                     <button type="button"
-                        attr:aria-label=move || t("food_editor.add_photo")
-                        style="width: 56px; height: 56px; flex: none; padding: 0; border: 1px dashed var(--bulma-border); border-radius: 8px; \
-                               background: var(--bulma-scheme-main); color: var(--bulma-text-weak); cursor: pointer; \
-                               display: flex; align-items: center; justify-content: center; font-size: 1.5rem; line-height: 1;"
+                        class="is-size-7"
+                        style="flex: 2 1 0; min-width: 0; height: 56px; padding: 4px; border: 1px dashed var(--bulma-border); border-radius: 10px; \
+                               background: var(--bulma-scheme-main); color: var(--bulma-text); cursor: pointer; \
+                               display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;"
                         on:click=move |_| {
                             let doc = web_sys::window().unwrap().document().unwrap();
                             let el = doc.get_element_by_id("food-photo-input").unwrap();
@@ -627,7 +629,8 @@ pub fn FoodEditor(
                             input.click();
                         }
                     >
-                        "\u{1f4f7}"
+                        <span style="font-size: 1.2rem; line-height: 1;">"\u{1f4f7}"</span>
+                        <span>{move || t("food_editor.add_photo_short")}</span>
                     </button>
                 </div>
 

@@ -143,13 +143,16 @@ pub fn FoodEditor(
     // starts on the left, is pushed right as photos are added, then stays pinned to
     // the row's right while extra photos wrap to the next row.
     let photo_grid_ref = create_node_ref::<leptos::html::Div>();
-    let photo_cols = create_rw_signal(4usize);
+    // How many photos fit BEFORE the add button on the first row (the button also
+    // carries a small extra left margin so it reads as separate from the photos).
+    let photo_before = create_rw_signal(4usize);
     let measure_cols = move || {
         if let Some(el) = photo_grid_ref.get() {
             let el: &web_sys::Element = &el;
             let w = el.client_width() as f64;
             if w > 0.0 {
-                photo_cols.set((((w + 8.0) / 64.0).floor() as i64).max(1) as usize);
+                // tile 56 + gap 8 = 64; reserve the 56px button + its 12px left margin.
+                photo_before.set((((w - 56.0 - 12.0) / 64.0).floor() as i64).max(0) as usize);
             }
         }
     };
@@ -624,10 +627,9 @@ pub fn FoodEditor(
                     style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 10px;">
                     {move || {
                         let photos = photos_base64.get();
-                        let cols = photo_cols.get().max(1);
-                        // The add button is the LAST cell of row 1: first (cols-1)
+                        // The add button is the LAST cell of row 1: the first `bi`
                         // photos go before it, the rest after (wrapping below).
-                        let bi = photos.len().min(cols.saturating_sub(1));
+                        let bi = photos.len().min(photo_before.get());
                         let thumb = move |i: usize, b64: String| view! {
                             <div style="position: relative; width: 56px; height: 56px;">
                                 <img src=format!("data:image/jpeg;base64,{b64}")
@@ -649,9 +651,10 @@ pub fn FoodEditor(
                             {before}
                             <button type="button"
                                 attr:aria-label=t("food_editor.add_photo")
-                                style="width: 56px; height: 56px; flex: none; padding: 0; border: 1px dashed var(--bulma-border); border-radius: 8px; \
+                                style=format!("width: 56px; height: 56px; flex: none; padding: 0; border: 1px dashed var(--bulma-border); border-radius: 8px; \
                                        background: var(--bulma-scheme-main); color: var(--bulma-text-weak); cursor: pointer; \
-                                       display: flex; align-items: center; justify-content: center; font-size: 1.5rem; line-height: 1;"
+                                       display: flex; align-items: center; justify-content: center; font-size: 1.5rem; line-height: 1; margin-left: {};",
+                                       if bi > 0 { "12px" } else { "0" })
                                 on:click=move |_| {
                                     let doc = web_sys::window().unwrap().document().unwrap();
                                     let el = doc.get_element_by_id("food-photo-input").unwrap();

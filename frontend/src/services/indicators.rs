@@ -319,6 +319,64 @@ pub async fn unlocked_indicator_states() -> Vec<(&'static str, IndicatorState)> 
     out
 }
 
+// ── "Keep them green" gate ───────────────────────────────────────────────────
+// The widget nudges the user to keep EVERY unlocked indicator green for a full
+// week: 7 GREEN days inside a rolling 8-day window (one day may slip). Counting
+// begins the day BEFORE the indicators first appeared (the open date's yesterday,
+// the earliest completed day we have on open) and then rolls forward over 8 days.
+
+/// GREEN days required to clear the gate.
+pub const GREEN_GATE_DAYS: u32 = 7;
+/// Rolling window (in completed days) the required GREEN days must fall within.
+const GREEN_GATE_WINDOW: i64 = 8;
+
+/// App-flag holding the date (YYYY-MM-DD) the indicators first became visible.
+const GATE_OPEN_KEY: &str = "ind_opened_at";
+
+/// The date the indicators "opened" for this user — persisted the first time we
+/// evaluate the gate, so the window is anchored to when the nudge began (not to
+/// arbitrary earlier diary history).
+fn gate_open_date(today: NaiveDate) -> NaiveDate {
+    if let Some(s) = crate::services::app_flags::get(GATE_OPEN_KEY) {
+        if let Ok(d) = NaiveDate::parse_from_str(&s, "%Y-%m-%d") {
+            return d;
+        }
+    }
+    crate::services::app_flags::set(GATE_OPEN_KEY, &fmt(today));
+    today
+}
+
+/// Did EVERY unlocked indicator meet its target on `date` (frozen ratio ≥ 1.0)?
+async fn all_green_on(date: &str) -> bool {
+    for key in UNLOCKED_INDICATORS.iter().copied() {
+        let (_value, ratio) = day_cached(key, date).await;
+        if !matches!(ratio, Some(r) if r >= 1.0) {
+            return false;
+        }
+    }
+    true
+}
+
+/// GREEN days accrued so far toward the gate: the number of completed days in the
+/// rolling [`GREEN_GATE_WINDOW`]-day window (yesterday back) on which all unlocked
+/// indicators were green — never counting days before the open date's yesterday.
+/// Capped at [`GREEN_GATE_DAYS`] (the requirement). `== GREEN_GATE_DAYS` ⇒ cleared.
+pub async fn green_gate_progress() -> u32 {
+    let today = chrono::Local::now().date_naive();
+    let earliest = gate_open_date(today) - Duration::days(1);
+    let mut green = 0u32;
+    for i in 1..=GREEN_GATE_WINDOW {
+        let d = today - Duration::days(i);
+        if d < earliest {
+            break;
+        }
+        if all_green_on(&fmt(d)).await {
+            green += 1;
+        }
+    }
+    green.min(GREEN_GATE_DAYS)
+}
+
 /// One indicator's per-day history for the expanded view's histogram: the 7
 /// COMPLETED days (oldest → newest). Each day carries `(date, value, ratio)`, where
 /// `ratio` is the FROZEN `value / target` (see [`day_cached`]) — so the bar colours

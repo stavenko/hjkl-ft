@@ -24,6 +24,7 @@ thread_local! {
     static COUNTS_CACHE: RefCell<Option<(u32, u32, u32)>> = const { RefCell::new(None) };
     static INDS_CACHE: RefCell<Option<Vec<(&'static str, IndicatorState)>>> = const { RefCell::new(None) };
     static GAUGES_CACHE: RefCell<Option<Vec<indicators::DailyGauge>>> = const { RefCell::new(None) };
+    static GATE_CACHE: RefCell<Option<u32>> = const { RefCell::new(None) };
 }
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 16px; \
@@ -183,6 +184,14 @@ pub fn ProgressWidget() -> impl IntoView {
         |_| async { indicators::daily_gauges().await },
     );
     let gauges_s = move || sticky(&GAUGES_CACHE, gauges.get());
+
+    // "Keep them green" gate: GREEN days accrued toward the required week. Same
+    // dependencies as the indicators (they drive the per-day green check).
+    let gate = create_local_resource(
+        move || (food_ver.get(), foods_ver.get(), weight_ver.get()),
+        |_| async { indicators::green_gate_progress().await },
+    );
+    let gate_s = move || sticky(&GATE_CACHE, gate.get());
 
     let busy = create_rw_signal(false);
     let calculate = move |_| {
@@ -347,8 +356,24 @@ pub fn ProgressWidget() -> impl IntoView {
                             .iter()
                             .map(|k| (*k, states.get(k).copied().unwrap_or(IndicatorState::Unknown)))
                             .collect();
+                        // "Keep them green" gate caption, right before the
+                        // indicators — hidden once the week (7 green days) is cleared.
+                        let green = gate_s().unwrap_or(0);
+                        let gate_caption = (green < indicators::GREEN_GATE_DAYS).then(|| {
+                            let progress = t("dashboard.progress.gate_progress")
+                                .replace("{n}", &green.to_string());
+                            view! {
+                                <div style="display: flex; flex-direction: column; gap: 2px;">
+                                    <span class="is-size-7 has-text-weight-semibold">
+                                        {move || t("dashboard.progress.gate_title")}
+                                    </span>
+                                    <span class="is-size-7 has-text-grey">{progress}</span>
+                                </div>
+                            }
+                        });
                         view! {
                             <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
+                            {gate_caption}
                             {indicators_row(row)}
                         }
                     })}

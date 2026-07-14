@@ -55,6 +55,26 @@ pub fn ChatPage() -> impl IntoView {
     }
     let mode = create_rw_signal(initial_mode);
     let live_messages = create_rw_signal(Vec::<LiveMessage>::new());
+    // Datasets already shared in this thread (top-level keys of every data_share
+    // payload) — drives the «✓ Отправлено» state on the matching curator request.
+    let shared_datasets = Signal::derive(move || {
+        let mut set = std::collections::HashSet::<String>::new();
+        for m in live_messages.get() {
+            if m.kind != "data_share" {
+                continue;
+            }
+            if let Some(p) = m.payload.as_deref() {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(p) {
+                    if let Some(obj) = v.as_object() {
+                        for k in obj.keys() {
+                            set.insert(k.clone());
+                        }
+                    }
+                }
+            }
+        }
+        set
+    });
     let live_outbox = create_rw_signal(Vec::<OutboxItem>::new());
     let live_sending = create_rw_signal(false);
     let live_input = create_rw_signal(String::new());
@@ -409,9 +429,14 @@ pub fn ChatPage() -> impl IntoView {
         // scroll/overscroll (so the title never slides up under the status bar),
         // and padding-top: safe-area-inset keeps it below the notch. The header is
         // flex-shrink: 0 (pinned); only the messages area scrolls under it. The
-        // grey background fills the whole viewport (no grey/white split).
-        <div style="position: fixed; inset: 0; padding: env(safe-area-inset-top) 0.75rem 0; display: flex; flex-direction: column; background: var(--bulma-background);">
-            <h1 class="title is-5" style="margin: 0 auto 0.75rem; max-width: 30rem; width: 100%; flex-shrink: 0;">{move || t("nav.support")}</h1>
+        // Soft pastel gradient wallpaper (blue base with purple / periwinkle /
+        // green glows) fills the whole viewport behind the messages.
+        <div style="position: fixed; inset: 0; padding: env(safe-area-inset-top) 0.75rem 0; display: flex; flex-direction: column; \
+                background: \
+                    radial-gradient(120% 80% at 0% 12%, #E7CCFB 0%, rgba(231,204,251,0) 60%), \
+                    radial-gradient(120% 90% at 0% 100%, #A5B3F9 0%, rgba(165,179,249,0) 60%), \
+                    radial-gradient(120% 90% at 100% 100%, #DDE9CE 0%, rgba(221,233,206,0) 62%), \
+                    #C1E1FC;">
 
             // Live/AI selector hidden while MODE_SELECTOR_ENABLED is off (Live-only).
             {MODE_SELECTOR_ENABLED.then(|| view! { <ModeToggle mode=mode /> })}
@@ -453,7 +478,13 @@ pub fn ChatPage() -> impl IntoView {
             // anchors messages to the BOTTOM when the thread is short — the reference's
             // pattern — so the newest message shows without a jump.
             <div node_ref=messages_ref on:scroll=on_messages_scroll attr:data-testid="chat-messages" attr:data-ios-scroll="1" style="flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; max-width: 30rem; width: 100%; margin: 0 auto;">
-              <div style="display: flex; flex-direction: column; min-height: 100%; justify-content: flex-end; padding-bottom: 9rem;">
+              <div style="position: relative; min-height: 100%;">
+                // Line-art pattern OVERLAY blended onto the gradient, behind the
+                // messages (so the bubbles stay crisp). Repeats down the thread.
+                <div style="position: absolute; inset: 0; z-index: 0; pointer-events: none; \
+                        background-image: url('/chat-bg-pattern.svg'); background-repeat: repeat-y; \
+                        background-size: 100% auto; background-position: top center; mix-blend-mode: overlay;"></div>
+                <div style="position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100%; justify-content: flex-end; padding-bottom: 9rem;">
                 // ── AI thread ──
                 <Show when=move || mode.get() == ChatMode::Ai>
                     <Show
@@ -494,7 +525,7 @@ pub fn ChatPage() -> impl IntoView {
                         <For
                             each=move || live_messages.get()
                             key=|m| m.seq
-                            children=move |m| view! { <LiveBubble msg=m /> }
+                            children=move |m| view! { <LiveBubble msg=m shared=shared_datasets /> }
                         />
                         // Optimistic outbox: right-aligned bubbles with a sending /
                         // retry affordance.
@@ -514,7 +545,7 @@ pub fn ChatPage() -> impl IntoView {
                                 view! {
                                     <div attr:data-testid="live-outbox" attr:data-status=o.status.clone()
                                         style="display: flex; flex-direction: column; margin-bottom: 10px;">
-                                        <div style="background: var(--bulma-link); color: var(--bulma-link-invert); border-radius: 12px; padding: 14px 16px; max-width: 80%; margin-left: auto; opacity: 0.6;">
+                                        <div style="background: #DEF7EC; color: #04603F; border: 1px solid #A7E3CD; border-radius: 12px; padding: 14px 16px; max-width: 80%; margin-left: auto; opacity: 0.6;">
                                             <p class="is-size-6" style="white-space: pre-wrap; line-height: 1.45; margin: 0;">
                                                 {o.text.clone()}
                                             </p>
@@ -549,6 +580,7 @@ pub fn ChatPage() -> impl IntoView {
                         />
                     </Show>
                 </Show>
+                </div>
               </div>
             </div>
 

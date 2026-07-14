@@ -1,7 +1,6 @@
 use leptos::*;
 
 use crate::services::curator_share::{self, Dataset};
-use crate::services::i18n::t;
 use crate::services::support_chat::{self, LiveMessage};
 
 /// One Live-thread bubble. User messages align right (link-tinted), expert
@@ -10,21 +9,36 @@ use crate::services::support_chat::{self, LiveMessage};
 /// every other kind (plain text, the user's own `data_share` confirmation) renders
 /// as a normal text bubble.
 #[component]
-pub fn LiveBubble(msg: LiveMessage) -> impl IntoView {
-    // A curator data-request → the distinct share panel (only when it names a
+pub fn LiveBubble(
+    msg: LiveMessage,
+    /// The set of datasets already shared in this thread (top-level keys of every
+    /// `data_share` payload) — so a fulfilled request renders as «✓ Отправлено».
+    #[prop(into)] shared: Signal<std::collections::HashSet<String>>,
+) -> impl IntoView {
+    // A curator data-request → the compact share button (only when it names a
     // known dataset; an unknown/garbled request falls through to plain text so we
-    // never silently drop the message).
+    // never silently drop the message). Already-shared → the button shows as done.
     if msg.kind == "data_request" {
         if let Some(dataset) = request_dataset(&msg) {
-            return view! { <RequestPanel dataset=dataset fallback=msg.text.clone() /> }.into_view();
+            let already = shared.get_untracked().contains(dataset_id(dataset));
+            return view! { <RequestPanel dataset=dataset already=already /> }.into_view();
         }
     }
 
+    // The user's own `data_share` confirmation is redundant with the request's
+    // «✓ Отправлено» state — don't draw a separate bubble for it.
+    if msg.kind == "data_share" {
+        return ().into_view();
+    }
+
     let is_user = msg.sender == "user";
+    // re:Norma palette: the user bubble is the soft-emerald brand tint (not the
+    // stock nuclear-blue link); the curator bubble is a white surface. Both carry
+    // a light brand-coloured border so they read on the pastel wallpaper.
     let bubble_style = if is_user {
-        "background: var(--bulma-link); color: var(--bulma-link-invert); border-radius: 12px; padding: 14px 16px; max-width: 80%; margin-left: auto;"
+        "background: #DEF7EC; color: #04603F; border: 1px solid #A7E3CD; border-radius: 12px; padding: 14px 16px; max-width: 80%; margin-left: auto;"
     } else {
-        "background: var(--bulma-scheme-main-bis); border-radius: 12px; padding: 14px 16px; max-width: 80%; margin-right: auto;"
+        "background: #FFFFFF; color: var(--bulma-text); border: 1px solid #E4E8F0; border-radius: 12px; padding: 14px 16px; max-width: 80%; margin-right: auto;"
     };
 
     let text = msg.text.clone();
@@ -53,16 +67,10 @@ fn request_dataset(msg: &LiveMessage) -> Option<Dataset> {
 /// text for the dataset, and a "Поделиться" button that gathers the real data and
 /// sends it back as a data_share message.
 #[component]
-fn RequestPanel(dataset: Dataset, fallback: String) -> impl IntoView {
-    // "idle" | "sending" | "done" | error string
-    let state = create_rw_signal(String::from("idle"));
-
-    // The panel text: the localized dataset prompt, falling back to the message's
-    // own RU text if the i18n key is somehow missing.
-    let panel_text = {
-        let localized = t(dataset.panel_key());
-        if localized.is_empty() { fallback } else { localized.to_string() }
-    };
+fn RequestPanel(dataset: Dataset, already: bool) -> impl IntoView {
+    // "idle" | "sending" | "done" | error string. `already` = a data_share for this
+    // dataset is already in the thread (fulfilled on a previous session).
+    let state = create_rw_signal(String::from(if already { "done" } else { "idle" }));
 
     let on_share = move |_| {
         if state.get() == "sending" || state.get() == "done" {
@@ -86,49 +94,60 @@ fn RequestPanel(dataset: Dataset, fallback: String) -> impl IntoView {
         });
     };
 
+    let done_label = format!("✓ Отправлено · {}", dataset_short(dataset));
     view! {
         <div attr:data-testid="live-request" attr:data-dataset=dataset_id(dataset)
-            style="display: flex; flex-direction: column; margin-bottom: 10px;">
-            <div style="background: var(--bulma-scheme-main-bis); border: 2px solid var(--bulma-link); \
-                        border-radius: 12px; padding: 14px 16px; max-width: 85%; margin-right: auto;">
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                    <span aria-hidden="true" style="font-size: 1.25rem; line-height: 1;">"📋"</span>
-                    <span class="is-size-7 has-text-weight-semibold has-text-link">
-                        {move || t("curator.request_title")}
-                    </span>
-                </div>
-                <p class="is-size-6" style="white-space: pre-wrap; line-height: 1.45; margin: 0 0 12px 0;">
-                    {panel_text}
-                </p>
-                <Show
-                    when=move || state.get() == "done"
-                    fallback=move || {
-                        let sending = move || state.get() == "sending";
-                        let err = move || {
-                            let s = state.get();
-                            (s != "idle" && s != "sending" && s != "done").then_some(s)
-                        };
-                        view! {
-                            <button attr:data-testid="live-request-share"
-                                class="button is-link is-small"
-                                prop:disabled=sending
-                                on:click=on_share>
-                                {move || if sending() { t("curator.sharing") } else { t("curator.share") }}
-                            </button>
-                            <Show when=move || err().is_some() fallback=|| ()>
-                                <p class="is-size-7 has-text-danger" style="margin: 6px 0 0 0;">
-                                    {move || err().unwrap_or_default()}
-                                </p>
-                            </Show>
-                        }
+            style="display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 10px;">
+            // The «Куратор запрашивает» caption stays in BOTH states.
+            <span class="is-size-7" style="color: #6B7491; margin: 0 0 5px 2px;">
+                "Куратор запрашивает"
+            </span>
+            <Show
+                when=move || state.get() == "done"
+                fallback=move || {
+                    let sending = move || state.get() == "sending";
+                    let err = move || {
+                        let s = state.get();
+                        (s != "idle" && s != "sending" && s != "done").then_some(s)
+                    };
+                    let label = format!("Отправить {}", dataset_short(dataset));
+                    view! {
+                        // Compact pill: the curator's data request is just a button.
+                        <button attr:data-testid="live-request-share"
+                            prop:disabled=sending
+                            on:click=on_share
+                            style="display: inline-flex; align-items: center; gap: 6px; \
+                                   background: #DEF7EC; color: #04603F; border: 1px solid #A7E3CD; \
+                                   border-radius: 999px; padding: 9px 15px; font-weight: 600; \
+                                   font-size: 0.92rem; cursor: pointer;">
+                            <span aria-hidden="true">"📤"</span>
+                            {move || if sending() { "Отправляю…".to_string() } else { label.clone() }}
+                        </button>
+                        <Show when=move || err().is_some() fallback=|| ()>
+                            <p class="is-size-7 has-text-danger" style="margin: 6px 0 0 0;">
+                                {move || err().unwrap_or_default()}
+                            </p>
+                        </Show>
                     }
-                >
-                    <p class="is-size-7 has-text-success" style="margin: 0;" data-testid="live-request-done">
-                        {move || t("curator.shared_done")}
-                    </p>
-                </Show>
-            </div>
+                }
+            >
+                <span class="is-size-7 has-text-weight-semibold" style="color: #04603F;"
+                    data-testid="live-request-done">
+                    {done_label.clone()}
+                </span>
+            </Show>
         </div>
+    }
+}
+
+/// Short RU name of a dataset for the compact «Отправить …» button.
+fn dataset_short(d: Dataset) -> &'static str {
+    match d {
+        Dataset::Body => "параметры тела",
+        Dataset::Food => "дневник питания",
+        Dataset::Weight => "дневник веса",
+        Dataset::Steps => "дневник шагов",
+        Dataset::All => "все данные",
     }
 }
 

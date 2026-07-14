@@ -481,7 +481,12 @@ pub fn FoodEditor(
     };
 
     view! {
-        <div on:keydown=move |ev: leptos::ev::KeyboardEvent| {
+        // re:Norma brand: recolour every link/primary control in this form from the
+        // stock nuclear-blue to the emerald accent (#10B981 = hsl(160,84%,39%)) by
+        // overriding Bulma's link HSL vars on the root — so `is-link` buttons, the
+        // active tab and any `has-text-link` inside turn green without per-button edits.
+        <div style="--bulma-link-h: 160deg; --bulma-link-s: 84%; --bulma-link-l: 39%; --bulma-link: #10B981;"
+            on:keydown=move |ev: leptos::ev::KeyboardEvent| {
             if ev.key() == "Enter" { ev.prevent_default(); }
         }>
             // Two independent sub-forms behind underline tabs. Switching only

@@ -553,7 +553,7 @@ pub fn FoodEditor(
                         rows="1"
                         placeholder=t("food_editor.product_name")
                         class="is-size-6"
-                        style="flex: 3 1 0; min-width: 0; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none; box-sizing: border-box; resize: none; overflow-y: auto; max-height: 64px; line-height: 1.5; font-family: inherit;"
+                        style="flex: 5 1 0; min-width: 0; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none; box-sizing: border-box; resize: none; overflow-y: auto; max-height: 64px; line-height: 1.5; font-family: inherit;"
                         prop:value=move || name.get()
                         on:input=move |ev| {
                             // Keep `draft_id` so the auto-sync effect propagates the new
@@ -562,7 +562,7 @@ pub fn FoodEditor(
                             autosize_name();
                         }
                     ></textarea>
-                    <div style="flex: 1 1 0; min-width: 0; position: relative;">
+                    <div style="flex: 2 1 0; min-width: 0; position: relative;">
                         <crate::components::net_badge::NetOfflineBadge/>
                         <button type="button"
                             class="button is-link is-fullwidth is-size-7"
@@ -575,9 +575,9 @@ pub fn FoodEditor(
                                 // the words): ⌛+seconds while connecting, then the
                                 // streaming token count — 🧠 thinking, ✍️ answer.
                                 match name_phase.get() {
-                                    0 => format!("\u{231b} {}s", name_elapsed()),
-                                    1 => format!("\u{1f9e0} {}", name_think.get()),
-                                    _ => format!("\u{270d}\u{fe0f} {}", name_answer.get()),
+                                    0 => format!("\u{231b} {} с", name_elapsed()),
+                                    1 => format!("\u{1f9e0} {} ток", name_think.get()),
+                                    _ => format!("\u{270d}\u{fe0f} {} ток", name_answer.get()),
                                 }
                             } else {
                                 t("food_editor.detect_short").to_string()

@@ -7,16 +7,14 @@
 
 use serde_json::{json, Value};
 
-use crate::services::story_dsl::{self, Engine};
 use crate::services::weight_trend::{self, BalanceState, Direction, WeightTrend, DEFAULT_WINDOW_DAYS};
-use crate::services::{i18n, local, profile, story};
+use crate::services::{i18n, local, profile};
 
 /// The datasets a curator can request. Mirrors the protocol's `dataset` field.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Dataset {
     Body,
     Food,
-    Story,
     Weight,
     Steps,
     All,
@@ -28,7 +26,6 @@ impl Dataset {
         Some(match s {
             "body" => Dataset::Body,
             "food" => Dataset::Food,
-            "story" => Dataset::Story,
             "weight" => Dataset::Weight,
             "steps" => Dataset::Steps,
             "all" => Dataset::All,
@@ -41,7 +38,6 @@ impl Dataset {
         match self {
             Dataset::Body => "curator.request_body",
             Dataset::Food => "curator.request_food",
-            Dataset::Story => "curator.request_story",
             Dataset::Weight => "curator.request_weight",
             Dataset::Steps => "curator.request_steps",
             Dataset::All => "curator.request_all",
@@ -53,7 +49,6 @@ impl Dataset {
         match self {
             Dataset::Body => "curator.shared_body",
             Dataset::Food => "curator.shared_food",
-            Dataset::Story => "curator.shared_story",
             Dataset::Weight => "curator.shared_weight",
             Dataset::Steps => "curator.shared_steps",
             Dataset::All => "curator.shared_all",
@@ -130,30 +125,6 @@ async fn build_steps() -> Value {
     json!({ "series": series })
 }
 
-async fn build_story() -> Value {
-    let snap = story::engine_snapshot().await;
-    let s = story_dsl::story();
-    let engine = Engine::new(s, &snap);
-
-    let mut completed: Vec<Value> = Vec::new();
-    let mut pending: Vec<String> = Vec::new();
-    for t in &s.tasks {
-        if engine.task_closed(&t.id) {
-            // The completion time: the mapped milestone flag's `updated_at`, when
-            // one exists (event/section tasks). "" when the task closes via a
-            // derived streak/count with no single flag timestamp.
-            let at = match story::flag_for_task(&t.id) {
-                Some(flag) => story::flag_updated_at(flag).await.unwrap_or_default(),
-                None => String::new(),
-            };
-            completed.push(json!({ "key": t.id, "at": at }));
-        } else {
-            pending.push(t.id.clone());
-        }
-    }
-    json!({ "completed": completed, "pending": pending })
-}
-
 async fn build_food() -> Value {
     let foods: std::collections::BTreeMap<String, api_types::Food> =
         local::list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect();
@@ -204,7 +175,7 @@ async fn build_food() -> Value {
 /// Gather `dataset` into its typed data_share envelope value.
 ///
 /// The envelope is ALWAYS an object keyed by dataset name — a single dataset is
-/// `{"weight": {...}}`, "all" is the 5-key map. Keying single shares too keeps the
+/// `{"weight": {...}}`, "all" is the 4-key map. Keying single shares too keeps the
 /// reader (admin `datasets_from_payload`) uniform and unambiguous: a bare
 /// `{"series": …}` couldn't be told apart (weight vs steps both carry `series`).
 pub async fn build(dataset: Dataset) -> Value {
@@ -212,13 +183,11 @@ pub async fn build(dataset: Dataset) -> Value {
         Dataset::Body => json!({ "body": build_body().await }),
         Dataset::Weight => json!({ "weight": build_weight().await }),
         Dataset::Steps => json!({ "steps": build_steps().await }),
-        Dataset::Story => json!({ "story": build_story().await }),
         Dataset::Food => json!({ "food": build_food().await }),
         Dataset::All => json!({
             "body": build_body().await,
             "weight": build_weight().await,
             "steps": build_steps().await,
-            "story": build_story().await,
             "food": build_food().await,
         }),
     }

@@ -136,7 +136,6 @@ fn dataset_id(d: Dataset) -> &'static str {
     match d {
         Dataset::Body => "body",
         Dataset::Food => "food",
-        Dataset::Story => "story",
         Dataset::Weight => "weight",
         Dataset::Steps => "steps",
         Dataset::All => "all",

@@ -1,6 +1,6 @@
 //! Rendering of typed data_share payloads shared by the user over the support
 //! chat. A `data_share` message carries a `payload` (raw JSON) for one dataset
-//! (body/weight/steps/story/food) or, for the "all" request, a nested object
+//! (body/weight/steps/food) or, for the "all" request, a nested object
 //! keyed by dataset. We render each dataset as a labelled button in the thread;
 //! tapping it opens a modal that mirrors the client's own views.
 //!
@@ -58,21 +58,6 @@ pub struct StepPoint {
 pub struct StepsShare {
     #[serde(default)]
     pub series: Vec<StepPoint>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct StoryDone {
-    pub key: String,
-    #[serde(default)]
-    pub at: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct StoryShare {
-    #[serde(default)]
-    pub completed: Vec<StoryDone>,
-    #[serde(default)]
-    pub pending: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -134,7 +119,6 @@ pub enum Dataset {
     Body(BodyShare),
     Weight(WeightShare),
     Steps(StepsShare),
-    Story(StoryShare),
     Food(FoodShare),
 }
 
@@ -145,7 +129,6 @@ impl Dataset {
             Dataset::Body(_) => "📋 Параметры тела",
             Dataset::Weight(_) => "📊 Дневник веса",
             Dataset::Steps(_) => "👟 Дневник шагов",
-            Dataset::Story(_) => "✅ Задания",
             Dataset::Food(_) => "🍽 Дневник питания",
         }
     }
@@ -156,7 +139,6 @@ impl Dataset {
             Dataset::Body(_) => "Параметры тела",
             Dataset::Weight(_) => "Дневник веса",
             Dataset::Steps(_) => "Дневник шагов",
-            Dataset::Story(_) => "Задания",
             Dataset::Food(_) => "Дневник питания",
         }
     }
@@ -178,9 +160,6 @@ fn parse_one(key: &str, v: &serde_json::Value) -> Result<Option<Dataset>, String
         "steps" => Dataset::Steps(
             serde_json::from_value(v.clone()).map_err(|e| format!("steps: {e}"))?,
         ),
-        "story" => Dataset::Story(
-            serde_json::from_value(v.clone()).map_err(|e| format!("story: {e}"))?,
-        ),
         "food" => Dataset::Food(
             serde_json::from_value(v.clone()).map_err(|e| format!("food: {e}"))?,
         ),
@@ -194,7 +173,7 @@ fn parse_one(key: &str, v: &serde_json::Value) -> Result<Option<Dataset>, String
 /// dataset keys at the top level (the bundle) — otherwise we probe each known
 /// key. FAIL LOUDLY on a present-but-broken payload.
 pub fn datasets_from_payload(payload: &serde_json::Value) -> Result<Vec<Dataset>, String> {
-    const KEYS: [&str; 5] = ["body", "weight", "steps", "story", "food"];
+    const KEYS: [&str; 4] = ["body", "weight", "steps", "food"];
     let mut out = Vec::new();
     let mut matched_any_key = false;
 
@@ -218,7 +197,7 @@ pub fn datasets_from_payload(payload: &serde_json::Value) -> Result<Vec<Dataset>
     // it loudly rather than guessing.
     if !matched_any_key {
         return Err(
-            "data_share payload has no known dataset key (body/weight/steps/story/food)".to_string(),
+            "data_share payload has no known dataset key (body/weight/steps/food)".to_string(),
         );
     }
     Ok(out)
@@ -372,43 +351,6 @@ fn steps_view(s: &StepsShare) -> impl IntoView {
     .into_view()
 }
 
-fn story_view(s: &StoryShare) -> impl IntoView {
-    let completed = s.completed.clone();
-    let pending = s.pending.clone();
-    view! {
-        <div>
-            <div style="font-weight:650; margin:0 0 8px;">"Выполненные"</div>
-            {if completed.is_empty() {
-                view! { <div class="row__meta">"—"</div> }.into_view()
-            } else {
-                view! {
-                    <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:16px;">
-                        {completed.into_iter().map(|c| view! {
-                            <div style="display:flex; justify-content:space-between; gap:10px; \
-                                        padding:7px 0; border-bottom:1px solid var(--line-soft);">
-                                <span>{c.key}</span>
-                                <span class="mono row__meta" style="flex:none;">{c.at}</span>
-                            </div>
-                        }).collect_view()}
-                    </div>
-                }.into_view()
-            }}
-            <div style="font-weight:650; margin:0 0 8px;">"Текущие"</div>
-            {if pending.is_empty() {
-                view! { <div class="row__meta">"—"</div> }.into_view()
-            } else {
-                view! {
-                    <div style="display:flex; flex-direction:column; gap:4px;">
-                        {pending.into_iter().map(|k| view! {
-                            <div style="padding:7px 0; border-bottom:1px solid var(--line-soft);">{k}</div>
-                        }).collect_view()}
-                    </div>
-                }.into_view()
-            }}
-        </div>
-    }
-}
-
 fn food_view(f: &FoodShare) -> impl IntoView {
     let days = f.days.clone();
     if days.is_empty() {
@@ -504,7 +446,6 @@ pub fn render_dataset(ds: &Dataset) -> View {
         Dataset::Body(b) => body_view(b).into_view(),
         Dataset::Weight(w) => weight_view(w).into_view(),
         Dataset::Steps(s) => steps_view(s).into_view(),
-        Dataset::Story(s) => story_view(s).into_view(),
         Dataset::Food(f) => food_view(f).into_view(),
     }
 }

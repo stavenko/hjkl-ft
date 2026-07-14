@@ -391,28 +391,30 @@ pub fn DashboardPage() -> impl IntoView {
                                 }
                             }).collect_view();
                             let detail = d.series.iter().map(|s| {
-                                let (paths, _) = progress_widget::icon_for(s.key);
+                                let (paths, name) = progress_widget::icon_for(s.key);
                                 let (stroke, tint) = progress_widget::state_colors(s.state);
                                 let reason = indicator_reason(s.key, s.state, s.missed);
                                 let days = s.days.clone();
-                                // Each indicator on its own bordered panel so the two
-                                // don't blur together: [icon] [histogram] [?].
+                                // Each indicator on its own bordered panel: a header row
+                                // [icon] [name] … [?] naming which indicator this is, with
+                                // the histogram full-width below.
                                 view! {
-                                    <div style="display: flex; align-items: center; gap: 8px; \
+                                    <div style="display: flex; flex-direction: column; gap: 6px; \
                                             border: 0.5px solid var(--bulma-border-weak); border-radius: 12px; \
                                             padding: 8px 10px; background: var(--bulma-scheme-main-bis);">
-                                        <div style=format!("width: 40px; height: 40px; min-width: 40px; border-radius: 50%; \
-                                                background: {tint}; display: flex; align-items: center; justify-content: center;")>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24"
-                                                fill="none" stroke=stroke stroke-width="2" stroke-linecap="round"
-                                                stroke-linejoin="round" inner_html=paths></svg>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <div style=format!("width: 28px; height: 28px; min-width: 28px; border-radius: 50%; \
+                                                    background: {tint}; display: flex; align-items: center; justify-content: center;")>
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                                    fill="none" stroke=stroke stroke-width="2" stroke-linecap="round"
+                                                    stroke-linejoin="round" inner_html=paths></svg>
+                                            </div>
+                                            <span class="has-text-weight-semibold" style="flex: 1; min-width: 0;">{name}</span>
+                                            <InfoHint text=reason/>
                                         </div>
-                                        <div style="flex: 1; min-width: 0;">
-                                            <DayBars series=Signal::derive(move || days.clone())
-                                                unit="г".to_string()
-                                                miss_color=stroke.to_string()/>
-                                        </div>
-                                        <InfoHint text=reason/>
+                                        <DayBars series=Signal::derive(move || days.clone())
+                                            unit="г".to_string()
+                                            miss_color=stroke.to_string()/>
                                     </div>
                                 }
                             }).collect_view();

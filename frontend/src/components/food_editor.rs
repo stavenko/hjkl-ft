@@ -571,7 +571,14 @@ pub fn FoodEditor(
                             on:click=on_detect_name
                         >
                             {move || if name_loading.get() {
-                                format!("\u{231b} {}s", name_elapsed())
+                                // Compact live progress (the narrow button can't fit
+                                // the words): ⌛+seconds while connecting, then the
+                                // streaming token count — 🧠 thinking, ✍️ answer.
+                                match name_phase.get() {
+                                    0 => format!("\u{231b} {}s", name_elapsed()),
+                                    1 => format!("\u{1f9e0} {}", name_think.get()),
+                                    _ => format!("\u{270d}\u{fe0f} {}", name_answer.get()),
+                                }
                             } else {
                                 t("food_editor.detect_short").to_string()
                             }}

@@ -34,10 +34,10 @@
     padding:0 20px calc(40px + var(--safe-b))}
   p{margin:0}
   a{color:inherit;text-decoration:none}
-  h1,h2,h3{margin:0;letter-spacing:-.02em;line-height:1.14}
-  h1{font-size:30px;font-weight:800}
-  h2{font-size:23px;font-weight:800}
-  h3{font-size:18px;font-weight:800}
+  h1,h2,h3{margin:0;letter-spacing:-.01em;line-height:1.14}
+  h1{font-size:30px;font-weight:600}
+  h2{font-size:23px;font-weight:600}
+  h3{font-size:18px;font-weight:600}
   .eyebrow{display:inline-block;font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
     color:var(--accent-ink);background:var(--accent-soft);padding:6px 12px;border-radius:var(--pill)}
   section{padding:34px 0}
@@ -82,14 +82,17 @@
   /* Полноэкранные «странички»: sticky-стопка — каждая поднимается снизу,
      фиксируется вверху и перекрывает предыдущую. После последней — обычный скролл. */
   .stack{position:relative}
-  .panel{position:sticky;top:0;min-height:100vh;min-height:100svh;display:flex;align-items:center;
+  .panel{position:sticky;top:0;min-height:100vh;min-height:100svh;display:flex;align-items:flex-start;padding:0;
     background:var(--bg);border-radius:28px 28px 0 0;box-shadow:0 -18px 48px -26px rgba(14,22,48,.45)}
   .panel:nth-child(even){background:var(--surface)}
-  .panel-inner{width:100%;padding:56px 4px;display:flex;flex-direction:column;gap:22px}
-  .panel-img{width:100%;aspect-ratio:4/3;border-radius:var(--radius-lg);background:var(--bg-2);
+  .panel-inner{width:100%;padding:22px 5% 48px;display:flex;flex-direction:column;gap:22px}
+  .panel-img{order:1;width:100%;aspect-ratio:4/3;border-radius:var(--radius-lg);background:var(--bg-2);
     border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px}
+  .panel-photo{order:1;width:100%;height:auto;display:block;margin:0 auto;max-width:380px}
   .panel h2{font-size:28px}
   .panel p{color:var(--ink-2);font-size:17px}
+  .panel-list{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px}
+  .panel-list li{color:var(--ink-2);font-size:17px}
   .panel-sub{color:var(--muted);font-size:17px}
 
   /* steps (how it works) */
@@ -196,36 +199,34 @@
   <div class="stack">
     <section class="panel">
       <div class="panel-inner">
-        <div class="panel-img">[Изображение]</div>
-        <h2>Интеллектуальная система для похудения</h2>
-        <p>(почему помогает именно вам)</p>
-      </div>
-    </section>
-    <section class="panel">
-      <div class="panel-inner">
-        <div class="panel-img">[Изображение]</div>
+        <img class="panel-photo" src="/img/girl-recraft.png" alt="Спортивная девушка" />
         <h2>Вернёт вас в норму</h2>
-        <p>Поможет понять, как надо питаться, чтобы терять, сохранять вес.</p>
+        <p>Проведёт вас по пути, где вы скинете лишний вес и:</p>
+        <ul class="panel-list">
+          <li>Появятся полезные пищевые привычки</li>
+          <li>Изменится рацион</li>
+          <li>Лишний вес уйдёт и не вернётся</li>
+        </ul>
       </div>
     </section>
     <section class="panel">
       <div class="panel-inner">
         <div class="panel-img">[Изображение]</div>
-        <h2>Ваш персональный пульт</h2>
+        <h2>Ваш персональный экран</h2>
         <p>Будет помогать вам даже когда вам плохо.</p>
       </div>
     </section>
     <section class="panel">
       <div class="panel-inner">
         <div class="panel-img">[Изображение]</div>
-        <h2>Живой человек по ту сторону экрана</h2>
+        <h2>Человек рядом</h2>
         <p>Поможет, даст обратную связь, подскажет.</p>
       </div>
     </section>
     <section class="panel">
       <div class="panel-inner">
         <div class="panel-img">[Изображение]</div>
-        <h2>Простой подсчёт</h2>
+        <h2>Простота подсчёта</h2>
         <p>Быстро находится нужная еда. Простая работа с рецептами. UI-фишки для поиска / дублирования.</p>
       </div>
     </section>

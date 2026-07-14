@@ -594,37 +594,33 @@ pub fn FoodEditor(
 
             // Tab 2 — "By photo": thumbnails + add-photo + detect-calories button.
             <div style=move || if active_tab.get() == 1 { "" } else { "display: none;" }>
-                // Thumbnails of the photos already added (tap × to drop one). Photos
-                // are stored as JPEG base64, so they render directly as data URLs.
-                {move || {
-                    let photos = photos_base64.get();
-                    (!photos.is_empty()).then(|| view! {
-                        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
-                            {photos.into_iter().enumerate().map(|(i, b64)| view! {
-                                <div style="position: relative; width: 56px; height: 56px;">
-                                    <img src=format!("data:image/jpeg;base64,{b64}")
-                                        style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
-                                    <button type="button"
-                                        style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
-                                        on:click=move |_| {
-                                            photos_base64.update(|v| { if i < v.len() { v.remove(i); } });
-                                            photo_count.set(photos_base64.get_untracked().len());
-                                        }
-                                    >"\u{00d7}"</button>
-                                </div>
-                            }).collect_view()}
-                        </div>
-                    })
-                }}
+                <input type="file" accept="image/*" multiple=true
+                    id="food-photo-input" style="display: none;" on:change=on_file_change />
 
-                <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
-                    <input type="file" accept="image/*" multiple=true
-                        id="food-photo-input"
-                        style="display: none;"
-                        on:change=on_file_change />
+                // Row: photo thumbnails (left, grow, wrap to a 2nd line) + «Добавить
+                // фото» on the right, pinned to the top — the same shape as the name
+                // tab. New photos land to the LEFT of the button.
+                <div style="display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px;">
+                    <div style="flex: 5 1 0; min-width: 0; display: flex; gap: 8px; flex-wrap: wrap;">
+                        {move || photos_base64.get().into_iter().enumerate().map(|(i, b64)| view! {
+                            <div style="position: relative; width: 56px; height: 56px;">
+                                <img src=format!("data:image/jpeg;base64,{b64}")
+                                    style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
+                                <button type="button"
+                                    style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
+                                    on:click=move |_| {
+                                        photos_base64.update(|v| { if i < v.len() { v.remove(i); } });
+                                        photo_count.set(photos_base64.get_untracked().len());
+                                    }
+                                >"\u{00d7}"</button>
+                            </div>
+                        }).collect_view()}
+                    </div>
                     <button type="button"
                         class="is-size-7"
-                        style="flex: 1; padding: 8px 0; border: 1px solid var(--bulma-border-weak); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); cursor: pointer;"
+                        style="flex: 2 1 0; min-width: 0; height: 56px; padding: 4px; border: 1px dashed var(--bulma-border); border-radius: 10px; \
+                               background: var(--bulma-scheme-main); color: var(--bulma-text); cursor: pointer; \
+                               display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;"
                         on:click=move |_| {
                             let doc = web_sys::window().unwrap().document().unwrap();
                             let el = doc.get_element_by_id("food-photo-input").unwrap();
@@ -633,19 +629,17 @@ pub fn FoodEditor(
                             input.click();
                         }
                     >
-                        {move || {
-                            // Label flips to "add another photo" once at least one is added.
-                            let key = if photo_count.get() == 0 {
-                                "food_editor.add_photo"
-                            } else {
-                                "food_editor.add_more_photo"
-                            };
-                            format!("\u{1f4f7} {}", t(key))
-                        }}
+                        <span style="font-size: 1.2rem; line-height: 1;">"\u{1f4f7}"</span>
+                        <span>{move || t("food_editor.add_photo_short")}</span>
                     </button>
+                </div>
+
+                // Full-width «Определить еду» below the photos + button.
+                <div style="position: relative; margin-bottom: 12px;">
+                    <crate::components::net_badge::NetOfflineBadge/>
                     <button type="button"
-                        class="button is-link is-size-7"
-                        style="flex: 1; padding: 8px 0; border: none; border-radius: 10px; cursor: pointer;"
+                        class="button is-link is-fullwidth"
+                        style="border: none; border-radius: 10px; cursor: pointer;"
                         disabled=move || photo_loading.get() || photo_count.get() == 0
                         on:click=on_detect_photo
                     >
@@ -654,16 +648,16 @@ pub fn FoodEditor(
                                 0 => {
                                     let msg = photo_vision_msg.get();
                                     if msg.is_empty() {
-                                        format!("\u{231b} {}s", photo_elapsed())
+                                        format!("\u{231b} {} с", photo_elapsed())
                                     } else {
-                                        format!("\u{231b} {msg} \u{00b7} {}s", photo_elapsed())
+                                        format!("\u{231b} {msg} \u{00b7} {} с", photo_elapsed())
                                     }
                                 }
-                                1 => format!("\u{1f9e0} Thinking ({} tok) \u{00b7} {}s", photo_think.get(), photo_elapsed()),
-                                _ => format!("\u{270d}\u{fe0f} Answer ({} tok) \u{00b7} {}s", photo_answer.get(), photo_elapsed()),
+                                1 => format!("\u{1f9e0} {} ток \u{00b7} {} с", photo_think.get(), photo_elapsed()),
+                                _ => format!("\u{270d}\u{fe0f} {} ток \u{00b7} {} с", photo_answer.get(), photo_elapsed()),
                             }
                         } else {
-                            format!("\u{2728} {}", t("food_editor.detect_by_photo"))
+                            format!("\u{2728} {}", t("food_editor.detect_food"))
                         }}
                     </button>
                 </div>

@@ -138,6 +138,26 @@ pub fn FoodEditor(
 
     let photos_base64 = create_rw_signal(Vec::<String>::new());
     let photo_count = create_rw_signal(0usize);
+    // How many 56px tiles (incl. the add button) fit per row — measured from the
+    // grid width so the «📷» button can sit as the LAST cell of the FIRST row: it
+    // starts on the left, is pushed right as photos are added, then stays pinned to
+    // the row's right while extra photos wrap to the next row.
+    let photo_grid_ref = create_node_ref::<leptos::html::Div>();
+    let photo_cols = create_rw_signal(4usize);
+    let measure_cols = move || {
+        if let Some(el) = photo_grid_ref.get() {
+            let el: &web_sys::Element = &el;
+            let w = el.client_width() as f64;
+            if w > 0.0 {
+                photo_cols.set((((w + 8.0) / 64.0).floor() as i64).max(1) as usize);
+            }
+        }
+    };
+    create_effect(move |_| {
+        photos_base64.get();
+        active_tab.get();
+        request_animation_frame(move || measure_cols());
+    });
 
     // Paywall modal: shown (instead of silently navigating away) when recognition
     // is blocked by an inactive subscription — proactively, or on a backend 402.
@@ -600,9 +620,15 @@ pub fn FoodEditor(
                 // Row: photo thumbnails (left, grow, wrap to a 2nd line) + «Добавить
                 // фото» on the right, pinned to the top — the same shape as the name
                 // tab. New photos land to the LEFT of the button.
-                <div style="display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px;">
-                    <div style="flex: 5 1 0; min-width: 0; display: flex; gap: 8px; flex-wrap: wrap;">
-                        {move || photos_base64.get().into_iter().enumerate().map(|(i, b64)| view! {
+                <div node_ref=photo_grid_ref
+                    style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 10px;">
+                    {move || {
+                        let photos = photos_base64.get();
+                        let cols = photo_cols.get().max(1);
+                        // The add button is the LAST cell of row 1: first (cols-1)
+                        // photos go before it, the rest after (wrapping below).
+                        let bi = photos.len().min(cols.saturating_sub(1));
+                        let thumb = move |i: usize, b64: String| view! {
                             <div style="position: relative; width: 56px; height: 56px;">
                                 <img src=format!("data:image/jpeg;base64,{b64}")
                                     style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
@@ -614,24 +640,31 @@ pub fn FoodEditor(
                                     }
                                 >"\u{00d7}"</button>
                             </div>
-                        }).collect_view()}
-                    </div>
-                    <button type="button"
-                        class="is-size-7"
-                        style="flex: 2 1 0; min-width: 0; height: 56px; padding: 4px; border: 1px dashed var(--bulma-border); border-radius: 10px; \
-                               background: var(--bulma-scheme-main); color: var(--bulma-text); cursor: pointer; \
-                               display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;"
-                        on:click=move |_| {
-                            let doc = web_sys::window().unwrap().document().unwrap();
-                            let el = doc.get_element_by_id("food-photo-input").unwrap();
-                            use wasm_bindgen::JsCast;
-                            let input: &web_sys::HtmlInputElement = el.unchecked_ref();
-                            input.click();
+                        };
+                        let before: Vec<_> = photos[..bi].iter().cloned().enumerate()
+                            .map(|(i, b64)| thumb(i, b64)).collect();
+                        let after: Vec<_> = photos[bi..].iter().cloned().enumerate()
+                            .map(|(j, b64)| thumb(bi + j, b64)).collect();
+                        view! {
+                            {before}
+                            <button type="button"
+                                attr:aria-label=t("food_editor.add_photo")
+                                style="width: 56px; height: 56px; flex: none; padding: 0; border: 1px dashed var(--bulma-border); border-radius: 8px; \
+                                       background: var(--bulma-scheme-main); color: var(--bulma-text-weak); cursor: pointer; \
+                                       display: flex; align-items: center; justify-content: center; font-size: 1.5rem; line-height: 1;"
+                                on:click=move |_| {
+                                    let doc = web_sys::window().unwrap().document().unwrap();
+                                    let el = doc.get_element_by_id("food-photo-input").unwrap();
+                                    use wasm_bindgen::JsCast;
+                                    let input: &web_sys::HtmlInputElement = el.unchecked_ref();
+                                    input.click();
+                                }
+                            >
+                                "\u{1f4f7}"
+                            </button>
+                            {after}
                         }
-                    >
-                        <span style="font-size: 1.2rem; line-height: 1;">"\u{1f4f7}"</span>
-                        <span>{move || t("food_editor.add_photo_short")}</span>
-                    </button>
+                    }}
                 </div>
 
                 // Full-width «Определить еду» below the photos + button.

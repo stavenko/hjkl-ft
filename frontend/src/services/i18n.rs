@@ -601,6 +601,8 @@ fn en(key: &str) -> &'static str {
 
         // Food editor
         "food_editor.product_name" => "Name or description of the dish",
+        "food_editor.name_field" => "Name",
+        "food_editor.name_field_ph" => "Product name",
         "food_editor.recommended_abbr" => "rec",
         "ai.extracted_from_label" => "Extracted from label",
         "food_editor.add_photo" => "Add label photo",
@@ -1857,6 +1859,8 @@ fn ru(key: &str) -> &'static str {
 
         // Редактор продукта
         "food_editor.product_name" => "Название или описание блюда",
+        "food_editor.name_field" => "Название",
+        "food_editor.name_field_ph" => "Название продукта",
         "food_editor.recommended_abbr" => "реком.",
         "ai.extracted_from_label" => "Извлечено с этикетки",
         "food_editor.add_photo" => "Добавить фото этикетки",

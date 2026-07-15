@@ -87,9 +87,14 @@ pub fn FoodEditor(
     #[prop(optional)]
     initial_tab: u8,
 ) -> impl IntoView {
-    let name = create_rw_signal(initial_name);
-    // The name field is a textarea that auto-grows from one line to (at most) two,
-    // so a long product name wraps instead of scrolling sideways next to the button.
+    // The product NAME — shown and editable in the nutrient card, and filled by the
+    // AI (from a plain name it's tidied; from a description it's a summarised dish
+    // name). This is what gets saved.
+    let name = create_rw_signal(String::new());
+    // The free-form INPUT at the top of the «По описанию» tab — a plain name OR a
+    // dish description — that feeds the AI. Seeded from the search query that led
+    // here. It's a textarea that auto-grows from one line to (at most) two.
+    let description = create_rw_signal(initial_name);
     let name_ta = create_node_ref::<leptos::html::Textarea>();
     let autosize_name = move || {
         if let Some(el) = name_ta.get() {
@@ -100,9 +105,9 @@ pub fn FoodEditor(
             let _ = style.set_property("height", &format!("{h}px"));
         }
     };
-    // Resize on any name change (typing OR the initial seed from the search query).
+    // Resize on any change (typing OR the initial seed from the search query).
     create_effect(move |_| {
-        name.get();
+        description.get();
         request_animation_frame(move || autosize_name());
     });
     let kcal = create_rw_signal(String::new());
@@ -301,7 +306,8 @@ pub fn FoodEditor(
         let vision_start = photo_vision_start;
 
         let images = photos_base64.get_untracked();
-        let n = name.get_untracked();
+        // Text channel feeds on the free-form `description` input, NOT the card name.
+        let n = description.get_untracked();
         if use_vision {
             if images.is_empty() { return; }
         } else if n.is_empty() {
@@ -590,11 +596,11 @@ pub fn FoodEditor(
                         placeholder=t("food_editor.product_name")
                         class="is-size-6"
                         style="flex: 5 1 0; min-width: 0; padding: 8px 12px; border: 1px solid var(--bulma-border); border-radius: 10px; background: var(--bulma-scheme-main); color: var(--bulma-text); outline: none; box-sizing: border-box; resize: none; overflow-y: auto; max-height: 64px; line-height: 1.5; font-family: inherit;"
-                        prop:value=move || name.get()
+                        prop:value=move || description.get()
                         on:input=move |ev| {
-                            // Keep `draft_id` so the auto-sync effect propagates the new
-                            // name into BOTH the draft and the Food created from it.
-                            name.set(event_target_value(&ev));
+                            // This is the AI FEED (a name or a free-form description),
+                            // separate from the product `name` shown in the card below.
+                            description.set(event_target_value(&ev));
                             autosize_name();
                         }
                     ></textarea>
@@ -603,7 +609,7 @@ pub fn FoodEditor(
                         <button type="button"
                             class="button is-link is-fullwidth is-size-7"
                             style="padding: 8px 6px; border: none; border-radius: 10px; cursor: pointer; height: 40px; white-space: nowrap;"
-                            disabled=move || name_loading.get() || name.get().is_empty()
+                            disabled=move || name_loading.get() || description.get().is_empty()
                             on:click=on_detect_name
                         >
                             {move || if name_loading.get() {
@@ -742,6 +748,24 @@ pub fn FoodEditor(
             // kept by making the card itself the rounded surface (scheme-main) with
             // transparent rows, rather than clipping opaque rows to the radius.
             <div style="background: var(--bulma-scheme-main); border-radius: 12px;">
+                // Product NAME — what gets saved. Filled by the AI (tidied name or a
+                // summarised dish name), and freely editable here on BOTH tabs. A wide
+                // input, unlike the numeric nutrient rows.
+                <div>
+                    <div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px;">
+                        <span class="is-size-6" style="color: var(--bulma-text); min-width: 80px;">
+                            {move || t("food_editor.name_field")}
+                        </span>
+                        <input type="text"
+                            placeholder=t("food_editor.name_field_ph")
+                            class="is-size-6"
+                            style="flex: 1; min-width: 0; text-align: left; padding: 4px 8px; border: none; background: var(--bulma-background); color: var(--bulma-text); border-radius: 8px; outline: none;"
+                            prop:value=move || name.get()
+                            on:input=move |ev| name.set(event_target_value(&ev))
+                        />
+                    </div>
+                    <div style="border-bottom: 0.5px solid var(--bulma-border-weak); margin-left: 12px;"></div>
+                </div>
                 <NutrientRow label=t("food_editor.calories") unit=t("common.unit.kcal") placeholder="0"
                     value=kcal hint=ai_hint("kcal").into_view() last=false />
                 <NutrientRow label=t("food_editor.protein") unit=t("common.unit.g") placeholder="0"

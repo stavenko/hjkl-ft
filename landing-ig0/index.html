@@ -89,6 +89,11 @@
   .panel-img{order:1;width:100%;aspect-ratio:4/3;border-radius:var(--radius-lg);background:var(--bg-2);
     border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px}
   .panel-photo{order:1;width:100%;height:auto;display:block;margin:0 auto;max-width:380px}
+  /* Скрин приложения: показываем верх, низ обрезаем, лёгкий наклон */
+  .panel-shot{order:1;width:82%;max-width:280px;margin:12px auto 0;overflow:hidden;
+    border-radius:22px;background:var(--surface);border:1px solid var(--line);
+    box-shadow:0 26px 60px -28px rgba(14,22,48,.5);transform:rotate(-3deg)}
+  .panel-shot img{width:100%;display:block}
   .panel h2{font-size:28px}
   .panel p{color:var(--ink-2);font-size:17px}
   .panel-list{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px}
@@ -199,7 +204,7 @@
   <div class="stack">
     <section class="panel">
       <div class="panel-inner">
-        <img class="panel-photo" src="/img/girl-recraft.png" alt="Спортивная девушка" />
+        <img class="panel-photo" src="/img/girl-v2.png" alt="Спортивная девушка" />
         <h2>Вернёт вас в норму</h2>
         <p>Проведёт вас по пути, где вы скинете лишний вес и:</p>
         <ul class="panel-list">
@@ -211,16 +216,18 @@
     </section>
     <section class="panel">
       <div class="panel-inner">
-        <div class="panel-img">[Изображение]</div>
-        <h2>Ваш персональный экран</h2>
+        <div class="panel-shot"><img src="/img/dashboard.png" alt="Дашборд re:Norma" /></div>
+        <h2>Ваш персональный дашборд</h2>
         <p>Будет помогать вам даже когда вам плохо.</p>
+        <p>Вы получаете личный дашборд вашего питания. Что хорошо, что плохо, что надо изменить, а что надо оставить. Удобная панель, на которой видно всё необходимое.</p>
       </div>
     </section>
     <section class="panel">
       <div class="panel-inner">
-        <div class="panel-img">[Изображение]</div>
-        <h2>Человек рядом</h2>
-        <p>Поможет, даст обратную связь, подскажет.</p>
+        <div class="panel-shot" style="max-width:240px;transform:rotate(3deg)"><img src="/img/chat.png" alt="Чат с поддержкой re:Norma" /></div>
+        <h2>Обратная связь с живым человеком</h2>
+        <p>Программа — это хорошо, но живой человек с опытом — это гораздо лучше.</p>
+        <p>Иногда необходимо что-то спросить. И мы даём такую возможность.</p>
       </div>
     </section>
     <section class="panel">

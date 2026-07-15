@@ -561,14 +561,14 @@ pub fn FoodEditor(
             // (fixed there with real <a href> links). A <button> is natively
             // clickable, matching the working "Форма/История" segmented control.
             <div style="display: flex; border-bottom: 1px solid var(--bulma-border); margin-bottom: 12px;">
-                {[(0u8, "food_editor.tab_by_name"), (1u8, "food_editor.tab_by_photo")]
+                {[(0u8, "food_editor.tab_by_name"), (1u8, "food_editor.tab_by_photo"), (2u8, "food_editor.tab_by_food_photo")]
                     .into_iter()
                     .map(|(idx, label)| view! {
                         <button type="button"
                             style=move || format!(
                                 "flex: 1; background: none; border: none; border-bottom: 2px solid {}; \
-                                 margin-bottom: -1px; padding: 8px 0; cursor: pointer; font: inherit; \
-                                 font-size: 0.875rem; {}",
+                                 margin-bottom: -1px; padding: 8px 2px; cursor: pointer; font: inherit; \
+                                 font-size: 0.8rem; white-space: nowrap; {}",
                                 if active_tab.get() == idx { "var(--bulma-link)" } else { "transparent" },
                                 if active_tab.get() == idx {
                                     "color: var(--bulma-link); font-weight: 600;"
@@ -743,11 +743,31 @@ pub fn FoodEditor(
                 })}
             </div>
 
+            // Tab 3 — "By food photo": placeholder (the recognition pipeline is not
+            // built yet — see docs/food-photo-recognition.md). Visible so the mode is
+            // discoverable; the shared nutrient card + Add button are hidden here.
+            <div style=move || if active_tab.get() == 2 { "" } else { "display: none;" }>
+                <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 28px 16px;">
+                    <span style="color: var(--bulma-link); opacity: 0.9;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"
+                            viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+                            <circle cx="12" cy="13" r="3"/>
+                        </svg>
+                    </span>
+                    <p class="is-size-6" style="color: var(--bulma-text-weak); max-width: 20rem; line-height: 1.5;">
+                        {move || t("food_editor.food_photo_soon")}
+                    </p>
+                </div>
+            </div>
+
             // Nutrient fields card. NB: no `overflow: hidden` — it would clip the
             // "?" hint popover that floats below the lower rows. The rounded look is
             // kept by making the card itself the rounded surface (scheme-main) with
             // transparent rows, rather than clipping opaque rows to the radius.
-            <div style="background: var(--bulma-scheme-main); border-radius: 12px;">
+            // Hidden on the "By food photo" tab (its list UI isn't built yet).
+            <div style=move || if active_tab.get() == 2 { "display: none;".to_string() } else { "background: var(--bulma-scheme-main); border-radius: 12px;".to_string() }>
                 // Product NAME — what gets saved. Filled by the AI (tidied name or a
                 // summarised dish name), and freely editable here on BOTH tabs. A wide
                 // input, unlike the numeric nutrient rows.
@@ -799,10 +819,13 @@ pub fn FoodEditor(
                 />
             </div>
 
-            // Add button
+            // Add button — hidden on the "By food photo" tab (nothing to add yet).
             <button type="button"
                 class="button is-link is-size-6 has-text-weight-semibold"
-                style="width: 100%; padding: 12px 0; margin-top: 16px; border: none; border-radius: 10px; cursor: pointer;"
+                style=move || format!(
+                    "width: 100%; padding: 12px 0; margin-top: 16px; border: none; border-radius: 10px; cursor: pointer;{}",
+                    if active_tab.get() == 2 { " display: none;" } else { "" },
+                )
                 // Enabled only once the form is filled: a name AND calories > 0.
                 disabled=move || {
                     name.get().trim().is_empty()

@@ -128,13 +128,20 @@ fn install_foreground_sync() {
             // the network (VPN toggled, tunnel dropped) — refresh is_online so the
             // warning is honest and the follow-ups gate correctly.
             services::net::probe_background();
-            if services::auth::get_token().is_some() {
-                services::sync::sync_now_background();
-            }
-            // Daily subscription re-check (no-op unless a day has passed).
-            leptos::spawn_local(services::subscription::maybe_recheck());
-            // Classify any still-untagged recent food on resume too.
-            leptos::spawn_local(services::classify::sweep_diary_unclassified());
+            leptos::spawn_local(async {
+                // iOS force-closes a backgrounded PWA's IndexedDB connection; the
+                // cached one then wedges (writes silently fail, reads return
+                // nothing) until a reload. Reopen it BEFORE any resume work — and
+                // before the user touches it (saving weight, opening the diary).
+                services::db::reopen().await;
+                if services::auth::get_token().is_some() {
+                    services::sync::sync_now_background();
+                }
+                // Daily subscription re-check (no-op unless a day has passed).
+                services::subscription::maybe_recheck().await;
+                // Classify any still-untagged recent food on resume too.
+                services::classify::sweep_diary_unclassified().await;
+            });
         }
     });
     let _ = document

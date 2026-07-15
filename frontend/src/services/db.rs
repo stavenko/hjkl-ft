@@ -8,7 +8,21 @@ use wasm_bindgen::JsValue;
 
 thread_local! {
     static DB: RefCell<Option<Rexie>> = RefCell::new(None);
+    // Name of the currently-active database, so the connection can be REOPENED
+    // after iOS force-closes it on a backgrounded PWA (see [`reopen`]).
+    static DB_NAME: RefCell<Option<String>> = RefCell::new(None);
     static STORE_VERSIONS: RefCell<HashMap<&'static str, RwSignal<u32>>> = RefCell::new(HashMap::new());
+}
+
+/// Reopen the active database connection. iOS closes a PWA's IndexedDB connection
+/// while it's backgrounded; the cached `Rexie` then wedges (transactions hang or
+/// error), so writes silently fail and reads return nothing until a full reload.
+/// Call this on resume (foreground) to get a live connection, then re-query.
+pub async fn reopen() {
+    let Some(name) = DB_NAME.with(|c| c.borrow().clone()) else { return };
+    let fresh = open(&name).await;
+    DB.with(|cell| cell.replace(Some(fresh)));
+    bump_all();
 }
 
 pub fn version(store_name: &'static str) -> RwSignal<u32> {
@@ -154,6 +168,7 @@ async fn open(name: &str) -> Rexie {
 pub async fn init() {
     let rexie = open(BOOTSTRAP_DB).await;
     DB.with(|cell| cell.replace(Some(rexie)));
+    DB_NAME.with(|c| c.replace(Some(BOOTSTRAP_DB.to_string())));
 
     STORE_VERSIONS.with(|cell| {
         let mut map = cell.borrow_mut();
@@ -189,6 +204,7 @@ pub async fn activate_for_user(user_id: &str, migrate_bootstrap: bool) {
     }
 
     DB.with(|cell| cell.replace(Some(target)));
+    DB_NAME.with(|c| c.replace(Some(user_db_name(user_id))));
 
     // One-time backfill of the legacy localStorage profile into the synced
     // `profile` store (no-op if a row already exists), then hydrate the in-memory

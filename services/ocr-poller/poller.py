@@ -4,15 +4,24 @@ check, and posts the structured per-100g result back.
 
 Runs forever (the container restarts it); one job at a time.
 
-Network: all calls to Cloudflare honor standard proxy env vars
-(HTTPS_PROXY / ALL_PROXY, e.g. socks5h://v2ray:1080) so the egress can be
-pinned to the Italy VPN. Calls to the local LLM (LLAMA_URL) bypass the proxy
-(NO_PROXY).
+Network robustness (see the 2026-07 wedge post-mortem):
+  * Every Cloudflare call is bounded by a HARD SIGALRM deadline, not just the
+    `requests` timeout. `requests`/PySocks does NOT reliably honour its read
+    timeout on a half-open SOCKS connection (a flaky hysteria/VPN tunnel can
+    leave the socket "established" with no bytes and no EOF, hanging `recv`
+    forever). The alarm always fires and unwinds the wedged syscall.
+  * Egress is ROUND-ROBIN/failover across `EGRESS_PROXIES` (e.g. the v2ray and
+    hysteria tunnels). A claim tries each proxy in turn; a dead path is skipped.
+  * When a claim fails through ALL egress paths for several sweeps in a row, an
+    optional `TUNNEL_RESTART_CMD` bounces the tunnels.
+Calls to the local LLM (LLAMA_URL) never use a proxy (they're on the LAN).
 """
 import base64
 import json
 import os
 import re
+import signal
+import subprocess
 import time
 
 import requests
@@ -23,6 +32,42 @@ LLAMA_URL = os.environ.get("LLAMA_URL", "http://192.168.1.17:8080").rstrip("/")
 VLM_MODEL = os.environ.get("VLM_MODEL", "qwen2.5-vl-32b")
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "3"))
 ATWATER_TOLERANCE = float(os.environ.get("ATWATER_TOLERANCE", "15"))  # kcal
+
+# --- Egress: round-robin across one or more proxies ------------------------
+# `EGRESS_PROXIES` is a comma-separated list (e.g.
+# "socks5h://v2ray:1080,socks5h://hysteria:1080"). An empty entry means DIRECT.
+# Falls back to the legacy ALL_PROXY/HTTPS_PROXY single value for back-compat.
+def _parse_proxies():
+    raw = os.environ.get("EGRESS_PROXIES", "").strip()
+    if raw:
+        items = [p.strip() for p in raw.split(",")]
+    else:
+        single = os.environ.get("ALL_PROXY") or os.environ.get("HTTPS_PROXY") or ""
+        items = [single.strip()]
+    # normalise "" -> None (direct); keep order, drop nothing so an explicit
+    # empty slot can mean "also try direct".
+    return [(p or None) for p in items] or [None]
+
+
+PROXIES = _parse_proxies()
+# After a claim fails through EVERY proxy this many sweeps in a row, bounce the
+# tunnels (best-effort). Empty TUNNEL_RESTART_CMD => just keep retrying.
+FULL_FAILURES_BEFORE_RESTART = int(os.environ.get("FULL_FAILURES_BEFORE_RESTART", "2"))
+TUNNEL_RESTART_CMD = os.environ.get("TUNNEL_RESTART_CMD", "").strip()
+RESTART_COOLDOWN = float(os.environ.get("RESTART_COOLDOWN", "10"))
+
+# Hard wall-clock caps (seconds) per network op. These ALWAYS fire (SIGALRM),
+# unlike the requests timeout, so a wedged tunnel can never hang the loop.
+CLAIM_HARD = int(os.environ.get("CLAIM_HARD", "40"))
+IMAGE_HARD = int(os.environ.get("IMAGE_HARD", "150"))
+COMPLETE_HARD = int(os.environ.get("COMPLETE_HARD", "40"))
+REPORT_HARD = int(os.environ.get("REPORT_HARD", "15"))
+# The local LLM call is on the LAN (no proxy) — bound it with a plain requests
+# (connect, read-between-chunks) timeout; the read timer resets on each token.
+LLM_TIMEOUT = (10, float(os.environ.get("LLM_READ_TIMEOUT", "300")))
+
+# The local LLM must never go through the egress proxy.
+LOCAL_PROXIES = {"http": None, "https": None}
 
 PROMPT = (
     "You are reading a photo of a food package. Nutrition info may be a TABLE or a "
@@ -44,49 +89,98 @@ PROMPT = (
     "\"custom_nutrients\":{{}}}}"
 )
 
-# Cloudflare calls go through the proxy; the local LLM must not.
-CF_PROXIES = None  # requests reads HTTPS_PROXY/ALL_PROXY from env automatically
-LOCAL_PROXIES = {"http": None, "https": None}
+
+class HardTimeout(Exception):
+    pass
 
 
-def claim():
-    r = requests.post(f"{QUEUE_URL}/claim", headers={"Authorization": f"Bearer {POLLER_SECRET}"}, timeout=30)
+def _on_alarm(signum, frame):
+    raise HardTimeout()
+
+
+signal.signal(signal.SIGALRM, _on_alarm)
+
+
+class hard_deadline:
+    """Wall-clock backstop that ALWAYS fires (SIGALRM), unwinding a wedged
+    socket that the `requests`/PySocks read timeout failed to break. Main-thread
+    only; the poller loop is single-threaded, and the calls below never nest."""
+
+    def __init__(self, secs):
+        self.secs = max(1, int(secs))
+
+    def __enter__(self):
+        signal.alarm(self.secs)
+
+    def __exit__(self, *exc):
+        signal.alarm(0)
+        return False
+
+
+def _label(proxy):
+    return proxy if proxy else "direct"
+
+
+def _proxies_dict(proxy):
+    return {"http": proxy, "https": proxy}
+
+
+def claim(proxy):
+    r = requests.post(
+        f"{QUEUE_URL}/claim",
+        headers={"Authorization": f"Bearer {POLLER_SECRET}"},
+        proxies=_proxies_dict(proxy),
+        timeout=(10, 25),
+    )
     r.raise_for_status()
     data = r.json()
     return data if data.get("job_id") else None
 
 
-def get_image_b64(job_id):
-    r = requests.get(f"{QUEUE_URL}/image/{job_id}", headers={"Authorization": f"Bearer {POLLER_SECRET}"}, timeout=120)
+def get_image_b64(job_id, proxy):
+    r = requests.get(
+        f"{QUEUE_URL}/image/{job_id}",
+        headers={"Authorization": f"Bearer {POLLER_SECRET}"},
+        proxies=_proxies_dict(proxy),
+        timeout=(10, 120),
+    )
     r.raise_for_status()
     return r.text
 
 
-def complete(job_id, result=None, error=None):
+def complete(job_id, proxy, result=None, error=None):
     body = {"job_id": job_id}
     if error is not None:
         body["error"] = str(error)
     else:
         body["result"] = result
-    r = requests.post(f"{QUEUE_URL}/complete", headers={"Authorization": f"Bearer {POLLER_SECRET}"}, json=body, timeout=30)
+    r = requests.post(
+        f"{QUEUE_URL}/complete",
+        headers={"Authorization": f"Bearer {POLLER_SECRET}"},
+        json=body,
+        proxies=_proxies_dict(proxy),
+        timeout=(10, 25),
+    )
     r.raise_for_status()
 
 
-def report(job_id, phase, thinking_tokens, answer_tokens):
+def report(job_id, proxy, phase, thinking_tokens, answer_tokens):
     """Push the live LLM phase + token counts to the queue (best-effort)."""
     try:
-        requests.post(
-            f"{QUEUE_URL}/progress",
-            headers={"Authorization": f"Bearer {POLLER_SECRET}"},
-            json={"job_id": job_id, "phase": phase,
-                  "thinking_tokens": thinking_tokens, "answer_tokens": answer_tokens},
-            timeout=15,
-        )
+        with hard_deadline(REPORT_HARD):
+            requests.post(
+                f"{QUEUE_URL}/progress",
+                headers={"Authorization": f"Bearer {POLLER_SECRET}"},
+                json={"job_id": job_id, "phase": phase,
+                      "thinking_tokens": thinking_tokens, "answer_tokens": answer_tokens},
+                proxies=_proxies_dict(proxy),
+                timeout=(5, 10),
+            )
     except Exception as e:
         print(f"progress report failed: {e}", flush=True)
 
 
-def recognize(job_id, image_blob, custom_nutrients):
+def recognize(job_id, image_blob, custom_nutrients, proxy):
     # The blob is a JSON array of base64 images (front/back of a label).
     try:
         images = json.loads(image_blob)
@@ -107,7 +201,8 @@ def recognize(job_id, image_blob, custom_nutrients):
     }
     # Stream so we can report thinking/answer progress; reasoning tokens (if the
     # model emits them) arrive in `reasoning_content`, the answer in `content`.
-    r = requests.post(f"{LLAMA_URL}/v1/chat/completions", json=body, proxies=LOCAL_PROXIES, timeout=600, stream=True)
+    # LOCAL call — no proxy, plain requests timeout is enough (LAN sockets honour it).
+    r = requests.post(f"{LLAMA_URL}/v1/chat/completions", json=body, proxies=LOCAL_PROXIES, timeout=LLM_TIMEOUT, stream=True)
     # Surface the server's actual error body (model-not-found, bad request shape,
     # etc.) instead of the opaque "400 Client Error for url" from raise_for_status.
     if r.status_code >= 400:
@@ -135,9 +230,9 @@ def recognize(job_id, image_blob, custom_nutrients):
             phase = "answer"
         now = time.time()
         if phase and now - last_report >= 0.7:
-            report(job_id, phase, tt, at)
+            report(job_id, proxy, phase, tt, at)
             last_report = now
-    report(job_id, phase or "answer", tt, at)
+    report(job_id, proxy, phase or "answer", tt, at)
 
     content = "".join(answer_parts)
     m = re.search(r"\{[\s\S]*\}", content)
@@ -155,30 +250,81 @@ def recognize(job_id, image_blob, custom_nutrients):
     return data
 
 
+class AllEgressFailed(Exception):
+    pass
+
+
+def poll_once(start_idx):
+    """Claim through each proxy starting at `start_idx` (round-robin) until one
+    is REACHABLE. Returns (job_or_None, proxy_used). A reachable-but-empty queue
+    is success (proves the tunnel works). Raises AllEgressFailed if EVERY proxy
+    errors this sweep."""
+    errs = []
+    n = len(PROXIES)
+    for k in range(n):
+        proxy = PROXIES[(start_idx + k) % n]
+        try:
+            with hard_deadline(CLAIM_HARD):
+                job = claim(proxy)
+            return job, proxy
+        except Exception as e:
+            errs.append(f"{_label(proxy)}: {e}")
+    raise AllEgressFailed("; ".join(errs))
+
+
+def restart_tunnels():
+    if not TUNNEL_RESTART_CMD:
+        print("all egress paths down; TUNNEL_RESTART_CMD unset — will keep retrying", flush=True)
+        return
+    print(f"all egress paths down; restarting tunnels: {TUNNEL_RESTART_CMD}", flush=True)
+    try:
+        subprocess.run(TUNNEL_RESTART_CMD, shell=True, timeout=90, check=False)
+    except Exception as e:
+        print(f"tunnel restart command failed: {e}", flush=True)
+    time.sleep(RESTART_COOLDOWN)
+
+
 def main():
-    print(f"poller up: queue={QUEUE_URL} model={VLM_MODEL} llama={LLAMA_URL}", flush=True)
+    print(
+        f"poller up: queue={QUEUE_URL} model={VLM_MODEL} llama={LLAMA_URL} "
+        f"egress={[_label(p) for p in PROXIES]}",
+        flush=True,
+    )
+    idx = 0
+    full_failures = 0
     while True:
         try:
-            job = claim()
-        except Exception as e:
-            print(f"claim error: {e}", flush=True)
+            job, proxy = poll_once(idx)
+            full_failures = 0
+        except AllEgressFailed as e:
+            full_failures += 1
+            print(f"claim: all egress failed (sweep {full_failures}): {e}", flush=True)
+            if full_failures >= FULL_FAILURES_BEFORE_RESTART:
+                restart_tunnels()
+                full_failures = 0
             time.sleep(POLL_INTERVAL)
             continue
+        finally:
+            idx = (idx + 1) % len(PROXIES)  # advance the round-robin start each poll
+
         if not job:
             time.sleep(POLL_INTERVAL)
             continue
 
         job_id = job["job_id"]
-        print(f"claimed {job_id}", flush=True)
+        print(f"claimed {job_id} via {_label(proxy)}", flush=True)
         try:
-            image_b64 = get_image_b64(job_id)
-            result = recognize(job_id, image_b64, job.get("custom_nutrients", []))
-            complete(job_id, result=result)
+            with hard_deadline(IMAGE_HARD):
+                image_b64 = get_image_b64(job_id, proxy)
+            result = recognize(job_id, image_b64, job.get("custom_nutrients", []), proxy)
+            with hard_deadline(COMPLETE_HARD):
+                complete(job_id, proxy, result=result)
             print(f"done {job_id}: {json.dumps(result, ensure_ascii=False)[:200]}", flush=True)
         except Exception as e:
             print(f"job {job_id} failed: {e}", flush=True)
             try:
-                complete(job_id, error=str(e))
+                with hard_deadline(COMPLETE_HARD):
+                    complete(job_id, proxy, error=str(e))
             except Exception as e2:
                 print(f"could not report failure for {job_id}: {e2}", flush=True)
 

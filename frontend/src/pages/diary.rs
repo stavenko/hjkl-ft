@@ -116,7 +116,41 @@ fn weekday_label(date_str: &str) -> &'static str {
 pub fn DiaryPage() -> impl IntoView {
     let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
     let today_max = today_str.clone();
-    let date = create_rw_signal(today_str);
+    let date = create_rw_signal(today_str.clone());
+
+    // Follow the real "today" across midnight. `date` is a snapshot from mount, so a
+    // PWA kept in memory over midnight would keep showing the OLD day — no "+" button
+    // (gated by `is_today()`) and none of the new day's entries. When the app is
+    // resumed (visibilitychange / window focus), if the user is still on what WAS
+    // today (not a past day they navigated to), snap `date` forward to the new today.
+    let known_today = store_value(today_str);
+    let resync_today = move || {
+        let now = chrono::Local::now().format("%Y-%m-%d").to_string();
+        if now != known_today.get_value() {
+            if date.get_untracked() == known_today.get_value() {
+                date.set(now.clone());
+            }
+            known_today.set_value(now);
+        }
+    };
+    {
+        use std::rc::Rc;
+        use wasm_bindgen::closure::Closure;
+        use wasm_bindgen::JsCast;
+        let cb = Rc::new(Closure::<dyn Fn()>::new(move || resync_today()));
+        let _ = document()
+            .add_event_listener_with_callback("visibilitychange", (*cb).as_ref().unchecked_ref());
+        let _ = window()
+            .add_event_listener_with_callback("focus", (*cb).as_ref().unchecked_ref());
+        // `cb` (an Rc) is moved into the cleanup closure, keeping the JS callback
+        // alive for the page's lifetime and removing both listeners on unmount.
+        on_cleanup(move || {
+            let _ = document()
+                .remove_event_listener_with_callback("visibilitychange", (*cb).as_ref().unchecked_ref());
+            let _ = window()
+                .remove_event_listener_with_callback("focus", (*cb).as_ref().unchecked_ref());
+        });
+    }
     // Stored so the FAB click handlers (both inside the same `Fn` render closure)
     // can each clone it without moving the single handle out of the environment.
     let navigate = store_value(use_navigate());

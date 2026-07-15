@@ -116,9 +116,9 @@
   .hiw-ph{width:82%;max-width:260px;margin:0 auto;aspect-ratio:39/60;border:2px dashed #C7D0E0;border-radius:20px;
     display:flex;align-items:center;justify-content:center;text-align:center;padding:22px;background:#F7F9FC;color:var(--muted);font-size:14px;line-height:1.4}
   .hiw-ph b{display:block;color:var(--ink-2);font-weight:700;margin-bottom:4px}
-  /* Длинный скрин, разрезанный волной пополам — две половины рядом */
-  .fp-split{display:flex;gap:8px;align-items:flex-start;justify-content:center;margin-top:2px}
-  .fp-split img{width:calc(50% - 4px);height:auto;display:block;filter:drop-shadow(0 12px 24px rgba(14,22,48,.22))}
+  /* Длинный скрин: середина вырезана, верх и низ склеены по вертикали с волнистым срезом */
+  .fp-cut{width:84%;max-width:250px;margin:2px auto 0;display:flex;flex-direction:column;gap:10px}
+  .fp-cut img{width:100%;display:block;filter:drop-shadow(0 10px 22px rgba(14,22,48,.20))}
   .panel-sub{color:var(--muted);font-size:17px}
 
   /* steps (how it works) */
@@ -291,7 +291,7 @@
       <div class="hiw-item">
         <h3>Ввод еды по описанию</h3>
         <p>Чтобы вносить еду, можно воспользоваться искусственным интеллектом — просто введите описание того, что вы съели.</p>
-        <div class="hiw-media"><img src="/img/shot-by-name.png" alt="Ввод еды по описанию" /></div>
+        <div class="hiw-media"><img src="/img/shot-by-name-card.png" alt="Ввод еды по описанию" /></div>
       </div>
 
       <div class="hiw-item">
@@ -303,9 +303,9 @@
       <div class="hiw-item">
         <h3>По фотографии еды</h3>
         <p>Ну и уже стандарт — можно определить то, что вы съели, по фотографии. Метод не очень точный, но рабочий.</p>
-        <div class="fp-split">
-          <img src="/img/foodphoto-top.png" alt="Распознавание блюда по фото — часть 1" />
-          <img src="/img/foodphoto-bottom.png" alt="Распознавание блюда по фото — часть 2" />
+        <div class="fp-cut">
+          <img src="/img/foodphoto-top.png" alt="Распознавание блюда по фото — верх" />
+          <img src="/img/foodphoto-bottom.png" alt="Распознавание блюда по фото — низ" />
         </div>
       </div>
 

@@ -165,9 +165,12 @@ pub async fn lookup(
          «яйцо», «рис», «гречка») OR a free-form DESCRIPTION of a dish, possibly with added \
          ingredients (e.g. «жареная курица, добавил немного лука, чайную ложку масла»). \
          Input: \"{name}\".\n\n\
-         First, set \"product_name\" to a SHORT dish/product name (2–4 words) in {lang}: for a \
-         plain name, keep it (tidied); for a description, name the resulting dish and fold in \
-         the added ingredients (e.g. «Жареная курица с луком»).\n\n\
+         First, set \"product_name\" to a SHORT dish/product name in {lang}. HARD LIMIT: at most \
+         THREE words, ideally TWO; a third word ONLY when indispensable to identify the dish. \
+         Do NOT list the added ingredients in the name — name only the core dish. Good examples \
+         (2–3 words): «Жареная курица», «Куриная грудка», «Овсяная каша», «Гречка с грибами». \
+         For a plain name, keep it (tidied); for a description, name the resulting core dish \
+         concisely within this limit.\n\n\
          Then provide nutritional values per 100 GRAMS of the resulting food/dish (account for \
          the added ingredients — e.g. the oil raises fat and kcal).\n\n\
          Form of the product: for items bought and weighed raw/dry (grains, rice, pasta, flour, \

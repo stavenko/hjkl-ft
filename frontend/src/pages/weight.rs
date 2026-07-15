@@ -52,17 +52,23 @@ pub fn WeightPage() -> impl IntoView {
                 used_toilet.get_untracked(),
                 morning.get_untracked(),
             ).await;
-            // Making a measurement is the milestone event for accounting task 2 —
-            // record it in the story DB (idempotent), not derived from entries.
-            story::set_flag(story::FIRST_WEIGH, true).await;
-            // First-ever measurement: send a congratulatory push (task 2 of the
-            // accounting section) confirming it's done.
-            if was_first {
-                if let Err(e) = push::send_test(t("story.acc.push_first_weigh"), "/story/accounting").await {
-                    leptos::logging::error!("first-weigh push: {}", e);
-                }
-            }
+            // The measurement is saved locally — return to the dashboard NOW. The
+            // milestone flag and the first-weigh push run detached, so a slow/blocked
+            // push never leaves the user stuck on the form (the button "doing nothing").
             nav("/", Default::default());
+            leptos::spawn_local(async move {
+                // Making a measurement is the milestone event for accounting task 2 —
+                // record it in the story DB (idempotent), not derived from entries.
+                story::set_flag(story::FIRST_WEIGH, true).await;
+                // First-ever measurement: send a congratulatory push confirming it.
+                if was_first {
+                    if let Err(e) =
+                        push::send_test(t("story.acc.push_first_weigh"), "/story/accounting").await
+                    {
+                        leptos::logging::error!("first-weigh push: {}", e);
+                    }
+                }
+            });
         });
     };
 

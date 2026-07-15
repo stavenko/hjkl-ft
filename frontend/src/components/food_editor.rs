@@ -743,23 +743,66 @@ pub fn FoodEditor(
                 })}
             </div>
 
-            // Tab 3 — "By food photo": placeholder (the recognition pipeline is not
-            // built yet — see docs/food-photo-recognition.md). Visible so the mode is
-            // discoverable; the shared nutrient card + Add button are hidden here.
+            // Tab 3 — "By food photo": DRAFT of the recognition result (see
+            // docs/food-photo-recognition.md). Example items only — the vision
+            // pipeline is not wired yet. Shows the intended layout: one row per
+            // detected product (name + grams + КБЖУ badges), inferred fats
+            // (oil/mayo) tagged, a total, and "add all products".
             <div style=move || if active_tab.get() == 2 { "" } else { "display: none;" }>
-                <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 28px 16px;">
-                    <span style="color: var(--bulma-link); opacity: 0.9;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"
-                            viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
-                            <circle cx="12" cy="13" r="3"/>
-                        </svg>
-                    </span>
-                    <p class="is-size-6" style="color: var(--bulma-text-weak); max-width: 20rem; line-height: 1.5;">
-                        {move || t("food_editor.food_photo_soon")}
-                    </p>
+                <p class="is-size-7" style="color: var(--bulma-text-weak); margin-bottom: 10px; line-height: 1.4;">
+                    {move || t("food_editor.food_photo_draft_hint")}
+                </p>
+                <p class="is-size-7 has-text-weight-semibold" style="color: var(--bulma-text-weak); margin: 0 0 6px 4px; letter-spacing: 0.03em;">
+                    {move || t("food_editor.detected_title")}
+                </p>
+                <div style="background: var(--bulma-scheme-main); border-radius: 12px;">
+                    {
+                        // (name, grams, kcal, protein, fat, carbs, inferred)
+                        let items: Vec<(&str, u32, u32, u32, u32, u32, bool)> = vec![
+                            ("Огурец", 200, 30, 2, 0, 6, false),
+                            ("Чечевица варёная", 150, 174, 12, 0, 30, false),
+                            ("Тыквенные семечки", 30, 168, 9, 14, 3, false),
+                            ("Подсолнечное масло", 12, 106, 0, 12, 0, true),
+                        ];
+                        let n = items.len();
+                        items.into_iter().enumerate().map(|(i, (name, g, k, p, f, c, inferred))| {
+                            view! {
+                                <div style="padding: 10px 12px;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="is-size-6" style="flex: 1; min-width: 0; color: var(--bulma-text);">
+                                            {name}
+                                            {inferred.then(|| view! {
+                                                <span class="is-size-7" style="margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: #FEF3C7; color: #92610A;">
+                                                    {move || t("food_editor.auto_tag")}
+                                                </span>
+                                            })}
+                                        </span>
+                                        <span class="is-size-6" style="min-width: 52px; text-align: right; padding: 4px 8px; border-radius: 8px; background: var(--bulma-background); color: var(--bulma-text);">
+                                            {format!("{g} г")}
+                                        </span>
+                                        <span class="has-text-grey-light" style="font-size: 1.2rem; line-height: 1; cursor: pointer;">"\u{00d7}"</span>
+                                    </div>
+                                    <div class="is-size-7 has-text-grey" style="margin-top: 4px;">
+                                        {format!("К {k} · Б {p} · Ж {f} · У {c}")}
+                                    </div>
+                                </div>
+                                {(i + 1 < n).then(|| view! {
+                                    <div style="border-bottom: 0.5px solid var(--bulma-border-weak); margin-left: 12px;"></div>
+                                })}
+                            }
+                        }).collect_view()
+                    }
                 </div>
+                <div class="is-size-7" style="display: flex; justify-content: space-between; padding: 10px 12px 0;">
+                    <span class="has-text-weight-semibold" style="color: var(--bulma-text-weak);">{move || t("food_editor.total")}</span>
+                    <span style="color: var(--bulma-text);">"К 478 · Б 23 · Ж 26 · У 39"</span>
+                </div>
+                <button type="button"
+                    class="button is-link is-size-6 has-text-weight-semibold"
+                    style="width: 100%; padding: 12px 0; margin-top: 16px; border: none; border-radius: 10px; cursor: pointer;"
+                >
+                    {move || t("food_editor.add_all")}
+                </button>
             </div>
 
             // Nutrient fields card. NB: no `overflow: hidden` — it would clip the

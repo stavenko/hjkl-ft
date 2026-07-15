@@ -805,10 +805,13 @@ pub fn FoodEditor(
                     {
                         // (name, grams, kcal, protein, fat, carbs, inferred)
                         let items: Vec<(&str, u32, u32, u32, u32, u32, bool)> = vec![
-                            ("Огурец", 200, 30, 2, 0, 6, false),
-                            ("Чечевица варёная", 150, 174, 12, 0, 30, false),
-                            ("Тыквенные семечки", 30, 168, 9, 14, 3, false),
-                            ("Подсолнечное масло", 12, 106, 0, 12, 0, true),
+                            ("Яичница глазунья", 50, 90, 6, 7, 0, false),
+                            ("Сосиски", 80, 232, 9, 21, 2, false),
+                            ("Тост пшеничный", 40, 108, 3, 1, 21, false),
+                            ("Помидоры черри", 50, 9, 0, 0, 2, false),
+                            ("Моцарелла", 30, 84, 6, 6, 0, false),
+                            ("Соус песто", 15, 45, 1, 4, 1, false),
+                            ("Масло для жарки", 5, 44, 0, 5, 0, true),
                         ];
                         let n = items.len();
                         items.into_iter().enumerate().map(|(i, (name, g, k, p, f, c, inferred))| {
@@ -841,7 +844,7 @@ pub fn FoodEditor(
                 </div>
                 <div class="is-size-7" style="display: flex; justify-content: space-between; padding: 10px 12px 0;">
                     <span class="has-text-weight-semibold" style="color: var(--bulma-text-weak);">{move || t("food_editor.total")}</span>
-                    <span style="color: var(--bulma-text);">"К 478 · Б 23 · Ж 26 · У 39"</span>
+                    <span style="color: var(--bulma-text);">"К 612 · Б 25 · Ж 44 · У 26"</span>
                 </div>
                 <button type="button"
                     class="button is-link is-size-6 has-text-weight-semibold"

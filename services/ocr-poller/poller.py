@@ -26,9 +26,34 @@ import time
 
 import requests
 
-QUEUE_URL = os.environ["QUEUE_URL"].rstrip("/")
+QUEUE_URL = os.environ.get("QUEUE_URL", "").rstrip("/")
 POLLER_SECRET = os.environ["POLLER_SECRET"]
 LLAMA_URL = os.environ.get("LLAMA_URL", "http://192.168.1.17:8080").rstrip("/")
+
+
+def _parse_queues():
+    """One poller can drain SEVERAL queues (e.g. prod + a dev stand) WITHOUT a
+    second process — it round-robins the /claim across them and still runs ONE
+    job at a time, so GPU/request load does not multiply.
+
+    `QUEUES` = comma/newline-separated `url` or `url|secret` entries (a bare url
+    uses POLLER_SECRET). Falls back to the legacy single QUEUE_URL+POLLER_SECRET.
+    To go back to prod-only later: drop the extra entry (or the whole QUEUES var)
+    and restart the container."""
+    raw = os.environ.get("QUEUES", "").strip()
+    out = []
+    if raw:
+        for item in re.split(r"[,\n]", raw):
+            item = item.strip()
+            if not item:
+                continue
+            url, secret = item.split("|", 1) if "|" in item else (item, POLLER_SECRET)
+            out.append({"url": url.strip().rstrip("/"), "secret": secret.strip()})
+    elif QUEUE_URL:
+        out.append({"url": QUEUE_URL, "secret": POLLER_SECRET})
+    if not out:
+        raise SystemExit("no queues configured: set QUEUES or QUEUE_URL")
+    return out
 VLM_MODEL = os.environ.get("VLM_MODEL", "qwen2.5-vl-32b")
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "3"))
 ATWATER_TOLERANCE = float(os.environ.get("ATWATER_TOLERANCE", "15"))  # kcal
@@ -50,6 +75,7 @@ def _parse_proxies():
 
 
 PROXIES = _parse_proxies()
+QUEUES = _parse_queues()
 # After a claim fails through EVERY proxy this many sweeps in a row, bounce the
 # tunnels (best-effort). Empty TUNNEL_RESTART_CMD => just keep retrying.
 FULL_FAILURES_BEFORE_RESTART = int(os.environ.get("FULL_FAILURES_BEFORE_RESTART", "2"))
@@ -125,10 +151,10 @@ def _proxies_dict(proxy):
     return {"http": proxy, "https": proxy}
 
 
-def claim(proxy):
+def claim(queue, proxy):
     r = requests.post(
-        f"{QUEUE_URL}/claim",
-        headers={"Authorization": f"Bearer {POLLER_SECRET}"},
+        f"{queue['url']}/claim",
+        headers={"Authorization": f"Bearer {queue['secret']}"},
         proxies=_proxies_dict(proxy),
         timeout=(10, 25),
     )
@@ -137,10 +163,10 @@ def claim(proxy):
     return data if data.get("job_id") else None
 
 
-def get_image_b64(job_id, proxy):
+def get_image_b64(queue, job_id, proxy):
     r = requests.get(
-        f"{QUEUE_URL}/image/{job_id}",
-        headers={"Authorization": f"Bearer {POLLER_SECRET}"},
+        f"{queue['url']}/image/{job_id}",
+        headers={"Authorization": f"Bearer {queue['secret']}"},
         proxies=_proxies_dict(proxy),
         timeout=(10, 120),
     )
@@ -148,15 +174,15 @@ def get_image_b64(job_id, proxy):
     return r.text
 
 
-def complete(job_id, proxy, result=None, error=None):
+def complete(queue, job_id, proxy, result=None, error=None):
     body = {"job_id": job_id}
     if error is not None:
         body["error"] = str(error)
     else:
         body["result"] = result
     r = requests.post(
-        f"{QUEUE_URL}/complete",
-        headers={"Authorization": f"Bearer {POLLER_SECRET}"},
+        f"{queue['url']}/complete",
+        headers={"Authorization": f"Bearer {queue['secret']}"},
         json=body,
         proxies=_proxies_dict(proxy),
         timeout=(10, 25),
@@ -164,13 +190,13 @@ def complete(job_id, proxy, result=None, error=None):
     r.raise_for_status()
 
 
-def report(job_id, proxy, phase, thinking_tokens, answer_tokens):
+def report(queue, job_id, proxy, phase, thinking_tokens, answer_tokens):
     """Push the live LLM phase + token counts to the queue (best-effort)."""
     try:
         with hard_deadline(REPORT_HARD):
             requests.post(
-                f"{QUEUE_URL}/progress",
-                headers={"Authorization": f"Bearer {POLLER_SECRET}"},
+                f"{queue['url']}/progress",
+                headers={"Authorization": f"Bearer {queue['secret']}"},
                 json={"job_id": job_id, "phase": phase,
                       "thinking_tokens": thinking_tokens, "answer_tokens": answer_tokens},
                 proxies=_proxies_dict(proxy),
@@ -180,7 +206,7 @@ def report(job_id, proxy, phase, thinking_tokens, answer_tokens):
         print(f"progress report failed: {e}", flush=True)
 
 
-def recognize(job_id, image_blob, custom_nutrients, proxy):
+def recognize(queue, job_id, image_blob, custom_nutrients, proxy):
     # The blob is a JSON array of base64 images (front/back of a label).
     try:
         images = json.loads(image_blob)
@@ -230,9 +256,9 @@ def recognize(job_id, image_blob, custom_nutrients, proxy):
             phase = "answer"
         now = time.time()
         if phase and now - last_report >= 0.7:
-            report(job_id, proxy, phase, tt, at)
+            report(queue, job_id, proxy, phase, tt, at)
             last_report = now
-    report(job_id, proxy, phase or "answer", tt, at)
+    report(queue, job_id, proxy, phase or "answer", tt, at)
 
     content = "".join(answer_parts)
     m = re.search(r"\{[\s\S]*\}", content)
@@ -254,18 +280,18 @@ class AllEgressFailed(Exception):
     pass
 
 
-def poll_once(start_idx):
-    """Claim through each proxy starting at `start_idx` (round-robin) until one
-    is REACHABLE. Returns (job_or_None, proxy_used). A reachable-but-empty queue
-    is success (proves the tunnel works). Raises AllEgressFailed if EVERY proxy
-    errors this sweep."""
+def poll_once(queue, start_idx):
+    """Claim from `queue` trying each proxy starting at `start_idx` (round-robin)
+    until one is REACHABLE. Returns (job_or_None, proxy_used). A reachable-but-
+    empty queue is success (proves the tunnel works). Raises AllEgressFailed if
+    EVERY proxy errors this sweep."""
     errs = []
     n = len(PROXIES)
     for k in range(n):
         proxy = PROXIES[(start_idx + k) % n]
         try:
             with hard_deadline(CLAIM_HARD):
-                job = claim(proxy)
+                job = claim(queue, proxy)
             return job, proxy
         except Exception as e:
             errs.append(f"{_label(proxy)}: {e}")
@@ -286,45 +312,49 @@ def restart_tunnels():
 
 def main():
     print(
-        f"poller up: queue={QUEUE_URL} model={VLM_MODEL} llama={LLAMA_URL} "
-        f"egress={[_label(p) for p in PROXIES]}",
+        f"poller up: queues={[q['url'] for q in QUEUES]} model={VLM_MODEL} "
+        f"llama={LLAMA_URL} egress={[_label(p) for p in PROXIES]}",
         flush=True,
     )
-    idx = 0
+    qidx = 0   # round-robin over QUEUES (one claim per cycle → no extra load)
+    pidx = 0   # round-robin start over PROXIES
     full_failures = 0
     while True:
+        queue = QUEUES[qidx % len(QUEUES)]
         try:
-            job, proxy = poll_once(idx)
+            job, proxy = poll_once(queue, pidx)
             full_failures = 0
         except AllEgressFailed as e:
             full_failures += 1
-            print(f"claim: all egress failed (sweep {full_failures}): {e}", flush=True)
+            print(f"claim {queue['url']}: all egress failed (sweep {full_failures}): {e}", flush=True)
             if full_failures >= FULL_FAILURES_BEFORE_RESTART:
                 restart_tunnels()
                 full_failures = 0
+            qidx += 1
+            pidx += 1
             time.sleep(POLL_INTERVAL)
             continue
-        finally:
-            idx = (idx + 1) % len(PROXIES)  # advance the round-robin start each poll
+        qidx += 1
+        pidx += 1
 
         if not job:
             time.sleep(POLL_INTERVAL)
             continue
 
         job_id = job["job_id"]
-        print(f"claimed {job_id} via {_label(proxy)}", flush=True)
+        print(f"claimed {job_id} from {queue['url']} via {_label(proxy)}", flush=True)
         try:
             with hard_deadline(IMAGE_HARD):
-                image_b64 = get_image_b64(job_id, proxy)
-            result = recognize(job_id, image_b64, job.get("custom_nutrients", []), proxy)
+                image_b64 = get_image_b64(queue, job_id, proxy)
+            result = recognize(queue, job_id, image_b64, job.get("custom_nutrients", []), proxy)
             with hard_deadline(COMPLETE_HARD):
-                complete(job_id, proxy, result=result)
+                complete(queue, job_id, proxy, result=result)
             print(f"done {job_id}: {json.dumps(result, ensure_ascii=False)[:200]}", flush=True)
         except Exception as e:
             print(f"job {job_id} failed: {e}", flush=True)
             try:
                 with hard_deadline(COMPLETE_HARD):
-                    complete(job_id, proxy, error=str(e))
+                    complete(queue, job_id, proxy, error=str(e))
             except Exception as e2:
                 print(f"could not report failure for {job_id}: {e2}", flush=True)
 

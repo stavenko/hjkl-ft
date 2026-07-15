@@ -62,6 +62,19 @@ async fn file_to_jpeg_base64(file: &web_sys::File) -> Result<String, String> {
         .ok_or_else(|| "malformed data URL".to_string())
 }
 
+/// Small line "sparkles" icon — the app's AI indicator, in the same line style as
+/// the other icons (replaces the ✨ emoji on the AI "detect" buttons).
+fn ai_icon() -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" style="flex: none;">
+            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+            <path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>
+        </svg>
+    }
+}
+
 #[component]
 pub fn FoodEditor(
     custom_nutrients: Signal<Vec<NutrientSpec>>,
@@ -601,9 +614,13 @@ pub fn FoodEditor(
                                     0 => format!("\u{231b} {} с", name_elapsed()),
                                     1 => format!("\u{1f9e0} {} ток", name_think.get()),
                                     _ => format!("\u{270d}\u{fe0f} {} ток", name_answer.get()),
-                                }
+                                }.into_view()
                             } else {
-                                t("food_editor.detect_short").to_string()
+                                view! {
+                                    <span style="display: inline-flex; align-items: center; gap: 5px;">
+                                        {ai_icon()}{t("food_editor.detect_short")}
+                                    </span>
+                                }.into_view()
                             }}
                         </button>
                     </div>
@@ -698,9 +715,13 @@ pub fn FoodEditor(
                                 }
                                 1 => format!("\u{1f9e0} {} ток \u{00b7} {} с", photo_think.get(), photo_elapsed()),
                                 _ => format!("\u{270d}\u{fe0f} {} ток \u{00b7} {} с", photo_answer.get(), photo_elapsed()),
-                            }
+                            }.into_view()
                         } else {
-                            format!("\u{2728} {}", t("food_editor.detect_food"))
+                            view! {
+                                <span style="display: inline-flex; align-items: center; gap: 6px;">
+                                    {ai_icon()}{t("food_editor.detect_food")}
+                                </span>
+                            }.into_view()
                         }}
                     </button>
                 </div>

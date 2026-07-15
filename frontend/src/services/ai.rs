@@ -132,8 +132,6 @@ pub async fn lookup(
     input: &AiLookupInput,
     on_token: impl Fn(AiPhase) + Clone + 'static,
 ) -> Result<AiLookupOutput, String> {
-    let executor = build_executor()?;
-
     let custom_part = if input.custom_nutrients.is_empty() {
         String::new()
     } else {
@@ -195,6 +193,12 @@ pub async fn lookup(
         lang = lang,
     );
 
+    let key_to_name: BTreeMap<String, String> = input
+        .custom_nutrients
+        .iter()
+        .map(|s| (s.key.clone(), s.name.clone()))
+        .collect();
+
     // Use `execute::<T>` so the ai-worker injects the JSON schema as an
     // instruction — that reliably keeps the model in JSON mode (without it the
     // model often replies in Markdown). The earlier "schema corrupts output" and
@@ -203,69 +207,87 @@ pub async fn lookup(
     // omit a numeric example from the prompt: concrete sample values anchored the
     // model (it kept returning cooked-rice 155 kcal for «рис»); the schema carries
     // the shape.
-    let result = executor
-        .execute::<NutritionResponse>(prompt)
-        .await
-        .map_err(|e| format!("LLM execute error: {e:?}"))?;
-
-    let mut thinking_stream = result.thinking_stream;
-    let on_think = on_token.clone();
-    wasm_bindgen_futures::spawn_local(async move {
-        while let Some(token) = thinking_stream.next().await {
-            if let Ok(t) = token {
-                leptos::logging::log!("[think] {}", t.content);
-                on_think(AiPhase::Thinking);
-            }
+    //
+    // qwen3 still occasionally returns an EMPTY content stream or malformed JSON
+    // (observed live: `recommended` as a bare number instead of {value,unit}).
+    // That's transient, so retry a couple of times before surfacing the error —
+    // same policy as `generate`. FAIL LOUDLY only after the retries are spent.
+    const ATTEMPTS: usize = 3;
+    let mut last_err = String::new();
+    for attempt in 0..ATTEMPTS {
+        if attempt > 0 {
+            leptos::logging::warn!("lookup retry #{attempt}: {last_err}");
         }
-    });
+        let executor = build_executor()?;
+        let result = executor
+            .execute::<NutritionResponse>(prompt.clone())
+            .await
+            .map_err(|e| format!("LLM execute error: {e:?}"))?;
 
-    let mut content_stream = result.content_stream;
-    let on_answer = on_token.clone();
-    wasm_bindgen_futures::spawn_local(async move {
-        while let Some(token) = content_stream.next().await {
-            if let Ok(t) = token {
-                leptos::logging::log!("[content] {}", t.content);
-                on_answer(AiPhase::Answer);
+        let mut thinking_stream = result.thinking_stream;
+        let on_think = on_token.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            while let Some(token) = thinking_stream.next().await {
+                if let Ok(t) = token {
+                    leptos::logging::log!("[think] {}", t.content);
+                    on_think(AiPhase::Thinking);
+                }
             }
+        });
+
+        let mut content_stream = result.content_stream;
+        let on_answer = on_token.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            while let Some(token) = content_stream.next().await {
+                if let Ok(t) = token {
+                    leptos::logging::log!("[content] {}", t.content);
+                    on_answer(AiPhase::Answer);
+                }
+            }
+        });
+
+        let output = result.output.await.map_err(|e| format!("LLM output error: {e:?}"))?;
+
+        let raw = output.result.trim();
+        if raw.is_empty() {
+            last_err = "model returned an empty response".to_string();
+            continue;
         }
-    });
+        let json_str = strip_code_fences(raw);
+        let response: NutritionResponse = match serde_json::from_str(json_str)
+            .or_else(|_| serde_json::from_str(unwrap_schema_envelope(json_str)))
+        {
+            Ok(r) => r,
+            Err(e) => {
+                // Malformed/partial JSON — a fresh attempt usually parses cleanly.
+                last_err = format!("parse error: {e}, raw: {raw}");
+                continue;
+            }
+        };
 
-    let output = result.output.await.map_err(|e| format!("LLM output error: {e:?}"))?;
+        let nutrients: BTreeMap<String, AiNutrientDetail> = response
+            .custom_nutrients
+            .into_iter()
+            .filter_map(|(ai_key, v)| {
+                let display_name = key_to_name.get(&ai_key)?;
+                Some((display_name.clone(), v.into_api()))
+            })
+            .collect();
 
-    let raw = output.result.trim();
-    let json_str = strip_code_fences(raw);
-
-    let response: NutritionResponse = serde_json::from_str(json_str)
-        .or_else(|_| serde_json::from_str(unwrap_schema_envelope(json_str)))
-        .map_err(|e| format!("parse error: {e}, raw: {raw}"))?;
-
-    let key_to_name: BTreeMap<String, String> = input
-        .custom_nutrients
-        .iter()
-        .map(|s| (s.key.clone(), s.name.clone()))
-        .collect();
-
-    let nutrients: BTreeMap<String, AiNutrientDetail> = response
-        .custom_nutrients
-        .into_iter()
-        .filter_map(|(ai_key, v)| {
-            let display_name = key_to_name.get(&ai_key)?;
-            Some((display_name.clone(), v.into_api()))
-        })
-        .collect();
-
-    let product_name = response.product_name.trim();
-    Ok(AiLookupOutput {
-        // Fill the name from the model's summarised product name (a plain input
-        // comes back tidied; a description is condensed to a dish name).
-        name: (!product_name.is_empty()).then(|| product_name.to_string()),
-        kcal: response.kcal.into_api(),
-        protein: response.protein.into_api(),
-        fat: response.fat.into_api(),
-        carbs: response.carbs.into_api(),
-        nutrients,
-        package_weight: None,
-    })
+        let product_name = response.product_name.trim();
+        return Ok(AiLookupOutput {
+            // Fill the name from the model's summarised product name (a plain input
+            // comes back tidied; a description is condensed to a dish name).
+            name: (!product_name.is_empty()).then(|| product_name.to_string()),
+            kcal: response.kcal.into_api(),
+            protein: response.protein.into_api(),
+            fat: response.fat.into_api(),
+            carbs: response.carbs.into_api(),
+            nutrients,
+            package_weight: None,
+        });
+    }
+    Err(last_err)
 }
 
 /// Stream a single JSON object of type `T` from the model. Same plumbing as

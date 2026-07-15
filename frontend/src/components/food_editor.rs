@@ -752,6 +752,52 @@ pub fn FoodEditor(
                 <p class="is-size-7" style="color: var(--bulma-text-weak); margin-bottom: 10px; line-height: 1.4;">
                     {move || t("food_editor.food_photo_draft_hint")}
                 </p>
+
+                // Photo of the DISH + recognize button (shares the same photo picker
+                // as the label tab). In the draft the button is inert.
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 10px;">
+                    {move || photos_base64.get().into_iter().enumerate().map(|(i, b64)| view! {
+                        <div style="position: relative; width: 56px; height: 56px;">
+                            <img src=format!("data:image/jpeg;base64,{b64}")
+                                style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
+                            <button type="button"
+                                style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
+                                on:click=move |_| {
+                                    photos_base64.update(|v| { if i < v.len() { v.remove(i); } });
+                                    photo_count.set(photos_base64.get_untracked().len());
+                                }
+                            >"\u{00d7}"</button>
+                        </div>
+                    }).collect_view()}
+                    <button type="button"
+                        attr:aria-label=t("food_editor.add_photo")
+                        style="width: 56px; height: 56px; flex: none; padding: 0; border: 1px dashed var(--bulma-border); border-radius: 8px; background: var(--bulma-scheme-main); color: var(--bulma-text-weak); cursor: pointer; display: flex; align-items: center; justify-content: center;"
+                        on:click=move |_| {
+                            let doc = web_sys::window().unwrap().document().unwrap();
+                            if let Some(el) = doc.get_element_by_id("food-photo-input") {
+                                use wasm_bindgen::JsCast;
+                                let input: &web_sys::HtmlInputElement = el.unchecked_ref();
+                                input.click();
+                            }
+                        }
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+                            viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+                            <circle cx="12" cy="13" r="3"/>
+                        </svg>
+                    </button>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <button type="button" class="button is-link is-fullwidth"
+                        style="border: none; border-radius: 10px; cursor: pointer;">
+                        <span style="display: inline-flex; align-items: center; gap: 6px;">
+                            {ai_icon()}{move || t("food_editor.detect_food")}
+                        </span>
+                    </button>
+                </div>
+
                 <p class="is-size-7 has-text-weight-semibold" style="color: var(--bulma-text-weak); margin: 0 0 6px 4px; letter-spacing: 0.03em;">
                     {move || t("food_editor.detected_title")}
                 </p>

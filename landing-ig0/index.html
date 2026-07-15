@@ -105,6 +105,17 @@
   .panel p{color:var(--ink-2);font-size:17px}
   .panel-list{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px}
   .panel-list li{color:var(--ink-2);font-size:17px}
+  /* «Как это работает»: шаги с картинкой или плейсхолдером «нужен скриншот» */
+  .hiw{margin-top:8px}
+  .hiw-item{margin:0 0 34px}
+  .hiw-item h3{margin:0 0 8px}
+  .hiw-item p{color:var(--ink-2);font-size:16px;margin:0 0 14px}
+  .hiw-media{width:82%;max-width:260px;margin:0 auto;border-radius:20px;overflow:hidden;
+    border:1px solid var(--line);box-shadow:0 18px 44px -24px rgba(14,22,48,.4);background:var(--surface)}
+  .hiw-media img{width:100%;display:block}
+  .hiw-ph{width:82%;max-width:260px;margin:0 auto;aspect-ratio:39/60;border:2px dashed #C7D0E0;border-radius:20px;
+    display:flex;align-items:center;justify-content:center;text-align:center;padding:22px;background:#F7F9FC;color:var(--muted);font-size:14px;line-height:1.4}
+  .hiw-ph b{display:block;color:var(--ink-2);font-weight:700;margin-bottom:4px}
   .panel-sub{color:var(--muted);font-size:17px}
 
   /* steps (how it works) */
@@ -260,15 +271,43 @@
   <!-- 9 · Как это работает -->
   <section>
     <h2>Как это работает</h2>
-    <p class="lead">Покажем дашборд, как заносить еду, как дублировать.</p>
-    <div class="step" style="margin-top:20px">
-      <div class="shot">[Скриншот: дашборд]</div>
-    </div>
-    <div class="step">
-      <div class="shot">[Скриншот: как заносить еду]</div>
-    </div>
-    <div class="step">
-      <div class="shot">[Скриншот: как дублировать]</div>
+
+    <div class="hiw">
+      <div class="hiw-item">
+        <h3>Всё на дашборде</h3>
+        <p>Вся необходимая информация находится на дашборде: какие нужны нутриенты, сколько осталось калорий за сегодня, а также индикаторы, которые показывают качество вашего питания.</p>
+        <div class="hiw-media"><img src="/img/dashboard.png" alt="Дашборд re:Norma" /></div>
+      </div>
+
+      <div class="hiw-item">
+        <h3>Что вносить</h3>
+        <p>Вам необходимо лишь ежедневно вносить шаги, вес и то, что вы едите. Система будет автоматически считать и выводить всё на дашборд.</p>
+      </div>
+
+      <div class="hiw-item">
+        <h3>Ввод еды по описанию</h3>
+        <p>Чтобы вносить еду, можно воспользоваться искусственным интеллектом — просто введите описание того, что вы съели.</p>
+        <div class="hiw-media"><img src="/img/shot-by-name.png" alt="Ввод еды по описанию" /></div>
+      </div>
+
+      <div class="hiw-item">
+        <h3>Считать с этикетки</h3>
+        <p>Кроме того, можно считать калории прямо с этикетки. Система сама заполнит недостающие показатели на основе данных, которые уже есть на упаковке.</p>
+        <div class="hiw-media"><img src="/img/shot-by-photo.png" alt="Распознавание по этикетке" /></div>
+      </div>
+
+      <div class="hiw-item">
+        <h3>По фотографии еды</h3>
+        <p>Ну и уже стандарт — можно определить то, что вы съели, по фотографии. Метод не очень точный, но рабочий.</p>
+        <div class="hiw-ph"><span><b>Нужен скриншот</b>определение еды по фотографии</span></div>
+      </div>
+
+      <div class="hiw-item">
+        <h3>Искать и дублировать</h3>
+        <p>Уже внесённую еду легко искать по имени, копировать со вчерашнего дня или дублировать в текущем дне.</p>
+        <div class="hiw-media"><img src="/img/shot-duplicate-popup.png" alt="Повторить сегодня" /></div>
+        <div class="hiw-ph" style="margin-top:14px"><span><b>Нужен скриншот</b>дублировать в текущем дне</span></div>
+      </div>
     </div>
   </section>
 
@@ -308,7 +347,7 @@
 
   <!-- 14 · Что вы получаете (функции) -->
   <section>
-    <h2>Что вы получаете</h2>
+    <h2>Что входит в подписку</h2>
     <ul class="list">
       <li><span class="check">✓</span><span>Счётчик калорий</span></li>
       <li><span class="check">✓</span><span>Удобные индикаторы вашего рациона</span></li>

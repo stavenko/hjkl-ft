@@ -779,7 +779,11 @@ pub fn FoodEditor(
             <button type="button"
                 class="button is-link is-size-6 has-text-weight-semibold"
                 style="width: 100%; padding: 12px 0; margin-top: 16px; border: none; border-radius: 10px; cursor: pointer;"
-                disabled=move || name.get().is_empty()
+                // Enabled only once the form is filled: a name AND calories > 0.
+                disabled=move || {
+                    name.get().trim().is_empty()
+                        || kcal.get().replace(',', ".").trim().parse::<f64>().map(|v| v <= 0.0).unwrap_or(true)
+                }
                 on:click=move |_| on_draft.call((build_food(), draft_id.get_untracked()))
             >
                 {move || t("food_editor.add")}

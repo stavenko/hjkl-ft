@@ -600,7 +600,7 @@ fn en(key: &str) -> &'static str {
         "settings.nutrient_placeholder" => "Omega 3, Fiber...",
 
         // Food editor
-        "food_editor.product_name" => "Product name",
+        "food_editor.product_name" => "Name or description of the dish",
         "food_editor.recommended_abbr" => "rec",
         "ai.extracted_from_label" => "Extracted from label",
         "food_editor.add_photo" => "Add label photo",
@@ -614,7 +614,7 @@ fn en(key: &str) -> &'static str {
         "food_editor.ai_timeout" => "Recognition is taking too long — try again later.",
         "food_editor.filling" => "Filling...",
         "food_editor.fill_info" => "Fill nutrition info",
-        "food_editor.tab_by_name" => "By name",
+        "food_editor.tab_by_name" => "By description",
         "food_editor.tab_by_photo" => "By photo",
         "food_editor.detect_by_name" => "Fill nutrition info",
         "food_editor.detect_short" => "Fill",
@@ -1856,7 +1856,7 @@ fn ru(key: &str) -> &'static str {
         "settings.nutrient_placeholder" => "Omega 3, Fiber...",
 
         // Редактор продукта
-        "food_editor.product_name" => "Название продукта",
+        "food_editor.product_name" => "Название или описание блюда",
         "food_editor.recommended_abbr" => "реком.",
         "ai.extracted_from_label" => "Извлечено с этикетки",
         "food_editor.add_photo" => "Добавить фото этикетки",
@@ -1870,7 +1870,7 @@ fn ru(key: &str) -> &'static str {
         "food_editor.ai_timeout" => "Распознавание не успело — попробуйте позже.",
         "food_editor.filling" => "Заполняю...",
         "food_editor.fill_info" => "Заполнить питательную ценность",
-        "food_editor.tab_by_name" => "По названию",
+        "food_editor.tab_by_name" => "По описанию",
         "food_editor.tab_by_photo" => "По фото",
         "food_editor.detect_by_name" => "Заполнить пищевую ценность",
         "food_editor.detect_short" => "Заполнить",

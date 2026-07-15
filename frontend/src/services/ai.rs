@@ -15,6 +15,10 @@ use super::{auth, bug_report, config, local, update};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct NutritionResponse {
+    /// A SHORT product/dish name the model derives from the input (which may be a
+    /// plain name OR a free-form description). Used to fill the name field.
+    #[serde(default)]
+    product_name: String,
     kcal: NutrientDetail,
     protein: NutrientDetail,
     fat: NutrientDetail,
@@ -157,24 +161,32 @@ pub async fn lookup(
         crate::services::i18n::Lang::En => "English",
     };
     let prompt = format!(
-        "You are a nutritional database. For the food item \"{name}\", provide nutritional \
-         values per 100 grams.\n\n\
-         Form of the product: for items that are bought and weighed raw/dry (grains, rice, \
-         pasta, flour, meat, fish, legumes, etc.), give values for the RAW / as-sold product — \
-         NOT cooked — unless the name explicitly says cooked, boiled, fried, steamed or \
-         ready-to-eat.\n\n\
+        "You are a nutritional database. The user's input may be a plain food NAME (e.g. \
+         «яйцо», «рис», «гречка») OR a free-form DESCRIPTION of a dish, possibly with added \
+         ingredients (e.g. «жареная курица, добавил немного лука, чайную ложку масла»). \
+         Input: \"{name}\".\n\n\
+         First, set \"product_name\" to a SHORT dish/product name (2–4 words) in {lang}: for a \
+         plain name, keep it (tidied); for a description, name the resulting dish and fold in \
+         the added ingredients (e.g. «Жареная курица с луком»).\n\n\
+         Then provide nutritional values per 100 GRAMS of the resulting food/dish (account for \
+         the added ingredients — e.g. the oil raises fat and kcal).\n\n\
+         Form of the product: for items bought and weighed raw/dry (grains, rice, pasta, flour, \
+         meat, fish, legumes, etc.), give values for the RAW / as-sold product — NOT cooked — \
+         unless the input says cooked, boiled, fried, steamed, ready-to-eat, or clearly \
+         describes a prepared dish.\n\n\
          For each nutrient (kcal, protein, fat, carbs{custom}), provide:\n\
          - min_value: lowest reasonable value for this food\n\
          - max_value: highest reasonable value for this food\n\
          - recommended: the most likely value to select\n\
          - comment: brief explanation why this value is appropriate, written in {lang}\n\n\
          Use these units: kcal for calories, g/mg/mkg/kg for weights.\n\
-         All values are per 100g. Compute real values specifically for \"{name}\" — do not \
+         All values are per 100g. Compute real values specifically for the input — do not \
          copy any sample numbers.\n\n\
          Respond with ONLY a single minified JSON object and nothing else — no markdown, no \
-         prose before or after. EVERY key and EVERY string value MUST be wrapped in double \
-         quotes. EVERY `value` MUST be a real number (e.g. 12.5), never empty or null. Custom \
-         nutrients go in the \"custom_nutrients\" object (use {{}} if none).",
+         prose before or after. Include \"product_name\" as a string. EVERY key and EVERY \
+         string value MUST be wrapped in double quotes. EVERY `value` MUST be a real number \
+         (e.g. 12.5), never empty or null. Custom nutrients go in the \"custom_nutrients\" \
+         object (use {{}} if none).",
         name = input.name,
         custom = custom_part,
         lang = lang,
@@ -239,8 +251,11 @@ pub async fn lookup(
         })
         .collect();
 
+    let product_name = response.product_name.trim();
     Ok(AiLookupOutput {
-        name: None,
+        // Fill the name from the model's summarised product name (a plain input
+        // comes back tidied; a description is condensed to a dish name).
+        name: (!product_name.is_empty()).then(|| product_name.to_string()),
         kcal: response.kcal.into_api(),
         protein: response.protein.into_api(),
         fat: response.fat.into_api(),

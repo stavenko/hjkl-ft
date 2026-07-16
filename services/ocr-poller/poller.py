@@ -143,7 +143,9 @@ FOOD_ITEMS_PROMPT = (
     "можешь чуть повысить долю. Не добавляй скрытый жир к сырым продуктам, фруктам, "
     "напиткам, хлебу и явно обезжиренным блюдам.\n"
     "Правила:\n"
-    "- Имена — на РУССКОМ, короткое каноническое название продукта (1-3 слова).\n"
+    "- Название — на РУССКОМ, ОДНО каноническое название (1-3 слова), БЕЗ СКОБОК и "
+    "пояснений. Пиши конкретное слово: «омлет» (НЕ «яйца (омлет)»); «укроп» (НЕ «зелень "
+    "(укроп)»); «лосось» (НЕ «рыба (лосось)»); «творожный сыр» (НЕ «сыр (крем)»).\n"
     "- Сомневаешься, есть ли предмет — ПРОПУСТИ (лучше не досчитать, чем выдумать).\n"
     "- Верни ТОЛЬКО JSON, без прозы до или после:\n"
     "{\"items\":[{\"name\":\"огурец\",\"grams\":200,\"confidence\":0.7,\"inferred\":false},"
@@ -312,6 +314,11 @@ def _validate_food_items(data):
         name = it.get("name")
         grams = it.get("grams")
         if not isinstance(name, str) or not name.strip():
+            continue
+        # Backstop: the model occasionally clarifies with a parenthetical
+        # ("яйца (омлет)") despite the prompt. Strip it for a clean canonical name.
+        name = re.sub(r"\s*\([^)]*\)", "", name).strip()
+        if not name:
             continue
         if not isinstance(grams, (int, float)) or isinstance(grams, bool) or grams < 0:
             continue

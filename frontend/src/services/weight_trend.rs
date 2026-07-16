@@ -64,6 +64,12 @@ pub enum BalanceState {
 /// trend). Below it the data is treated as maintenance / "unclear".
 pub const CONFIDENT: f64 = 0.8;
 
+/// Confidence band `[WEAK, CONFIDENT)`: the slope already leans one way but the
+/// data is too noisy to commit. Surfaced as a low-confidence lean ("скорее вниз")
+/// instead of a flat "стоит на месте" — the direction is shown, the deficit/
+/// surplus colour is NOT (that still needs `CONFIDENT`). Below `WEAK` → flat.
+pub const WEAK: f64 = 0.65;
+
 impl WeightTrend {
     /// Map to deficit/surplus/maintenance. Only a confident Estimated trend
     /// colours; tentative / insufficient / low-confidence read as maintenance.

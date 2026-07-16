@@ -8,7 +8,7 @@ use crate::services::i18n::{t, weight_unit_signal, WeightUnit};
 use crate::services::profile::{self, Sex};
 use crate::services::weight_cycle::{weight_cycle, CycleResult, CYCLE_WINDOW_DAYS};
 use crate::services::weight_trend::{
-    weight_trend, BalanceState, Direction, WeightTrend, CONFIDENT, DEFAULT_WINDOW_DAYS,
+    weight_trend, BalanceState, Direction, WeightTrend, CONFIDENT, DEFAULT_WINDOW_DAYS, WEAK,
 };
 
 /// Weight widget in its EXPANDED form — content only, to sit inside the shared
@@ -46,9 +46,7 @@ pub fn WeightPanel(
                 format!("{arrow} {} · {}", t(key), t("weight.trend.preliminary"))
             }
             WeightTrend::Estimated { direction, slope_kg_per_week, confidence, .. } => {
-                if confidence < CONFIDENT {
-                    t("weight.trend.stable").to_string()
-                } else {
+                if confidence >= CONFIDENT {
                     let (arrow, key) = dir_label(direction);
                     let rate = u.from_kg(slope_kg_per_week.abs());
                     format!(
@@ -60,6 +58,18 @@ pub fn WeightPanel(
                         t("weight.trend.confidence"),
                         (confidence * 100.0).round() as i64,
                     )
+                } else if confidence >= WEAK {
+                    // Direction leans but the noise is too high to commit — show the
+                    // lean at low confidence instead of a false "holding steady".
+                    let (arrow, key) = weak_dir_label(direction);
+                    format!(
+                        "{arrow} {} · {} {}%",
+                        t(key),
+                        t("weight.trend.low_confidence"),
+                        (confidence * 100.0).round() as i64,
+                    )
+                } else {
+                    t("weight.trend.stable").to_string()
                 }
             }
         }
@@ -189,6 +199,14 @@ fn dir_label(direction: Direction) -> (&'static str, &'static str) {
     match direction {
         Direction::Down => ("\u{2193}", "weight.trend.down"),
         Direction::Up => ("\u{2191}", "weight.trend.up"),
+    }
+}
+
+/// Arrow + i18n key for a WEAK (low-confidence) directional lean.
+fn weak_dir_label(direction: Direction) -> (&'static str, &'static str) {
+    match direction {
+        Direction::Down => ("\u{2193}", "weight.trend.weak_down"),
+        Direction::Up => ("\u{2191}", "weight.trend.weak_up"),
     }
 }
 

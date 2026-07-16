@@ -239,11 +239,12 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
             Ok(v) => v,
             Err(e) => return cors_json(&serde_json::json!({ "error": format!("invalid JSON body: {e}") }), 400),
         };
-        // Job kind selects which prompt the on-prem poller runs. Absent → "label"
-        // (back-compat: old clients send no `kind`). Only these two are valid.
-        let kind = body.get("kind").and_then(|v| v.as_str()).unwrap_or("label").to_string();
-        if kind != "label" && kind != "food_items" {
-            return cors_json(&serde_json::json!({ "error": "invalid kind" }), 400);
+        // The FULL prompt is built on the frontend (all business logic + the user's
+        // i18n language) and passed straight through — the poller is a dumb executor
+        // that just runs it. The queue never holds any prompt/business logic.
+        let prompt = body.get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if prompt.trim().is_empty() {
+            return cors_json(&serde_json::json!({ "error": "missing prompt" }), 400);
         }
         // images = body.images ?? (body.image ? [body.image] : [])
         let mut images: Vec<String> = Vec::new();
@@ -263,10 +264,6 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         }
 
         let job_id = uuid_v4();
-        let custom_nutrients = body
-            .get("custom_nutrients")
-            .cloned()
-            .unwrap_or(serde_json::json!([]));
         // The blob is a JSON array of pure-base64 images (front/back of a label).
         let stripped: Vec<String> = images.iter().map(|i| to_base64(i)).collect();
         let image_b64 = serde_json::to_string(&stripped)
@@ -274,8 +271,7 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         let enqueue_body = serde_json::json!({
             "id": job_id,
             "owner": sub,
-            "kind": kind,
-            "custom_nutrients": custom_nutrients,
+            "prompt": prompt,
             "image_b64": image_b64,
         })
         .to_string();

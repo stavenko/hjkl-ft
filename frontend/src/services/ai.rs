@@ -1366,8 +1366,10 @@ struct QueueJob {
     thinking_tokens: u32,
     #[serde(default)]
     answer_tokens: u32,
+    /// The RAW model answer text (business logic — prompt + parsing — now lives on
+    /// the frontend; the poller is a dumb executor that relays this string).
     #[serde(default)]
-    result: Option<QueueResult>,
+    result: Option<String>,
     #[serde(default)]
     error: Option<String>,
 }
@@ -1496,12 +1498,165 @@ pub async fn summarize(prompt: &str) -> Result<String, String> {
     Ok(out.trim().to_string())
 }
 
+// ── Vision prompt BUILDERS (business logic moved off the poller) ──
+//
+// The on-prem poller is now a dumb executor: it receives `{images, prompt}`, runs
+// the prompt, and relays the RAW model text back. All the prompt engineering and
+// the result parsing live here, on the frontend.
+
+/// The label-OCR prompt. `product_name` follows the LABEL's own language, so this
+/// prompt has no {lang} slot — only a {custom} slot listing requested nutrient keys.
+/// Built with `.replace` (NOT `format!`) so the JSON braces in the literal aren't
+/// treated as format placeholders.
+fn label_prompt(custom_nutrients: &[NutrientSpec]) -> String {
+    let keys = if custom_nutrients.is_empty() {
+        "(none)".to_string()
+    } else {
+        custom_nutrients
+            .iter()
+            .map(|c| format!("\"{}\"", c.key))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let template = "You are reading a photo of a food package. Nutrition info may be a TABLE or a sentence in fine print, e.g. «Пищевая ценность (среднее значение) в 100 г: белки – 9,0 г; жиры – 2,1 г; углеводы – 3,5 г; 68,9 ккал / 290 кДж». Read ALL text on the package, then extract per-100g nutrition.\n\
+        RU mapping: белки->protein, жиры->fat, углеводы->carbs, энергетическая ценность/калорийность->energy.\n\
+        energy: kcal only (number before «ккал»), ignore kJ. Per-portion -> convert to per 100g. Do NOT use front-of-pack marketing («11 г белка в упаковке»). If info is absent/illegible, use null.\n\
+        Also fill custom_nutrients for any of these requested keys found on the label: {custom}.\n\
+        product_name: a SHORT name, MAXIMUM 3-4 words. Keep ONLY brand + core product (and a defining number like fat %). DROP process/marketing/descriptor words such as ультрапастеризованные, пастеризованные, стерилизованные, питьевые, отборное, «с массовой долей жира», «среднее значение». NEVER output more than 4 words. Example: «ВкусВилл Сливки питьевые ультрапастеризованные с массовой долей жира 10%» -> «ВкусВилл Сливки 10%».\n\
+        Return ONLY JSON: {\"source_text\":\"<exact nutrition sentence>\",\"product_name\":\"...\",\"energy_kcal\":0,\"protein_g\":0,\"fat_g\":0,\"carbs_g\":0,\"package_weight_g\":0,\"custom_nutrients\":{}}";
+    template.replace("{custom}", &keys)
+}
+
+/// The food-items (dish photo → list of foods) prompt. LANGUAGE-AWARE: the output
+/// language must not waver, so we hand the model the whole prompt in its own
+/// language (Russian for `Lang::Ru`, an English translation for `Lang::En`).
+fn food_items_prompt() -> String {
+    match crate::services::i18n::get_lang() {
+        crate::services::i18n::Lang::Ru => "Ты — nutrition vision assistant. На фото — блюдо/тарелка/приём пищи. Выведи ТОЛЬКО ту еду, которую реально ВИДНО. Не выдумывай вероятные гарниры.\n\
+            Рассуждай про себя, затем выдай СТРОГИЙ JSON.\n\
+            Шаги:\n\
+            1. Перечисли КАЖДЫЙ различимый компонент ОТДЕЛЬНОЙ позицией — в том числе сыр/моцареллу, мясо/сосиски/курицу, яйцо, орехи, семечки, зелень, видимый соус. Для салата/капрезе/боула дай компоненты ПО ОТДЕЛЬНОСТИ (помидоры, моцарелла, базилик...).\n\
+               ЗАПРЕЩЕНО: добавлять обобщённую позицию («салат», «микс», «ассорти», «капрезе», «блюдо»), если её компоненты уже перечислены отдельно; считать одну и ту же еду дважды; дробить одну еду на две.\n\
+            2. Порция: найди эталон масштаба (край обеденной тарелки ~26 см, десертной ~20 см, вилка ~19 см, рука, монета). Оцени граммы из покрытия тарелки и типичной плотности. Нет эталона — прикинь стандартную порцию. grams — ОДНО число, не диапазон. Крупные порции на больших тарелках часто НЕДООцениваются — не занижай их.\n\
+            3. confidence 0-1 на позицию.\n\
+            4. Скрытые жиры (масло/майонез не видно напрямую) добавь ОТДЕЛЬНЫМИ позициями с inferred=true:\n\
+               - салат без видимой заправки -> «подсолнечное масло», ~10% массы зелени/овощей;\n\
+               - салат/блюдо с белой заправкой (майонез/сметана/йогурт) -> «майонез», ~20% массы;\n\
+               - жареные/тушёные овощи, масло не видно -> «подсолнечное масло», ~8-10% массы овощей.\n\
+               Округляй граммы масла/майонеза до целых. Не добавляй скрытый жир к сырым продуктам, фруктам, напиткам, хлебу и явно обезжиренным блюдам.\n\
+            Правила:\n\
+            - Название — на РУССКОМ, ОДНО каноническое название (1-3 слова), БЕЗ СКОБОК и пояснений. Пиши конкретное слово: «омлет» (НЕ «яйца (омлет)»); «укроп» (НЕ «зелень (укроп)»).\n\
+            - Сомневаешься, есть ли предмет — ПРОПУСТИ.\n\
+            - Верни ТОЛЬКО JSON, без прозы: {\"items\":[{\"name\":\"огурец\",\"grams\":200,\"confidence\":0.7,\"inferred\":false},{\"name\":\"подсолнечное масло\",\"grams\":20,\"confidence\":0.4,\"inferred\":true}]}".to_string(),
+        crate::services::i18n::Lang::En => "You are a nutrition vision assistant. The photo shows a dish/plate/meal. Output ONLY food that is actually VISIBLE. Do not invent likely side dishes.\n\
+            Reason to yourself, then emit STRICT JSON.\n\
+            Steps:\n\
+            1. List EACH distinguishable component as a SEPARATE item — including cheese/mozzarella, meat/sausages/chicken, egg, nuts, seeds, greens, visible sauce. For a salad/caprese/bowl give the components SEPARATELY (tomatoes, mozzarella, basil...).\n\
+               FORBIDDEN: adding a generic item («salad», «mix», «assorted», «caprese», «dish») when its components are already listed separately; counting the same food twice; splitting one food into two.\n\
+            2. Portion: find a scale reference (dinner plate rim ~26 cm, dessert plate ~20 cm, fork ~19 cm, hand, coin). Estimate grams from plate coverage and typical density. No reference — estimate a standard portion. grams is ONE number, not a range. Large portions on big plates are often UNDERestimated — do not lowball them.\n\
+            3. confidence 0-1 per item.\n\
+            4. Hidden fats (oil/mayo not directly visible) add as SEPARATE items with inferred=true:\n\
+               - salad with no visible dressing -> «sunflower oil», ~10% of the mass of the greens/vegetables;\n\
+               - salad/dish with a white dressing (mayo/sour cream/yogurt) -> «mayonnaise», ~20% of the mass;\n\
+               - fried/stewed vegetables, oil not visible -> «sunflower oil», ~8-10% of the mass of the vegetables.\n\
+               Round oil/mayo grams to whole numbers. Do NOT add hidden fat to raw products, fruit, drinks, bread, or clearly fat-free dishes.\n\
+            Rules:\n\
+            - The name is in ENGLISH, ONE canonical name (1-3 words), WITHOUT PARENTHESES or explanations. Write the concrete word: «omelette» (NOT «eggs (omelette)»); «dill» (NOT «greens (dill)»).\n\
+            - If you are unsure whether an item is there — SKIP it.\n\
+            - Return ONLY JSON, no prose: {\"items\":[{\"name\":\"cucumber\",\"grams\":200,\"confidence\":0.7,\"inferred\":false},{\"name\":\"sunflower oil\",\"grams\":20,\"confidence\":0.4,\"inferred\":true}]}".to_string(),
+    }
+}
+
+// ── Client-side parse helpers for the raw model text ──
+
+/// Trim + strip code fences, then take the substring from the first `{` to the last
+/// `}` and parse it as JSON. On failure return an Err including a truncated snippet.
+fn extract_json_value(raw: &str) -> Result<serde_json::Value, String> {
+    let cleaned = strip_code_fences(raw.trim());
+    let start = cleaned.find('{');
+    let end = cleaned.rfind('}');
+    let slice = match (start, end) {
+        (Some(s), Some(e)) if e >= s => &cleaned[s..=e],
+        _ => return Err(format!("no JSON object in model output: {}", snippet(cleaned))),
+    };
+    serde_json::from_str(slice)
+        .map_err(|e| format!("JSON parse error: {e}, raw: {}", snippet(cleaned)))
+}
+
+/// A short, safe (char-boundary) prefix of `s` for error messages.
+fn snippet(s: &str) -> String {
+    const MAX: usize = 400;
+    if s.len() <= MAX {
+        s.to_string()
+    } else {
+        let mut end = MAX;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &s[..end])
+    }
+}
+
+/// Remove any `(...)` parenthetical segments from a name and normalise whitespace.
+/// Manual depth-scan (no regex crate).
+fn strip_parens(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut depth = 0i32;
+    for c in s.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Parse the RAW label-OCR model text into a `QueueResult`.
+fn parse_label_result(raw: &str) -> Result<QueueResult, String> {
+    serde_json::from_value(extract_json_value(raw)?)
+        .map_err(|e| format!("label result parse error: {e}"))
+}
+
+/// Parse the RAW food-items model text into a `DetectedFood` list. Requires an
+/// `items` array (a missing one is a real error, not an empty plate). Per item:
+/// require `name` (str) + `grams` (f64 ≥ 0); strip parentheticals from the name;
+/// clamp confidence to 0..1 (default 0.0); `inferred` default false.
+fn parse_food_items(raw: &str) -> Result<Vec<DetectedFood>, String> {
+    let value = extract_json_value(raw)?;
+    let items = value
+        .get("items")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("no `items` array in model output: {}", snippet(raw)))?;
+    let mut out = Vec::with_capacity(items.len());
+    for it in items {
+        let Some(name) = it.get("name").and_then(|v| v.as_str()) else { continue };
+        let Some(grams) = it.get("grams").and_then(|v| v.as_f64()) else { continue };
+        if grams < 0.0 {
+            continue;
+        }
+        let name = strip_parens(name);
+        if name.is_empty() {
+            continue;
+        }
+        let confidence = it.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0).clamp(0.0, 1.0);
+        let inferred = it.get("inferred").and_then(|v| v.as_bool()).unwrap_or(false);
+        out.push(DetectedFood { name, grams, confidence, inferred });
+    }
+    Ok(out)
+}
+
 /// Submit label image(s) to the ocr-queue; returns the job id immediately.
 /// The job is then processed asynchronously on-prem — poll it via `poll_vision`.
 pub async fn submit_vision(input: &AiVisionInput) -> Result<String, String> {
     let submit_body = serde_json::json!({
         "images": input.images,
-        "custom_nutrients": input.custom_nutrients,
+        "prompt": label_prompt(&input.custom_nutrients),
     });
     let (status, text) = queue_request("POST", "/submit", Some(&submit_body)).await?;
     if status == 402 {
@@ -1526,7 +1681,10 @@ pub async fn poll_queue(job_id: &str, input: &AiVisionInput) -> Result<QueuePhas
     }
     let job: QueueJob = serde_json::from_str(&body).map_err(|e| format!("job parse: {e}, raw: {body}"))?;
     Ok(match job.status.as_str() {
-        "done" => QueuePhase::Done(map_result(input, job.result.ok_or_else(|| "job done but no result".to_string())?)),
+        "done" => QueuePhase::Done(map_result(
+            input,
+            parse_label_result(&job.result.ok_or_else(|| "job done but no result".to_string())?)?,
+        )),
         "error" => QueuePhase::Error(job.error.unwrap_or_else(|| "recognition failed".to_string())),
         "processing" => QueuePhase::Processing { since_ms: job.started_at.unwrap_or(job.created_at) },
         _ => QueuePhase::Queued { position: job.position, since_ms: job.created_at },
@@ -1591,8 +1749,10 @@ pub async fn stream_vision(
                         on_progress(phase, tt, at);
                     }
                     Some("done") => {
-                        let rv = v.get("result").cloned().unwrap_or(serde_json::Value::Null);
-                        let r: QueueResult = serde_json::from_value(rv).map_err(|e| format!("result parse: {e}"))?;
+                        // The relayed `result` is now the RAW model text (a JSON string).
+                        let raw = v.get("result").and_then(|r| r.as_str())
+                            .ok_or_else(|| "done event missing string result".to_string())?;
+                        let r = parse_label_result(raw)?;
                         return Ok(map_result(input, r));
                     }
                     Some("error") => {
@@ -1634,15 +1794,8 @@ fn map_result(input: &AiVisionInput, r: QueueResult) -> AiLookupOutput {
 // inferred-fat flag) instead of one per-100g nutrition label. The DO relays the
 // result JSON verbatim; only this parser differs. See docs/food-photo-recognition.md.
 
-/// The `result` JSON shape the food-items poller posts back (relayed verbatim).
-#[derive(Deserialize)]
-struct FoodItemsQueueResult {
-    #[serde(default)]
-    items: Vec<DetectedFood>,
-}
-
-/// One food-items status poll, parsing the opaque `result` as a food list.
-/// Mirrors `QueueJob` but with the food-items result type.
+/// One food-items status poll. Mirrors `QueueJob`; `result` is the RAW model text,
+/// parsed client-side by `parse_food_items`.
 #[derive(Deserialize)]
 struct FoodItemsQueueJob {
     status: String,
@@ -1653,7 +1806,7 @@ struct FoodItemsQueueJob {
     #[serde(default)]
     started_at: Option<f64>,
     #[serde(default)]
-    result: Option<FoodItemsQueueResult>,
+    result: Option<String>,
     #[serde(default)]
     error: Option<String>,
 }
@@ -1673,7 +1826,7 @@ pub enum FoodItemsPhase {
 pub async fn submit_food_items(input: &AiFoodItemsInput) -> Result<String, String> {
     let submit_body = serde_json::json!({
         "images": input.images,
-        "kind": "food_items",
+        "prompt": food_items_prompt(),
     });
     let (status, text) = queue_request("POST", "/submit", Some(&submit_body)).await?;
     if status == 402 {
@@ -1699,9 +1852,9 @@ pub async fn poll_food_items(job_id: &str) -> Result<FoodItemsPhase, String> {
     let job: FoodItemsQueueJob =
         serde_json::from_str(&body).map_err(|e| format!("job parse: {e}, raw: {body}"))?;
     Ok(match job.status.as_str() {
-        "done" => FoodItemsPhase::Done(
-            job.result.ok_or_else(|| "job done but no result".to_string())?.items,
-        ),
+        "done" => FoodItemsPhase::Done(parse_food_items(
+            &job.result.ok_or_else(|| "job done but no result".to_string())?,
+        )?),
         "error" => FoodItemsPhase::Error(job.error.unwrap_or_else(|| "recognition failed".to_string())),
         "processing" => FoodItemsPhase::Processing { since_ms: job.started_at.unwrap_or(job.created_at) },
         _ => FoodItemsPhase::Queued { position: job.position, since_ms: job.created_at },
@@ -1765,10 +1918,10 @@ pub async fn stream_food_items(
                         on_progress(phase, tt, at);
                     }
                     Some("done") => {
-                        let rv = v.get("result").cloned().unwrap_or(serde_json::Value::Null);
-                        let r: FoodItemsQueueResult =
-                            serde_json::from_value(rv).map_err(|e| format!("result parse: {e}"))?;
-                        return Ok(r.items);
+                        // The relayed `result` is now the RAW model text (a JSON string).
+                        let raw = v.get("result").and_then(|r| r.as_str())
+                            .ok_or_else(|| "done event missing string result".to_string())?;
+                        return parse_food_items(raw);
                     }
                     Some("error") => {
                         return Err(v.get("error").and_then(|e| e.as_str()).unwrap_or("recognition failed").to_string());

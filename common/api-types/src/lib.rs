@@ -275,6 +275,33 @@ pub struct AiVisionInput {
     pub custom_nutrients: Vec<NutrientSpec>,
 }
 
+// AI Food-items (dish photo → list of foods). Uses the same on-prem Qwen2.5-VL
+// through the ocr-queue as label OCR, but with a "food_items" job kind that
+// returns a LIST of detected foods instead of one per-100g label. See
+// docs/food-photo-recognition.md.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AiFoodItemsInput {
+    pub images: Vec<String>,
+}
+
+/// One food the vision model detected in a dish photo. `grams` is an estimate
+/// (always editable downstream). `inferred = true` marks an auto-added hidden-fat
+/// row (cooking oil / mayonnaise) the model added on top of the visible food — a
+/// hypothesis, shown explicitly and removable, never baked silently into a total.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectedFood {
+    pub name: String,
+    pub grams: f64,
+    pub confidence: f64,
+    #[serde(default)]
+    pub inferred: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiFoodItemsOutput {
+    pub items: Vec<DetectedFood>,
+}
+
 // Recipe
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateRecipeInput {

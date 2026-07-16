@@ -19,6 +19,12 @@ fn now_ms() -> i64 {
     Date::now().as_millis() as i64
 }
 
+/// Default job kind for records persisted before `kind` existed, and for
+/// enqueue bodies that omit it. Label OCR is the original (only) kind.
+fn default_kind() -> String {
+    "label".into()
+}
+
 /// Per-job record stored under `job:<id>`. Option fields are skipped when None so
 /// the persisted JSON shape mirrors the TS `Job` interface exactly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +32,10 @@ struct Job {
     id: String,
     status: String, // "queued" | "processing" | "done" | "error"
     owner: String,
+    /// Which prompt the poller runs: "label" (per-100g) | "food_items" (dish
+    /// photo → list). Pre-existing persisted jobs load as "label" (no migration).
+    #[serde(default = "default_kind")]
+    kind: String,
     custom_nutrients: Vec<serde_json::Value>,
     chunks: usize,
     created_at: i64,
@@ -193,6 +203,7 @@ impl DurableObject for QueueDO {
             let b: serde_json::Value = req.json().await?;
             let id = b.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let owner = b.get("owner").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let kind = b.get("kind").and_then(|v| v.as_str()).unwrap_or("label").to_string();
             let custom_nutrients = b
                 .get("custom_nutrients")
                 .and_then(|v| v.as_array())
@@ -220,6 +231,7 @@ impl DurableObject for QueueDO {
                 id: id.clone(),
                 status: "queued".into(),
                 owner,
+                kind,
                 custom_nutrients,
                 chunks: n,
                 created_at: now_ms(),
@@ -264,6 +276,7 @@ impl DurableObject for QueueDO {
                 self.state.storage().put("processing", &p).await?;
                 return Response::from_json(&serde_json::json!({
                     "job_id": id,
+                    "kind": job.kind,
                     "custom_nutrients": job.custom_nutrients,
                 }));
             }

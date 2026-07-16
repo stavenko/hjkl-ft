@@ -11,7 +11,29 @@ use leptos_router::use_navigate;
 use crate::services::ai;
 use crate::services::i18n::t;
 use crate::services::local;
+use crate::services::sync;
 use crate::services::subscription;
+
+/// One detected food row in the «По фото еды» tab. Name + grams are editable in
+/// place (RwSignals); КБЖУ are per-100g values filled by enrichment (match to an
+/// existing food, or `ai::lookup`). `inferred` = an auto-added hidden-fat row
+/// (oil/mayo) the model hypothesised; `suggested` = a 0.5–0.8 fuzzy match that
+/// was accepted but flagged for the user to sanity-check.
+#[derive(Clone)]
+struct DetectedRow {
+    /// Stable identity for the `<For>` key (survives edits/removals; index alone
+    /// would remap rows when one is deleted).
+    key: u64,
+    name: RwSignal<String>,
+    grams: RwSignal<f64>,
+    kcal: RwSignal<f64>,
+    protein: RwSignal<f64>,
+    fat: RwSignal<f64>,
+    carbs: RwSignal<f64>,
+    nutrients: RwSignal<BTreeMap<String, f64>>,
+    inferred: bool,
+    suggested: RwSignal<bool>,
+}
 
 /// Decode any picked image (incl. iOS **HEIC**) and re-encode it as a downscaled
 /// JPEG, returned as base64 (no data-URL prefix).
@@ -156,6 +178,32 @@ pub fn FoodEditor(
 
     let photos_base64 = create_rw_signal(Vec::<String>::new());
     let photo_count = create_rw_signal(0usize);
+
+    // --- Tab 3 ("По фото еды") — its OWN detection channel, independent of the
+    // label tab above. Photos here go through the "food_items" ocr-queue kind and
+    // resolve to a LIST of foods (name + grams + КБЖУ), NOT the single nutrient
+    // card. Kept separate so a label detection and a dish detection can run at once.
+    let fitems_photos = create_rw_signal(Vec::<String>::new());
+    let fitems_photo_count = create_rw_signal(0usize);
+    let fitems_loading = create_rw_signal(false);
+    let fitems_error = create_rw_signal(None::<String>);
+    let fitems_phase = create_rw_signal(0u8);
+    let fitems_think = create_rw_signal(0u32);
+    let fitems_answer = create_rw_signal(0u32);
+    let fitems_start = create_rw_signal(0f64);
+    let fitems_tick = create_rw_signal(0u32);
+    let fitems_interval = create_rw_signal(None::<i32>);
+    let fitems_vision_msg = create_rw_signal(String::new());
+    let fitems_vision_start = create_rw_signal(0f64);
+    // The resolved list of detected foods (one row per item). Each row's fields
+    // are RwSignals so name/grams are editable in place; `pending` marks a row
+    // still awaiting its КБЖУ enrichment (match / lookup).
+    let food_items = create_rw_signal(Vec::<DetectedRow>::new());
+    // How many enrichment jobs are still in flight — the «Добавить все» button is
+    // disabled until this reaches 0 (all rows resolved).
+    let fitems_pending = create_rw_signal(0usize);
+    // Monotonic id source for stable `<For>` keys on detected rows.
+    let fitems_next_key = create_rw_signal(0u64);
     // How many 56px tiles (incl. the add button) fit per row — measured from the
     // grid width so the «📷» button can sit as the LAST cell of the FIRST row: it
     // starts on the left, is pushed right as photos are added, then stays pinned to
@@ -270,7 +318,32 @@ pub fn FoodEditor(
         });
     };
 
+    // Tab-3 photo picker (its OWN channel, separate input id from the label tab).
+    let on_fitems_file_change = move |ev: leptos::ev::Event| {
+        let input: web_sys::HtmlInputElement = ev.target().unwrap().unchecked_into();
+        let files = match input.files() {
+            Some(f) if f.length() > 0 => f,
+            _ => return,
+        };
+        spawn_local(async move {
+            let mut new_imgs = Vec::new();
+            for i in 0..files.length() {
+                let file = files.get(i).unwrap();
+                match file_to_jpeg_base64(&file).await {
+                    Ok(b64) => new_imgs.push(b64),
+                    Err(e) => { fitems_error.set(Some(e)); }
+                }
+            }
+            fitems_photos.update(|v| v.extend(new_imgs));
+            fitems_photo_count.set(fitems_photos.get_untracked().len());
+            input.set_value("");
+        });
+    };
+
     let navigate = use_navigate();
+    // A dedicated clone for the «Добавить все» handler (the paywall handler and
+    // this one each need their own — the view can't move the same `navigate` twice).
+    let navigate_add = navigate.clone();
 
     // Create-or-update the SINGLE draft from the current fields. Both detection
     // channels call this on completion; if a draft already exists (e.g. the
@@ -466,6 +539,197 @@ pub fn FoodEditor(
     let run_photo = run_ai.clone();
     let on_detect_photo = move |_| run_photo(true);
 
+    // «По фото еды»: submit dish photo(s) as a "food_items" job, poll then stream
+    // (same queue state machine as the label vision path), and on completion
+    // enrich each detected food (match an existing food, else `ai::lookup`) into
+    // an editable row. Shaped like the `use_vision` branch of `run_ai`, but its
+    // OWN channel and a LIST result instead of the single nutrient card.
+    let on_detect_food_items = move |_| {
+        let images = fitems_photos.get_untracked();
+        if images.is_empty() {
+            return;
+        }
+        let nutrients_list = custom_nutrients.get_untracked();
+
+        fitems_loading.set(true);
+        fitems_error.set(None);
+        fitems_phase.set(0);
+        fitems_think.set(0);
+        fitems_answer.set(0);
+        fitems_tick.set(0);
+        fitems_vision_msg.set(String::new());
+        fitems_vision_start.set(0.0);
+        food_items.set(Vec::new());
+        fitems_pending.set(0);
+        fitems_start.set(js_sys::Date::now());
+        {
+            let win = web_sys::window().unwrap();
+            let cb = wasm_bindgen::closure::Closure::<dyn Fn()>::new(move || fitems_tick.update(|v| *v += 1));
+            if let Ok(id) = win.set_interval_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                1000,
+            ) {
+                fitems_interval.set(Some(id));
+            }
+            cb.forget();
+        }
+
+        spawn_local(async move {
+            let stop_timer = move || {
+                if let Some(id) = fitems_interval.get_untracked() {
+                    web_sys::window().unwrap().clear_interval_with_handle(id);
+                    fitems_interval.set(None);
+                }
+            };
+            let finish = move |err: Option<String>| {
+                stop_timer();
+                fitems_vision_msg.set(String::new());
+                fitems_loading.set(false);
+                if let Some(e) = err {
+                    if e.contains("HTTP 402") { show_paywall.set(true); } else { fitems_error.set(Some(e)); }
+                }
+            };
+
+            // Proactive subscription gate (as the label path).
+            if let Ok(s) = subscription::status().await {
+                if !s.active {
+                    stop_timer();
+                    fitems_loading.set(false);
+                    show_paywall.set(true);
+                    return;
+                }
+            }
+
+            let input = AiFoodItemsInput { images };
+            fitems_phase.set(0);
+            fitems_vision_msg.set(t("food_editor.ai_uploading").to_string());
+            let job_id = match ai::submit_food_items(&input).await {
+                Ok(id) => id,
+                Err(e) => { finish(Some(e)); return; }
+            };
+
+            // QUEUED: poll until processing / done / error.
+            let mut processing = false;
+            let mut detected: Option<Vec<DetectedFood>> = None;
+            for _ in 0..600 {
+                match ai::poll_food_items(&job_id).await {
+                    Ok(ai::FoodItemsPhase::Done(items)) => { detected = Some(items); break; }
+                    Ok(ai::FoodItemsPhase::Error(e)) => { finish(Some(e)); return; }
+                    Ok(ai::FoodItemsPhase::Processing { since_ms }) => {
+                        if since_ms > 0.0 { fitems_vision_start.set(since_ms); }
+                        processing = true;
+                        break;
+                    }
+                    Ok(ai::FoodItemsPhase::Queued { position, since_ms }) => {
+                        if since_ms > 0.0 { fitems_vision_start.set(since_ms); }
+                        fitems_phase.set(0);
+                        fitems_vision_msg.set(if position > 0 {
+                            format!("{} {}", t("food_editor.ai_queue"), position)
+                        } else {
+                            t("food_editor.ai_recognizing").to_string()
+                        });
+                    }
+                    Err(_) => {} // transient; keep waiting
+                }
+                ai::sleep_ms(1500).await;
+            }
+
+            // PROCESSING: stream live LLM phase/tokens until the result arrives.
+            if detected.is_none() {
+                if !processing {
+                    finish(Some(t("food_editor.ai_timeout").to_string()));
+                    return;
+                }
+                fitems_vision_msg.set(String::new());
+                let on_progress = move |ph: u8, tt: u32, at: u32| match ph {
+                    1 => { fitems_phase.set(1); fitems_think.set(tt); fitems_vision_msg.set(String::new()); }
+                    2 => { fitems_phase.set(2); fitems_answer.set(at); fitems_vision_msg.set(String::new()); }
+                    _ => { fitems_phase.set(0); fitems_vision_msg.set(t("food_editor.ai_recognizing").to_string()); }
+                };
+                match ai::stream_food_items(&job_id, on_progress).await {
+                    Ok(items) => detected = Some(items),
+                    Err(e) => { finish(Some(e)); return; }
+                }
+            }
+
+            let items = detected.unwrap_or_default();
+            // Detection is done; enrichment continues per-item below.
+            finish(None);
+            if items.is_empty() {
+                fitems_error.set(Some(t("food_editor.no_food_detected").to_string()));
+                return;
+            }
+
+            // Fetch the match candidates once (the user's non-archived, non-recipe
+            // foods) and enrich each detected food into a row. Rows are pushed as
+            // placeholders immediately (in detection order) and filled in as each
+            // enrichment resolves, so the list appears and populates progressively.
+            let candidates = local::match_candidates().await;
+            for det in items {
+                let key = fitems_next_key.get_untracked();
+                fitems_next_key.set(key + 1);
+                let row = DetectedRow {
+                    key,
+                    name: create_rw_signal(det.name.clone()),
+                    grams: create_rw_signal(det.grams),
+                    kcal: create_rw_signal(0.0),
+                    protein: create_rw_signal(0.0),
+                    fat: create_rw_signal(0.0),
+                    carbs: create_rw_signal(0.0),
+                    nutrients: create_rw_signal(BTreeMap::new()),
+                    inferred: det.inferred,
+                    suggested: create_rw_signal(false),
+                };
+                food_items.update(|v| v.push(row.clone()));
+                fitems_pending.update(|n| *n += 1);
+
+                let candidates = candidates.clone();
+                let nutrients_list = nutrients_list.clone();
+                spawn_local(async move {
+                    // D5 thresholds: ≥0.8 auto-use the matched food; 0.5–0.8 use it
+                    // but FLAG as suggested; <0.5 / no match → look КБЖУ up by name.
+                    let matched = match ai::match_food(&det.name, &candidates).await {
+                        Ok((Some(id), conf)) if conf >= 0.5 => {
+                            local::get_food(&id).await.map(|f| (f, conf))
+                        }
+                        _ => None,
+                    };
+                    if let Some((food, conf)) = matched {
+                        row.kcal.set(food.kcal);
+                        row.protein.set(food.protein);
+                        row.fat.set(food.fat);
+                        row.carbs.set(food.carbs);
+                        row.nutrients.set(food.nutrients.clone());
+                        // Keep the model's name; flag a fuzzy (0.5–0.8) match.
+                        if conf < 0.8 { row.suggested.set(true); }
+                    } else {
+                        // No confident match → look up per-100g КБЖУ by name.
+                        let input = AiLookupInput { name: det.name.clone(), custom_nutrients: nutrients_list };
+                        match ai::lookup(&input, |_| {}).await {
+                            Ok(out) => {
+                                if let Some(n) = out.name { row.name.set(n); }
+                                row.kcal.set(out.kcal.recommended.value);
+                                row.protein.set(out.protein.recommended.value);
+                                row.fat.set(out.fat.recommended.value);
+                                row.carbs.set(out.carbs.recommended.value);
+                                let mut nut = BTreeMap::new();
+                                for (name, detail) in &out.nutrients {
+                                    nut.insert(name.clone(), detail.recommended.value);
+                                }
+                                row.nutrients.set(nut);
+                            }
+                            Err(e) => {
+                                // Surface the failure; the row stays with zero КБЖУ.
+                                fitems_error.set(Some(e));
+                            }
+                        }
+                    }
+                    fitems_pending.update(|n| *n = n.saturating_sub(1));
+                });
+            }
+        });
+    };
+
     create_effect(move |prev: Option<()>| {
         let _ = name.get();
         let _ = kcal.get();
@@ -537,6 +801,23 @@ pub fn FoodEditor(
         photo_tick.get();
         let start = if photo_vision_start.get() > 0.0 { photo_vision_start.get() } else { photo_start.get() };
         ((js_sys::Date::now() - start) / 1000.0).max(0.0) as u32
+    };
+    let fitems_elapsed = move || -> u32 {
+        fitems_tick.get();
+        let start = if fitems_vision_start.get() > 0.0 { fitems_vision_start.get() } else { fitems_start.get() };
+        ((js_sys::Date::now() - start) / 1000.0).max(0.0) as u32
+    };
+    // Live totals across all resolved rows (grams-scaled per-100g КБЖУ).
+    let fitems_totals = move || -> (f64, f64, f64, f64) {
+        food_items.get().iter().fold((0.0, 0.0, 0.0, 0.0), |(k, p, f, c), r| {
+            let g = r.grams.get() / 100.0;
+            (
+                k + r.kcal.get() * g,
+                p + r.protein.get() * g,
+                f + r.fat.get() * g,
+                c + r.carbs.get() * g,
+            )
+        })
     };
 
     view! {
@@ -743,28 +1024,31 @@ pub fn FoodEditor(
                 })}
             </div>
 
-            // Tab 3 — "By food photo": DRAFT of the recognition result (see
-            // docs/food-photo-recognition.md). Example items only — the vision
-            // pipeline is not wired yet. Shows the intended layout: one row per
-            // detected product (name + grams + КБЖУ badges), inferred fats
-            // (oil/mayo) tagged, a total, and "add all products".
+            // Tab 3 — "By food photo": REAL recognition pipeline (see
+            // docs/food-photo-recognition.md). Dish photo(s) → a list of detected
+            // foods, each row's name/grams editable, КБЖУ enriched (match an
+            // existing food or look it up), inferred fats (oil/mayo) tagged, a live
+            // total, and "add all products" that writes one food+diary entry each.
             <div style=move || if active_tab.get() == 2 { "" } else { "display: none;" }>
+                <input type="file" accept="image/*" multiple=true
+                    id="fitems-photo-input" style="display: none;" on:change=on_fitems_file_change />
+
                 <p class="is-size-7" style="color: var(--bulma-text-weak); margin-bottom: 10px; line-height: 1.4;">
-                    {move || t("food_editor.food_photo_draft_hint")}
+                    {move || t("food_editor.food_photo_hint")}
                 </p>
 
-                // Photo of the DISH + recognize button (shares the same photo picker
-                // as the label tab). In the draft the button is inert.
+                // Photo(s) of the DISH + its own picker (separate channel from the
+                // label tab).
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 10px;">
-                    {move || photos_base64.get().into_iter().enumerate().map(|(i, b64)| view! {
+                    {move || fitems_photos.get().into_iter().enumerate().map(|(i, b64)| view! {
                         <div style="position: relative; width: 56px; height: 56px;">
                             <img src=format!("data:image/jpeg;base64,{b64}")
                                 style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
                             <button type="button"
                                 style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
                                 on:click=move |_| {
-                                    photos_base64.update(|v| { if i < v.len() { v.remove(i); } });
-                                    photo_count.set(photos_base64.get_untracked().len());
+                                    fitems_photos.update(|v| { if i < v.len() { v.remove(i); } });
+                                    fitems_photo_count.set(fitems_photos.get_untracked().len());
                                 }
                             >"\u{00d7}"</button>
                         </div>
@@ -774,7 +1058,7 @@ pub fn FoodEditor(
                         style="width: 56px; height: 56px; flex: none; padding: 0; border: 1px dashed var(--bulma-border); border-radius: 8px; background: var(--bulma-scheme-main); color: var(--bulma-text-weak); cursor: pointer; display: flex; align-items: center; justify-content: center;"
                         on:click=move |_| {
                             let doc = web_sys::window().unwrap().document().unwrap();
-                            if let Some(el) = doc.get_element_by_id("food-photo-input") {
+                            if let Some(el) = doc.get_element_by_id("fitems-photo-input") {
                                 use wasm_bindgen::JsCast;
                                 let input: &web_sys::HtmlInputElement = el.unchecked_ref();
                                 input.click();
@@ -789,69 +1073,159 @@ pub fn FoodEditor(
                         </svg>
                     </button>
                 </div>
-                <div style="margin-bottom: 16px;">
-                    <button type="button" class="button is-link is-fullwidth"
-                        style="border: none; border-radius: 10px; cursor: pointer;">
-                        <span style="display: inline-flex; align-items: center; gap: 6px;">
-                            {ai_icon()}{move || t("food_editor.detect_food")}
-                        </span>
+
+                // «Определить еду» — submit for recognition, with live progress
+                // (⌛ waiting / 🧠 thinking / ✍️ answering) reusing the label pattern.
+                <div style="position: relative; margin-bottom: 12px;">
+                    <crate::components::net_badge::NetOfflineBadge/>
+                    <button type="button"
+                        class="button is-link is-fullwidth"
+                        style="border: none; border-radius: 10px; cursor: pointer;"
+                        disabled=move || fitems_loading.get() || fitems_photo_count.get() == 0
+                        on:click=on_detect_food_items
+                    >
+                        {move || if fitems_loading.get() {
+                            match fitems_phase.get() {
+                                0 => {
+                                    let msg = fitems_vision_msg.get();
+                                    if msg.is_empty() {
+                                        format!("\u{231b} {} с", fitems_elapsed())
+                                    } else {
+                                        format!("\u{231b} {msg} \u{00b7} {} с", fitems_elapsed())
+                                    }
+                                }
+                                1 => format!("\u{1f9e0} {} ток \u{00b7} {} с", fitems_think.get(), fitems_elapsed()),
+                                _ => format!("\u{270d}\u{fe0f} {} ток \u{00b7} {} с", fitems_answer.get(), fitems_elapsed()),
+                            }.into_view()
+                        } else {
+                            view! {
+                                <span style="display: inline-flex; align-items: center; gap: 6px;">
+                                    {ai_icon()}{t("food_editor.detect_food")}
+                                </span>
+                            }.into_view()
+                        }}
                     </button>
                 </div>
 
-                <p class="is-size-7 has-text-weight-semibold" style="color: var(--bulma-text-weak); margin: 0 0 6px 4px; letter-spacing: 0.03em;">
-                    {move || t("food_editor.detected_title")}
-                </p>
-                <div style="background: var(--bulma-scheme-main); border-radius: 12px;">
-                    {
-                        // (name, grams, kcal, protein, fat, carbs, inferred)
-                        let items: Vec<(&str, u32, u32, u32, u32, u32, bool)> = vec![
-                            ("Яичница глазунья", 50, 90, 6, 7, 0, false),
-                            ("Сосиски", 80, 232, 9, 21, 2, false),
-                            ("Тост пшеничный", 40, 108, 3, 1, 21, false),
-                            ("Помидоры черри", 50, 9, 0, 0, 2, false),
-                            ("Моцарелла", 30, 84, 6, 6, 0, false),
-                            ("Соус песто", 15, 45, 1, 4, 1, false),
-                            ("Масло для жарки", 5, 44, 0, 5, 0, true),
-                        ];
-                        let n = items.len();
-                        items.into_iter().enumerate().map(|(i, (name, g, k, p, f, c, inferred))| {
-                            view! {
-                                <div style="padding: 10px 12px;">
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="is-size-6" style="flex: 1; min-width: 0; color: var(--bulma-text);">
-                                            {name}
+                {move || fitems_error.get().map(|e| view! {
+                    <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-bottom: 10px; background: var(--bulma-danger-light); border-radius: 10px;">
+                        {e}
+                    </div>
+                })}
+
+                // The detected-food list — one row per item, shown only once we
+                // have results.
+                <Show when=move || !food_items.get().is_empty()>
+                    <p class="is-size-7 has-text-weight-semibold" style="color: var(--bulma-text-weak); margin: 0 0 6px 4px; letter-spacing: 0.03em;">
+                        {move || t("food_editor.detected_title")}
+                    </p>
+                    <div style="background: var(--bulma-scheme-main); border-radius: 12px;">
+                        <For
+                            each=move || food_items.get()
+                            key=|r| r.key
+                            children=move |row| {
+                                let r = row.clone();
+                                let row_key = r.key;
+                                let (kcal_s, protein_s, fat_s, carbs_s) =
+                                    (r.kcal, r.protein, r.fat, r.carbs);
+                                let name_s = r.name;
+                                let grams_s = r.grams;
+                                let inferred = r.inferred;
+                                let suggested = r.suggested;
+                                view! {
+                                    <div style="padding: 10px 12px;">
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <input type="text"
+                                                class="is-size-6"
+                                                style="flex: 1; min-width: 0; padding: 4px 8px; border: none; background: var(--bulma-background); color: var(--bulma-text); border-radius: 8px; outline: none;"
+                                                prop:value=move || name_s.get()
+                                                on:input=move |ev| name_s.set(event_target_value(&ev))
+                                            />
+                                            <input type="text" inputmode="decimal"
+                                                class="is-size-6"
+                                                style="width: 60px; text-align: right; padding: 4px 8px; border: none; background: var(--bulma-background); color: var(--bulma-text); border-radius: 8px; outline: none;"
+                                                prop:value=move || format!("{:.0}", grams_s.get())
+                                                on:input=move |ev| {
+                                                    let v = event_target_value(&ev).replace(',', ".");
+                                                    grams_s.set(v.parse().unwrap_or(0.0));
+                                                }
+                                            />
+                                            <span class="has-text-grey-light is-size-7" style="min-width: 14px;">"\u{0433}"</span>
+                                            <button type="button"
+                                                class="has-text-grey-light"
+                                                style="border: none; background: none; font-size: 1.2rem; line-height: 1; cursor: pointer; padding: 0;"
+                                                on:click=move |_| {
+                                                    food_items.update(|v| v.retain(|x| x.key != row_key));
+                                                }
+                                            >"\u{00d7}"</button>
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+                                            <span class="is-size-7 has-text-grey">
+                                                {move || {
+                                                    let g = grams_s.get() / 100.0;
+                                                    format!(
+                                                        "К {:.0} · Б {:.0} · Ж {:.0} · У {:.0}",
+                                                        kcal_s.get() * g, protein_s.get() * g,
+                                                        fat_s.get() * g, carbs_s.get() * g,
+                                                    )
+                                                }}
+                                            </span>
                                             {inferred.then(|| view! {
-                                                <span class="is-size-7" style="margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: #FEF3C7; color: #92610A;">
+                                                <span class="is-size-7" style="padding: 1px 6px; border-radius: 6px; background: #FEF3C7; color: #92610A;">
                                                     {move || t("food_editor.auto_tag")}
                                                 </span>
                                             })}
-                                        </span>
-                                        <span class="is-size-6" style="min-width: 52px; text-align: right; padding: 4px 8px; border-radius: 8px; background: var(--bulma-background); color: var(--bulma-text);">
-                                            {format!("{g} г")}
-                                        </span>
-                                        <span class="has-text-grey-light" style="font-size: 1.2rem; line-height: 1; cursor: pointer;">"\u{00d7}"</span>
+                                            {move || suggested.get().then(|| view! {
+                                                <span class="is-size-7" style="padding: 1px 6px; border-radius: 6px; background: #FEF3C7; color: #92610A;">
+                                                    {move || t("food_editor.suggested_tag")}
+                                                </span>
+                                            })}
+                                        </div>
                                     </div>
-                                    <div class="is-size-7 has-text-grey" style="margin-top: 4px;">
-                                        {format!("К {k} · Б {p} · Ж {f} · У {c}")}
-                                    </div>
-                                </div>
-                                {(i + 1 < n).then(|| view! {
                                     <div style="border-bottom: 0.5px solid var(--bulma-border-weak); margin-left: 12px;"></div>
-                                })}
+                                }
                             }
-                        }).collect_view()
-                    }
-                </div>
-                <div class="is-size-7" style="display: flex; justify-content: space-between; padding: 10px 12px 0;">
-                    <span class="has-text-weight-semibold" style="color: var(--bulma-text-weak);">{move || t("food_editor.total")}</span>
-                    <span style="color: var(--bulma-text);">"К 612 · Б 25 · Ж 44 · У 26"</span>
-                </div>
-                <button type="button"
-                    class="button is-link is-size-6 has-text-weight-semibold"
-                    style="width: 100%; padding: 12px 0; margin-top: 16px; border: none; border-radius: 10px; cursor: pointer;"
-                >
-                    {move || t("food_editor.add_all")}
-                </button>
+                        />
+                    </div>
+                    <div class="is-size-7" style="display: flex; justify-content: space-between; padding: 10px 12px 0;">
+                        <span class="has-text-weight-semibold" style="color: var(--bulma-text-weak);">{move || t("food_editor.total")}</span>
+                        <span style="color: var(--bulma-text);">
+                            {move || {
+                                let (k, p, f, c) = fitems_totals();
+                                format!("\u{041a} {:.0} · \u{0411} {:.0} · \u{0416} {:.0} · \u{0423} {:.0}", k, p, f, c)
+                            }}
+                        </span>
+                    </div>
+                    <button type="button"
+                        class="button is-link is-size-6 has-text-weight-semibold"
+                        style="width: 100%; padding: 12px 0; margin-top: 16px; border: none; border-radius: 10px; cursor: pointer;"
+                        // Enabled only once ALL rows have resolved their КБЖУ.
+                        disabled=move || { fitems_pending.get() > 0 || food_items.get().is_empty() }
+                        on:click={
+                            let navigate = navigate_add.clone();
+                            move |_| {
+                                let rows = food_items.get_untracked();
+                                let items: Vec<local::ResolvedFood> = rows.iter().map(|r| local::ResolvedFood {
+                                    name: r.name.get_untracked(),
+                                    grams: r.grams.get_untracked(),
+                                    kcal: r.kcal.get_untracked(),
+                                    protein: r.protein.get_untracked(),
+                                    fat: r.fat.get_untracked(),
+                                    carbs: r.carbs.get_untracked(),
+                                    nutrients: r.nutrients.get_untracked(),
+                                }).collect();
+                                let navigate = navigate.clone();
+                                spawn_local(async move {
+                                    local::add_detected_foods_to_diary(&items).await;
+                                    sync::push_background();
+                                    navigate("/diary", Default::default());
+                                });
+                            }
+                        }
+                    >
+                        {move || t("food_editor.add_all")}
+                    </button>
+                </Show>
             </div>
 
             // Nutrient fields card. NB: no `overflow: hidden` — it would clip the

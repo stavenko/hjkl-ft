@@ -1626,6 +1626,222 @@ fn map_result(input: &AiVisionInput, r: QueueResult) -> AiLookupOutput {
     }
 }
 
+// --- Food-items (dish photo → list of foods) ---------------------------------
+//
+// Same ocr-queue plumbing as label OCR (`submit_vision`/`poll_queue`/`stream_vision`)
+// but with the "food_items" job kind: the on-prem poller runs a different prompt
+// and returns a LIST of detected foods (name + estimated grams + confidence +
+// inferred-fat flag) instead of one per-100g nutrition label. The DO relays the
+// result JSON verbatim; only this parser differs. See docs/food-photo-recognition.md.
+
+/// The `result` JSON shape the food-items poller posts back (relayed verbatim).
+#[derive(Deserialize)]
+struct FoodItemsQueueResult {
+    #[serde(default)]
+    items: Vec<DetectedFood>,
+}
+
+/// One food-items status poll, parsing the opaque `result` as a food list.
+/// Mirrors `QueueJob` but with the food-items result type.
+#[derive(Deserialize)]
+struct FoodItemsQueueJob {
+    status: String,
+    #[serde(default)]
+    position: u32,
+    #[serde(default)]
+    created_at: f64,
+    #[serde(default)]
+    started_at: Option<f64>,
+    #[serde(default)]
+    result: Option<FoodItemsQueueResult>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+/// Queue state for the food-items job. Parallel to `QueuePhase`, but `Done`
+/// carries the detected food list.
+pub enum FoodItemsPhase {
+    Queued { position: u32, since_ms: f64 },
+    Processing { since_ms: f64 },
+    Done(Vec<DetectedFood>),
+    Error(String),
+}
+
+/// Submit dish photo(s) to the ocr-queue with `kind = "food_items"`; returns the
+/// job id immediately. Same as `submit_vision` but carries NO custom_nutrients
+/// (the food-items pass returns names+grams only; КБЖУ comes downstream).
+pub async fn submit_food_items(input: &AiFoodItemsInput) -> Result<String, String> {
+    let submit_body = serde_json::json!({
+        "images": input.images,
+        "kind": "food_items",
+    });
+    let (status, text) = queue_request("POST", "/submit", Some(&submit_body)).await?;
+    if status == 402 {
+        return Err("HTTP 402: subscription_required".to_string());
+    }
+    if status != 200 {
+        return Err(format!("submit HTTP {status}: {text}"));
+    }
+    serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|v| v.get("job_id").and_then(|j| j.as_str()).map(String::from))
+        .ok_or_else(|| format!("no job_id in response: {text}"))
+}
+
+/// One queue-status poll for a food-items job. Copy of `poll_queue` but returns
+/// `FoodItemsPhase::Done(items)` (no custom-nutrient remap). Transient errors
+/// report as still-`Queued` so we keep waiting.
+pub async fn poll_food_items(job_id: &str) -> Result<FoodItemsPhase, String> {
+    let (st, body) = queue_request("GET", &format!("/job/{job_id}"), None).await?;
+    if st != 200 {
+        return Ok(FoodItemsPhase::Queued { position: 0, since_ms: 0.0 });
+    }
+    let job: FoodItemsQueueJob =
+        serde_json::from_str(&body).map_err(|e| format!("job parse: {e}, raw: {body}"))?;
+    Ok(match job.status.as_str() {
+        "done" => FoodItemsPhase::Done(
+            job.result.ok_or_else(|| "job done but no result".to_string())?.items,
+        ),
+        "error" => FoodItemsPhase::Error(job.error.unwrap_or_else(|| "recognition failed".to_string())),
+        "processing" => FoodItemsPhase::Processing { since_ms: job.started_at.unwrap_or(job.created_at) },
+        _ => FoodItemsPhase::Queued { position: job.position, since_ms: job.created_at },
+    })
+}
+
+/// Stream a food-items job while it's `processing`. Copy of `stream_vision`:
+/// opens the worker's SSE stream, reports live `on_progress(phase, thinking,
+/// answer)`, and on the terminal `"done"` event parses the result as a food list.
+pub async fn stream_food_items(
+    job_id: &str,
+    on_progress: impl Fn(u8, u32, u32),
+) -> Result<Vec<DetectedFood>, String> {
+    let base = &config::get().ocr_queue_base_url;
+    let url = format!("{base}/stream/{job_id}");
+    let token = auth::get_token().ok_or_else(|| "not authenticated".to_string())?;
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("GET");
+    let headers = web_sys::Headers::new().map_err(|e| format!("{e:?}"))?;
+    headers.set("Authorization", &format!("Bearer {token}")).map_err(|e| format!("{e:?}"))?;
+    opts.set_headers(&headers);
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts).map_err(|e| format!("{e:?}"))?;
+    let window = web_sys::window().expect("no window");
+    let resp_val = JsFuture::from(window.fetch_with_request(&request)).await.map_err(|e| format!("{e:?}"))?;
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
+    if !resp.ok() {
+        return Err(format!("stream HTTP {}", resp.status()));
+    }
+    let body = resp.body().ok_or_else(|| "no stream body".to_string())?;
+    let reader: web_sys::ReadableStreamDefaultReader =
+        body.get_reader().dyn_into().map_err(|_| "no stream reader".to_string())?;
+
+    let mut buf = String::new();
+    loop {
+        let chunk = JsFuture::from(reader.read()).await.map_err(|e| format!("stream read: {e:?}"))?;
+        let done = js_sys::Reflect::get(&chunk, &JsValue::from_str("done"))
+            .ok().and_then(|d| d.as_bool()).unwrap_or(false);
+        if done {
+            break;
+        }
+        let value = js_sys::Reflect::get(&chunk, &JsValue::from_str("value")).map_err(|e| format!("{e:?}"))?;
+        let bytes = js_sys::Uint8Array::new(&value).to_vec();
+        buf.push_str(&String::from_utf8_lossy(&bytes));
+
+        while let Some(idx) = buf.find("\n\n") {
+            let event = buf[..idx].to_string();
+            buf.replace_range(..idx + 2, "");
+            for line in event.lines() {
+                let Some(data) = line.strip_prefix("data: ") else { continue };
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else { continue };
+                match v.get("type").and_then(|t| t.as_str()) {
+                    Some("progress") => {
+                        let phase = match v.get("phase").and_then(|p| p.as_str()) {
+                            Some("thinking") => 1u8,
+                            Some("answer") => 2u8,
+                            _ => 0u8,
+                        };
+                        let tt = v.get("thinking_tokens").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+                        let at = v.get("answer_tokens").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+                        on_progress(phase, tt, at);
+                    }
+                    Some("done") => {
+                        let rv = v.get("result").cloned().unwrap_or(serde_json::Value::Null);
+                        let r: FoodItemsQueueResult =
+                            serde_json::from_value(rv).map_err(|e| format!("result parse: {e}"))?;
+                        return Ok(r.items);
+                    }
+                    Some("error") => {
+                        return Err(v.get("error").and_then(|e| e.as_str()).unwrap_or("recognition failed").to_string());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Err("stream ended without result".to_string())
+}
+
+/// LLM verdict for `match_food`: the best-matching candidate id (or null) plus a
+/// 0..1 confidence and a short reason. Schema-injected JSON mode via `execute`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct MatchResult {
+    /// The `id` of the best-matching candidate, or null if none is a real match.
+    #[serde(default)]
+    match_id: Option<String>,
+    /// Confidence 0..1 that `match_id` is the same food as the detected name.
+    confidence: f64,
+    /// Short reason for the verdict (unused by the caller; keeps the model honest).
+    #[serde(default)]
+    #[allow(dead_code)]
+    reason: String,
+}
+
+/// Match a detected food NAME against the user's existing foods. Given the
+/// detected name and a list of candidate `(id, name)` foods, returns the best
+/// match `id` and a 0..1 confidence, or `None` if the model finds no real match.
+/// Uses the SAME qwen3 execute stack as `lookup`. Thresholds are applied by the
+/// caller (≥0.8 auto, 0.5–0.8 suggested, <0.5/None → lookup).
+pub async fn match_food(
+    detected: &str,
+    candidates: &[(String, String)],
+) -> Result<(Option<String>, f64), String> {
+    // No candidates to match against — skip the LLM call entirely.
+    if candidates.is_empty() {
+        return Ok((None, 0.0));
+    }
+    let lang = match crate::services::i18n::get_lang() {
+        crate::services::i18n::Lang::Ru => "Russian",
+        crate::services::i18n::Lang::En => "English",
+    };
+    let list = candidates
+        .iter()
+        .map(|(id, name)| format!("- id={id}: {name}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = format!(
+        "You match a detected food to an existing food catalog. The detected food name \
+         (in {lang}) is: \"{detected}\".\n\n\
+         Candidate foods (choose from these ids ONLY):\n{list}\n\n\
+         Pick the candidate that is the SAME food as the detected one (same product/dish, \
+         allowing spelling/word-order/synonym differences). If NONE of the candidates is \
+         genuinely the same food, set match_id to null. Do NOT force a weak match.\n\n\
+         Set confidence to your certainty (0..1) that match_id is the same food: near 1.0 \
+         for an obvious match, ~0.6 for a plausible-but-uncertain one, near 0 when nothing \
+         fits. Respond with ONLY a single minified JSON object.",
+        lang = lang,
+        detected = detected,
+        list = list,
+    );
+
+    let result: MatchResult = generate(prompt, |_| {}).await?;
+    let confidence = result.confidence.clamp(0.0, 1.0);
+    // A confident-but-unknown id is meaningless — drop match_ids not in the list.
+    let match_id = result
+        .match_id
+        .filter(|id| candidates.iter().any(|(cid, _)| cid == id));
+    Ok((match_id, confidence))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -40,6 +40,10 @@ pub async fn list_foods() -> Vec<Food> {
     db::list_all("foods").await
 }
 
+pub async fn get_food(id: &str) -> Option<Food> {
+    db::get("foods", id).await
+}
+
 pub async fn archive_food(id: &str, archived: bool) -> Option<Food> {
     let mut food: Food = db::get("foods", id).await?;
     food.archived = archived;
@@ -937,6 +941,86 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
     // (only counts if its trigger was armed by opening that section).
     crate::services::story::fire_first_food_if_armed().await;
     Some(entry)
+}
+
+// --- Food-photo recognition (dish photo → list of foods) ---------------------
+
+/// Candidate foods to match a detected name against: the user's own foods,
+/// excluding archived ones and recipes (a recipe isn't a raw catalog food).
+/// Returns `(id, name)` pairs for `ai::match_food`.
+pub async fn match_candidates() -> Vec<(String, String)> {
+    list_foods()
+        .await
+        .into_iter()
+        .filter(|f| !f.archived && !f.is_recipe)
+        .map(|f| (f.id, f.name))
+        .collect()
+}
+
+/// One resolved detected-food row, ready to write to the diary: a name, the
+/// eaten grams, and per-100g КБЖУ + custom nutrients. Built by the caller from
+/// a matched existing `Food` or from an `ai::lookup` result.
+pub struct ResolvedFood {
+    pub name: String,
+    pub grams: f64,
+    /// Per-100g macros.
+    pub kcal: f64,
+    pub protein: f64,
+    pub fat: f64,
+    pub carbs: f64,
+    /// Per-100g custom nutrients (name -> value), same shape as `Food::nutrients`.
+    pub nutrients: BTreeMap<String, f64>,
+}
+
+/// Write a batch of detected foods to today's diary: ONE new `Food` + ONE
+/// `DiaryEntry` per item (decision D6). Mirrors the Food/DiaryEntry construction
+/// in `add_draft_to_diary` (all AI tags None), fires the first-food story task
+/// once, and enqueues background classification per food. Returns the entries.
+pub async fn add_detected_foods_to_diary(items: &[ResolvedFood]) -> Vec<DiaryEntry> {
+    let mut entries = Vec::with_capacity(items.len());
+    for it in items {
+        let food = Food {
+            id: new_id(),
+            name: it.name.clone(),
+            kcal: it.kcal,
+            protein: it.protein,
+            fat: it.fat,
+            carbs: it.carbs,
+            nutrients: it.nutrients.clone(),
+            package_weight: None,
+            is_recipe: false,
+            recipe_id: None,
+            archived: false,
+            is_restaurant: false,
+            is_snack: None,
+            is_liquid_cal: None,
+            is_veg_fruit: None,
+            is_egg: None,
+            is_red_meat: None,
+            created_at: now(),
+            updated_at: now(),
+        };
+        db::put("foods", &food).await;
+        let entry = DiaryEntry {
+            id: new_id(),
+            food_id: food.id.clone(),
+            date: today(),
+            time: Some(time_now()),
+            grams: it.grams,
+            waste_grams: 0.0,
+            meal_label: None,
+            deleted: false,
+            created_at: now(),
+            updated_at: now(),
+        };
+        db::put("diary", &entry).await;
+        // Classify this food's categories in the background (as `save_food_to_diary`).
+        crate::services::classify::enqueue(food.id.clone());
+        entries.push(entry);
+    }
+    // Adding food to the diary fires the "first food entries" story task (once).
+    crate::services::story::fire_first_food_if_armed().await;
+    entries
 }
 
 // --- Recipes ---

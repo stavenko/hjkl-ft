@@ -115,6 +115,38 @@ PROMPT = (
     "\"custom_nutrients\":{{}}}}"
 )
 
+# Dish-photo -> list of foods (the "food_items" job kind). Returns a LIST of
+# detected foods (name+grams+confidence+inferred). No per-100g label parsing,
+# no custom_nutrients, no Atwater check — КБЖУ is resolved later on the client.
+FOOD_ITEMS_PROMPT = (
+    "Ты — nutrition vision assistant. На фото — блюдо/тарелка/приём пищи. "
+    "Выведи ТОЛЬКО ту еду, которую реально ВИДНО. Не выдумывай вероятные гарниры.\n"
+    "Рассуждай про себя, затем выдай СТРОГИЙ JSON.\n"
+    "Шаги:\n"
+    "1. Каждую отдельную видимую еду — отдельной позицией. Для салата/боула перечисли "
+    "различимые компоненты (зелень, белок, семечки...), но НИКОГДА не считай одну и ту же "
+    "еду дважды и не дроби одну еду на две.\n"
+    "2. Порция: найди эталон масштаба (край обеденной тарелки ~26 см, десертной ~20 см, "
+    "вилка ~19 см, рука, монета). Оцени граммы из покрытия тарелки и типичной плотности. "
+    "Нет эталона — прикинь стандартную порцию. grams — ОДНО число, не диапазон. "
+    "Крупные порции на больших тарелках часто НЕДООцениваются — не занижай их.\n"
+    "3. confidence 0-1 на позицию (насколько уверен в самой еде и её массе).\n"
+    "4. Скрытые жиры (масло/майонез не видно напрямую) добавь ОТДЕЛЬНЫМИ позициями с "
+    "inferred=true:\n"
+    "   - салат без видимой заправки -> «подсолнечное масло», ~10% массы зелени/овощей;\n"
+    "   - салат/блюдо с белой заправкой (майонез/сметана/йогурт) -> «майонез», ~20% массы;\n"
+    "   - жареные/тушёные овощи, масло не видно -> «подсолнечное масло», ~8-10% массы овощей.\n"
+    "   Округляй граммы масла/майонеза до целых. Если явно видно бутылку/факт заправки — "
+    "можешь чуть повысить долю. Не добавляй скрытый жир к сырым продуктам, фруктам, "
+    "напиткам, хлебу и явно обезжиренным блюдам.\n"
+    "Правила:\n"
+    "- Имена — на РУССКОМ, короткое каноническое название продукта (1-3 слова).\n"
+    "- Сомневаешься, есть ли предмет — ПРОПУСТИ (лучше не досчитать, чем выдумать).\n"
+    "- Верни ТОЛЬКО JSON, без прозы до или после:\n"
+    "{\"items\":[{\"name\":\"огурец\",\"grams\":200,\"confidence\":0.7,\"inferred\":false},"
+    "{\"name\":\"подсолнечное масло\",\"grams\":20,\"confidence\":0.4,\"inferred\":true}]}"
+)
+
 
 class HardTimeout(Exception):
     pass
@@ -206,17 +238,9 @@ def report(queue, job_id, proxy, phase, thinking_tokens, answer_tokens):
         print(f"progress report failed: {e}", flush=True)
 
 
-def recognize(queue, job_id, image_blob, custom_nutrients, proxy):
-    # The blob is a JSON array of base64 images (front/back of a label).
-    try:
-        images = json.loads(image_blob)
-        if not isinstance(images, list):
-            images = [image_blob]
-    except (ValueError, TypeError):
-        images = [image_blob]
-
-    keys = ", ".join(f'"{c.get("key")}"' for c in custom_nutrients) or "(none)"
-    prompt = PROMPT.format(custom=keys)
+def _run_vlm(queue, job_id, images, prompt, proxy):
+    """Shared llama-swap streaming call: sends `images` + `prompt`, heartbeats
+    thinking/answer progress, returns the raw answer text. Kind-agnostic."""
     parts = [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + img}} for img in images]
     parts.append({"type": "text", "text": prompt})
     body = {
@@ -259,12 +283,70 @@ def recognize(queue, job_id, image_blob, custom_nutrients, proxy):
             report(queue, job_id, proxy, phase, tt, at)
             last_report = now
     report(queue, job_id, proxy, phase or "answer", tt, at)
+    return "".join(answer_parts)
 
-    content = "".join(answer_parts)
+
+def _extract_json(content):
     m = re.search(r"\{[\s\S]*\}", content)
     if not m:
         raise ValueError(f"no JSON in model output: {content[:200]}")
-    data = json.loads(m.group(0))
+    return json.loads(m.group(0))
+
+
+def _validate_food_items(data):
+    """Validate/coerce the food_items result. Requires `items` to be a list
+    (raise ValueError if missing entirely, so the client sees a real error, not
+    an empty plate). Per item: require name (non-empty str) + grams (number ≥ 0);
+    clamp confidence to 0..1; default inferred=false. Items failing name/grams
+    are dropped. No Atwater step."""
+    items = data.get("items")
+    if not isinstance(items, list):
+        raise ValueError(f"food_items result missing 'items' list: {json.dumps(data, ensure_ascii=False)[:200]}")
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        name = it.get("name")
+        grams = it.get("grams")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if not isinstance(grams, (int, float)) or isinstance(grams, bool) or grams < 0:
+            continue
+        conf = it.get("confidence")
+        if not isinstance(conf, (int, float)) or isinstance(conf, bool):
+            conf = 0.0
+        conf = max(0.0, min(1.0, float(conf)))
+        inferred = it.get("inferred")
+        if not isinstance(inferred, bool):
+            inferred = False
+        out.append({
+            "name": name.strip(),
+            "grams": float(grams),
+            "confidence": conf,
+            "inferred": inferred,
+        })
+    return {"items": out}
+
+
+def recognize(queue, job_id, image_blob, custom_nutrients, proxy, kind="label"):
+    # The blob is a JSON array of base64 images (front/back of a label, or the
+    # dish photo(s) for a food_items job).
+    try:
+        images = json.loads(image_blob)
+        if not isinstance(images, list):
+            images = [image_blob]
+    except (ValueError, TypeError):
+        images = [image_blob]
+
+    if kind == "food_items":
+        content = _run_vlm(queue, job_id, images, FOOD_ITEMS_PROMPT, proxy)
+        return _validate_food_items(_extract_json(content))
+
+    # kind == "label" (default): unchanged per-100g label flow + Atwater check.
+    keys = ", ".join(f'"{c.get("key")}"' for c in custom_nutrients) or "(none)"
+    prompt = PROMPT.format(custom=keys)
+    content = _run_vlm(queue, job_id, images, prompt, proxy)
+    data = _extract_json(content)
 
     # Atwater sanity check: 4*protein + 9*fat + 4*carbs ≈ kcal. Catches swapped
     # fields / misreads. We report it; the client decides how to surface it.
@@ -342,11 +424,12 @@ def main():
             continue
 
         job_id = job["job_id"]
-        print(f"claimed {job_id} from {queue['url']} via {_label(proxy)}", flush=True)
+        kind = job.get("kind", "label")
+        print(f"claimed {job_id} (kind={kind}) from {queue['url']} via {_label(proxy)}", flush=True)
         try:
             with hard_deadline(IMAGE_HARD):
                 image_b64 = get_image_b64(queue, job_id, proxy)
-            result = recognize(queue, job_id, image_b64, job.get("custom_nutrients", []), proxy)
+            result = recognize(queue, job_id, image_b64, job.get("custom_nutrients", []), proxy, kind=kind)
             with hard_deadline(COMPLETE_HARD):
                 complete(queue, job_id, proxy, result=result)
             print(f"done {job_id}: {json.dumps(result, ensure_ascii=False)[:200]}", flush=True)

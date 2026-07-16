@@ -239,6 +239,12 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
             Ok(v) => v,
             Err(e) => return cors_json(&serde_json::json!({ "error": format!("invalid JSON body: {e}") }), 400),
         };
+        // Job kind selects which prompt the on-prem poller runs. Absent → "label"
+        // (back-compat: old clients send no `kind`). Only these two are valid.
+        let kind = body.get("kind").and_then(|v| v.as_str()).unwrap_or("label").to_string();
+        if kind != "label" && kind != "food_items" {
+            return cors_json(&serde_json::json!({ "error": "invalid kind" }), 400);
+        }
         // images = body.images ?? (body.image ? [body.image] : [])
         let mut images: Vec<String> = Vec::new();
         if let Some(arr) = body.get("images").and_then(|v| v.as_array()) {
@@ -268,6 +274,7 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         let enqueue_body = serde_json::json!({
             "id": job_id,
             "owner": sub,
+            "kind": kind,
             "custom_nutrients": custom_nutrients,
             "image_b64": image_b64,
         })

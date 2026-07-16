@@ -159,7 +159,7 @@ fn needs_processing(food: &Food) -> bool {
 /// logged offline, before this feature existed, or on another device gets processed
 /// — the window covers the daily indicators' 7-day span with margin.
 pub async fn sweep_diary_unclassified() {
-    let today = chrono::Local::now().date_naive();
+    let today = crate::services::local::today_date();
     let foods: std::collections::BTreeMap<String, Food> =
         local::list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect();
     let mut seen = std::collections::HashSet::new();

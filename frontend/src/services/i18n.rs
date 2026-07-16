@@ -109,7 +109,7 @@ pub fn t(key: &str) -> &'static str {
 /// then the weekday name (3–7 days ago), then the full date (older / any future).
 pub fn relative_date(date_str: &str) -> String {
     use chrono::Datelike;
-    let today = chrono::Local::now().date_naive();
+    let today = crate::services::local::today_date();
     let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
         Ok(d) => d,
         Err(_) => return date_str.to_string(),

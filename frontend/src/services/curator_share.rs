@@ -130,7 +130,7 @@ async fn build_food() -> Value {
         local::list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect();
 
     // Last 7 calendar days, newest first.
-    let today = chrono::Local::now().date_naive();
+    let today = crate::services::local::today_date();
     let mut days: Vec<Value> = Vec::new();
     for i in 0..7 {
         let date = (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();

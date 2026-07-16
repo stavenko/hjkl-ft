@@ -70,20 +70,22 @@ const NEW_MEAL_SECS: i64 = 10800; // > 3h => possibly a new major meal
 /// time windows, with the munch-monitor fallback for times outside all
 /// windows.
 ///
-/// Windows (local):
-///   Breakfast 05:00–10:59
+/// Windows (local). Aligned with the 04:00 logical day boundary
+/// (see `local::DAY_START_HOUR`): a day runs 04:00→03:59, so the earliest entry
+/// of a day is a morning one, and "night" only covers the late 22:00–03:59 tail.
+///   Breakfast 04:00–10:59
 ///   Lunch     11:00–15:59
 ///   Dinner    16:00–21:59
-///   Night     22:00–04:59 (wraps midnight)
+///   Night     22:00–03:59 (wraps midnight)
 fn determine_meal_type(hour: u32, _minute: u32) -> MealType {
     // First window that contains the time.
-    if (5..=10).contains(&hour) {
+    if (4..=10).contains(&hour) {
         MealType::Breakfast
     } else if (11..=15).contains(&hour) {
         MealType::Lunch
     } else if (16..=21).contains(&hour) {
         MealType::Dinner
-    } else if hour >= 22 || hour < 5 {
+    } else if hour >= 22 || hour < 4 {
         MealType::NightSnack
     } else {
         // Outside all windows fallback (unreachable given windows cover all
@@ -295,6 +297,10 @@ mod tests {
 
     #[test]
     fn window_edges_pure_clock() {
+        // Windows align with the 04:00 day boundary: breakfast starts at 04:00,
+        // night only covers the 22:00–03:59 tail.
+        assert_eq!(classify_solo("04:00"), MealType::Breakfast);
+        assert_eq!(classify_solo("04:59"), MealType::Breakfast);
         assert_eq!(classify_solo("05:00"), MealType::Breakfast);
         assert_eq!(classify_solo("10:59"), MealType::Breakfast);
         assert_eq!(classify_solo("11:00"), MealType::Lunch);
@@ -304,7 +310,26 @@ mod tests {
         assert_eq!(classify_solo("22:00"), MealType::NightSnack);
         assert_eq!(classify_solo("23:30"), MealType::NightSnack);
         assert_eq!(classify_solo("03:00"), MealType::NightSnack);
-        assert_eq!(classify_solo("04:59"), MealType::NightSnack);
+        assert_eq!(classify_solo("03:59"), MealType::NightSnack);
+    }
+
+    #[test]
+    fn early_morning_start_not_swallowed_into_night() {
+        // Reported bug: a very early entry was classified NightSnack, which then
+        // swallowed the following morning meals into NightSnack too. With
+        // breakfast starting at 04:00 an 04:30 entry is Breakfast, and nothing
+        // in the day lands in a night-snack bucket.
+        let entries = vec![
+            entry("a", Some("04:30"), &ts("04:30")),
+            entry("b", Some("08:00"), &ts("08:00")),
+        ];
+        let g = group_by_meal(&entries);
+        assert_eq!(g[0].meal, MealType::Breakfast);
+        assert!(
+            g.iter().all(|grp| grp.meal != MealType::NightSnack),
+            "nothing should be night snack, got {:?}",
+            g.iter().map(|x| x.meal).collect::<Vec<_>>()
+        );
     }
 
     #[test]

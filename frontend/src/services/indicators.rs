@@ -113,7 +113,7 @@ pub async fn enough_history() -> bool {
 
 /// Compute all seven indicator states, keyed the same as the widget icons.
 pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
-    let today = chrono::Local::now().date_naive();
+    let today = crate::services::local::today_date();
     // 70-day window covers the rolling week + up to 8 complete Mon–Sun weeks.
     let window: Vec<NaiveDate> = (0..70).map(|i| today - Duration::days(i)).collect();
     let diary_days: HashSet<String> = local::list_diary_dates().await.into_iter().collect();
@@ -290,7 +290,7 @@ pub async fn indicator_state(key: &str) -> IndicatorState {
     if target_for(key).await <= 0.0 {
         return IndicatorState::Unknown;
     }
-    let today = chrono::Local::now().date_naive();
+    let today = crate::services::local::today_date();
     let days: Vec<NaiveDate> = (1..=7).map(|i| today - Duration::days(i)).collect();
     let mut ratios = Vec::with_capacity(days.len());
     let mut any_data = false;
@@ -362,7 +362,7 @@ async fn all_green_on(date: &str) -> bool {
 /// indicators were green — never counting days before the open date's yesterday.
 /// Capped at [`GREEN_GATE_DAYS`] (the requirement). `== GREEN_GATE_DAYS` ⇒ cleared.
 pub async fn green_gate_progress() -> u32 {
-    let today = chrono::Local::now().date_naive();
+    let today = crate::services::local::today_date();
     let earliest = gate_open_date(today) - Duration::days(1);
     let mut green = 0u32;
     for i in 1..=GREEN_GATE_WINDOW {
@@ -391,7 +391,7 @@ pub struct IndicatorSeries {
 
 /// Per-day series for every unlocked indicator (cached), for the histograms.
 pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
-    let today = chrono::Local::now().date_naive();
+    let today = crate::services::local::today_date();
     // Oldest → newest: today-7 … today-1.
     let dates: Vec<NaiveDate> = (1..=7).rev().map(|i| today - Duration::days(i)).collect();
     let mut out = Vec::new();
@@ -433,7 +433,7 @@ fn unit_for(key: &str) -> &'static str {
 /// Today's progress toward each UNLOCKED daily target, for the dashboard gauges.
 /// The value is TODAY only (live); the colour is the indicator's 7-day state.
 pub async fn daily_gauges() -> Vec<DailyGauge> {
-    let today = fmt(chrono::Local::now().date_naive());
+    let today = fmt(crate::services::local::today_date());
     let mut out = Vec::new();
     for key in UNLOCKED_GAUGES.iter().copied() {
         out.push(DailyGauge {

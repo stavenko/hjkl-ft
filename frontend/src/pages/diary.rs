@@ -26,7 +26,7 @@ fn format_date_relative(date_str: &str) -> String {
 
 fn format_date_past_prefix(date_str: &str) -> String {
     use chrono::Datelike;
-    let today = chrono::Local::now().date_naive();
+    let today = local::today_date();
     let date = match chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
         Ok(d) => d,
         Err(_) => return date_str.to_string(),
@@ -90,7 +90,7 @@ fn is_standard_nutrient(name: &str) -> bool {
 fn week_dates(date_str: &str) -> Vec<String> {
     use chrono::Datelike;
     let date = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-        .unwrap_or_else(|_| chrono::Local::now().date_naive());
+        .unwrap_or_else(|_| local::today_date());
     let weekday = date.weekday().num_days_from_monday();
     let monday = date - chrono::Duration::days(weekday as i64);
     (0..7)
@@ -114,7 +114,7 @@ fn weekday_label(date_str: &str) -> &'static str {
 
 #[component]
 pub fn DiaryPage() -> impl IntoView {
-    let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let today_str = local::today();
     let today_max = today_str.clone();
     let date = create_rw_signal(today_str.clone());
 
@@ -125,7 +125,7 @@ pub fn DiaryPage() -> impl IntoView {
     // today (not a past day they navigated to), snap `date` forward to the new today.
     let known_today = store_value(today_str);
     let resync_today = move || {
-        let now = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let now = local::today();
         if now != known_today.get_value() {
             if date.get_untracked() == known_today.get_value() {
                 date.set(now.clone());
@@ -179,7 +179,7 @@ pub fn DiaryPage() -> impl IntoView {
     let today_entries_res = create_resource(
         move || version.get(),
         |_| async {
-            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let today = local::today();
             local::list_diary(&today).await
         },
     );
@@ -233,7 +233,7 @@ pub fn DiaryPage() -> impl IntoView {
         let d = date.get_untracked();
         if let Ok(parsed) = chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d") {
             let new = parsed + chrono::Duration::days(delta);
-            let today = chrono::Local::now().date_naive();
+            let today = local::today_date();
             if new <= today {
                 date.set(new.format("%Y-%m-%d").to_string());
             }
@@ -241,7 +241,7 @@ pub fn DiaryPage() -> impl IntoView {
     };
 
     let is_today = move || {
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let today = local::today();
         date.get() == today
     };
 
@@ -348,7 +348,7 @@ pub fn DiaryPage() -> impl IntoView {
                     let we = week_entries();
                     let sel_date = date.get();
                     let dates = week_dates(&sel_date);
-                    let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+                    let today_str = local::today();
 
                     gs.iter().filter(|g| g.amount > 0.0).map(|goal| {
                         let name = if is_standard_nutrient(&goal.nutrient) {
@@ -419,7 +419,7 @@ pub fn DiaryPage() -> impl IntoView {
                             // Today's expected position (day index 0-based from Monday)
                             let today_index = {
                                 use chrono::Datelike;
-                                let today_d = chrono::Local::now().date_naive();
+                                let today_d = local::today_date();
                                 today_d.weekday().num_days_from_monday() as usize
                             };
                             let expected_by_today = target * (today_index + 1) as f64 / 7.0;

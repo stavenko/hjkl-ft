@@ -12,8 +12,22 @@ fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
-fn today() -> String {
-    chrono::Local::now().format("%Y-%m-%d").to_string()
+/// Hour (local) at which a new logical/diary day begins. Entries logged BEFORE
+/// this hour belong to the PREVIOUS day, so a 01:00 night snack lands on the day
+/// it really belongs to instead of opening a fresh calendar day (which used to
+/// swallow the following morning's breakfast into "ночной перекус"). The diary,
+/// its date navigation and daily aggregations all pivot on this.
+pub const DAY_START_HOUR: i64 = 4;
+
+/// The current logical day: the calendar date shifted back by [`DAY_START_HOUR`],
+/// so the day flips at 04:00 local rather than at midnight.
+pub fn today_date() -> chrono::NaiveDate {
+    (chrono::Local::now() - chrono::Duration::hours(DAY_START_HOUR)).date_naive()
+}
+
+/// The current logical day as "YYYY-MM-DD" (see [`today_date`]).
+pub fn today() -> String {
+    today_date().format("%Y-%m-%d").to_string()
 }
 
 fn time_now() -> String {
@@ -504,9 +518,10 @@ pub async fn protein_grams_on(date: &str) -> f64 {
     }).sum()
 }
 
-/// Local "yesterday" (today - 1 day) as "YYYY-MM-DD".
+/// Logical "yesterday" (today - 1 day) as "YYYY-MM-DD", pivoting on the 04:00
+/// day boundary like [`today`].
 pub fn yesterday() -> String {
-    (chrono::Local::now().date_naive() - chrono::Duration::days(1))
+    (today_date() - chrono::Duration::days(1))
         .format("%Y-%m-%d")
         .to_string()
 }

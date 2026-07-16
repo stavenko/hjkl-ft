@@ -586,20 +586,6 @@ pub async fn save_food_to_diary(
         updated_at: now(),
     };
     db::put("diary", &entry).await;
-    // Adding any food to the diary fires the "first food entries" story task.
-    crate::services::story::fire_first_food_if_armed().await;
-    // Adding a cooked dish (recipe) to the diary — the "I cook" task 2 milestone.
-    if food.is_recipe {
-        crate::services::story::set_flag(crate::services::story::COOKING_DISH_IN_DIARY, true).await;
-    }
-    // Recording inedible waste — the "food with bones" task milestone.
-    if waste_grams > 0.0 {
-        crate::services::story::set_flag(crate::services::story::BONES_WASTE_ENTERED, true).await;
-    }
-    // Logging restaurant food — the "party or restaurant" task milestone.
-    if is_restaurant {
-        crate::services::story::set_flag(crate::services::story::RESTAURANT_FOOD_ENTERED, true).await;
-    }
     // Classify this food's categories in the background (snack / liquid calories /
     // vegetable-fruit) as soon as it's logged.
     crate::services::classify::enqueue(food.id.clone());
@@ -622,12 +608,6 @@ pub async fn update_diary_entry(
     db::put("diary", &entry).await;
     // The day's aggregates changed → drop its cached indicator values.
     crate::services::indicators::invalidate_day(&entry.date).await;
-    if waste_grams > 0.0 {
-        crate::services::story::set_flag(crate::services::story::BONES_WASTE_ENTERED, true).await;
-    }
-    if is_restaurant {
-        crate::services::story::set_flag(crate::services::story::RESTAURANT_FOOD_ENTERED, true).await;
-    }
     // Editing may fork a new food variant (restaurant CoW) — classify it.
     crate::services::classify::enqueue(entry.food_id.clone());
     Some(entry)
@@ -674,23 +654,6 @@ pub async fn remove_food_diary(entry_id: &str) -> Result<(), String> {
     db::delete("diary", entry_id).await;
     crate::services::indicators::invalidate_day(&entry.date).await;
     Ok(())
-}
-
-/// Danger zone — reset story progress. Sets every flag to `false` with a fresh
-/// `updated_at` (rather than hard-clearing) so the reset is a last-writer-wins
-/// update that PROPAGATES across devices via sync — a plain `db::clear` would be
-/// re-populated from the server on the next pull. Caller pushes afterwards.
-pub async fn delete_story_progress() {
-    let flags: Vec<api_types::StoryFlag> = db::list_all("story").await;
-    let ts = now();
-    for mut f in flags {
-        f.value = false;
-        f.updated_at = ts.clone();
-        db::put("story", &f).await;
-    }
-    // Also drop the attached progress photos (a local-only, un-synced store):
-    // resetting the story must clear the "before" photos too.
-    db::clear("progress_photos").await;
 }
 
 /// Danger zone — delete diary food entries (and their cached day-summaries).
@@ -937,9 +900,6 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
         updated_at: now(),
     };
     db::put("diary", &entry).await;
-    // Entering a food into the diary fires the "first food entries" story task
-    // (only counts if its trigger was armed by opening that section).
-    crate::services::story::fire_first_food_if_armed().await;
     Some(entry)
 }
 
@@ -1018,8 +978,6 @@ pub async fn add_detected_foods_to_diary(items: &[ResolvedFood]) -> Vec<DiaryEnt
         crate::services::classify::enqueue(food.id.clone());
         entries.push(entry);
     }
-    // Adding food to the diary fires the "first food entries" story task (once).
-    crate::services::story::fire_first_food_if_armed().await;
     entries
 }
 
@@ -1214,9 +1172,6 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
     // (newest-recipe-per-name) in both the recipes list (`recipes.rs`) and the food
     // picker (`food_picker.rs`) — no `archived` write here, so pre-existing
     // duplicates are handled too and there's no data migration.
-
-    // Finishing a recipe creates a dish — the "I cook" task 1 milestone.
-    crate::services::story::set_flag(crate::services::story::COOKING_DISH_CREATED, true).await;
 
     // Ensure every ingredient is classified, so the dish's egg / red-meat / veg-fruit
     // content can be counted by composition when it's logged.
@@ -1463,8 +1418,6 @@ pub async fn save_steps(date: &str, steps: u32) -> api_types::StepEntry {
         db::put("step_entries", &entry).await;
         entry
     };
-    // Recording steps is the milestone event for the activity section's task 2.
-    crate::services::story::set_flag(crate::services::story::FIRST_STEPS, true).await;
     entry
 }
 
@@ -1503,12 +1456,6 @@ pub async fn save_progress_photo(pose: &str, image: &str) -> ProgressPhoto {
         created_at: now(),
     };
     db::put("progress_photos", &photo).await;
-    // The intro task completes once all three poses have at least one photo.
-    let all: Vec<ProgressPhoto> = db::list_all("progress_photos").await;
-    let have: std::collections::BTreeSet<&str> = all.iter().map(|p| p.pose.as_str()).collect();
-    if POSES.iter().all(|p| have.contains(p)) {
-        crate::services::story::set_flag(crate::services::story::PROGRESS_PHOTOS_TAKEN, true).await;
-    }
     photo
 }
 

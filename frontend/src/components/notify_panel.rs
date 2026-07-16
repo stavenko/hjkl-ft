@@ -1,7 +1,7 @@
 //! Push-notification enable/test button + the reminder-time schedule, extracted
 //! from the Settings page so the Dashboard's "Notifications" widget can render the
 //! exact same UI. Fully self-contained: owns its signals, reads/writes the schedule
-//! from IndexedDB, and derives visibility from the story flags.
+//! from IndexedDB.
 //!
 //! `hide_check_after_received`: when true, the enable/test button disappears once a
 //! notification has been received in the background (the widget wants only the time
@@ -10,7 +10,7 @@
 use leptos::*;
 use serde::Serialize;
 
-use crate::services::{db, i18n::t, push, story};
+use crate::services::{db, i18n::t, push};
 
 const IOS_CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden;";
 const IOS_SECTION_LABEL: &str =
@@ -245,18 +245,6 @@ fn ScheduleRow(
                 on:click=move |_| {
                     enabled.update(|v| *v = !*v);
                     save();
-                    if enabled.get_untracked() {
-                        let flag = match slot_id {
-                            "weigh_in" => Some(story::WEIGH_IN_REMINDER),
-                            "steps" => Some(story::STEPS_REMINDER),
-                            _ => None,
-                        };
-                        if let Some(flag) = flag {
-                            spawn_local(async move {
-                                story::set_flag(flag, true).await;
-                            });
-                        }
-                    }
                 }
             >
                 <div style=move || format!(

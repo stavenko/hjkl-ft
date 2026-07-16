@@ -515,18 +515,9 @@ pub struct StepEntry {
 
 // --- Sync types ---
 
-/// A story-progress flag, synced last-writer-wins by `updated_at` (like foods/goals).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoryFlag {
-    pub key: String,
-    pub value: bool,
-    #[serde(default)]
-    pub updated_at: String,
-}
-
 /// The synced user profile, modelled as a keyed singleton (one row, key
 /// "profile") so it rides the same array-of-keyed-rows, LWW-by-`updated_at`
-/// machinery as story flags. All fields `#[serde(default)]` so old clients and
+/// machinery as the other synced stores. All fields `#[serde(default)]` so old clients and
 /// servers stay compatible.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileRow {
@@ -571,8 +562,6 @@ pub struct SyncDumpResponse {
     pub recipe_ingredients: Vec<RecipeIngredient>,
     pub goals: Vec<Goal>,
     #[serde(default)]
-    pub story: Vec<StoryFlag>,
-    #[serde(default)]
     pub profile: Vec<ProfileRow>,
     #[serde(default)]
     pub weight_entries: Vec<WeightEntry>,
@@ -589,8 +578,6 @@ pub struct SyncPushPayload {
     pub recipes: Vec<Recipe>,
     pub recipe_ingredients: Vec<RecipeIngredient>,
     pub goals: Vec<Goal>,
-    #[serde(default)]
-    pub story: Vec<StoryFlag>,
     #[serde(default)]
     pub profile: Vec<ProfileRow>,
     #[serde(default)]

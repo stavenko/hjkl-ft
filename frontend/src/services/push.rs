@@ -191,7 +191,7 @@ pub async fn unsubscribe() -> Result<(), String> {
 
 /// Ask the server to send a test push notification to the current user's
 /// devices. The caller decides the body and the deep-link `url` (where tapping
-/// the notification should take the user) based on story progress.
+/// the notification should take the user).
 pub async fn send_test(body: &str, url: &str) -> Result<(), String> {
     let push_base = {
         let cfg = crate::services::config::get();

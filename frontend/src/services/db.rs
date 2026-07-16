@@ -44,7 +44,7 @@ fn bump(store_name: &str) {
 /// The legacy, device-global database. Used before login (no user identity yet)
 /// and as the one-time migration source for users created before per-user scoping.
 const BOOTSTRAP_DB: &str = "hjkl-ft";
-const DB_VERSION: u32 = 13;
+const DB_VERSION: u32 = 14;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -53,7 +53,7 @@ const DB_VERSION: u32 = 13;
 const ALL_STORES: &[&str] = &[
     "foods", "diary", "recipes", "recipe_ingredients",
     "goals", "food_drafts", "weight_entries", "step_entries",
-    "progress_photos", "summaries", "chat", "story", "profile", "deletions", "_sync_meta",
+    "progress_photos", "summaries", "chat", "profile", "deletions", "_sync_meta",
     "app_flags",
     "support_messages", "support_outbox", "support_meta",
 ];
@@ -134,7 +134,6 @@ fn builder(name: &str) -> rexie::RexieBuilder {
                 .key_path("id")
                 .add_index(rexie::Index::new("created_at", "created_at")),
         )
-        .add_object_store(ObjectStore::new("story").key_path("key"))
         // Synced user profile, a keyed singleton (one row, key "profile").
         .add_object_store(ObjectStore::new("profile").key_path("key"))
         // Explicit deletion records (tombstones), synced and applied on every device.
@@ -368,7 +367,7 @@ pub async fn count(store_name: &str) -> u32 {
 }
 
 pub async fn wipe_all() {
-    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "step_entries", "chat", "support_messages", "support_outbox", "support_meta", "story", "profile", "deletions", "_sync_meta"];
+    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "step_entries", "chat", "support_messages", "support_outbox", "support_meta", "profile", "deletions", "_sync_meta"];
     for store in stores {
         clear(store).await;
     }

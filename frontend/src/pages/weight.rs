@@ -1,7 +1,7 @@
 use leptos::*;
 use leptos_router::*;
 
-use crate::services::{local, push, story, i18n::{t, weight_unit_signal, WeightUnit}};
+use crate::services::{local, i18n::{t, weight_unit_signal, WeightUnit}};
 
 const PAGE_BG: &str = "background: var(--bulma-background); min-height: 100vh; padding: 0; margin: -0.75rem;";
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; overflow: hidden;";
@@ -43,7 +43,6 @@ pub fn WeightPage() -> impl IntoView {
         let kg = unit.get_untracked().to_kg(val);
         let nav = nav_save.clone();
         leptos::spawn_local(async move {
-            let was_first = local::list_weight_entries().await.is_empty();
             local::save_weight(
                 kg,
                 no_water.get_untracked(),
@@ -52,23 +51,8 @@ pub fn WeightPage() -> impl IntoView {
                 used_toilet.get_untracked(),
                 morning.get_untracked(),
             ).await;
-            // The measurement is saved locally — return to the dashboard NOW. The
-            // milestone flag and the first-weigh push run detached, so a slow/blocked
-            // push never leaves the user stuck on the form (the button "doing nothing").
+            // The measurement is saved locally — return to the dashboard.
             nav("/", Default::default());
-            leptos::spawn_local(async move {
-                // Making a measurement is the milestone event for accounting task 2 —
-                // record it in the story DB (idempotent), not derived from entries.
-                story::set_flag(story::FIRST_WEIGH, true).await;
-                // First-ever measurement: send a congratulatory push confirming it.
-                if was_first {
-                    if let Err(e) =
-                        push::send_test(t("story.acc.push_first_weigh"), "/story/accounting").await
-                    {
-                        leptos::logging::error!("first-weigh push: {}", e);
-                    }
-                }
-            });
         });
     };
 

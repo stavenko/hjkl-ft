@@ -3,7 +3,7 @@ use leptos_router::*;
 
 use crate::pages;
 use crate::services::i18n::t;
-use crate::services::{auth, net, platform, story, subscription, update};
+use crate::services::{auth, net, platform, subscription, update};
 
 #[derive(Clone, Copy, PartialEq)]
 enum AppState {
@@ -70,22 +70,6 @@ fn initial_state() -> AppState {
             None => AppState::Checking,
         }
     }
-}
-
-/// Invisible component mounted inside `<Router>`: when the user opens a story
-/// section page it marks that section seen (clearing its "new" badge). Lives
-/// inside the router so `use_location` works.
-#[component]
-fn RouteWatcher() -> impl IntoView {
-    let location = use_location();
-    create_effect(move |_| {
-        let path = location.pathname.get();
-        if story::is_section_route(&path) {
-            spawn_local(async move {
-                story::mark_section_seen(&path).await;
-            });
-        }
-    });
 }
 
 #[component]
@@ -250,7 +234,6 @@ pub fn App() -> impl IntoView {
 
         // Router always mounted
         <Router>
-            <RouteWatcher/>
             // Pinned app-shell: the document itself never scrolls (position:
             // fixed, inset:0), so the fixed bottom nav can't float with iOS's
             // visual viewport after a resume (the "phantom keyboard" bug — the
@@ -261,15 +244,9 @@ pub fn App() -> impl IntoView {
                      style="position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4.5rem;">
                     <div style="padding: 0.75rem;">
                     <Routes>
-                        // The dashboard is the new default screen; the story («История»)
-                        // is preserved at /history until it's fully replaced by widgets.
                         <Route path="/" view=pages::dashboard::DashboardPage />
-                        <Route path="/history" view=pages::story::StoryPage />
                         <Route path="/help/food" view=pages::help::HelpFoodPage />
                         <Route path="/help/:id" view=pages::help::HelpArticlePage />
-                        // Generic DSL-driven section page; serves migrated sections (those
-                        // without a bespoke static route above). Static routes win by specificity.
-                        <Route path="/story/:id" view=pages::story_section::StorySectionPage />
                         <Route path="/onboard" view=pages::onboard::OnboardPage />
                         <Route path="/onboard-tg" view=pages::onboard_tg::OnboardTgPage />
                         <Route path="/progress" view=pages::progress::ProgressPage />
@@ -296,7 +273,7 @@ pub fn App() -> impl IntoView {
             // bypass the auth overlays, which would otherwise surface this app-shell
             // nav before the user has registered.
             <nav style:display=move || { let p = use_location().pathname.get(); if p == "/onboard" || p == "/onboard-tg" { "none" } else { "flex" } } style="position: fixed; bottom: 0.75rem; left: 50%; transform: translateX(-50%); z-index: 40; background: var(--bulma-scheme-main); display: flex; justify-content: space-around; align-items: center; height: 3.5rem; width: min(26rem, calc(100% - 2rem)); border-radius: 1rem; box-shadow: 0 4px 24px rgba(0,0,0,0.15);">
-                <a attr:data-testid="nav-story" href="/" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
+                <a attr:data-testid="nav-dashboard" href="/" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="3" y="3" width="7" height="7" rx="1.5" />
                         <rect x="14" y="3" width="7" height="7" rx="1.5" />

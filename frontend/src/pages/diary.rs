@@ -8,7 +8,7 @@ use api_types::*;
 use crate::components::food_weight_modal::FoodWeightModal;
 use crate::components::food_edit_modal::FoodEditModal;
 use crate::services::sticky::{sticky, sticky_keyed};
-use crate::services::{local, sync, story};
+use crate::services::{local, sync};
 use crate::services::i18n::t;
 
 // Process-lifetime caches so navigating back to the diary paints the last-known
@@ -722,8 +722,6 @@ pub fn DiaryPage() -> impl IntoView {
                                                                             spawn_local(async move {
                                                                                 if let Some(food) = local::list_foods().await.into_iter().find(|f| f.id == fid) {
                                                                                     let _ = local::save_food_to_diary(&food, g, w, food.is_restaurant).await;
-                                                                                    // Closes the "repeat yesterday's food" story task.
-                                                                                    story::set_flag(story::FOOD_REPEATED, true).await;
                                                                                     invalidate();
                                                                                     sync::push_background();
                                                                                 }

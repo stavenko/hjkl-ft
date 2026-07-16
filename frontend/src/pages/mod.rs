@@ -18,7 +18,5 @@ pub mod steps;
 pub mod subscription;
 pub mod dashboard;
 pub mod help;
-pub mod story;
-pub mod story_section;
 pub mod progress;
 pub mod weight;

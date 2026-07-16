@@ -39,7 +39,7 @@ test('bottom nav closes the chat — no teardown panic', async ({ browser }) => 
     ['nav-diary', /\/diary$/],
     ['nav-recipes', /\/recipes$/],
     ['nav-settings', /\/settings$/],
-    ['nav-story', /\/$/],
+    ['nav-dashboard', /\/$/],
   ];
 
   for (const [testid, url] of targets) {

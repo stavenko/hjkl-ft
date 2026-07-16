@@ -154,11 +154,10 @@ fn install_foreground_sync() {
 fn install_notif_receipt_poll() {
     use wasm_bindgen::prelude::Closure;
     use wasm_bindgen::JsCast;
-    // A "task complete" notification (its URL carries `ntf=<kind>.<section>.<task>.<rand>`)
-    // means that task's milestone is confirmed on receipt. The service worker records the
-    // code in Cache; index.html bridges it into localStorage `rn_notif_received`. Poll it,
-    // resolve the task's story flag and set it HERE in Leptos — set_flag bumps the story
-    // db-version signal, so the checkmark updates reactively. No tap / navigation.
+    // A push notification's arrival confirms this device's notification setup works.
+    // The service worker records the code in Cache; index.html bridges it into
+    // localStorage `rn_notif_received`. Poll it and mark the device as having
+    // received a push. No tap / navigation.
     let cb = Closure::<dyn Fn()>::new(move || {
         let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten())
         else {
@@ -172,13 +171,6 @@ fn install_notif_receipt_poll() {
         services::diag::note(&format!("WASM poll consumed {code}"));
         // Receiving ANY push confirms this device's notification setup works.
         services::push::mark_received();
-        // code = "<kind>.<section>.<task>.<rand>" — the task id is the 3rd segment.
-        let task = code.split('.').nth(2).unwrap_or_default().to_string();
-        if let Some(flag) = services::story::flag_for_task(&task) {
-            leptos::spawn_local(async move {
-                services::story::set_flag(flag, true).await;
-            });
-        }
     });
     if let Some(win) = web_sys::window() {
         let _ = win.set_interval_with_callback_and_timeout_and_arguments_0(

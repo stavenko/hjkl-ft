@@ -112,30 +112,6 @@ pub async fn code_verify(user_id: &str, code: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Record — from the RUNNING app — that a story chapter became available in the UI (stored next
-/// to the persona). The first chapter unlocking marks «entered the system». Authenticated.
-pub async fn record_chapter_available(chapter_id: &str) -> Result<(), String> {
-    post_json_auth("/chapters/available", &serde_json::json!({ "chapter": chapter_id })).await?;
-    Ok(())
-}
-
-/// Fire-and-forget report that a chapter is AVAILABLE in the UI, deduped per chapter per device.
-/// Sets an optimistic guard before the call (so re-renders don't re-POST) and CLEARS it on
-/// failure so the report retries later. A failure is logged, never silently swallowed.
-pub fn report_chapter_available(chapter_id: &str) {
-    let key = format!("ch_avail_reported:{chapter_id}");
-    if storage().get_item(&key).ok().flatten().is_some() {
-        return;
-    }
-    let _ = storage().set_item(&key, "1");
-    let chapter_id = chapter_id.to_string();
-    wasm_bindgen_futures::spawn_local(async move {
-        if let Err(e) = record_chapter_available(&chapter_id).await {
-            leptos::logging::error!("report_chapter_available({chapter_id}): {e}");
-            let _ = storage().remove_item(&format!("ch_avail_reported:{chapter_id}"));
-        }
-    });
-}
 
 /// True ONLY when this device is Android AND cannot create a passkey (no WebAuthn API, or no
 /// user-verifying platform authenticator). Gates the Telegram-code fallback. iOS/desktop

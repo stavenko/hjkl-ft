@@ -1,9 +1,8 @@
-//! The Dashboard — the app's new default screen (replaces the story «История» on
-//! the first nav tab; the story lives on at `/history`).
+//! The Dashboard — the app's default screen and first nav tab.
 //!
 //! Layout: an 8-COLUMN square-cell grid. A unit is 1×1 cell; widgets occupy a
 //! rectangle of units (the weight/steps widgets will be 4×3). Widgets are revealed
-//! progressively — like the story, but simpler.
+//! progressively.
 //!
 //! The Persona widget comes FIRST and is OPEN by default: while the profile is
 //! incomplete its editor fills the whole dashboard (above the nav, in-flow — never a
@@ -36,7 +35,7 @@ use crate::services::profile::{self, CourseGoal, Sex};
 use crate::services::indicators::{self, IndicatorState};
 use crate::services::sticky::sticky;
 use crate::services::weight_trend::{self, BalanceState};
-use crate::services::{db, local, net, story};
+use crate::services::{db, local, net};
 
 // ── Expanded-view helpers (gauge labels / colours + "?" explanations) ─────────
 
@@ -561,8 +560,6 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
     let pick_sex = move |s: Sex| {
         profile::set_sex(s);
         bump.update(|v| *v += 1);
-        // Keep the story setup-section tasks working (Settings used to set these).
-        spawn_local(async { story::set_flag(story::SEX_SELECTED, true).await; });
     };
     let pick_goal = move |g: CourseGoal| {
         profile::set_goal(g);
@@ -607,7 +604,6 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                             if v > 0.0 {
                                 profile::set_height_cm(v);
                                 bump.update(|x| *x += 1);
-                                spawn_local(async { story::set_flag(story::HEIGHT_SET, true).await; });
                             }
                         }
                     }/>
@@ -622,7 +618,6 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                             if (1900..=2026).contains(&v) {
                                 profile::set_birth_year(v);
                                 bump.update(|x| *x += 1);
-                                spawn_local(async { story::set_flag(story::BIRTH_YEAR_SET, true).await; });
                             }
                         }
                     }/>

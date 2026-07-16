@@ -83,9 +83,3 @@ arti-pipes = { git = "https://github.com/stavenko/arti-pipes" }
 schemars = { version = "1", features = ["preserve_order"] }
 async-trait = "0.1"
 futures = "0.3"
-
-# Build-time only: the Story DSL is authored in YAML and converted to JSON in
-# build.rs, so the wasm bundle never carries a YAML parser.
-[build-dependencies]
-serde_yaml = "0.9"
-serde_json = "1"

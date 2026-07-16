@@ -303,27 +303,7 @@ pub fn SettingsPage() -> impl IntoView {
             // ---- Danger zone ----
             <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.danger_zone")}</p>
             <div style=IOS_CARD>
-                // 1. Reset story progress. Soft-reset (flags set false + bumped),
-                // then pushed so the reset propagates to the user's other devices.
-                <button
-                    attr:data-testid="settings-btn-reset-story"
-                    style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
-                    on:click=move |_| {
-                        let win = web_sys::window().unwrap();
-                        if win.confirm_with_message(&t("settings.danger_confirm_story")).unwrap_or(false) {
-                            spawn_local(async move {
-                                local::delete_story_progress().await;
-                                sync::push_background();
-                            });
-                        }
-                    }
-                >
-                    <span class="is-size-6 has-text-danger">{move || t("settings.danger_reset_story")}</span>
-                </button>
-
-                <div style=IOS_SEPARATOR></div>
-
-                // 2. Delete diary data — expands into two options.
+                // Delete diary data — expands into two options.
                 <button
                     attr:data-testid="settings-btn-delete-diary"
                     style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"

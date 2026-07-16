@@ -68,7 +68,6 @@ pub async fn pull_full_dump() -> Result<(), String> {
     merge_store("recipes", &dump.recipes).await;
     merge_store("recipe_ingredients", &dump.recipe_ingredients).await;
     merge_store("goals", &dump.goals).await;
-    merge_store("story", &dump.story).await;
     merge_store("profile", &dump.profile).await;
     merge_store("weight_entries", &dump.weight_entries).await;
     merge_store("step_entries", &dump.step_entries).await;
@@ -101,7 +100,6 @@ pub async fn push_to_server() -> Result<(), String> {
         recipes: db::list_all("recipes").await,
         recipe_ingredients: db::list_all("recipe_ingredients").await,
         goals: db::list_all("goals").await,
-        story: db::list_all("story").await,
         profile: db::list_all("profile").await,
         weight_entries: db::list_all("weight_entries").await,
         step_entries: db::list_all("step_entries").await,

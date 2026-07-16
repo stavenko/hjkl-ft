@@ -23,7 +23,6 @@ pub mod sticky;
 pub mod story;
 pub mod story_dsl;
 pub mod subscription;
-pub mod summary;
 pub mod support_chat;
 pub mod sync;
 pub mod update;

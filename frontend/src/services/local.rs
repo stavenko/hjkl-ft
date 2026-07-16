@@ -707,15 +707,9 @@ pub async fn delete_diary_data(cutoff: Option<&str>) {
             db::delete("diary", &e.id).await;
         }
     }
-    let summaries: Vec<crate::services::summary::Summary> = db::list_all("summaries").await;
-    for s in summaries {
-        if s.id.starts_with("meta:") {
-            continue;
-        }
-        if cutoff.map_or(true, |c| s.date.as_str() < c) {
-            db::delete("summaries", &s.id).await;
-        }
-    }
+    // AI summaries were removed (functionality moved to the dashboard); the
+    // `summaries` store is no longer written or read. Wipe any stale records.
+    db::clear("summaries").await;
     // A bulk delete can touch arbitrary past days → drop the whole indicator cache.
     crate::services::indicators::clear_cache().await;
 }

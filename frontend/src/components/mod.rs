@@ -19,7 +19,6 @@ pub mod steps_panel;
 pub mod qr_code;
 pub mod qr_scanner;
 pub mod weight_widget;
-pub mod summary_block;
 pub mod meal_panel;
 pub mod net_badge;
 pub mod bar_chart;

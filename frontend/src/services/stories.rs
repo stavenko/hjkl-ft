@@ -208,10 +208,10 @@ const S1: &[Frame] = &[
             ru: "Каждый день вносите вес, шаги и еду — это всё, что от вас нужно. Остальное приложение посчитает само.",
         },
     },
-    // 2 — weight: tap widget
+    // 2 — weight: tap widget (animated hint highlights the weight widget)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("dashboard.png"),
+        media: Media::Shot("dashboard-weight.gif"),
         accent: GREEN,
         kicker: Loc { en: "Weight", ru: "Вес" },
         title: Loc { en: "Start with weight", ru: "Начинаем с веса" },

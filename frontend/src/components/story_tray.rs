@@ -261,12 +261,22 @@ fn FrameView(frame: Frame) -> impl IntoView {
                            box-shadow: 0 18px 50px rgba(0,0,0,0.5);" />
             </div>
         }.into_view(),
+        Media::Emoji(e) => view! {
+            <div style="position: absolute; top: 22%; left: 0; right: 0; z-index: 1; \
+                        display: flex; justify-content: center; font-size: 120px; line-height: 1;">
+                {e}
+            </div>
+        }.into_view(),
     };
 
     view! {
         <div style="position: absolute; inset: 0;">
             {bg}
             {media}
+            // Gradient scrim under the text so the media card and the copy don't mix.
+            <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 52%; z-index: 1; \
+                        pointer-events: none; background: linear-gradient(180deg, \
+                        rgba(7,13,20,0) 0%, rgba(7,13,20,0.55) 42%, rgba(7,13,20,0.9) 72%, #070d14 100%);" />
             {content}
         </div>
     }

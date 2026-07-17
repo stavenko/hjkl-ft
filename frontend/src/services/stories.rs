@@ -48,6 +48,8 @@ pub enum Media {
     Shot(&'static str),
     /// The bundled weight-trend SVG chart.
     Chart,
+    /// A large centred emoji (e.g. a celebration).
+    Emoji(&'static str),
 }
 
 /// One story frame: a background, optional media, and the text overlay.
@@ -88,6 +90,10 @@ impl Frame {
                 s.push_str(p);
             }
             Media::Chart => s.push_str("chart"),
+            Media::Emoji(e) => {
+                s.push_str("emoji:");
+                s.push_str(e);
+            }
         }
         format!("{:016x}", fnv1a(&s))
     }
@@ -571,10 +577,10 @@ const WELCOME: &[Frame] = &[
 // calculated. Product frames (protein / veg-fruit / oils / drinks) are plain text
 // on the dark card for now; real product photos can be dropped in later.
 const S2: &[Frame] = &[
-    // 1 — first week done, planka calculated
+    // 1 — first week done, planka calculated (celebration)
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Emoji("🎉"),
         accent: GREEN,
         kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
         title: Loc { en: "The first week is behind you", ru: "Первая неделя позади" },
@@ -583,40 +589,40 @@ const S2: &[Frame] = &[
             ru: "Поздравляем — первая неделя прошла, у нас появились первые данные, и ваша первая планка по калориям посчитана.",
         },
     },
-    // 2 — stay under the planka; the remaining-calories indicator
+    // 2 — the calorie planka (highlighted on the widget) + weekly recalculation
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("dashboard-planka-cal.gif"),
         accent: GREEN,
         kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
         title: Loc { en: "Your calorie planka", ru: "Планка по калориям" },
         body: Loc {
-            en: "From now on, try not to eat above this planka. You'll have an indicator showing how many calories you have left.",
-            ru: "Отныне старайтесь не превышать калорийность вашего питания выше этой планки. У вас будет индикатор — там видно, сколько вам ещё осталось калорий.",
+            en: "From now on, try not to eat above this planka — the indicator shows how many calories you have left. We recalculate and adjust it every week.",
+            ru: "Отныне старайтесь не превышать калорийность выше этой планки — индикатор показывает, сколько калорий вам ещё осталось. Мы пересчитываем и корректируем её каждую неделю.",
         },
     },
-    // 3 — more data → better dynamics → weekly recalculation
+    // 3 — not only calories: protein + veg/fruit plankas (highlighted)
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
-        accent: GREEN,
-        kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
-        title: Loc { en: "Dynamics & recalculation", ru: "Динамика и пересчёт" },
-        body: Loc {
-            en: "The more data there is, the more precisely we can read your weight dynamics — and the easier it is to recalculate the planka. We recalculate and adjust it every week.",
-            ru: "Чем больше данных, тем точнее мы определяем вашу динамику веса и тем проще пересчитывать планку. Мы пересчитываем и корректируем её каждую неделю.",
-        },
-    },
-    // 4 — not only calories: protein + veg/fruit plankas
-    Frame {
-        bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("dashboard-planka-macros.gif"),
         accent: GREEN,
         kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
         title: Loc { en: "Not only calories", ru: "Не только калории" },
         body: Loc {
             en: "Besides the calorie planka, we also give you a protein planka and a vegetables-and-fruit planka.",
             ru: "Кроме планки по калориям, мы также выдаём планку по белку и планку по овощам и фруктам.",
+        },
+    },
+    // 4 — the indicators
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("dashboard-indicators.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
+        title: Loc { en: "Indicators", ru: "Индикаторы" },
+        body: Loc {
+            en: "You now have indicators — they show how well you're keeping to your plankas. There are just two for now, but there will be more. They help you see how healthy your diet is.",
+            ru: "У вас появились индикаторы — они показывают, как хорошо вы придерживаетесь ваших целей на планке. Пока их здесь только два, но будет больше. С их помощью вы будете понимать, насколько здоров ваш рацион.",
         },
     },
     // 5 — protein → satiety

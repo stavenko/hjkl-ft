@@ -139,6 +139,35 @@ fn StoryViewer(story: &'static Story, on_close: Callback<()>) -> impl IntoView {
     }
 }
 
+/// The app's Feather «repeat» glyph, sized to the surrounding text (`1em`), so
+/// story copy can reference the real diary icon inline instead of a «⇄» char.
+fn repeat_icon() -> impl IntoView {
+    view! {
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"
+            style="width: 1em; height: 1em; vertical-align: -0.14em; display: inline-block; margin: 0 0.06em;">
+            <polyline points="17 1 21 5 17 9"/>
+            <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+            <polyline points="7 23 3 19 7 15"/>
+            <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+        </svg>
+    }
+}
+
+/// Render story text, replacing each «⇄» marker with the real repeat icon inline.
+fn text_with_icons(s: &str) -> View {
+    let parts: Vec<&str> = s.split('⇄').collect();
+    let n = parts.len();
+    let mut out: Vec<View> = Vec::new();
+    for (i, part) in parts.into_iter().enumerate() {
+        out.push(view! { {part.to_string()} }.into_view());
+        if i + 1 < n {
+            out.push(repeat_icon().into_view());
+        }
+    }
+    out.collect_view().into_view()
+}
+
 #[component]
 fn FrameView(frame: Frame) -> impl IntoView {
     let content = view! {
@@ -150,11 +179,11 @@ fn FrameView(frame: Frame) -> impl IntoView {
             </div>
             <div style="color: #fff; font-size: 34px; line-height: 1.1; font-weight: 800; margin-bottom: 14px; \
                         text-shadow: 0 2px 18px rgba(0,0,0,0.55);">
-                {frame.title.get()}
+                {text_with_icons(frame.title.get())}
             </div>
             <div style="color: rgba(255,255,255,0.93); font-size: 18px; line-height: 1.45; \
                         text-shadow: 0 1px 12px rgba(0,0,0,0.6);">
-                {frame.body.get()}
+                {text_with_icons(frame.body.get())}
             </div>
         </div>
     };

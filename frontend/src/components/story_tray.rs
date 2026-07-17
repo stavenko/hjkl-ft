@@ -12,20 +12,11 @@ use crate::services::stories::{self, Bg, Frame, Media, Story};
 /// Full-width row of story circles. Mount once on the dashboard.
 #[component]
 pub fn StoryTray() -> impl IntoView {
-    // Root-scope signal, so the viewer survives dashboard re-renders (which remount
-    // this component) — an auto-opened / tapped story would otherwise close instantly.
+    // Root-scope signal, so tapping a circle survives dashboard re-renders (which
+    // remount this component). The fullscreen viewer itself is rendered by
+    // `StoryViewerHost`, mounted once high in the tree.
     let open = stories::open_signal();
     let list = stories::visible();
-
-    // Auto-open the welcome story once, on first launch.
-    create_effect(move |_| {
-        if stories::welcome_pending() {
-            if let Some(w) = stories::by_id("welcome") {
-                open.set(Some(w));
-                stories::mark_welcome_shown();
-            }
-        }
-    });
 
     view! {
         <div style="width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch;">
@@ -33,6 +24,17 @@ pub fn StoryTray() -> impl IntoView {
                 {list.into_iter().map(|s| view! { <TrayCircle story=s open=open /> }).collect_view()}
             </div>
         </div>
+    }
+}
+
+/// The fullscreen story viewer for whatever story is currently open (root-scope
+/// `open_signal`). Mount once in `App`, so it's available on ANY screen — the
+/// welcome story must be able to open over the persona editor on first launch,
+/// not just on the widget dashboard where the tray lives.
+#[component]
+pub fn StoryViewerHost() -> impl IntoView {
+    let open = stories::open_signal();
+    view! {
         <Show when=move || open.get().is_some()>
             <StoryViewer story=open.get().unwrap() on_close=Callback::new(move |_| open.set(None)) />
         </Show>

@@ -3,7 +3,7 @@ use leptos_router::*;
 
 use crate::pages;
 use crate::services::i18n::t;
-use crate::services::{auth, net, platform, subscription, update};
+use crate::services::{auth, net, platform, stories, subscription, update};
 
 #[derive(Clone, Copy, PartialEq)]
 enum AppState {
@@ -144,6 +144,18 @@ pub fn App() -> impl IntoView {
             // Network came back → re-enter verification.
             AppState::OfflineNoVerify if online == Some(true) => state.set(AppState::Checking),
             _ => {}
+        }
+    });
+
+    // First launch: auto-open the welcome story once the app is Ready (past the
+    // auth / subscription gates) — over WHATEVER screen is showing, including the
+    // persona editor a brand-new user lands on. Gated on the `welcome_shown` flag.
+    create_effect(move |_| {
+        if state.get() == AppState::Ready && stories::welcome_pending() {
+            if let Some(w) = stories::by_id("welcome") {
+                stories::open_signal().set(Some(w));
+                stories::mark_welcome_shown();
+            }
         }
     });
 
@@ -322,5 +334,9 @@ pub fn App() -> impl IntoView {
                 </a>
             </nav>
         </Router>
+
+        // Fullscreen story viewer (Portal to <body>) — mounted here so a story can
+        // open over any screen, including the first-launch persona editor.
+        <crate::components::story_tray::StoryViewerHost/>
     }
 }

@@ -248,21 +248,38 @@ fn FrameView(frame: Frame) -> impl IntoView {
     // Foreground media.
     let media = match frame.media {
         Media::None => ().into_view(),
+        // Media boxes are centred on ~25% of the frame height (top 3% .. bottom 53%
+        // → centre 25%), so images read as sitting in the middle of the upper half
+        // rather than dropped onto the horizontal midline.
         Media::Chart => view! {
-            <div style="position: absolute; top: 20%; left: 0; right: 0; z-index: 1; display: flex; justify-content: center;">
+            <div style="position: absolute; top: 10%; left: 0; right: 0; z-index: 1; display: flex; justify-content: center;">
                 <img src="/story-img/weight-chart.svg" style="width: 340px; max-width: 88%; height: auto;" />
             </div>
         }.into_view(),
         Media::Shot(p) => view! {
-            <div style="position: absolute; top: 10%; left: 0; right: 0; bottom: 34%; z-index: 1; \
+            <div style="position: absolute; top: 3%; left: 0; right: 0; bottom: 53%; z-index: 1; \
                         display: flex; align-items: center; justify-content: center; padding: 0 28px;">
                 <img src=format!("/story-img/{p}")
                     style="max-width: 100%; max-height: 100%; border-radius: 18px; \
                            box-shadow: 0 18px 50px rgba(0,0,0,0.5);" />
             </div>
         }.into_view(),
+        // Same card, panned up by `up`% of the image height so a low-sitting
+        // highlight rises to the run's shared focal point. Its own (lower) box —
+        // NOT the raised Shot box — keeps the three widget frames aligned to each
+        // other with the card fully visible. `overflow: hidden` clips the raised
+        // edge cleanly at the box instead of over the progress bars.
+        Media::ShotUp(p, up) => view! {
+            <div style="position: absolute; top: 10%; left: 0; right: 0; bottom: 34%; z-index: 1; \
+                        display: flex; align-items: center; justify-content: center; padding: 0 28px; \
+                        overflow: hidden;">
+                <img src=format!("/story-img/{p}")
+                    style=format!("max-width: 100%; max-height: 100%; border-radius: 18px; \
+                           box-shadow: 0 18px 50px rgba(0,0,0,0.5); transform: translateY(-{up}%);") />
+            </div>
+        }.into_view(),
         Media::Emoji(e) => view! {
-            <div style="position: absolute; top: 22%; left: 0; right: 0; z-index: 1; \
+            <div style="position: absolute; top: 15%; left: 0; right: 0; z-index: 1; \
                         display: flex; justify-content: center; font-size: 120px; line-height: 1;">
                 {e}
             </div>

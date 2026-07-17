@@ -46,6 +46,10 @@ pub enum Media {
     None,
     /// An app screenshot shown as a centred rounded card (`/story-img/…`).
     Shot(&'static str),
+    /// Like `Shot`, but the image is nudged up by N% of its own height, so a
+    /// GIF whose highlight sits lower in the frame is panned up to a shared
+    /// focal point across a run of frames (same widget, different framing).
+    ShotUp(&'static str, u8),
     /// The bundled weight-trend SVG chart.
     Chart,
     /// A large centred emoji (e.g. a celebration).
@@ -88,6 +92,12 @@ impl Frame {
             Media::Shot(p) => {
                 s.push_str("shot:");
                 s.push_str(p);
+            }
+            Media::ShotUp(p, up) => {
+                s.push_str("shotup:");
+                s.push_str(p);
+                s.push(':');
+                s.push_str(&up.to_string());
             }
             Media::Chart => s.push_str("chart"),
             Media::Emoji(e) => {
@@ -592,7 +602,7 @@ const S2: &[Frame] = &[
     // 2 — the calorie planka (highlighted on the widget) + weekly recalculation
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("dashboard-planka-cal.gif"),
+        media: Media::ShotUp("dashboard-planka-cal.gif", 0),
         accent: GREEN,
         kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
         title: Loc { en: "Your calorie planka", ru: "Планка по калориям" },
@@ -604,7 +614,7 @@ const S2: &[Frame] = &[
     // 3 — not only calories: protein + veg/fruit plankas (highlighted)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("dashboard-planka-macros.gif"),
+        media: Media::ShotUp("dashboard-planka-macros.gif", 14),
         accent: GREEN,
         kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
         title: Loc { en: "Not only calories", ru: "Не только калории" },
@@ -616,7 +626,7 @@ const S2: &[Frame] = &[
     // 4 — the indicators
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("dashboard-indicators.gif"),
+        media: Media::ShotUp("dashboard-indicators.gif", 44),
         accent: GREEN,
         kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
         title: Loc { en: "Indicators", ru: "Индикаторы" },
@@ -628,10 +638,10 @@ const S2: &[Frame] = &[
     // 5 — protein → satiety
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("protein-collage.png"),
         accent: GREEN,
         kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
-        title: Loc { en: "Protein & satiety", ru: "Белок и насыщение" },
+        title: Loc { en: "Eat more protein", ru: "Ешьте больше белка" },
         body: Loc {
             en: "Protein is very filling. The more protein you eat, the less hungry you are. Use it as a tool to control hunger.",
             ru: "Белок даёт очень хорошее насыщение. Чем больше белка вы едите, тем меньше ваш голод. Используйте этот инструмент для контроля голода.",
@@ -640,10 +650,10 @@ const S2: &[Frame] = &[
     // 6 — veg/fruit → volume, low calories
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("veg-collage.png"),
         accent: GREEN,
         kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
-        title: Loc { en: "Vegetables & fruit", ru: "Овощи и фрукты" },
+        title: Loc { en: "Eat plenty of vegetables and fruit", ru: "Ешьте много овощей и фруктов" },
         body: Loc {
             en: "Vegetables and fruit are low in calories and full of water, so they satisfy hunger too. The more of them, the easier it is to fill your stomach.",
             ru: "Овощи и фрукты обладают низкой калорийностью и содержат много воды, поэтому тоже хорошо утоляют голод. Чем больше фруктов и овощей, тем легче наполнить желудок.",
@@ -652,10 +662,10 @@ const S2: &[Frame] = &[
     // 7 — go easy on oils
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("oils-collage.png"),
         accent: AMBER,
         kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
-        title: Loc { en: "Go easy on oils", ru: "Меньше масла" },
+        title: Loc { en: "Use less fat", ru: "Используйте меньше жира" },
         body: Loc {
             en: "Still not fitting your planka? Use less oil — butter, vegetable oil, mayonnaise are very high-calorie. Try to limit them.",
             ru: "Если всё равно не влезаете в планку — используйте меньше масла: сливочное, растительное, майонез очень калорийны. Постарайтесь их ограничивать.",
@@ -664,10 +674,10 @@ const S2: &[Frame] = &[
     // 8 — caloric drinks leave you hungry
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("drinks-collage.png"),
         accent: AMBER,
         kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
-        title: Loc { en: "Caloric drinks", ru: "Калорийные напитки" },
+        title: Loc { en: "Don't drink caloric drinks", ru: "Не пейте калорийные напитки" },
         body: Loc {
             en: "Caloric drinks — juice, sugary cola, beer — can leave you hungry, because the calories run out very fast.",
             ru: "Калорийные напитки — соки, кола с сахаром, пиво — могут оставить вас голодными, потому что калории заканчиваются очень быстро.",

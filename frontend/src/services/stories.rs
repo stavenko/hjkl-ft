@@ -288,8 +288,8 @@ const S1: &[Frame] = &[
         kicker: Loc { en: "Steps", ru: "Шаги" },
         title: Loc { en: "Save it", ru: "Сохраните" },
         body: Loc {
-            en: "Press «Save». Log steps every day — it's half of all your activity.",
-            ru: "Нажмите «Сохранить». Записывайте шаги каждый день — это половина всей активности.",
+            en: "Press «Save». Steps need logging every day too. Activity really matters!",
+            ru: "Нажмите «Сохранить». Шаги тоже надо записывать каждый день. Активность — это очень важно!",
         },
     },
     // 9 — food by description

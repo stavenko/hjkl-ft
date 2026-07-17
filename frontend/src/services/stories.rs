@@ -276,8 +276,8 @@ const S1: &[Frame] = &[
         kicker: Loc { en: "Steps", ru: "Шаги" },
         title: Loc { en: "Enter your steps", ru: "Внесите шаги" },
         body: Loc {
-            en: "Take the step count from your phone's pedometer and type it in.",
-            ru: "Возьмите число шагов из шагомера на телефоне и впишите его.",
+            en: "Log your steps in the evening before bed, or in the morning for the previous day.",
+            ru: "Шаги можно внести вечером перед сном или утром, за вчерашний день.",
         },
     },
     // 8 — steps: save

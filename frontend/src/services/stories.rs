@@ -256,10 +256,10 @@ const S1: &[Frame] = &[
             ru: "Нажмите «Сохранить». Вы молодец — так и делайте каждое утро.",
         },
     },
-    // 6 — steps: tap widget
+    // 6 — steps: tap widget (animated hint highlights the empty steps widget)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("dashboard.png"),
+        media: Media::Shot("dashboard-steps.gif"),
         accent: GREEN,
         kicker: Loc { en: "Steps", ru: "Шаги" },
         title: Loc { en: "Now steps", ru: "Теперь шаги" },

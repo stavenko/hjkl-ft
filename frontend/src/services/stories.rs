@@ -239,18 +239,21 @@ const S1: &[Frame] = &[
         accent: GREEN,
         kicker: Loc { en: "Weight", ru: "Вес" },
         title: Loc { en: "The weigh-in form", ru: "Форма взвешивания" },
-        body: Loc { en: "Enter the number from the scale.", ru: "Введите цифру с весов." },
+        body: Loc {
+            en: "Enter your weight. And try to tick the checkboxes too, honestly matching reality.",
+            ru: "Введите свой вес. И старайтесь делать так, чтобы галочки тоже были проставлены и соответствовали действительности.",
+        },
     },
-    // 5 — weight: save
+    // 5 — weight: save (checkboxes ticked)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("weight-form.png"),
+        media: Media::Shot("weight-form-checked.png"),
         accent: GREEN,
         kicker: Loc { en: "Weight", ru: "Вес" },
         title: Loc { en: "Save it", ru: "Сохраните" },
         body: Loc {
-            en: "Tick the conditions and press «Save». Well done — do this every morning.",
-            ru: "Отметьте галочками условия и нажмите «Сохранить». Вы молодец — так и делайте каждое утро.",
+            en: "Press «Save». Well done — do this every morning.",
+            ru: "Нажмите «Сохранить». Вы молодец — так и делайте каждое утро.",
         },
     },
     // 6 — steps: tap widget

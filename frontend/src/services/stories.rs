@@ -129,9 +129,13 @@ struct ViewedState {
 
 thread_local! {
     static VIEWED: RefCell<Option<ViewedState>> = const { RefCell::new(None) };
+    /// The currently-open story in the fullscreen viewer. Lives in the root scope
+    /// (not in the tray component) so it survives dashboard re-renders — otherwise
+    /// an auto-opened / tapped story closes the moment the dashboard re-renders.
+    static OPEN: RefCell<Option<RwSignal<Option<&'static Story>>>> = const { RefCell::new(None) };
 }
 
-/// Seed the seen-set from `app_flags` and create the reactive version signal.
+/// Seed the seen-set from `app_flags` and create the reactive signals.
 /// Call once from `main()` inside the Leptos runtime.
 pub fn init() {
     let set: HashSet<String> = app_flags::get(VIEWED_KEY)
@@ -139,6 +143,12 @@ pub fn init() {
         .unwrap_or_default();
     let ver = create_rw_signal(0u32);
     VIEWED.with(|v| *v.borrow_mut() = Some(ViewedState { set, ver }));
+    OPEN.with(|o| *o.borrow_mut() = Some(create_rw_signal(None)));
+}
+
+/// The root-scope signal holding the story currently open in the viewer.
+pub fn open_signal() -> RwSignal<Option<&'static Story>> {
+    OPEN.with(|o| *o.borrow()).expect("stories::init() must run first")
 }
 
 fn version() -> RwSignal<u32> {
@@ -188,6 +198,20 @@ pub fn visible() -> Vec<&'static Story> {
 
 pub fn by_id(id: &str) -> Option<&'static Story> {
     STORIES.iter().find(|s| s.id == id)
+}
+
+// --- Welcome story auto-open (once, on first launch) ------------------------
+
+const WELCOME_KEY: &str = "welcome_shown";
+
+/// True until the welcome story has been auto-shown on this device.
+pub fn welcome_pending() -> bool {
+    !app_flags::get_bool(WELCOME_KEY)
+}
+
+/// Record that the welcome story was auto-shown (so it won't auto-open again).
+pub fn mark_welcome_shown() {
+    app_flags::set(WELCOME_KEY, "true");
 }
 
 // --- Authored content -------------------------------------------------------
@@ -414,9 +438,94 @@ const S1: &[Frame] = &[
     },
 ];
 
-static STORIES: &[Story] = &[Story {
-    id: "week1",
-    appears: Appears::Always,
-    badge: Loc { en: "1", ru: "1" },
-    frames: S1,
-}];
+// The welcome / dashboard tour. Auto-opens once on first launch and stays in the
+// tray for re-watching.
+const WELCOME: &[Frame] = &[
+    // 1 — hello
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("welcome-intro.png"),
+        accent: GREEN,
+        kicker: Loc { en: "re:Norma", ru: "re:Norma" },
+        title: Loc { en: "Hello!", ru: "Привет!" },
+        body: Loc {
+            en: "This is re:Norma — a weight-loss app.",
+            ru: "Это re:Norma. Приложение по похудению.",
+        },
+    },
+    // 2 — persona
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("welcome-persona.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "re:Norma", ru: "re:Norma" },
+        title: Loc { en: "Your details", ru: "Ваши данные" },
+        body: Loc {
+            en: "Set your personal details here: height, weight, age and what you're aiming for.",
+            ru: "Вот здесь настройте свои персональные данные: рост, вес, возраст и чего вы хотите.",
+        },
+    },
+    // 3 — notifications
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("welcome-bell.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "re:Norma", ru: "re:Norma" },
+        title: Loc { en: "Notifications", ru: "Уведомления" },
+        body: Loc {
+            en: "Set up notifications here — so the app can remind you to log something, or tell you it's been updated.",
+            ru: "Вот здесь настройте уведомления — чтобы приложение могло напомнить внести данные или сообщить, что программа обновилась.",
+        },
+    },
+    // 4 — settings / language
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("welcome-settings.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "re:Norma", ru: "re:Norma" },
+        title: Loc { en: "Settings", ru: "Настройки" },
+        body: Loc {
+            en: "Here you can set the language. App updates show up here too.",
+            ru: "Вот здесь вы можете настроить язык. Также там будут обновления.",
+        },
+    },
+    // 5 — support
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("welcome-support.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "re:Norma", ru: "re:Norma" },
+        title: Loc { en: "Support", ru: "Поддержка" },
+        body: Loc {
+            en: "And here's the support chat. You'll always get an answer — though you may have to wait.",
+            ru: "А вот здесь чат поддержки. Вам обязательно ответят, но, может быть, придётся подождать.",
+        },
+    },
+    // 6 — the main thing
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("welcome-main.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "re:Norma", ru: "re:Norma" },
+        title: Loc { en: "The main thing", ru: "Самое главное" },
+        body: Loc {
+            en: "And here's what matters most: your weight, activity, and your food-diary entries.",
+            ru: "А вот здесь всё самое главное: ваш вес, активность, а также записи вашего дневника питания.",
+        },
+    },
+];
+
+static STORIES: &[Story] = &[
+    Story {
+        id: "welcome",
+        appears: Appears::Always,
+        badge: Loc { en: "?", ru: "?" },
+        frames: WELCOME,
+    },
+    Story {
+        id: "week1",
+        appears: Appears::Always,
+        badge: Loc { en: "1", ru: "1" },
+        frames: S1,
+    },
+];

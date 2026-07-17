@@ -12,8 +12,20 @@ use crate::services::stories::{self, Bg, Frame, Media, Story};
 /// Full-width row of story circles. Mount once on the dashboard.
 #[component]
 pub fn StoryTray() -> impl IntoView {
-    let open = create_rw_signal(None::<&'static Story>);
+    // Root-scope signal, so the viewer survives dashboard re-renders (which remount
+    // this component) — an auto-opened / tapped story would otherwise close instantly.
+    let open = stories::open_signal();
     let list = stories::visible();
+
+    // Auto-open the welcome story once, on first launch.
+    create_effect(move |_| {
+        if stories::welcome_pending() {
+            if let Some(w) = stories::by_id("welcome") {
+                open.set(Some(w));
+                stories::mark_welcome_shown();
+            }
+        }
+    });
 
     view! {
         <div style="width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch;">

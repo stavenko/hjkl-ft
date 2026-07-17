@@ -364,7 +364,19 @@ const S1: &[Frame] = &[
             ru: "Сфотографируйте блюдо целиком — оно разберётся на продукты.",
         },
     },
-    // 15 — repeat: copy from yesterday (shows the ⇄ repeat icon)
+    // 15 — warning: dish photo is a draft (right after «по фото еды»)
+    Frame {
+        bg: Bg::Photo("dish-bowl.jpeg"),
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Important", ru: "Важно" },
+        title: Loc { en: "A dish photo is a draft", ru: "Фото тарелки — черновик" },
+        body: Loc {
+            en: "Photo recognition can be wrong about the contents and grams — always check the numbers. Description and label are more accurate.",
+            ru: "Распознавание по фото может ошибиться в составе и граммах — всегда проверяйте цифры. Описание и этикетка точнее.",
+        },
+    },
+    // 16 — repeat: copy from yesterday (shows the ⇄ repeat icon)
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-duplicate-popup.png"),
@@ -376,7 +388,7 @@ const S1: &[Frame] = &[
             ru: "Едите одно и то же? Откройте дневник, перелистните на «Вчера» и нажмите у записи иконку ⇄ «Повторить сегодня».",
         },
     },
-    // 16 — repeat: duplicate today (via the «⋮» menu)
+    // 17 — repeat: duplicate today (via the «⋮» menu)
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("diary-duplicate.gif"),
@@ -388,7 +400,7 @@ const S1: &[Frame] = &[
             ru: "Съеденное сегодня — откройте меню «⋮» у записи и выберите «Дублировать».",
         },
     },
-    // 17 — food search
+    // 18 — food search
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("food-search.gif"),
@@ -398,18 +410,6 @@ const S1: &[Frame] = &[
         body: Loc {
             en: "Already logged this product? Start typing its name — say «Ap» — and pick it from the list.",
             ru: "Уже вносили этот продукт? Начните вводить название — например «Яб» — и выберите из списка.",
-        },
-    },
-    // 18 — warning: dish photo is a draft
-    Frame {
-        bg: Bg::Photo("dish-bowl.jpeg"),
-        media: Media::None,
-        accent: AMBER,
-        kicker: Loc { en: "Important", ru: "Важно" },
-        title: Loc { en: "A dish photo is a draft", ru: "Фото тарелки — черновик" },
-        body: Loc {
-            en: "Photo recognition can be wrong about the contents and grams — always check the numbers. Description and label are more accurate.",
-            ru: "Распознавание по фото может ошибиться в составе и граммах — всегда проверяйте цифры. Описание и этикетка точнее.",
         },
     },
 ];

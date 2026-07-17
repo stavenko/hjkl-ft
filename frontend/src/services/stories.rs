@@ -461,8 +461,8 @@ const WELCOME: &[Frame] = &[
         kicker: Loc { en: "re:Norma", ru: "re:Norma" },
         title: Loc { en: "Your details", ru: "Ваши данные" },
         body: Loc {
-            en: "Set your personal details here: height, weight, age and what you're aiming for.",
-            ru: "Вот здесь настройте свои персональные данные: рост, вес, возраст и чего вы хотите.",
+            en: "Set your personal details here — height, weight, age — and what you want to achieve: lose, gain or maintain.",
+            ru: "Вот здесь настройте свои персональные данные — рост, вес, возраст — и чего вы хотите достичь: похудеть, набрать или сохранить.",
         },
     },
     // 3 — notifications

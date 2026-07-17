@@ -292,7 +292,43 @@ const S1: &[Frame] = &[
             ru: "Нажмите «Сохранить». Шаги тоже надо записывать каждый день. Активность — это очень важно!",
         },
     },
-    // 9 — food by description
+    // 9 — food: open the diary (highlight the «Дневник» nav button)
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("diary-nav.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "Food", ru: "Еда" },
+        title: Loc { en: "Open the diary", ru: "Откройте дневник" },
+        body: Loc {
+            en: "Tap «Diary» in the bottom bar.",
+            ru: "Внизу нажмите «Дневник».",
+        },
+    },
+    // 10 — food: add an entry (highlight the green «+» button)
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("diary-plus.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "Food", ru: "Еда" },
+        title: Loc { en: "Add an entry", ru: "Добавьте запись" },
+        body: Loc {
+            en: "Tap the green «+» button.",
+            ru: "Нажмите зелёную кнопку «+».",
+        },
+    },
+    // 11 — food: new product (highlight «Добавить новый продукт»)
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("diary-addnew.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "Food", ru: "Еда" },
+        title: Loc { en: "A new product", ru: "Новый продукт" },
+        body: Loc {
+            en: "Nothing found yet — tap «Add a new product».",
+            ru: "Пока ничего нет — нажмите «Добавить новый продукт».",
+        },
+    },
+    // 12 — food by description
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-by-name-card.png"),
@@ -304,7 +340,7 @@ const S1: &[Frame] = &[
             ru: "Опишите блюдо словами — приложение подставит КБЖУ. Проверьте и нажмите «Добавить».",
         },
     },
-    // 10 — food by label
+    // 13 — food by label
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-by-photo.png"),
@@ -316,7 +352,7 @@ const S1: &[Frame] = &[
             ru: "Снимите таблицу КБЖУ крупно — цифры заполнятся сами.",
         },
     },
-    // 11 — food by dish photo
+    // 14 — food by dish photo
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("foodphoto-top.png"),
@@ -328,7 +364,7 @@ const S1: &[Frame] = &[
             ru: "Сфотографируйте блюдо целиком — оно разберётся на продукты.",
         },
     },
-    // 12 — repeat: go to yesterday
+    // 15 — repeat: go to yesterday
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-duplicate-popup.png"),
@@ -340,7 +376,7 @@ const S1: &[Frame] = &[
             ru: "Едите одно и то же? Откройте дневник и перелистните на «Вчера».",
         },
     },
-    // 13 — repeat: the icon
+    // 16 — repeat: the icon
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-duplicate-card.png"),
@@ -352,7 +388,7 @@ const S1: &[Frame] = &[
             ru: "У каждой записи справа есть иконка ⇄. Нажмите её у нужного продукта.",
         },
     },
-    // 14 — repeat: repeat today
+    // 17 — repeat: repeat today
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-duplicate-popup.png"),
@@ -364,7 +400,7 @@ const S1: &[Frame] = &[
             ru: "Выберите «Повторить сегодня» — продукт со всеми граммами и КБЖУ перенесётся в сегодня.",
         },
     },
-    // 15 — duplicate today
+    // 18 — duplicate today
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-duplicate-card.png"),
@@ -376,7 +412,7 @@ const S1: &[Frame] = &[
             ru: "Так же дублируется съеденное сегодня: тот же значок ⇄ у записи за сегодня.",
         },
     },
-    // 16 — warning: dish photo is a draft
+    // 19 — warning: dish photo is a draft
     Frame {
         bg: Bg::Photo("dish-bowl.jpeg"),
         media: Media::None,

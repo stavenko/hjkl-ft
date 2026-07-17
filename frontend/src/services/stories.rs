@@ -107,6 +107,8 @@ fn fnv1a(s: &str) -> u64 {
 pub enum Appears {
     /// Visible from the very first launch.
     Always,
+    /// Visible once the first weekly calorie planka has been calculated.
+    AfterCaloriePlanka,
 }
 
 pub struct Story {
@@ -191,12 +193,14 @@ pub fn unviewed_count(story: &Story) -> usize {
     story.frames.iter().filter(|f| !is_viewed(&f.hash())).count()
 }
 
-/// The stories currently eligible to show, in order.
-pub fn visible() -> Vec<&'static Story> {
+/// The stories currently eligible to show, in order. `planka_set` = the weekly
+/// calorie planka has been calculated (gates the second-week story).
+pub fn visible(planka_set: bool) -> Vec<&'static Story> {
     STORIES
         .iter()
         .filter(|s| match s.appears {
             Appears::Always => true,
+            Appears::AfterCaloriePlanka => planka_set,
         })
         .collect()
 }
@@ -448,6 +452,30 @@ const S1: &[Frame] = &[
             ru: "Уже вносили этот продукт? Начните вводить название — например «Яб» — и выберите из списка.",
         },
     },
+    // 19 — always log caloric drinks
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Important", ru: "Важно" },
+        title: Loc { en: "Log caloric drinks", ru: "Записывайте напитки" },
+        body: Loc {
+            en: "Always log caloric drinks. Juice, sugary soda, or sugar in your tea or coffee — that's a real amount of calories, and it has to be counted.",
+            ru: "Обязательно записывайте калорийные напитки. Если пьёте сок, сладкую газировку с сахаром или добавляете сахар в чай или кофе — это существенное количество калорий, его нужно учитывать.",
+        },
+    },
+    // 20 — always log oils
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Important", ru: "Важно" },
+        title: Loc { en: "Log the oils", ru: "Записывайте масла" },
+        body: Loc {
+            en: "Always log the oils: olive, sunflower, butter. They're packed with calories — skip them and in a week your planka will be a very hungry one.",
+            ru: "Обязательно записываем масла: оливковое, подсолнечное, сливочное. В них очень много калорий; если их не записывать, то через неделю у вас будет очень голодная планка.",
+        },
+    },
 ];
 
 // The welcome / dashboard tour. Auto-opens once on first launch and stays in the
@@ -539,6 +567,108 @@ const WELCOME: &[Frame] = &[
     },
 ];
 
+// The second-week story. Appears once the first weekly calorie planka has been
+// calculated. Product frames (protein / veg-fruit / oils / drinks) are plain text
+// on the dark card for now; real product photos can be dropped in later.
+const S2: &[Frame] = &[
+    // 1 — first week done, planka calculated
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
+        title: Loc { en: "The first week is behind you", ru: "Первая неделя позади" },
+        body: Loc {
+            en: "Congratulations — the first week is done, we have your first data, and your first calorie planka is calculated.",
+            ru: "Поздравляем — первая неделя прошла, у нас появились первые данные, и ваша первая планка по калориям посчитана.",
+        },
+    },
+    // 2 — stay under the planka; the remaining-calories indicator
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
+        title: Loc { en: "Your calorie planka", ru: "Планка по калориям" },
+        body: Loc {
+            en: "From now on, try not to eat above this planka. You'll have an indicator showing how many calories you have left.",
+            ru: "Отныне старайтесь не превышать калорийность вашего питания выше этой планки. У вас будет индикатор — там видно, сколько вам ещё осталось калорий.",
+        },
+    },
+    // 3 — more data → better dynamics → weekly recalculation
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
+        title: Loc { en: "Dynamics & recalculation", ru: "Динамика и пересчёт" },
+        body: Loc {
+            en: "The more data there is, the more precisely we can read your weight dynamics — and the easier it is to recalculate the planka. We recalculate and adjust it every week.",
+            ru: "Чем больше данных, тем точнее мы определяем вашу динамику веса и тем проще пересчитывать планку. Мы пересчитываем и корректируем её каждую неделю.",
+        },
+    },
+    // 4 — not only calories: protein + veg/fruit plankas
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
+        title: Loc { en: "Not only calories", ru: "Не только калории" },
+        body: Loc {
+            en: "Besides the calorie planka, we also give you a protein planka and a vegetables-and-fruit planka.",
+            ru: "Кроме планки по калориям, мы также выдаём планку по белку и планку по овощам и фруктам.",
+        },
+    },
+    // 5 — protein → satiety
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
+        title: Loc { en: "Protein & satiety", ru: "Белок и насыщение" },
+        body: Loc {
+            en: "Protein is very filling. The more protein you eat, the less hungry you are. Use it as a tool to control hunger.",
+            ru: "Белок даёт очень хорошее насыщение. Чем больше белка вы едите, тем меньше ваш голод. Используйте этот инструмент для контроля голода.",
+        },
+    },
+    // 6 — veg/fruit → volume, low calories
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
+        title: Loc { en: "Vegetables & fruit", ru: "Овощи и фрукты" },
+        body: Loc {
+            en: "Vegetables and fruit are low in calories and full of water, so they satisfy hunger too. The more of them, the easier it is to fill your stomach.",
+            ru: "Овощи и фрукты обладают низкой калорийностью и содержат много воды, поэтому тоже хорошо утоляют голод. Чем больше фруктов и овощей, тем легче наполнить желудок.",
+        },
+    },
+    // 7 — go easy on oils
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
+        title: Loc { en: "Go easy on oils", ru: "Меньше масла" },
+        body: Loc {
+            en: "Still not fitting your planka? Use less oil — butter, vegetable oil, mayonnaise are very high-calorie. Try to limit them.",
+            ru: "Если всё равно не влезаете в планку — используйте меньше масла: сливочное, растительное, майонез очень калорийны. Постарайтесь их ограничивать.",
+        },
+    },
+    // 8 — caloric drinks leave you hungry
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Week 2", ru: "Вторая неделя" },
+        title: Loc { en: "Caloric drinks", ru: "Калорийные напитки" },
+        body: Loc {
+            en: "Caloric drinks — juice, sugary cola, beer — can leave you hungry, because the calories run out very fast.",
+            ru: "Калорийные напитки — соки, кола с сахаром, пиво — могут оставить вас голодными, потому что калории заканчиваются очень быстро.",
+        },
+    },
+];
+
 static STORIES: &[Story] = &[
     Story {
         id: "welcome",
@@ -551,5 +681,11 @@ static STORIES: &[Story] = &[
         appears: Appears::Always,
         badge: Loc { en: "1", ru: "1" },
         frames: S1,
+    },
+    Story {
+        id: "week2",
+        appears: Appears::AfterCaloriePlanka,
+        badge: Loc { en: "2", ru: "2" },
+        frames: S2,
     },
 ];

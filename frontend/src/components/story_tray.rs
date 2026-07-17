@@ -8,6 +8,7 @@
 use leptos::*;
 
 use crate::services::stories::{self, Bg, Frame, Media, Story};
+use crate::services::{db, local};
 
 /// Full-width row of story circles. Mount once on the dashboard.
 #[component]
@@ -16,12 +17,24 @@ pub fn StoryTray() -> impl IntoView {
     // remount this component). The fullscreen viewer itself is rendered by
     // `StoryViewerHost`, mounted once high in the tree.
     let open = stories::open_signal();
-    let list = stories::visible();
+
+    // The weekly calorie planka gates the second-week story. Re-loads when the
+    // `goals` store changes (the planka is a Calories/AtMost goal).
+    let goals_ver = db::version("goals");
+    let planka = create_resource(move || goals_ver.get(), |_| async {
+        local::calorie_goal_amount().await
+    });
 
     view! {
         <div style="width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch;">
             <div style="display: flex; gap: 14px; padding: 4px 2px 8px;">
-                {list.into_iter().map(|s| view! { <TrayCircle story=s open=open /> }).collect_view()}
+                {move || {
+                    let planka_set = planka.get().flatten().is_some();
+                    stories::visible(planka_set)
+                        .into_iter()
+                        .map(|s| view! { <TrayCircle story=s open=open /> })
+                        .collect_view()
+                }}
             </div>
         </div>
     }

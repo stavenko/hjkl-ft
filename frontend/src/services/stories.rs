@@ -364,7 +364,7 @@ const S1: &[Frame] = &[
             ru: "Сфотографируйте блюдо целиком — оно разберётся на продукты.",
         },
     },
-    // 15 — repeat: go to yesterday
+    // 15 — repeat: copy from yesterday (shows the ⇄ repeat icon)
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-duplicate-popup.png"),
@@ -372,47 +372,35 @@ const S1: &[Frame] = &[
         kicker: Loc { en: "Repeat", ru: "Повтор" },
         title: Loc { en: "Copy from yesterday", ru: "Копируем из вчера" },
         body: Loc {
-            en: "Eating the same thing? Open the diary and swipe to «Yesterday».",
-            ru: "Едите одно и то же? Откройте дневник и перелистните на «Вчера».",
+            en: "Eating the same thing? Open the diary, swipe to «Yesterday» and tap the ⇄ icon on the entry — «Repeat today».",
+            ru: "Едите одно и то же? Откройте дневник, перелистните на «Вчера» и нажмите у записи иконку ⇄ «Повторить сегодня».",
         },
     },
-    // 16 — repeat: the icon
+    // 16 — repeat: duplicate today (via the «⋮» menu)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("shot-duplicate-card.png"),
+        media: Media::Shot("diary-duplicate.gif"),
         accent: GREEN,
         kicker: Loc { en: "Repeat", ru: "Повтор" },
-        title: Loc { en: "The ⇄ icon", ru: "Иконка ⇄" },
+        title: Loc { en: "Duplicate for today", ru: "Дублируем сегодня" },
         body: Loc {
-            en: "Every entry has a ⇄ icon on the right. Tap it on the product you want.",
-            ru: "У каждой записи справа есть иконка ⇄. Нажмите её у нужного продукта.",
+            en: "For today's food, open the «⋮» menu on the entry and choose «Duplicate».",
+            ru: "Съеденное сегодня — откройте меню «⋮» у записи и выберите «Дублировать».",
         },
     },
-    // 17 — repeat: repeat today
+    // 17 — food search
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("shot-duplicate-popup.png"),
+        media: Media::Shot("food-search.gif"),
         accent: GREEN,
-        kicker: Loc { en: "Repeat", ru: "Повтор" },
-        title: Loc { en: "Repeat today", ru: "Повторить сегодня" },
+        kicker: Loc { en: "Food", ru: "Еда" },
+        title: Loc { en: "Food search", ru: "Поиск по еде" },
         body: Loc {
-            en: "Choose «Repeat today» — the product, with its grams and macros, moves to today.",
-            ru: "Выберите «Повторить сегодня» — продукт со всеми граммами и КБЖУ перенесётся в сегодня.",
+            en: "Already logged this product? Start typing its name — say «Ap» — and pick it from the list.",
+            ru: "Уже вносили этот продукт? Начните вводить название — например «Яб» — и выберите из списка.",
         },
     },
-    // 18 — duplicate today
-    Frame {
-        bg: Bg::Dark,
-        media: Media::Shot("shot-duplicate-card.png"),
-        accent: GREEN,
-        kicker: Loc { en: "Repeat", ru: "Повтор" },
-        title: Loc { en: "Duplicate within today", ru: "Дублируем сегодня" },
-        body: Loc {
-            en: "The same works for what you already ate today: the same ⇄ on today's entry.",
-            ru: "Так же дублируется съеденное сегодня: тот же значок ⇄ у записи за сегодня.",
-        },
-    },
-    // 19 — warning: dish photo is a draft
+    // 18 — warning: dish photo is a draft
     Frame {
         bg: Bg::Photo("dish-bowl.jpeg"),
         media: Media::None,

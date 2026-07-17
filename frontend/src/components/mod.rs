@@ -25,6 +25,7 @@ pub mod bar_chart;
 pub mod day_bars;
 pub mod info_hint;
 pub mod gauge;
+pub mod story_tray;
 pub mod chat_message;
 pub mod chat_streaming;
 pub mod chat_input;

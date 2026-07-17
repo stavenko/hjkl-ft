@@ -20,6 +20,7 @@ pub mod platform;
 pub mod profile;
 pub mod push;
 pub mod sticky;
+pub mod stories;
 pub mod subscription;
 pub mod support_chat;
 pub mod sync;

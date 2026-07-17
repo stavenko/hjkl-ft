@@ -57,11 +57,13 @@ fn TrayCircle(story: &'static Story, open: RwSignal<Option<&'static Story>>) -> 
                     })
                 }}
             </svg>
-            // Inner disc with the badge glyph (emoji on a grey face).
+            // Inner disc with the badge numeral (Anticva, outline-only) on a grey face.
             <div style="position: absolute; inset: 6px; border-radius: 50%; \
                         background: #e5e7eb; \
                         display: flex; align-items: center; justify-content: center;">
-                <span style="font-size: 30px; line-height: 1;">{badge}</span>
+                <span style="font-family: 'Anticva', serif; font-size: 40px; line-height: 1; \
+                             color: transparent; -webkit-text-stroke: 1.5px #334155; \
+                             text-stroke: 1.5px #334155;">{badge}</span>
             </div>
         </button>
     }

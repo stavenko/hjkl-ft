@@ -378,6 +378,6 @@ const S1: &[Frame] = &[
 static STORIES: &[Story] = &[Story {
     id: "week1",
     appears: Appears::Always,
-    badge: Loc { en: "1\u{fe0f}\u{20e3}", ru: "1\u{fe0f}\u{20e3}" },
+    badge: Loc { en: "1", ru: "1" },
     frames: S1,
 }];

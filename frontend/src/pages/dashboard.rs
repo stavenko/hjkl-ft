@@ -460,7 +460,7 @@ pub fn DashboardPage() -> impl IntoView {
                 // Collapsed grid: persona 1×1 + notifications bell 1×1.
                 view! {
                     <div style="display: flex; flex-direction: column; gap: 12px;">
-                        <crate::components::story_tray::StoryTray/>
+                        // Top row: persona (col 1) · error (col 7) · notifications (col 8).
                         <div style=GRID>
                             <button style=format!("{TILE} grid-column: 1 / 2; grid-row: span 1;")
                                 on:click=move |_| overlay.set(Overlay::Persona)>
@@ -486,21 +486,26 @@ pub fn DashboardPage() -> impl IntoView {
                                     {move || if notif_disabled.get() { icon_bell_off().into_view() } else { icon_bell().into_view() }}
                                 </span>
                             </button>
+                        </div>
 
-                            // Weight & steps widgets: 4×3 tiles side by side under the top row.
-                            <button style=format!("{WIDGET_TILE} grid-column: 1 / 5; grid-row: 2 / 5;")
+                        // Stories tray — under the persona/notifications/warning row,
+                        // above the weight/steps/nutrition widgets.
+                        <crate::components::story_tray::StoryTray/>
+
+                        // Weight & steps widgets: 4×3 tiles side by side.
+                        <div style=GRID>
+                            <button style=format!("{WIDGET_TILE} grid-column: 1 / 5; grid-row: 1 / 4;")
                                 attr:data-testid="dash-weight-widget"
                                 on:click=move |_| overlay.set(Overlay::Weight)>
                                 // Empty until the first data load (then sticky keeps it
                                 // filled across navigations) — no placeholder flash.
                                 {move || weight_data().map(|_| view! { <WeightWidget entries=Signal::derive(weight_entries)/> })}
                             </button>
-                            <button style=format!("{WIDGET_TILE} grid-column: 5 / 9; grid-row: 2 / 5;")
+                            <button style=format!("{WIDGET_TILE} grid-column: 5 / 9; grid-row: 1 / 4;")
                                 attr:data-testid="dash-steps-widget"
                                 on:click=move |_| overlay.set(Overlay::Steps)>
                                 {move || steps_data().map(|_| view! { <StepsWidget entries=Signal::derive(steps_entries)/> })}
                             </button>
-
                         </div>
 
                         // Progress widget + cycle flow BELOW the grid (not inside it),

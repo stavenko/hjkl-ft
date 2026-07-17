@@ -220,7 +220,19 @@ const S1: &[Frame] = &[
             ru: "Взвешивайтесь один раз, с утра. На главном экране нажмите на виджет «Вес».",
         },
     },
-    // 3 — weight: form
+    // 3 — weight: the widget expands, with the «Взвеситься» button
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("weight-expand.png"),
+        accent: GREEN,
+        kicker: Loc { en: "Weight", ru: "Вес" },
+        title: Loc { en: "The widget opens up", ru: "Виджет раскроется" },
+        body: Loc {
+            en: "You'll see your chart and history. Tap «Weigh in» to log a new weight.",
+            ru: "Откроется график и история. Нажмите «Взвеситься», чтобы внести новый вес.",
+        },
+    },
+    // 4 — weight: form
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("weight-form.png"),
@@ -229,7 +241,7 @@ const S1: &[Frame] = &[
         title: Loc { en: "The weigh-in form", ru: "Форма взвешивания" },
         body: Loc { en: "Enter the number from the scale.", ru: "Введите цифру с весов." },
     },
-    // 4 — weight: save
+    // 5 — weight: save
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("weight-form.png"),
@@ -241,7 +253,7 @@ const S1: &[Frame] = &[
             ru: "Отметьте галочками условия и нажмите «Сохранить». Вы молодец — так и делайте каждое утро.",
         },
     },
-    // 5 — steps: tap widget
+    // 6 — steps: tap widget
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("dashboard.png"),
@@ -253,7 +265,7 @@ const S1: &[Frame] = &[
             ru: "На главном экране нажмите на виджет «Шаги».",
         },
     },
-    // 6 — steps: form
+    // 7 — steps: form
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("steps-form.png"),
@@ -265,7 +277,7 @@ const S1: &[Frame] = &[
             ru: "Возьмите число шагов из шагомера на телефоне и впишите его.",
         },
     },
-    // 7 — steps: save
+    // 8 — steps: save
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("steps-form.png"),
@@ -277,7 +289,7 @@ const S1: &[Frame] = &[
             ru: "Нажмите «Сохранить». Записывайте шаги каждый день — это половина всей активности.",
         },
     },
-    // 8 — food by description
+    // 9 — food by description
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-by-name-card.png"),
@@ -289,7 +301,7 @@ const S1: &[Frame] = &[
             ru: "Опишите блюдо словами — приложение подставит КБЖУ. Проверьте и нажмите «Добавить».",
         },
     },
-    // 9 — food by label
+    // 10 — food by label
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-by-photo.png"),
@@ -301,7 +313,7 @@ const S1: &[Frame] = &[
             ru: "Снимите таблицу КБЖУ крупно — цифры заполнятся сами.",
         },
     },
-    // 10 — food by dish photo
+    // 11 — food by dish photo
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("foodphoto-top.png"),
@@ -313,7 +325,7 @@ const S1: &[Frame] = &[
             ru: "Сфотографируйте блюдо целиком — оно разберётся на продукты.",
         },
     },
-    // 11 — repeat: go to yesterday
+    // 12 — repeat: go to yesterday
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-duplicate-popup.png"),
@@ -325,7 +337,7 @@ const S1: &[Frame] = &[
             ru: "Едите одно и то же? Откройте дневник и перелистните на «Вчера».",
         },
     },
-    // 12 — repeat: the icon
+    // 13 — repeat: the icon
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-duplicate-card.png"),
@@ -337,7 +349,7 @@ const S1: &[Frame] = &[
             ru: "У каждой записи справа есть иконка ⇄. Нажмите её у нужного продукта.",
         },
     },
-    // 13 — repeat: repeat today
+    // 14 — repeat: repeat today
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-duplicate-popup.png"),
@@ -349,7 +361,7 @@ const S1: &[Frame] = &[
             ru: "Выберите «Повторить сегодня» — продукт со всеми граммами и КБЖУ перенесётся в сегодня.",
         },
     },
-    // 14 — duplicate today
+    // 15 — duplicate today
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("shot-duplicate-card.png"),
@@ -361,7 +373,7 @@ const S1: &[Frame] = &[
             ru: "Так же дублируется съеденное сегодня: тот же значок ⇄ у записи за сегодня.",
         },
     },
-    // 15 — warning: dish photo is a draft
+    // 16 — warning: dish photo is a draft
     Frame {
         bg: Bg::Photo("dish-bowl.jpeg"),
         media: Media::None,

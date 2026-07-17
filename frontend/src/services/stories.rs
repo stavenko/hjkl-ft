@@ -131,8 +131,11 @@ thread_local! {
     static VIEWED: RefCell<Option<ViewedState>> = const { RefCell::new(None) };
     /// The currently-open story in the fullscreen viewer. Lives in the root scope
     /// (not in the tray component) so it survives dashboard re-renders — otherwise
-    /// an auto-opened / tapped story closes the moment the dashboard re-renders.
+    /// a tapped story closes the moment the dashboard re-renders.
     static OPEN: RefCell<Option<RwSignal<Option<&'static Story>>>> = const { RefCell::new(None) };
+    /// Reactive: true until the welcome story has been opened. Drives the tray
+    /// circle's attention jiggle.
+    static WELCOME_PENDING_SIG: RefCell<Option<RwSignal<bool>>> = const { RefCell::new(None) };
 }
 
 /// Seed the seen-set from `app_flags` and create the reactive signals.
@@ -144,6 +147,8 @@ pub fn init() {
     let ver = create_rw_signal(0u32);
     VIEWED.with(|v| *v.borrow_mut() = Some(ViewedState { set, ver }));
     OPEN.with(|o| *o.borrow_mut() = Some(create_rw_signal(None)));
+    let pending = !app_flags::get_bool(WELCOME_KEY);
+    WELCOME_PENDING_SIG.with(|s| *s.borrow_mut() = Some(create_rw_signal(pending)));
 }
 
 /// The root-scope signal holding the story currently open in the viewer.
@@ -204,14 +209,21 @@ pub fn by_id(id: &str) -> Option<&'static Story> {
 
 const WELCOME_KEY: &str = "welcome_shown";
 
-/// True until the welcome story has been auto-shown on this device.
+/// Reactive: true until the user has opened the welcome story on this device.
+/// The tray circle jiggles while this holds.
 pub fn welcome_pending() -> bool {
-    !app_flags::get_bool(WELCOME_KEY)
+    WELCOME_PENDING_SIG
+        .with(|s| *s.borrow())
+        .map(|sig| sig.get())
+        .unwrap_or(false)
 }
 
-/// Record that the welcome story was auto-shown (so it won't auto-open again).
+/// Record that the welcome story has been opened (stops the jiggle, persists).
 pub fn mark_welcome_shown() {
     app_flags::set(WELCOME_KEY, "true");
+    if let Some(sig) = WELCOME_PENDING_SIG.with(|s| *s.borrow()) {
+        sig.set(false);
+    }
 }
 
 // --- Authored content -------------------------------------------------------

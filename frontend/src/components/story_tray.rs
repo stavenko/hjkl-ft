@@ -53,9 +53,25 @@ fn TrayCircle(story: &'static Story, open: RwSignal<Option<&'static Story>>) -> 
     };
     let badge = story.badge.get();
 
+    // The welcome story jiggles (like the notifications bell) until it's opened,
+    // inviting a brand-new user to tap it.
+    let jiggle = move || {
+        if story.id == "welcome" && stories::welcome_pending() {
+            "dash-bell-jiggle"
+        } else {
+            ""
+        }
+    };
+
     view! {
         <button
-            on:click=move |_| open.set(Some(story))
+            on:click=move |_| {
+                if story.id == "welcome" {
+                    stories::mark_welcome_shown();
+                }
+                open.set(Some(story));
+            }
+            class=jiggle
             style="flex: 0 0 auto; background: none; border: none; padding: 0; cursor: pointer; \
                    width: 68px; height: 68px; position: relative;"
         >

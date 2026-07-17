@@ -477,7 +477,19 @@ const WELCOME: &[Frame] = &[
             ru: "Вот здесь настройте уведомления — чтобы приложение могло напомнить внести данные или сообщить, что программа обновилась.",
         },
     },
-    // 4 — settings / language
+    // 4 — the errors / warning tile
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("welcome-errors.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "re:Norma", ru: "re:Norma" },
+        title: Loc { en: "Problems", ru: "Проблемы" },
+        body: Loc {
+            en: "If anything goes wrong, you'll be able to see it here.",
+            ru: "Если какие-то проблемы произойдут, здесь их можно будет посмотреть.",
+        },
+    },
+    // 5 — settings / language
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("welcome-settings.gif"),
@@ -489,7 +501,7 @@ const WELCOME: &[Frame] = &[
             ru: "Вот здесь вы можете настроить язык. Также там будут обновления.",
         },
     },
-    // 5 — support
+    // 6 — support
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("welcome-support.gif"),
@@ -501,7 +513,7 @@ const WELCOME: &[Frame] = &[
             ru: "А вот здесь чат поддержки. Вам обязательно ответят, но, может быть, придётся подождать.",
         },
     },
-    // 6 — the main thing
+    // 7 — the main thing
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("welcome-main.gif"),

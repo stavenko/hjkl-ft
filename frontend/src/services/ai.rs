@@ -1573,11 +1573,27 @@ fn food_items_prompt() -> String {
 /// `}` and parse it as JSON. On failure return an Err including a truncated snippet.
 fn extract_json_value(raw: &str) -> Result<serde_json::Value, String> {
     let cleaned = strip_code_fences(raw.trim());
-    let start = cleaned.find('{');
-    let end = cleaned.rfind('}');
-    let slice = match (start, end) {
-        (Some(s), Some(e)) if e >= s => &cleaned[s..=e],
-        _ => return Err(format!("no JSON object in model output: {}", snippet(cleaned))),
+    // Take the OUTERMOST JSON container: whichever of `{` / `[` appears first,
+    // matched to the last corresponding `}` / `]`. The model sometimes returns a
+    // bare array instead of the documented object — assuming `{` there would slice
+    // `{a},{b},{c}` out of `[{a},{b},{c}]` and fail with "trailing characters".
+    let obj_start = cleaned.find('{');
+    let arr_start = cleaned.find('[');
+    let (close, start) = match (obj_start, arr_start) {
+        (Some(o), Some(a)) => {
+            if a < o {
+                (']', a)
+            } else {
+                ('}', o)
+            }
+        }
+        (Some(o), None) => ('}', o),
+        (None, Some(a)) => (']', a),
+        (None, None) => return Err(format!("no JSON in model output: {}", snippet(cleaned))),
+    };
+    let slice = match cleaned.rfind(close) {
+        Some(e) if e >= start => &cleaned[start..=e],
+        _ => return Err(format!("unterminated JSON in model output: {}", snippet(cleaned))),
     };
     serde_json::from_str(slice)
         .map_err(|e| format!("JSON parse error: {e}, raw: {}", snippet(cleaned)))
@@ -1629,10 +1645,15 @@ fn parse_label_result(raw: &str) -> Result<QueueResult, String> {
 /// clamp confidence to 0..1 (default 0.0); `inferred` default false.
 fn parse_food_items(raw: &str) -> Result<Vec<DetectedFood>, String> {
     let value = extract_json_value(raw)?;
-    let items = value
-        .get("items")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| format!("no `items` array in model output: {}", snippet(raw)))?;
+    // Accept both the documented `{"items":[…]}` and a bare `[…]` the model
+    // sometimes returns instead.
+    let items = match value.as_array() {
+        Some(arr) => arr,
+        None => value
+            .get("items")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| format!("no `items` array in model output: {}", snippet(raw)))?,
+    };
     let mut out = Vec::with_capacity(items.len());
     for it in items {
         let Some(name) = it.get("name").and_then(|v| v.as_str()) else { continue };
@@ -2028,6 +2049,34 @@ mod tests {
     fn strips_final_marker() {
         assert_eq!(strip_final_marker("[[final]] hello"), "hello");
         assert_eq!(strip_final_marker("plain, no marker"), "plain, no marker");
+    }
+
+    /// The vision model sometimes returns a BARE array instead of the documented
+    /// `{"items":[…]}`. This is the exact shape that produced the user's
+    /// "trailing characters at line 6 column 6" (first-`{`..last-`}` slicing).
+    #[test]
+    fn parses_bare_array_food_items() {
+        let raw = r#"[
+            { "name": "спиральчатый спагетти", "grams": 250, "confidence": 0.9, "inferred": false },
+            { "name": "курица жареная", "grams": 150, "confidence": 0.8, "inferred": false },
+            { "name": "огурец", "grams": 80, "confidence": 0.9, "inferred": false }
+        ]"#;
+        let items = parse_food_items(raw).expect("bare array must parse");
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].name, "спиральчатый спагетти");
+        assert_eq!(items[0].grams, 250.0);
+        assert_eq!(items[1].name, "курица жареная");
+        assert_eq!(items[2].grams, 80.0);
+    }
+
+    /// The documented object shape must keep working (regression guard).
+    #[test]
+    fn parses_items_object_food_items() {
+        let raw = r#"{"items":[{"name":"рис","grams":200,"confidence":0.7}]}"#;
+        let items = parse_food_items(raw).expect("items object must parse");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "рис");
+        assert!(!items[0].inferred);
     }
 
     /// Feed a marker split across arbitrary chunk boundaries; the marker itself

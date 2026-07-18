@@ -241,6 +241,13 @@ pub struct NutrientSpec {
 pub struct AiLookupInput {
     pub name: String,
     pub custom_nutrients: Vec<NutrientSpec>,
+    /// True when the name came from a food PHOTO where the estimated grams are the
+    /// COOKED / as-served portion on the plate. The nutrition lookup must then
+    /// value the food in its cooked/ready-to-eat state (e.g. boiled pasta ~130
+    /// kcal/100 g), NOT the raw/dry product (~350) — otherwise a cooked portion
+    /// weight × raw density over-counts calories ~2–3×.
+    #[serde(default)]
+    pub as_served: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

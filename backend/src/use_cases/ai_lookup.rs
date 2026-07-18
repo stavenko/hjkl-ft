@@ -66,9 +66,19 @@ pub async fn lookup(executor: &Qwen, input: AiLookupInput) -> Result<AiLookupOut
         )
     };
 
+    // When the name came from a food PHOTO the grams are the cooked/as-served
+    // portion, so per-100 g values must be for the cooked food (not raw/dry) —
+    // else a cooked weight × raw density over-counts calories ~2–3×.
+    let form_part = if input.as_served {
+        " This food was photographed on a plate, ready to eat: give values for the \
+         COOKED / as-served state (e.g. boiled pasta ~130 kcal/100 g, not dry ~350), \
+         even if the name sounds like a raw ingredient.\n\n"
+    } else {
+        "\n\n"
+    };
     let prompt = format!(
         "You are a nutritional database. For the food item \"{name}\", provide nutritional \
-         values per 100 grams.\n\n\
+         values per 100 grams.{form}\
          For each nutrient (kcal, protein, fat, carbs{custom}), provide:\n\
          - min_value: lowest reasonable value for this food\n\
          - max_value: highest reasonable value for this food\n\
@@ -78,6 +88,7 @@ pub async fn lookup(executor: &Qwen, input: AiLookupInput) -> Result<AiLookupOut
          All values are per 100g of the product.",
         name = input.name,
         custom = custom_part,
+        form = form_part,
     );
 
     tracing::info!("AI lookup for: {}", input.name);

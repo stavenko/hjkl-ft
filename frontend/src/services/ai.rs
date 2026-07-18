@@ -158,6 +158,23 @@ pub async fn lookup(
         crate::services::i18n::Lang::Ru => "Russian",
         crate::services::i18n::Lang::En => "English",
     };
+    // "Form of the product" clause. For a plain name/description we default to the
+    // RAW / as-sold product (you weigh dry rice/pasta before cooking). But when the
+    // name came from a food PHOTO, the grams are the COOKED portion on the plate, so
+    // the per-100 g values MUST be for the cooked / ready-to-eat food — otherwise a
+    // cooked weight × raw density over-counts calories ~2–3× (dry pasta ~350 vs
+    // boiled ~130 kcal/100 g).
+    let form_part = if input.as_served {
+        "Form of the product: this food was photographed ON A PLATE, ready to eat, and \
+         its weight is the COOKED / as-served portion. Give values for the food in its \
+         COOKED / ready-to-eat state (e.g. boiled pasta ~130 kcal/100 g, boiled rice \
+         ~120, NOT the dry product), even if the name alone sounds like a raw ingredient."
+    } else {
+        "Form of the product: for items bought and weighed raw/dry (grains, rice, pasta, \
+         flour, meat, fish, legumes, etc.), give values for the RAW / as-sold product — \
+         NOT cooked — unless the input says cooked, boiled, fried, steamed, ready-to-eat, \
+         or clearly describes a prepared dish."
+    };
     let prompt = format!(
         "You are a nutritional database. The user's input may be a plain food NAME (e.g. \
          «яйцо», «рис», «гречка») OR a free-form DESCRIPTION of a dish, possibly with added \
@@ -171,10 +188,7 @@ pub async fn lookup(
          concisely within this limit.\n\n\
          Then provide nutritional values per 100 GRAMS of the resulting food/dish (account for \
          the added ingredients — e.g. the oil raises fat and kcal).\n\n\
-         Form of the product: for items bought and weighed raw/dry (grains, rice, pasta, flour, \
-         meat, fish, legumes, etc.), give values for the RAW / as-sold product — NOT cooked — \
-         unless the input says cooked, boiled, fried, steamed, ready-to-eat, or clearly \
-         describes a prepared dish.\n\n\
+         {form}\n\n\
          For each nutrient (kcal, protein, fat, carbs{custom}), provide:\n\
          - min_value: lowest reasonable value for this food\n\
          - max_value: highest reasonable value for this food\n\
@@ -191,6 +205,7 @@ pub async fn lookup(
         name = input.name,
         custom = custom_part,
         lang = lang,
+        form = form_part,
     );
 
     let key_to_name: BTreeMap<String, String> = input

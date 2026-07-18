@@ -26,6 +26,8 @@ pub async fn ai_vision(
             let lookup_input = AiLookupInput {
                 name: product_name,
                 custom_nutrients,
+                // Packaged-label product → as-sold semantics (not a cooked plate).
+                as_served: false,
             };
             match use_cases::ai_lookup::lookup(&llm_executor, lookup_input).await {
                 Ok(nutrient_result) => {

@@ -520,7 +520,7 @@ pub fn FoodEditor(
                         if phase.get_untracked() != 2 { phase.set(2); }
                     }
                 };
-                let input = AiLookupInput { name: n, custom_nutrients: nutrients_list };
+                let input = AiLookupInput { name: n, custom_nutrients: nutrients_list, as_served: false };
                 let result = ai::lookup(&input, on_token).await;
                 match result {
                     Ok(output) => {
@@ -704,7 +704,9 @@ pub fn FoodEditor(
                         if conf < 0.8 { row.suggested.set(true); }
                     } else {
                         // No confident match → look up per-100g КБЖУ by name.
-                        let input = AiLookupInput { name: det.name.clone(), custom_nutrients: nutrients_list };
+                        // From a food PHOTO: `det.grams` is the cooked/as-served portion,
+                        // so КБЖУ must be for the cooked food (not the raw/dry product).
+                        let input = AiLookupInput { name: det.name.clone(), custom_nutrients: nutrients_list, as_served: true };
                         match ai::lookup(&input, |_| {}).await {
                             Ok(out) => {
                                 if let Some(n) = out.name { row.name.set(n); }

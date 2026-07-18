@@ -128,6 +128,78 @@ fn build_executor_think(think: bool) -> Result<Qwen, String> {
     Ok(executor)
 }
 
+/// Shared skeleton for both nutrition-lookup prompts. The only thing that differs
+/// between the two use cases is `form_clause` (raw/as-sold vs cooked/as-served),
+/// so the identical structure (naming rules, per-100 g, JSON contract) lives here
+/// and the two named builders below supply their clause.
+fn build_nutrition_prompt(name: &str, custom: &str, lang: &str, form_clause: &str) -> String {
+    format!(
+        "You are a nutritional database. The user's input may be a plain food NAME (e.g. \
+         «яйцо», «рис», «гречка») OR a free-form DESCRIPTION of a dish, possibly with added \
+         ingredients (e.g. «жареная курица, добавил немного лука, чайную ложку масла»). \
+         Input: \"{name}\".\n\n\
+         First, set \"product_name\" to a SHORT dish/product name in {lang}. HARD LIMIT: at most \
+         THREE words, ideally TWO; a third word ONLY when indispensable to identify the dish. \
+         Do NOT list the added ingredients in the name — name only the core dish. Good examples \
+         (2–3 words): «Жареная курица», «Куриная грудка», «Овсяная каша», «Гречка с грибами». \
+         For a plain name, keep it (tidied); for a description, name the resulting core dish \
+         concisely within this limit.\n\n\
+         Then provide nutritional values per 100 GRAMS of the resulting food/dish (account for \
+         the added ingredients — e.g. the oil raises fat and kcal).\n\n\
+         {form}\n\n\
+         For each nutrient (kcal, protein, fat, carbs{custom}), provide:\n\
+         - min_value: lowest reasonable value for this food\n\
+         - max_value: highest reasonable value for this food\n\
+         - recommended: the most likely value to select\n\
+         - comment: brief explanation why this value is appropriate, written in {lang}\n\n\
+         Use these units: kcal for calories, g/mg/mkg/kg for weights.\n\
+         All values are per 100g. Compute real values specifically for the input — do not \
+         copy any sample numbers.\n\n\
+         Respond with ONLY a single minified JSON object and nothing else — no markdown, no \
+         prose before or after. Include \"product_name\" as a string. EVERY key and EVERY \
+         string value MUST be wrapped in double quotes. EVERY `value` MUST be a real number \
+         (e.g. 12.5), never empty or null. Custom nutrients go in the \"custom_nutrients\" \
+         object (use {{}} if none).",
+        name = name,
+        custom = custom,
+        lang = lang,
+        form = form_clause,
+    )
+}
+
+/// USE CASE 1 — «поиск по названию/описанию»: the user TYPED a food name or a
+/// free-form description and enters/edits the weight themselves. People weigh food
+/// AS BOUGHT, so values are for the RAW / as-sold product (dry pasta ~370, raw
+/// meat) unless the text itself says cooked. Used by the manual food-entry lookup.
+fn lookup_prompt_by_name(name: &str, custom: &str, lang: &str) -> String {
+    build_nutrition_prompt(
+        name,
+        custom,
+        lang,
+        "Form of the product: for items bought and weighed raw/dry (grains, rice, pasta, \
+         flour, meat, fish, legumes, etc.), give values for the RAW / as-sold product — \
+         NOT cooked — unless the input says cooked, boiled, fried, steamed, ready-to-eat, \
+         or clearly describes a prepared dish.",
+    )
+}
+
+/// USE CASE 2 — «распознавание по фото тарелки»: the food name came from a PLATE
+/// PHOTO and the estimated grams are the COOKED / as-served portion. Values must be
+/// for the cooked / ready-to-eat food (boiled pasta ~130 kcal/100 g, not dry ~370),
+/// else a cooked-portion weight × raw density over-counts calories ~2–3×. Used by
+/// the food-photo detection lookup.
+fn lookup_prompt_from_photo(name: &str, custom: &str, lang: &str) -> String {
+    build_nutrition_prompt(
+        name,
+        custom,
+        lang,
+        "Form of the product: this food was photographed ON A PLATE, ready to eat, and \
+         its weight is the COOKED / as-served portion. Give values for the food in its \
+         COOKED / ready-to-eat state (e.g. boiled pasta ~130 kcal/100 g, boiled rice \
+         ~120, NOT the dry product), even if the name alone sounds like a raw ingredient.",
+    )
+}
+
 pub async fn lookup(
     input: &AiLookupInput,
     on_token: impl Fn(AiPhase) + Clone + 'static,
@@ -158,55 +230,13 @@ pub async fn lookup(
         crate::services::i18n::Lang::Ru => "Russian",
         crate::services::i18n::Lang::En => "English",
     };
-    // "Form of the product" clause. For a plain name/description we default to the
-    // RAW / as-sold product (you weigh dry rice/pasta before cooking). But when the
-    // name came from a food PHOTO, the grams are the COOKED portion on the plate, so
-    // the per-100 g values MUST be for the cooked / ready-to-eat food — otherwise a
-    // cooked weight × raw density over-counts calories ~2–3× (dry pasta ~350 vs
-    // boiled ~130 kcal/100 g).
-    let form_part = if input.as_served {
-        "Form of the product: this food was photographed ON A PLATE, ready to eat, and \
-         its weight is the COOKED / as-served portion. Give values for the food in its \
-         COOKED / ready-to-eat state (e.g. boiled pasta ~130 kcal/100 g, boiled rice \
-         ~120, NOT the dry product), even if the name alone sounds like a raw ingredient."
+    // Two distinct prompts for two distinct use cases (see each fn's doc). The
+    // `as_served` flag on the input selects which — set by the calling feature.
+    let prompt = if input.as_served {
+        lookup_prompt_from_photo(&input.name, &custom_part, lang)
     } else {
-        "Form of the product: for items bought and weighed raw/dry (grains, rice, pasta, \
-         flour, meat, fish, legumes, etc.), give values for the RAW / as-sold product — \
-         NOT cooked — unless the input says cooked, boiled, fried, steamed, ready-to-eat, \
-         or clearly describes a prepared dish."
+        lookup_prompt_by_name(&input.name, &custom_part, lang)
     };
-    let prompt = format!(
-        "You are a nutritional database. The user's input may be a plain food NAME (e.g. \
-         «яйцо», «рис», «гречка») OR a free-form DESCRIPTION of a dish, possibly with added \
-         ingredients (e.g. «жареная курица, добавил немного лука, чайную ложку масла»). \
-         Input: \"{name}\".\n\n\
-         First, set \"product_name\" to a SHORT dish/product name in {lang}. HARD LIMIT: at most \
-         THREE words, ideally TWO; a third word ONLY when indispensable to identify the dish. \
-         Do NOT list the added ingredients in the name — name only the core dish. Good examples \
-         (2–3 words): «Жареная курица», «Куриная грудка», «Овсяная каша», «Гречка с грибами». \
-         For a plain name, keep it (tidied); for a description, name the resulting core dish \
-         concisely within this limit.\n\n\
-         Then provide nutritional values per 100 GRAMS of the resulting food/dish (account for \
-         the added ingredients — e.g. the oil raises fat and kcal).\n\n\
-         {form}\n\n\
-         For each nutrient (kcal, protein, fat, carbs{custom}), provide:\n\
-         - min_value: lowest reasonable value for this food\n\
-         - max_value: highest reasonable value for this food\n\
-         - recommended: the most likely value to select\n\
-         - comment: brief explanation why this value is appropriate, written in {lang}\n\n\
-         Use these units: kcal for calories, g/mg/mkg/kg for weights.\n\
-         All values are per 100g. Compute real values specifically for the input — do not \
-         copy any sample numbers.\n\n\
-         Respond with ONLY a single minified JSON object and nothing else — no markdown, no \
-         prose before or after. Include \"product_name\" as a string. EVERY key and EVERY \
-         string value MUST be wrapped in double quotes. EVERY `value` MUST be a real number \
-         (e.g. 12.5), never empty or null. Custom nutrients go in the \"custom_nutrients\" \
-         object (use {{}} if none).",
-        name = input.name,
-        custom = custom_part,
-        lang = lang,
-        form = form_part,
-    );
 
     let key_to_name: BTreeMap<String, String> = input
         .custom_nutrients

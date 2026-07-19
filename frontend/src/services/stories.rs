@@ -360,7 +360,7 @@ const S1: &[Frame] = &[
             ru: "Внизу нажмите «Дневник».",
         },
     },
-    // 10 — food: add an entry (highlight the green «+» button)
+    // 10 — food: add an entry (highlight a meal panel's «+»)
     Frame {
         bg: Bg::Dark,
         media: Media::Shot("diary-plus.gif"),
@@ -368,8 +368,8 @@ const S1: &[Frame] = &[
         kicker: Loc { en: "Food", ru: "Еда" },
         title: Loc { en: "Add an entry", ru: "Добавьте запись" },
         body: Loc {
-            en: "Tap the green «+» button.",
-            ru: "Нажмите зелёную кнопку «+».",
+            en: "Tap «+» on a meal — breakfast, lunch or dinner (or its title).",
+            ru: "Нажмите «+» на приёме — завтрак, обед или ужин (или на его названии).",
         },
     },
     // 11 — food: new product (highlight «Добавить новый продукт»)

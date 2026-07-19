@@ -10,6 +10,7 @@ use api_types::{Food, Goal, NutrientSpec, StepEntry, WeightEntry};
 use crate::components::food_list_item::FoodListItem;
 use crate::components::food_picker::FoodPicker;
 use crate::components::food_editor::FoodEditor;
+use crate::components::meal_panel::MealPanel;
 use crate::components::weight_widget::{EmptyPrompt, WeightWidget};
 use crate::components::steps_widget::StepsWidget;
 use crate::services::i18n::t;
@@ -86,9 +87,9 @@ pub fn HelpFoodPage() -> impl IntoView {
         {back_bar()}
         <h1 class="is-size-4 has-text-weight-bold" style="margin: 0 0 10px;">{move || t("help.food.title")}</h1>
 
-        // Show that you need the Diary tab and the «+» button.
+        // Show the Diary tab and the per-meal «+» buttons.
         <p class="is-size-6" style="line-height: 1.5; margin-bottom: 10px;">{move || t("help.food.where_text")}</p>
-        {fab_demo()}
+        {meal_panels_demo()}
 
         // There is no global product base — you build your own.
         <p class="is-size-6" style="line-height: 1.5; margin: 14px 0 4px;">{move || t("help.food.no_base")}</p>
@@ -182,14 +183,24 @@ fn grams_row_demo() -> impl IntoView {
 const FRAME: &str = "background: var(--bulma-background); border-radius: 12px; \
     padding: 14px; pointer-events: none;";
 
-/// Inert copy of the real diary «+» FAB.
-fn fab_demo() -> impl IntoView {
+/// Inert copy of the diary's three meal panels the way an empty day looks —
+/// each meal (breakfast / lunch / dinner) is a header with its «+». Renders the
+/// REAL `MealPanel`, wrapped in a `pointer-events: none` frame so it's inert.
+fn meal_panels_demo() -> impl IntoView {
+    let meals = [
+        ("meal.breakfast", "breakfast", "#D99A2B"),
+        ("meal.lunch", "lunch", "#4FA96A"),
+        ("meal.dinner", "dinner", "#6C7DC4"),
+    ];
     view! {
-        <div style=format!("{DEMO} pointer-events: none;")>
-            <button class="button is-success is-rounded"
-                style="width: 3.5rem; height: 3.5rem; font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); border: none;">
-                "+"
-            </button>
+        <div style=format!("{DEMO} flex-direction: column; align-items: stretch; gap: 0; padding: 12px; pointer-events: none;")>
+            {meals.into_iter().map(|(name_key, key, accent)| view! {
+                <MealPanel title=t(name_key).to_string() accent=accent.to_string()
+                    meal_key=key.to_string() can_add=true is_empty=true
+                    kcal=0.0 protein=0.0 fat=0.0 carbs=0.0>
+                    {Vec::<View>::new()}
+                </MealPanel>
+            }).collect_view()}
         </div>
     }
 }

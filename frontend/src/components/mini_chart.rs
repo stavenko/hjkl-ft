@@ -43,12 +43,20 @@ pub fn chart_block(dates: &[&str], values: &[f64]) -> String {
 /// tiles where a count-per-day reads better as bars than a line (e.g. steps).
 /// Bars grow from a zero baseline. Empty data draws the same axes placeholder.
 pub fn bar_block(dates: &[&str], values: &[f64]) -> String {
+    bar_block_with_line(dates, values, None)
+}
+
+/// Like [`bar_block`], but also draws a horizontal target line at `line` (e.g. the
+/// steps planka). The line is included in the vertical scale so it always fits, and
+/// the bars scale to `max(tallest day, line)` — so you can see how far a day falls
+/// below the planka.
+pub fn bar_block_with_line(dates: &[&str], values: &[f64], line: Option<f64>) -> String {
     if values.is_empty() {
         return format!(
             r#"<div><svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">{AXES}</svg><div style="{LABEL_ROW}"><span></span><span></span></div></div>"#
         );
     }
-    let svg = bar_chart_svg(values);
+    let svg = bar_chart_svg(values, line);
     let first = short_date(dates.first().copied().unwrap_or(""));
     let last = if dates.len() > 1 {
         short_date(dates.last().copied().unwrap_or(""))
@@ -60,12 +68,18 @@ pub fn bar_block(dates: &[&str], values: &[f64]) -> String {
     )
 }
 
-fn bar_chart_svg(values: &[f64]) -> String {
+fn bar_chart_svg(values: &[f64], line: Option<f64>) -> String {
     let w = 300.0_f64;
     let h = 80.0_f64;
     let n = values.len();
-    // Bars grow from zero, scaled to the tallest day.
-    let max_val = values.iter().copied().fold(0.0_f64, f64::max).max(1.0);
+    // Bars grow from zero, scaled to the tallest day OR the target line (so the
+    // planka line always fits on the chart).
+    let max_val = values
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        .max(line.unwrap_or(0.0))
+        .max(1.0);
 
     let slot = w / n as f64;
     let bar_w = (slot * 0.6).max(1.0);
@@ -88,10 +102,21 @@ fn bar_chart_svg(values: &[f64]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
+    // Horizontal target line (the step planka), drawn ON TOP of the bars.
+    let target = line
+        .map(|p| {
+            let y = h - (p / max_val) * h;
+            format!(
+                r#"<line x1="0" y1="{y:.1}" x2="{w:.0}" y2="{y:.1}" stroke="var(--bulma-success)" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>"#
+            )
+        })
+        .unwrap_or_default();
+
     format!(
         r#"<svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">
   {AXES}
   {bars}
+  {target}
 </svg>"#
     )
 }

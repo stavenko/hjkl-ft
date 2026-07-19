@@ -225,6 +225,48 @@ pub fn by_id(id: &str) -> Option<&'static Story> {
     STORIES.iter().find(|s| s.id == id)
 }
 
+/// Every bundled image referenced by any story frame (`/story-img/…`).
+fn all_image_paths() -> Vec<String> {
+    let mut set = std::collections::BTreeSet::new();
+    for story in STORIES {
+        for f in story.frames {
+            match f.media {
+                Media::Shot(p) | Media::ShotUp(p, _) => {
+                    set.insert(format!("/story-img/{p}"));
+                }
+                Media::Chart => {
+                    set.insert("/story-img/weight-chart.svg".to_string());
+                }
+                Media::None | Media::Emoji(_) => {}
+            }
+            if let Bg::Photo(p) = f.bg {
+                set.insert(format!("/story-img/{p}"));
+            }
+        }
+    }
+    set.into_iter().collect()
+}
+
+/// Warm the cache for every story image so the FIRST story open shows them
+/// instantly instead of fetching each on demand (the "loads from outside" flash).
+/// Fire-and-forget: fetches each same-origin asset in the background; the service
+/// worker caches every response cache-first thereafter. Idempotent and cheap —
+/// call once after launch, off the critical path.
+pub fn prefetch_images() {
+    let paths = all_image_paths();
+    wasm_bindgen_futures::spawn_local(async move {
+        for p in paths {
+            let opts = web_sys::RequestInit::new();
+            opts.set_method("GET");
+            let Ok(req) = web_sys::Request::new_with_str_and_init(&p, &opts) else { continue };
+            let Some(window) = web_sys::window() else { break };
+            // Await each so we don't fire a burst of parallel requests at launch;
+            // errors (offline) are ignored — the on-demand fetch remains the fallback.
+            let _ = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&req)).await;
+        }
+    });
+}
+
 // --- Welcome story auto-open (once, on first launch) ------------------------
 
 const WELCOME_KEY: &str = "welcome_shown";

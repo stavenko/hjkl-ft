@@ -93,6 +93,11 @@ async fn bootstrap_network() {
     // 2. Probe reachability: AI worker → is_online; secondary workers → degraded.
     services::net::probe().await;
 
+    // Warm the story-image cache from the same origin so the first story open isn't
+    // a from-network flash. Independent of worker reachability — the assets are
+    // bundled and served locally, so this runs regardless of `online_now()`.
+    services::stories::prefetch_images();
+
     // 3. Server reachable → begin network interactions.
     if services::net::online_now() {
         // First update check right after establishing the connection.

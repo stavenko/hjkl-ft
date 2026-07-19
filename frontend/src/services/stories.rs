@@ -483,7 +483,7 @@ const S1: &[Frame] = &[
     // 20 — always log oils
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("oils-collage.png"),
         accent: AMBER,
         kicker: Loc { en: "Important", ru: "Важно" },
         title: Loc { en: "Log the oils", ru: "Записывайте масла" },

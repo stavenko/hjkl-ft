@@ -272,8 +272,8 @@ const S1: &[Frame] = &[
         kicker: Loc { en: "Weight", ru: "Вес" },
         title: Loc { en: "Start with weight", ru: "Начинаем с веса" },
         body: Loc {
-            en: "Weigh in once, in the morning. On the home screen tap the «Weight» widget.",
-            ru: "Взвешивайтесь один раз, с утра. На главном экране нажмите на виджет «Вес».",
+            en: "Weigh in every day, in the morning. On the home screen tap the «Weight» widget.",
+            ru: "Взвешивайтесь каждый день с утра. На главном экране нажмите на виджет «Вес».",
         },
     },
     // 3 — weight: the widget expands, with the «Взвеситься» button

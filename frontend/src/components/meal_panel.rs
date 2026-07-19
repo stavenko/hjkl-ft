@@ -116,24 +116,20 @@ pub fn MealPanel(
                     }>
                         <span class="is-size-7 has-text-grey">{macro_line}</span>
                     </div>
-                    // Footer: collapse / expand toggle.
-                    <div style=move || format!(
-                        "display: flex; justify-content: center; padding: 0.15rem 0 0.35rem; border-top: 1px solid {divider};"
+                    // Footer: collapse / expand toggle — icon only, right-aligned.
+                    <div style=format!(
+                        "display: flex; justify-content: flex-end; padding: 0.1rem 0.4rem 0.25rem; border-top: 1px solid {divider};"
                     )>
                         <button
                             class="button is-ghost is-small has-text-grey"
-                            style="text-decoration: none; height: auto;"
+                            style="text-decoration: none; height: auto; padding: 0.25rem 0.5rem;"
+                            aria-label=move || if collapsed.get() { t("diary.expand") } else { t("diary.collapse") }
                             on:click=move |_| collapsed.update(|c| *c = !*c)
                         >
-                            <span style=move || format!(
-                                "display: inline-flex; align-items: center; gap: 0.35rem; transition: none;"
-                            )>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                                    style=move || format!("transform: rotate({}deg);", if collapsed.get() { 180 } else { 0 })>
-                                    <polyline points="18 15 12 9 6 15"/>
-                                </svg>
-                                {move || if collapsed.get() { t("diary.expand") } else { t("diary.collapse") }}
-                            </span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                                style=move || format!("transform: rotate({}deg);", if collapsed.get() { 180 } else { 0 })>
+                                <polyline points="18 15 12 9 6 15"/>
+                            </svg>
                         </button>
                     </div>
                 }

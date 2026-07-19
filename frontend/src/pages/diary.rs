@@ -499,7 +499,9 @@ pub fn DiaryPage() -> impl IntoView {
                           // Single diary row. Identical regardless of grouping:
                           // the meal-split path interleaves headers between calls
                           // to this, the flat path just maps over it directly.
-                          let render_row = move |entry: DiaryEntry| -> View {
+                          // `is_last` suppresses the row divider on the final row so
+                          // dividers sit only BETWEEN entries, not after the last one.
+                          let render_row = move |entry: DiaryEntry, is_last: bool| -> View {
                             let entry_id = entry.id.clone();
                             let entry_id2 = entry.id.clone();
                             let fid = entry.food_id.clone();
@@ -513,7 +515,7 @@ pub fn DiaryPage() -> impl IntoView {
                             // belongs to (its label, or derived from its time).
                             let meal_key = Some(crate::services::meal_split::meal_key_for(&entry).to_string());
                             view! {
-                                    <div style="display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--bulma-border-weak);">
+                                    <div style=format!("display: flex; align-items: center; padding: 0.5rem 0;{}", if is_last { "" } else { " border-bottom: 1px solid var(--bulma-border-weak);" })>
                                         <div style="flex: 1; min-width: 0; overflow-wrap: break-word;">
                                             <span class="is-size-6 has-text-weight-medium"
                                                 style=move || if foods().iter().any(|f| f.id == fid5 && f.is_restaurant) { crate::components::food_list_item::RESTAURANT_NAME_STYLE } else { "" }>
@@ -746,7 +748,9 @@ pub fn DiaryPage() -> impl IntoView {
                               let fat = nutrient_sum("Fat", &meal_entries, &fs);
                               let carbs = nutrient_sum("Carbs", &meal_entries, &fs);
                               let is_empty = meal_entries.is_empty();
-                              let rows = meal_entries.into_iter().map(|e| render_row(e)).collect::<Vec<_>>();
+                              let n = meal_entries.len();
+                              let rows = meal_entries.into_iter().enumerate()
+                                  .map(|(i, e)| render_row(e, i + 1 == n)).collect::<Vec<_>>();
                               Some(view! {
                                   <MealPanel title=title accent=accent meal_key=meal.key.to_string()
                                       can_add=today is_empty=is_empty

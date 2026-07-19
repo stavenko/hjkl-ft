@@ -360,8 +360,25 @@ pub fn ProgressWidget() -> impl IntoView {
                         // indicators — hidden once the week (7 green days) is cleared.
                         let green = gate_s().unwrap_or(0);
                         let gate_caption = (green < indicators::GREEN_GATE_DAYS).then(|| {
+                            // Show DAYS REMAINING (not "5/7", which read ambiguously as
+                            // done-or-left). Russian day-word agrees with the number.
+                            let left = indicators::GREEN_GATE_DAYS.saturating_sub(green);
+                            let word = match crate::services::i18n::get_lang() {
+                                crate::services::i18n::Lang::En => if left == 1 { "day" } else { "days" },
+                                crate::services::i18n::Lang::Ru => {
+                                    let (d10, d100) = (left % 10, left % 100);
+                                    if d10 == 1 && d100 != 11 {
+                                        "день"
+                                    } else if (2..=4).contains(&d10) && !(12..=14).contains(&d100) {
+                                        "дня"
+                                    } else {
+                                        "дней"
+                                    }
+                                }
+                            };
                             let progress = t("dashboard.progress.gate_progress")
-                                .replace("{n}", &green.to_string());
+                                .replace("{n}", &left.to_string())
+                                .replace("{w}", word);
                             view! {
                                 <div style="display: flex; flex-direction: column; gap: 2px;">
                                     <span class="is-size-7 has-text-weight-semibold">

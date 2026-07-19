@@ -257,8 +257,8 @@ fn FrameView(frame: Frame) -> impl IntoView {
             </div>
         }.into_view(),
         Media::Shot(p) => view! {
-            <div style="position: absolute; top: 3%; left: 0; right: 0; bottom: 53%; z-index: 1; \
-                        display: flex; align-items: center; justify-content: center; padding: 0 28px;">
+            <div style="position: absolute; top: 2%; left: 0; right: 0; bottom: 34%; z-index: 1; \
+                        display: flex; align-items: center; justify-content: center; padding: 0 12px;">
                 <img src=format!("/story-img/{p}")
                     style="max-width: 100%; max-height: 100%; border-radius: 18px; \
                            box-shadow: 0 18px 50px rgba(0,0,0,0.5);" />

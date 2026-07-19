@@ -471,7 +471,7 @@ const S1: &[Frame] = &[
     // 19 — always log caloric drinks
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("drinks-collage.png"),
         accent: AMBER,
         kicker: Loc { en: "Important", ru: "Важно" },
         title: Loc { en: "Log caloric drinks", ru: "Записывайте напитки" },

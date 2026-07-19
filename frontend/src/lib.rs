@@ -117,6 +117,9 @@ async fn bootstrap_network() {
         leptos::spawn_local(services::classify::sweep_diary_unclassified());
         leptos::spawn_local(services::classify::sweep_recipe_ingredients());
     }
+    // Open the activity week if the week-2 gate is now cleared (local-only; runs
+    // regardless of connectivity).
+    services::indicators::maybe_unlock_activity_week().await;
 }
 
 #[cfg(not(test))]

@@ -1450,7 +1450,47 @@ pub async fn save_steps(date: &str, steps: u32) -> api_types::StepEntry {
         db::put("step_entries", &entry).await;
         entry
     };
+    // Steps are ONE final value per day, so the step indicator is rewritten right
+    // here (write-through) — the ONLY moment it recomputes. Editing an old day (e.g.
+    // logging yesterday today) rewrites that day's row against the current planka.
+    crate::services::indicators::record_steps(date).await;
+    // Logging steps may be the data that finally lets the activity week open (its
+    // planka needs step history), so re-check the unlock here too.
+    crate::services::indicators::maybe_unlock_activity_week().await;
     entry
+}
+
+/// Steps logged on `date` as an `f64` (0 if none) — the value the step indicator
+/// compares to the planka.
+pub async fn steps_on(date: &str) -> f64 {
+    get_steps_for_date(date).await.map(|e| e.steps as f64).unwrap_or(0.0)
+}
+
+/// The steps planka for this user from their ENTIRE step history: the average daily
+/// steps over all logged days, mapped to a discipline target —
+///   avg < 3000          → 7000
+///   3000 ≤ avg < 10000  → 10000
+///   avg ≥ 10000         → the average rounded UP to the nearest 100
+/// `None` when there is no step data at all yet.
+pub async fn steps_planka_from_history() -> Option<u32> {
+    let entries = list_step_entries().await;
+    if entries.is_empty() {
+        return None;
+    }
+    let total: u64 = entries.iter().map(|e| e.steps as u64).sum();
+    let avg = total as f64 / entries.len() as f64;
+    Some(steps_planka_for_avg(avg))
+}
+
+/// Pure band mapping for the steps planka (unit-tested).
+pub fn steps_planka_for_avg(avg: f64) -> u32 {
+    if avg < 3000.0 {
+        7000
+    } else if avg < 10000.0 {
+        10000
+    } else {
+        (((avg / 100.0).ceil()) as u32) * 100
+    }
 }
 
 pub async fn get_steps_for_date(date: &str) -> Option<api_types::StepEntry> {
@@ -1500,7 +1540,23 @@ pub async fn list_progress_photos() -> Vec<ProgressPhoto> {
 #[cfg(test)]
 mod tests {
     use super::calorie_planka;
+    use super::steps_planka_for_avg;
     use crate::services::weight_trend::BalanceState;
+
+    #[test]
+    fn steps_planka_bands() {
+        // < 3000 → 7000 (start small).
+        assert_eq!(steps_planka_for_avg(0.0), 7000);
+        assert_eq!(steps_planka_for_avg(2999.0), 7000);
+        // 3000..10000 → 10000.
+        assert_eq!(steps_planka_for_avg(3000.0), 10000);
+        assert_eq!(steps_planka_for_avg(9999.0), 10000);
+        // ≥ 10000 → average rounded UP to the nearest 100.
+        assert_eq!(steps_planka_for_avg(10000.0), 10000);
+        assert_eq!(steps_planka_for_avg(10001.0), 10100);
+        assert_eq!(steps_planka_for_avg(12345.0), 12400);
+        assert_eq!(steps_planka_for_avg(15000.0), 15000);
+    }
 
     #[test]
     fn calorie_planka_deficit_is_avg_rounded_to_50() {

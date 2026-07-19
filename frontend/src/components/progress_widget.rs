@@ -352,9 +352,9 @@ pub fn ProgressWidget() -> impl IntoView {
                     {(has_food_v).then(|| {
                         let states: std::collections::HashMap<&'static str, IndicatorState> =
                             inds_s().unwrap_or_default().into_iter().collect();
-                        let row: Vec<(&'static str, IndicatorState)> = indicators::UNLOCKED_INDICATORS
-                            .iter()
-                            .map(|k| (*k, states.get(k).copied().unwrap_or(IndicatorState::Unknown)))
+                        let row: Vec<(&'static str, IndicatorState)> = indicators::displayed_indicators()
+                            .into_iter()
+                            .map(|k| (k, states.get(k).copied().unwrap_or(IndicatorState::Unknown)))
                             .collect();
                         // "Keep them green" gate caption, right before the
                         // indicators — hidden once the week (7 green days) is cleared.

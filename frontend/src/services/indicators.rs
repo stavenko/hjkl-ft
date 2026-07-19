@@ -145,7 +145,52 @@ pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
 // time; today only the week-1 set. Calories is the planka gauge (drawn directly by
 // the widget, not via `daily_gauges`).
 pub const UNLOCKED_GAUGES: &[&str] = &["protein", "veg_fruit"];
+/// The week-2 indicators — ALSO the set the "keep green 7 days" gate watches. The
+/// step indicator is NOT here: it's added to the DISPLAY by [`displayed_indicators`]
+/// once the activity week unlocks, and gets its OWN separate gate.
 pub const UNLOCKED_INDICATORS: &[&str] = &["protein", "veg_fruit"];
+
+/// App-flag: the activity week (step planka + step indicator) has been unlocked.
+const ACTIVITY_UNLOCKED_KEY: &str = "activity_week_unlocked";
+
+/// Whether the activity week is unlocked (step indicator visible).
+pub fn activity_unlocked() -> bool {
+    crate::services::app_flags::get_bool(ACTIVITY_UNLOCKED_KEY)
+}
+
+/// Indicators shown in the widget (icons + histograms), in display order: the
+/// week-2 set plus `steps` once the activity week is unlocked. NB: distinct from
+/// the gate set (`UNLOCKED_INDICATORS`) — steps has its own gate, so adding it to
+/// the display must NOT change the protein/veg-fruit gate.
+pub fn displayed_indicators() -> Vec<&'static str> {
+    let mut v: Vec<&'static str> = UNLOCKED_INDICATORS.to_vec();
+    if activity_unlocked() {
+        v.push("steps");
+    }
+    v
+}
+
+/// Unlock the activity week once the week-2 gate (protein + veg-fruit green for a
+/// week) is cleared: compute the step planka from the whole history and set it as
+/// the daily Steps goal, then flip the flag so the step indicator appears and its
+/// own gate begins. Idempotent (guarded by the flag) and a no-op until there is
+/// step data to base a planka on. Call on launch and after step/diary saves.
+pub async fn maybe_unlock_activity_week() {
+    if activity_unlocked() {
+        return;
+    }
+    if green_gate_progress().await < GREEN_GATE_DAYS {
+        return; // week-2 gate not cleared yet
+    }
+    let Some(planka) = local::steps_planka_from_history().await else {
+        return; // no step history yet → can't set a planka; wait for data
+    };
+    local::set_steps_goal(planka as f64).await;
+    // Anchor the step gate at today so "hold steps a week" counts from now.
+    let today = crate::services::local::today_date();
+    crate::services::app_flags::set(STEPS_GATE_OPEN_KEY, &fmt(today));
+    crate::services::app_flags::set_bool(ACTIVITY_UNLOCKED_KEY, true);
+}
 
 // ── Per-indicator per-day cache ──────────────────────────────────────────────
 // Each cacheable indicator has its OWN store (`ind_<key>`), keyed by date, holding
@@ -169,13 +214,14 @@ struct IndDay {
 
 /// Indicator keys that have a per-day cache store. Keep in sync with the `ind_*`
 /// object stores in `db::builder` and with [`invalidate_day`]/[`clear_cache`].
-const CACHED_STORES: &[&str] = &["ind_protein", "ind_veg_fruit"];
+const CACHED_STORES: &[&str] = &["ind_protein", "ind_veg_fruit", "ind_steps"];
 
 /// The cache store for `key`, or None if the indicator isn't cached.
 fn cache_store(key: &str) -> Option<&'static str> {
     match key {
         "protein" => Some("ind_protein"),
         "veg_fruit" => Some("ind_veg_fruit"),
+        "steps" => Some("ind_steps"),
         _ => None,
     }
 }
@@ -185,6 +231,7 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
     match key {
         "protein" => local::protein_grams_on(date).await,
         "veg_fruit" => local::veg_fruit_grams_on(date).await,
+        "steps" => local::steps_on(date).await,
         "calcium" => local::nutrient_grams_on(date, N_CALCIUM).await,
         "iron" => local::nutrient_grams_on(date, N_IRON).await,
         "fiber" => local::nutrient_grams_on(date, N_FIBER).await,
@@ -245,6 +292,22 @@ pub async fn clear_cache() {
     }
 }
 
+/// Write-through for the STEP indicator: recompute `date`'s steps ratio against the
+/// CURRENT planka and store it in `ind_steps`. Called from `save_steps` — the ONLY
+/// moment the step indicator recomputes (steps are one final value per day, so no
+/// waiting for day-end like the diary needs). Overwrites any previous row, so
+/// re-logging or editing an old day rewrites that day's verdict. A `None` ratio
+/// (planka not set yet) is stored but never counts as a miss.
+pub async fn record_steps(date: &str) {
+    let value = local::steps_on(date).await;
+    let ratio = ratio_now("steps", value).await;
+    crate::services::db::put(
+        "ind_steps",
+        &IndDay { date: date.to_string(), value, ratio },
+    )
+    .await;
+}
+
 /// Invalidate cached days affected by a change to `food_id` — every distinct diary
 /// date that food appears on (via the diary `food_id` index). A change to a food
 /// only ever affects the days it was eaten, so classifying/​editing a food logged
@@ -269,6 +332,7 @@ async fn target_for(key: &str) -> f64 {
             .map(|e| profile::protein_target_from_profile(e.weight_kg) as f64)
             .unwrap_or(0.0),
         "veg_fruit" => veg_fruit_per_day_g(),
+        "steps" => local::steps_goal_amount().await.unwrap_or(0.0),
         "calcium" => CALCIUM_PER_DAY_MG,
         "iron" => iron_per_day_mg(),
         "fiber" => FIBER_PER_DAY_G,
@@ -276,10 +340,11 @@ async fn target_for(key: &str) -> f64 {
     }
 }
 
-/// Classifier metrics (veg/fruit) always have data → never Unknown. Nutrient
-/// metrics can be Unknown (grey) when there's no data in the window.
+/// Classifier metrics always have data → never Unknown. veg/fruit is derived from
+/// tags (a day with none = 0 g). Steps too: a day with no logged steps counts as a
+/// MISS (0 < planka), not grey — we're disciplining the user to log every day.
 fn is_classifier(key: &str) -> bool {
-    key == "veg_fruit"
+    key == "veg_fruit" || key == "steps"
 }
 
 /// Indicator colour for `key` over the 7 COMPLETED days ending yesterday, read
@@ -313,7 +378,7 @@ pub async fn indicator_state(key: &str) -> IndicatorState {
 /// States for the currently-unlocked indicators, in display order (cached).
 pub async fn unlocked_indicator_states() -> Vec<(&'static str, IndicatorState)> {
     let mut out = Vec::new();
-    for key in UNLOCKED_INDICATORS.iter().copied() {
+    for key in displayed_indicators() {
         out.push((key, indicator_state(key).await));
     }
     out
@@ -332,6 +397,10 @@ const GREEN_GATE_WINDOW: i64 = 8;
 
 /// App-flag holding the date (YYYY-MM-DD) the indicators first became visible.
 const GATE_OPEN_KEY: &str = "ind_opened_at";
+
+/// App-flag holding the date the STEP gate (activity week) opened — its rolling
+/// window counts from here, so pre-planka days never count.
+const STEPS_GATE_OPEN_KEY: &str = "steps_gate_opened_at";
 
 /// The date the indicators "opened" for this user — persisted the first time we
 /// evaluate the gate, so the window is anchored to when the nudge began (not to
@@ -377,6 +446,35 @@ pub async fn green_gate_progress() -> u32 {
     green.min(GREEN_GATE_DAYS)
 }
 
+/// GREEN steps-days accrued toward the STEP gate (activity week): completed days
+/// from the step-gate open date on which steps met the planka. Steps-only — its
+/// own gate, independent of the protein/veg-fruit one. `== GREEN_GATE_DAYS` ⇒ the
+/// activity week is cleared (→ next task).
+pub async fn steps_gate_progress() -> u32 {
+    if !activity_unlocked() {
+        return 0;
+    }
+    let Some(s) = crate::services::app_flags::get(STEPS_GATE_OPEN_KEY) else {
+        return 0;
+    };
+    let Ok(open) = NaiveDate::parse_from_str(&s, "%Y-%m-%d") else {
+        return 0;
+    };
+    let today = crate::services::local::today_date();
+    let mut green = 0u32;
+    for i in 1..=GREEN_GATE_WINDOW {
+        let d = today - Duration::days(i);
+        if d < open {
+            break; // never count days before the planka was set
+        }
+        let (_v, ratio) = day_cached("steps", &fmt(d)).await;
+        if matches!(ratio, Some(r) if r >= 1.0) {
+            green += 1;
+        }
+    }
+    green.min(GREEN_GATE_DAYS)
+}
+
 /// One indicator's per-day history for the expanded view's histogram: the 7
 /// COMPLETED days (oldest → newest). Each day carries `(date, value, ratio)`, where
 /// `ratio` is the FROZEN `value / target` (see [`day_cached`]) — so the bar colours
@@ -395,7 +493,7 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
     // Oldest → newest: today-7 … today-1.
     let dates: Vec<NaiveDate> = (1..=7).rev().map(|i| today - Duration::days(i)).collect();
     let mut out = Vec::new();
-    for key in UNLOCKED_INDICATORS.iter().copied() {
+    for key in displayed_indicators() {
         let mut days = Vec::with_capacity(dates.len());
         for d in &dates {
             let (value, ratio) = day_cached(key, &fmt(*d)).await;

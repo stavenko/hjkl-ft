@@ -832,18 +832,19 @@ pub fn DiaryPage() -> impl IntoView {
                         }
                     }).collect_view();
                     view! {
-                        <div style="position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.45); \
-                                display: flex; align-items: flex-end; justify-content: center;"
-                            on:click=move |_| dup_target.set(None)>
-                            <div style="background: var(--bulma-scheme-main); border-radius: 16px 16px 0 0; \
-                                    width: 100%; max-width: 480px; padding: 20px 18px calc(20px + env(safe-area-inset-bottom));"
-                                on:click=|ev| ev.stop_propagation()>
-                                <div class="is-size-6 has-text-weight-bold" style="margin-bottom: 14px;">
-                                    {move || t("diary.duplicate_to")}
-                                </div>
-                                {meal_btns}
-                                <button class="button is-ghost is-fullwidth" style="margin-top: 4px;"
-                                    on:click=move |_| dup_target.set(None)>{move || t("common.cancel")}</button>
+                        // Bulma modal — centred, viewport-fixed, matching the app's
+                        // other dialogs (a bare position:fixed misplaces inside the shell).
+                        <div class="modal is-active">
+                            <div class="modal-background" on:click=move |_| dup_target.set(None)></div>
+                            <div class="modal-card" style="max-width: 22rem; width: calc(100% - 2rem);">
+                                <section class="modal-card-body" style="border-radius: 12px;">
+                                    <div class="is-size-6 has-text-weight-bold" style="margin-bottom: 14px;">
+                                        {move || t("diary.duplicate_to")}
+                                    </div>
+                                    {meal_btns}
+                                    <button class="button is-ghost is-fullwidth" style="margin-top: 4px;"
+                                        on:click=move |_| dup_target.set(None)>{move || t("common.cancel")}</button>
+                                </section>
                             </div>
                         </div>
                     }

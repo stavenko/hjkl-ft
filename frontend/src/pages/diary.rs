@@ -157,6 +157,8 @@ pub fn DiaryPage() -> impl IntoView {
 
     let editing = create_rw_signal(None::<(String, Food, f64, f64, bool)>);
     let menu_open = create_rw_signal(None::<String>);
+    // Entry id whose «Дублировать» dialog (pick target meal) is open.
+    let dup_target = create_rw_signal(None::<String>);
     // The diary entry whose product is being edited (КБЖУ + name, CoW on save).
     let edit_food = create_rw_signal(None::<(String, Food)>);
 
@@ -240,13 +242,6 @@ pub fn DiaryPage() -> impl IntoView {
         date.get() == today
     };
 
-    let duplicate_entry = move |entry_id: String| {
-        spawn_local(async move {
-            local::duplicate_diary_entry(&entry_id).await;
-            invalidate();
-            sync::push_background();
-        });
-    };
 
     let nutrient_sum = move |nutrient: &str, es: &[DiaryEntry], fs: &[Food]| -> f64 {
         es.iter().map(|e| {
@@ -632,7 +627,7 @@ pub fn DiaryPage() -> impl IntoView {
                                                                         style="justify-content: flex-start; text-decoration: none;"
                                                                         on:click={
                                                                             let id = eid_d.clone();
-                                                                            move |_| { duplicate_entry(id.clone()); menu_open.set(None); }
+                                                                            move |_| { dup_target.set(Some(id.clone())); menu_open.set(None); }
                                                                         }
                                                                     >{move || t("diary.duplicate")}</button>
                                                                     <button
@@ -809,6 +804,49 @@ pub fn DiaryPage() -> impl IntoView {
                         on_saved=Callback::new(move |_| { invalidate(); sync::push_background(); })
                         on_close=Callback::new(move |_| edit_food.set(None))
                     />
+                })
+            }}
+
+            // "Дублировать": bottom-sheet to pick which meal the copy goes into.
+            {move || {
+                dup_target.get().map(|eid| {
+                    let meal_btns = crate::services::meal_split::MAIN_MEALS.iter().map(|m| {
+                        let eid = eid.clone();
+                        let key: &'static str = m.key;
+                        let accent: &'static str = m.accent;
+                        let i18n_key: &'static str = m.i18n_key;
+                        view! {
+                            <button class="button is-fullwidth"
+                                style=format!("justify-content: flex-start; margin-bottom: 8px; height: 3rem; \
+                                    border: 1px solid {accent}; color: {accent}; background: {accent}22; font-weight: 600;")
+                                on:click=move |_| {
+                                    let eid = eid.clone();
+                                    dup_target.set(None);
+                                    spawn_local(async move {
+                                        local::duplicate_diary_entry(&eid, Some(key.to_string())).await;
+                                        invalidate();
+                                        sync::push_background();
+                                    });
+                                }
+                            >{move || t(i18n_key)}</button>
+                        }
+                    }).collect_view();
+                    view! {
+                        <div style="position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.45); \
+                                display: flex; align-items: flex-end; justify-content: center;"
+                            on:click=move |_| dup_target.set(None)>
+                            <div style="background: var(--bulma-scheme-main); border-radius: 16px 16px 0 0; \
+                                    width: 100%; max-width: 480px; padding: 20px 18px calc(20px + env(safe-area-inset-bottom));"
+                                on:click=|ev| ev.stop_propagation()>
+                                <div class="is-size-6 has-text-weight-bold" style="margin-bottom: 14px;">
+                                    {move || t("diary.duplicate_to")}
+                                </div>
+                                {meal_btns}
+                                <button class="button is-ghost is-fullwidth" style="margin-top: 4px;"
+                                    on:click=move |_| dup_target.set(None)>{move || t("common.cancel")}</button>
+                            </div>
+                        </div>
+                    }
                 })
             }}
     }

@@ -714,7 +714,7 @@ pub async fn delete_diary_data(cutoff: Option<&str>) {
 
 /// Duplicate a diary entry as a NEW entry today with a fresh time (food and
 /// grams/waste copied). Used by the diary-row long-press "Duplicate" action.
-pub async fn duplicate_diary_entry(entry_id: &str) -> Option<DiaryEntry> {
+pub async fn duplicate_diary_entry(entry_id: &str, meal_label: Option<String>) -> Option<DiaryEntry> {
     let src: DiaryEntry = db::get("diary", entry_id).await?;
     let entry = DiaryEntry {
         id: new_id(),
@@ -723,7 +723,8 @@ pub async fn duplicate_diary_entry(entry_id: &str) -> Option<DiaryEntry> {
         time: Some(time_now()),
         grams: src.grams,
         waste_grams: src.waste_grams,
-        meal_label: src.meal_label.clone(),
+        // Target meal chosen in the duplicate dialog; falls back to the source's.
+        meal_label: meal_label.or_else(|| src.meal_label.clone()),
         deleted: false,
         created_at: now(),
         updated_at: now(),

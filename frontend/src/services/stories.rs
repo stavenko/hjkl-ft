@@ -125,6 +125,8 @@ pub enum Appears {
     Always,
     /// Visible once the first weekly calorie planka has been calculated.
     AfterCaloriePlanka,
+    /// Visible once the activity week (step planka) has been unlocked.
+    AfterActivityWeek,
 }
 
 pub struct Story {
@@ -211,12 +213,13 @@ pub fn unviewed_count(story: &Story) -> usize {
 
 /// The stories currently eligible to show, in order. `planka_set` = the weekly
 /// calorie planka has been calculated (gates the second-week story).
-pub fn visible(planka_set: bool) -> Vec<&'static Story> {
+pub fn visible(planka_set: bool, activity_unlocked: bool) -> Vec<&'static Story> {
     STORIES
         .iter()
         .filter(|s| match s.appears {
             Appears::Always => true,
             Appears::AfterCaloriePlanka => planka_set,
+            Appears::AfterActivityWeek => activity_unlocked,
         })
         .collect()
 }
@@ -727,6 +730,71 @@ const S2: &[Frame] = &[
     },
 ];
 
+// --- Story 3 «Неделя активности» — unlocked once the week-2 gate is cleared and
+// the step planka is set (Appears::AfterActivityWeek). ------------------------
+const S3: &[Frame] = &[
+    // 1 — congrats + intro
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Emoji("🚶"),
+        accent: GREEN,
+        kicker: Loc { en: "Activity", ru: "Активность" },
+        title: Loc { en: "Activity week", ru: "Неделя активности" },
+        body: Loc {
+            en: "Well done — protein and vegetables-and-fruit have been green for a whole week. Now we begin the activity week.",
+            ru: "Вы молодец — белок и фрукты-овощи зелёные уже неделю. Теперь мы начинаем неделю активности.",
+        },
+    },
+    // 2 — the step planka
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Activity", ru: "Активность" },
+        title: Loc { en: "Your step planka", ru: "Планка по шагам" },
+        body: Loc {
+            en: "You now have a step planka. It's not enough to just log your steps — there have to be a lot of them.",
+            ru: "У вас теперь появляется планка по шагам. Вам необходимо не просто записывать шаги, но ещё их должно быть много.",
+        },
+    },
+    // 3 — why walk at all (deficit / metabolism)
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Activity", ru: "Активность" },
+        title: Loc { en: "Why walk at all?", ru: "Зачем вообще ходить?" },
+        body: Loc {
+            en: "When you start living in a calorie deficit, your body begins to slow down to get out of that deficit. To stay in it, you have to spend calories.",
+            ru: "Если вы начинаете жить в дефиците калорий, ваш организм начинает замедляться так, чтобы из этого дефицита уйти. Чтобы не уходить из дефицита, необходимо тратить калории.",
+        },
+    },
+    // 4 — separate health benefit of walking
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Activity", ru: "Активность" },
+        title: Loc { en: "The benefit of walking", ru: "Польза ходьбы" },
+        body: Loc {
+            en: "Walking has a separate benefit of its own. Every study confirms the health benefit of walking more than 7000 steps a day.",
+            ru: "У ходьбы есть отдельная польза. Все исследования подтверждают пользу для здоровья, если человек ходит более 7000 шагов в день.",
+        },
+    },
+    // 5 — walking, running or the gym
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Activity", ru: "Активность" },
+        title: Loc { en: "Walking, running or the gym", ru: "Ходьба, бег или зал" },
+        body: Loc {
+            en: "It depends on your athletic background. Already a runner — keep running. Doing CrossFit regularly — don't stop. But if you haven't done sport before — start with walking.",
+            ru: "Это зависит от вашего спортивного опыта. Если вы уже бегаете — можно оставить бег. Если вы регулярно занимаетесь кроссфитом — не надо останавливаться. Но если вы до этого не занимались спортом — начните с ходьбы.",
+        },
+    },
+];
+
 static STORIES: &[Story] = &[
     Story {
         id: "welcome",
@@ -745,5 +813,11 @@ static STORIES: &[Story] = &[
         appears: Appears::AfterCaloriePlanka,
         badge: Loc { en: "2", ru: "2" },
         frames: S2,
+    },
+    Story {
+        id: "week3",
+        appears: Appears::AfterActivityWeek,
+        badge: Loc { en: "3", ru: "3" },
+        frames: S3,
     },
 ];

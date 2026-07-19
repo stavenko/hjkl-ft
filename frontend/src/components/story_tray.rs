@@ -30,7 +30,8 @@ pub fn StoryTray() -> impl IntoView {
             <div style="display: flex; gap: 14px; padding: 4px 2px 8px;">
                 {move || {
                     let planka_set = planka.get().flatten().is_some();
-                    stories::visible(planka_set)
+                    let activity = crate::services::indicators::activity_unlocked();
+                    stories::visible(planka_set, activity)
                         .into_iter()
                         .map(|s| view! { <TrayCircle story=s open=open /> })
                         .collect_view()

@@ -19,6 +19,10 @@ const PAGE_BG: &str = "background: var(--bulma-background); min-height: 100vh; p
 pub fn DiaryAddPage() -> impl IntoView {
     let navigate = use_navigate();
 
+    // Which meal panel's «+» opened this flow (query `?meal=breakfast|lunch|dinner`).
+    // Stored verbatim on the new entry's `meal_label`. Absent → unlabelled.
+    let meal_label = use_query_map().with_untracked(|q| q.get("meal").cloned());
+
     // Version counter: bump after a draft is created → resources re-read.
     let version = create_rw_signal(0u32);
 
@@ -86,8 +90,10 @@ pub fn DiaryAddPage() -> impl IntoView {
         let navigate = navigate.clone();
         Callback::new(move |(food, grams, waste, restaurant): (Food, f64, f64, bool)| {
             let navigate = navigate.clone();
+            let meal_label = meal_label.clone();
             spawn_local(async move {
-                let _entry = local::save_food_to_diary(&food, grams, waste, restaurant).await;
+                let _entry =
+                    local::save_food_to_diary(&food, grams, waste, restaurant, meal_label).await;
                 sync::push_background();
                 navigate("/diary", Default::default());
             });

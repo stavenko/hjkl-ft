@@ -571,6 +571,9 @@ pub async fn save_food_to_diary(
     grams: f64,
     waste_grams: f64,
     is_restaurant: bool,
+    // Explicit meal this entry belongs to ("breakfast"/"lunch"/"dinner"), from the
+    // panel whose «+» was tapped. `None` leaves it unlabelled (derived by time).
+    meal_label: Option<String>,
 ) -> DiaryEntry {
     let food = food_with_restaurant_flag(food, is_restaurant).await;
     let entry = DiaryEntry {
@@ -580,7 +583,7 @@ pub async fn save_food_to_diary(
         time: Some(time_now()),
         grams,
         waste_grams,
-        meal_label: None,
+        meal_label,
         deleted: false,
         created_at: now(),
         updated_at: now(),
@@ -611,6 +614,34 @@ pub async fn update_diary_entry(
     // Editing may fork a new food variant (restaurant CoW) — classify it.
     crate::services::classify::enqueue(entry.food_id.clone());
     Some(entry)
+}
+
+/// One-time backfill of explicit meal labels. The diary switched from meals
+/// DERIVED by time to EXPLICIT `meal_label` (breakfast/lunch/dinner). This assigns
+/// a label to every pre-existing entry that has none, using the same time windows
+/// the old derivation used, so history keeps the meal it always appeared under.
+/// Idempotent + guarded by an app_flags flag → runs once per device; pushes the
+/// relabelled entries so the labels reach the server and other devices.
+pub async fn migrate_meal_labels() {
+    const FLAG: &str = "meal_labels_backfilled_v1";
+    if crate::services::app_flags::get_bool(FLAG) {
+        return;
+    }
+    let all: Vec<DiaryEntry> = db::list_all("diary").await;
+    let mut changed = false;
+    for mut e in all {
+        if e.meal_label.is_none() {
+            // meal_key_for on an unlabelled entry derives from its local time.
+            e.meal_label = Some(crate::services::meal_split::meal_key_for(&e).to_string());
+            e.updated_at = now();
+            db::put("diary", &e).await;
+            changed = true;
+        }
+    }
+    crate::services::app_flags::set_bool(FLAG, true);
+    if changed {
+        crate::services::sync::push_background();
+    }
 }
 
 /// Stores whose rows can be deleted via the deletion log (kind == store name).

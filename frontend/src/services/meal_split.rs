@@ -62,6 +62,55 @@ pub struct MealGroup {
     pub entries: Vec<api_types::DiaryEntry>,
 }
 
+// --- Explicit three-meal model (breakfast / lunch / dinner) --------------------
+// The diary now shows three EXPLICIT panels; the meal an entry belongs to is
+// stored in `DiaryEntry.meal_label` (chosen by which panel's «+» added it).
+// Snacks are intentionally omitted from the UI and fold into the adjacent main
+// meal by time. `meal_key_for` gives back-compat for entries without a label.
+
+/// One explicit meal panel. `key` is what gets stored in `meal_label`.
+pub struct MainMeal {
+    pub key: &'static str,
+    pub i18n_key: &'static str,
+    pub accent: &'static str,
+}
+
+/// The three explicit meals, in display order. Accents match the derived
+/// `MealType::accent` for continuity.
+pub const MAIN_MEALS: [MainMeal; 3] = [
+    MainMeal { key: "breakfast", i18n_key: "meal.breakfast", accent: "#D99A2B" },
+    MainMeal { key: "lunch", i18n_key: "meal.lunch", accent: "#4FA96A" },
+    MainMeal { key: "dinner", i18n_key: "meal.dinner", accent: "#6C7DC4" },
+];
+
+/// Fold a local wall-clock hour into one of the three explicit meal keys.
+/// Windows mirror `determine_meal_type`; snacks/night merge into the adjacent
+/// main meal, and dinner absorbs the 16:00–03:59 evening/night tail.
+pub fn main_meal_key_for_hour(hour: u32) -> &'static str {
+    if (4..=10).contains(&hour) {
+        "breakfast"
+    } else if (11..=15).contains(&hour) {
+        "lunch"
+    } else {
+        "dinner"
+    }
+}
+
+/// The explicit meal key for an entry: its stored `meal_label` when it is one of
+/// the three keys, otherwise derived from the entry's local time (covers
+/// unlabelled/legacy entries and legacy snack labels).
+pub fn meal_key_for(entry: &api_types::DiaryEntry) -> &'static str {
+    match entry.meal_label.as_deref() {
+        Some("breakfast") => "breakfast",
+        Some("lunch") => "lunch",
+        Some("dinner") => "dinner",
+        _ => {
+            let (h, _) = local_hm(entry);
+            main_meal_key_for_hour(h)
+        }
+    }
+}
+
 // Gap thresholds (seconds) replicated from munch-monitor.
 const CONTINUATION_SECS: i64 = 3600; // < 1h => continuation of previous meal
 const NEW_MEAL_SECS: i64 = 10800; // > 3h => possibly a new major meal
@@ -278,6 +327,35 @@ mod tests {
         let g = group_by_meal(&solo(time));
         assert_eq!(g.len(), 1);
         g[0].meal
+    }
+
+    #[test]
+    fn three_meal_windows() {
+        assert_eq!(main_meal_key_for_hour(4), "breakfast");
+        assert_eq!(main_meal_key_for_hour(10), "breakfast");
+        assert_eq!(main_meal_key_for_hour(11), "lunch");
+        assert_eq!(main_meal_key_for_hour(15), "lunch");
+        assert_eq!(main_meal_key_for_hour(16), "dinner");
+        assert_eq!(main_meal_key_for_hour(21), "dinner");
+        // Dinner absorbs the evening/night tail (snacks fold in).
+        assert_eq!(main_meal_key_for_hour(23), "dinner");
+        assert_eq!(main_meal_key_for_hour(2), "dinner");
+    }
+
+    #[test]
+    fn meal_key_prefers_label_else_time() {
+        // No label → derived from the entry's local time (migration path).
+        assert_eq!(meal_key_for(&entry("a", Some("08:30"), &ts("08:30"))), "breakfast");
+        assert_eq!(meal_key_for(&entry("b", Some("13:00"), &ts("13:00"))), "lunch");
+        assert_eq!(meal_key_for(&entry("c", Some("19:00"), &ts("19:00"))), "dinner");
+        // An explicit label wins over the time.
+        let mut e = entry("d", Some("08:30"), &ts("08:30"));
+        e.meal_label = Some("dinner".to_string());
+        assert_eq!(meal_key_for(&e), "dinner");
+        // A legacy/unknown label falls back to time.
+        let mut e2 = entry("e", Some("13:00"), &ts("13:00"));
+        e2.meal_label = Some("snack_morning".to_string());
+        assert_eq!(meal_key_for(&e2), "lunch");
     }
 
     #[test]

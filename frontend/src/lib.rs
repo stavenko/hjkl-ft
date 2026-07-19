@@ -105,6 +105,9 @@ async fn bootstrap_network() {
                 leptos::logging::warn!("Launch sync failed: {e}");
             }
         }
+        // One-time backfill of explicit meal labels on pre-existing entries (runs
+        // on the merged dump, after the pull, so server entries get labelled too).
+        services::local::migrate_meal_labels().await;
         // Classify any recent/untagged food now that the AI worker is reachable.
         leptos::spawn_local(services::classify::sweep_diary_unclassified());
         leptos::spawn_local(services::classify::sweep_recipe_ingredients());

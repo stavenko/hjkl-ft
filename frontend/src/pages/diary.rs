@@ -151,9 +151,6 @@ pub fn DiaryPage() -> impl IntoView {
                 .remove_event_listener_with_callback("focus", (*cb).as_ref().unchecked_ref());
         });
     }
-    // Stored so the FAB click handlers (both inside the same `Fn` render closure)
-    // can each clone it without moving the single handle out of the environment.
-    let navigate = store_value(use_navigate());
 
     // Version counter: bump after any write → all resources re-read from IndexedDB
     let version = create_rw_signal(0u32);
@@ -193,8 +190,6 @@ pub fn DiaryPage() -> impl IntoView {
         },
     );
 
-    // The day's diary entries are always grouped into derived meals.
-    let meal_split_on = move || true;
 
     // `_data` is `None` only before the first-ever load of that key (→ render
     // nothing); after that it's the fresh-or-last-known value, so switching to the
@@ -478,38 +473,19 @@ pub fn DiaryPage() -> impl IntoView {
                 // «+»), which would otherwise flash before the entries arrive.
                 // Sticky caches make this instant on any later navigation.
                 ().into_view()
-            } else if entries().is_empty() {
-                if is_today() {
-                    // Today empty: invitation to add first entry
-                    view! {
-                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4rem 24px;">
-                            <p style="font-size: 17px; color: var(--bulma-text-weak); margin: 0 0 8px 0; text-align: center; line-height: 1.5;">
-                                {move || t("diary.empty_today_1")}
+            } else if !is_today() && entries().is_empty() {
+                // Past day with no entries: a short message (no panels, no add). Today
+                // always falls through to the panel view below, which renders the three
+                // empty meal panels (each with its «+»).
+                view! {
+                    <div style="padding: 0 16px 5rem 16px;">
+                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 8px 0 8px;">
+                            <p style="font-size: 17px; color: var(--bulma-text-weak); margin: 0; text-align: center; line-height: 1.5;">
+                                {move || format!("{} {}", format_date_past_prefix(&date.get()), t("diary.empty_past"))}
                             </p>
-                            <p style="font-size: 17px; color: var(--bulma-text-weak); margin: 0 0 24px 0; text-align: center; line-height: 1.5;">
-                                {move || t("diary.empty_today_2")}
-                            </p>
-                            <button
-                                attr:data-testid="diary-btn-add"
-                                class="button is-success is-rounded"
-                                style="width: 3.5rem; height: 3.5rem; font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); border: none;"
-                                on:click=move |_| navigate.get_value()("/diary/add", Default::default())
-                            >"+"</button>
                         </div>
-                    }.into_view()
-                } else {
-                    // Past day empty: no add button, but the weekly report is
-                    // still available (the day summary renders nothing if empty).
-                    view! {
-                        <div style="padding: 0 16px 5rem 16px;">
-                            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 8px 0 8px;">
-                                <p style="font-size: 17px; color: var(--bulma-text-weak); margin: 0; text-align: center; line-height: 1.5;">
-                                    {move || format!("{} {}", format_date_past_prefix(&date.get()), t("diary.empty_past"))}
-                                </p>
-                            </div>
-                        </div>
-                    }.into_view()
-                }
+                    </div>
+                }.into_view()
             } else {
                 // Entries list — scrollable. The bottom padding MUST keep the last
                 // list item ABOVE the floating "+" FAB so they never overlap: the
@@ -533,6 +509,9 @@ pub fn DiaryPage() -> impl IntoView {
                             let fid5 = entry.food_id.clone();
                             let g = entry.grams;
                             let w = entry.waste_grams;
+                            // Repeating a row re-logs the food into the SAME meal it
+                            // belongs to (its label, or derived from its time).
+                            let meal_key = Some(crate::services::meal_split::meal_key_for(&entry).to_string());
                             view! {
                                     <div style="display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--bulma-border-weak);">
                                         <div style="flex: 1; min-width: 0; overflow-wrap: break-word;">
@@ -685,6 +664,8 @@ pub fn DiaryPage() -> impl IntoView {
                                                     let eid2 = entry_id2.clone();
                                                     let fid_c = fid3.clone();
                                                     let fid_r = fid4.clone();
+                                                    // Per-render clone so the repeat on:click stays `Fn`.
+                                                    let meal_key = meal_key.clone();
                                                     let already_copied = move || {
                                                         today_entries().iter().any(|e| e.food_id == fid_c)
                                                     };
@@ -716,12 +697,15 @@ pub fn DiaryPage() -> impl IntoView {
                                                                         style="justify-content: flex-start; text-decoration: none;"
                                                                         on:click={
                                                                             let fid = fid_r.clone();
+                                                                            let mk = meal_key.clone();
                                                                             move |_| {
                                                                             let fid = fid.clone();
+                                                                            // Clone before the `async move` so the on:click stays `Fn`.
+                                                                            let mk = mk.clone();
                                                                             menu_open.set(None);
                                                                             spawn_local(async move {
                                                                                 if let Some(food) = local::list_foods().await.into_iter().find(|f| f.id == fid) {
-                                                                                    let _ = local::save_food_to_diary(&food, g, w, food.is_restaurant).await;
+                                                                                    let _ = local::save_food_to_diary(&food, g, w, food.is_restaurant, mk).await;
                                                                                     invalidate();
                                                                                     sync::push_background();
                                                                                 }
@@ -740,46 +724,42 @@ pub fn DiaryPage() -> impl IntoView {
                             }.into_view()
                           };
 
-                          if meal_split_on() {
-                              // Grouped by derived meal. Each group is a collapsible
-                              // panel: header (meal name + aggregated КБЖУ) over its
-                              // rows.
-                              use crate::services::meal_split::group_by_meal;
-                              use crate::components::meal_panel::MealPanel;
-                              let fs = foods();
-                              let es = entries();
-                              group_by_meal(&es).into_iter().map(|grp| {
-                                  let title = t(grp.meal.i18n_key()).to_string();
-                                  let accent = grp.meal.accent().to_string();
-                                  let kcal = nutrient_sum("Calories", &grp.entries, &fs);
-                                  let protein = nutrient_sum("Protein", &grp.entries, &fs);
-                                  let fat = nutrient_sum("Fat", &grp.entries, &fs);
-                                  let carbs = nutrient_sum("Carbs", &grp.entries, &fs);
-                                  let rows = grp.entries.into_iter().map(render_row).collect::<Vec<_>>();
-                                  view! {
-                                      <MealPanel title=title accent=accent kcal=kcal protein=protein fat=fat carbs=carbs>
-                                          {rows}
-                                      </MealPanel>
-                                  }.into_view()
-                              }).collect::<Vec<_>>()
-                          } else {
-                              entries().into_iter().map(render_row).collect::<Vec<_>>()
-                          }
+                          // Three explicit meal panels (breakfast / lunch / dinner),
+                          // in order. Today they always show (empty → header + «+»);
+                          // past days show only meals that have entries. Each entry is
+                          // placed by its `meal_label` (or derived from its time).
+                          use crate::services::meal_split::{meal_key_for, MAIN_MEALS};
+                          use crate::components::meal_panel::MealPanel;
+                          let fs = foods();
+                          let es = entries();
+                          let today = is_today();
+                          MAIN_MEALS.iter().filter_map(|meal| {
+                              let meal_entries: Vec<DiaryEntry> =
+                                  es.iter().filter(|e| meal_key_for(e) == meal.key).cloned().collect();
+                              if !today && meal_entries.is_empty() {
+                                  return None;
+                              }
+                              let title = t(meal.i18n_key).to_string();
+                              let accent = meal.accent.to_string();
+                              let kcal = nutrient_sum("Calories", &meal_entries, &fs);
+                              let protein = nutrient_sum("Protein", &meal_entries, &fs);
+                              let fat = nutrient_sum("Fat", &meal_entries, &fs);
+                              let carbs = nutrient_sum("Carbs", &meal_entries, &fs);
+                              let is_empty = meal_entries.is_empty();
+                              let rows = meal_entries.into_iter().map(|e| render_row(e)).collect::<Vec<_>>();
+                              Some(view! {
+                                  <MealPanel title=title accent=accent meal_key=meal.key.to_string()
+                                      can_add=today is_empty=is_empty
+                                      kcal=kcal protein=protein fat=fat carbs=carbs>
+                                      {rows}
+                                  </MealPanel>
+                              }.into_view())
+                          }).collect::<Vec<_>>()
                         }}
                     </div>
 
-                    // Floating green "+" FAB. MUST be drawn STRICTLY for "today":
-                    // you can only log food into the current day. On past days there's
-                    // NO add button — `is_today()` gates it here. (Bug fixed: this used
-                    // to render on every day with entries, not just today.)
-                    <Show when=move || is_today()>
-                        <button
-                            attr:data-testid="diary-btn-add"
-                            class="button is-success is-rounded"
-                            style="position: fixed; bottom: 5.5rem; right: 1.5rem; z-index: 41; width: 3.5rem; height: 3.5rem; font-size: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.2); border: none;"
-                            on:click=move |_| navigate.get_value()("/diary/add", Default::default())
-                        >"+"</button>
-                    </Show>
+                    // (The floating «+» FAB was removed: adding now happens from each
+                    // meal panel's header / «+».)
                 }.into_view()
             }}
         // Close the page container. Dialogs below stay SIBLINGS (not nested) so

@@ -762,7 +762,7 @@ const S3: &[Frame] = &[
     // 3 — why walk at all (deficit / metabolism)
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("couch-cola.png"),
         accent: GREEN,
         kicker: Loc { en: "Activity", ru: "Активность" },
         title: Loc { en: "Why walk at all?", ru: "Зачем вообще ходить?" },

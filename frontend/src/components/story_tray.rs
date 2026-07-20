@@ -212,11 +212,36 @@ fn text_with_icons(s: &str) -> View {
     out.collect_view().into_view()
 }
 
+/// Render story text with two inline markers: text wrapped in `~…~` becomes a
+/// BOLD GRADIENT span (same font-size as the surrounding text — just emphasized),
+/// and the rest still passes through `text_with_icons` for the «⇄» repeat icon.
+fn text_rich(s: &str) -> View {
+    let mut out: Vec<View> = Vec::new();
+    for (i, part) in s.split('~').enumerate() {
+        if i % 2 == 1 {
+            out.push(
+                view! {
+                    <span style="font-weight: 800; \
+                        background: linear-gradient(115deg, #34d399 0%, #22d3ee 55%, #818cf8 100%); \
+                        -webkit-background-clip: text; background-clip: text; \
+                        -webkit-text-fill-color: transparent; color: transparent;">
+                        {part.to_string()}
+                    </span>
+                }
+                .into_view(),
+            );
+        } else {
+            out.push(text_with_icons(part));
+        }
+    }
+    out.collect_view().into_view()
+}
+
 #[component]
 fn FrameView(frame: Frame) -> impl IntoView {
-    // A title wrapped in `~…~` is a GRADIENT HEADLINE: the layout flips so the
-    // supporting copy (body) sits on top and the big gradient headline is the last,
-    // emphasized line at the bottom (used by the activity-week intro frame).
+    // `~…~` inside any text renders as a bold gradient span INLINE (same size as
+    // the surrounding text), and the title is skipped when empty — so a frame can
+    // be just body copy with an emphasized phrase (the activity-week intro).
     let container = "position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; \
                      justify-content: flex-end; padding: 30px 28px 92px;";
     let kicker_style = format!(
@@ -225,44 +250,20 @@ fn FrameView(frame: Frame) -> impl IntoView {
         frame.accent
     );
     let title_raw = frame.title.get();
-    let gradient = title_raw
-        .strip_prefix('~')
-        .and_then(|s| s.strip_suffix('~'))
-        .map(|s| s.to_string());
-
-    let content = if let Some(headline) = gradient {
-        view! {
-            <div style=container>
-                <div style=kicker_style>{frame.kicker.get()}</div>
-                <div style="color: rgba(255,255,255,0.93); font-size: 20px; line-height: 1.4; \
-                            margin-bottom: 16px; text-shadow: 0 1px 12px rgba(0,0,0,0.6);">
-                    {text_with_icons(frame.body.get())}
-                </div>
-                <div style="font-size: 40px; line-height: 1.05; font-weight: 800; \
-                            background: linear-gradient(115deg, #34d399 0%, #22d3ee 45%, #818cf8 100%); \
-                            -webkit-background-clip: text; background-clip: text; \
-                            -webkit-text-fill-color: transparent; color: transparent; \
-                            filter: drop-shadow(0 2px 18px rgba(0,0,0,0.45));">
-                    {headline}
-                </div>
-            </div>
-        }
-        .into_view()
-    } else {
-        view! {
-            <div style=container>
-                <div style=kicker_style>{frame.kicker.get()}</div>
+    let content = view! {
+        <div style=container>
+            <div style=kicker_style>{frame.kicker.get()}</div>
+            {(!title_raw.is_empty()).then(|| view! {
                 <div style="color: #fff; font-size: 34px; line-height: 1.1; font-weight: 800; margin-bottom: 14px; \
                             text-shadow: 0 2px 18px rgba(0,0,0,0.55);">
-                    {text_with_icons(title_raw)}
+                    {text_rich(title_raw)}
                 </div>
-                <div style="color: rgba(255,255,255,0.93); font-size: 18px; line-height: 1.45; \
-                            text-shadow: 0 1px 12px rgba(0,0,0,0.6);">
-                    {text_with_icons(frame.body.get())}
-                </div>
+            })}
+            <div style="color: rgba(255,255,255,0.93); font-size: 18px; line-height: 1.45; \
+                        text-shadow: 0 1px 12px rgba(0,0,0,0.6);">
+                {text_rich(frame.body.get())}
             </div>
-        }
-        .into_view()
+        </div>
     };
 
     // Background layer.

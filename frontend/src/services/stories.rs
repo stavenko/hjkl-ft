@@ -736,14 +736,15 @@ const S3: &[Frame] = &[
     // 1 — congrats + intro
     Frame {
         bg: Bg::Dark,
-        media: Media::Emoji("🚶"),
+        media: Media::Emoji("🎉"),
         accent: GREEN,
         kicker: Loc { en: "Activity", ru: "Активность" },
-        // `~…~` → rendered as a gradient headline pinned to the bottom.
-        title: Loc { en: "~Activity week~", ru: "~Неделя активности~" },
+        // No big title — the message is the body, with the phrase emphasized inline
+        // (`~…~` = bold gradient, same size as the rest of the text).
+        title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "You've been in the program for two weeks now, and you've kept your indicators green for a whole week. So we begin the next week:",
-            ru: "Вы уже две недели в программе и целую неделю держите индикаторы зелёными. Поэтому мы начинаем следующую неделю:",
+            en: "You've been in the program for two weeks now, and you've kept your indicators green for a whole week. So we begin the next week: ~the activity week~.",
+            ru: "Вы уже две недели в программе и целую неделю держите индикаторы зелёными. Поэтому мы начинаем следующую неделю: ~неделю активности~.",
         },
     },
     // 2 — the step planka
@@ -754,8 +755,8 @@ const S3: &[Frame] = &[
         kicker: Loc { en: "Activity", ru: "Активность" },
         title: Loc { en: "Your step planka", ru: "Планка по шагам" },
         body: Loc {
-            en: "You now have a step planka. It's not enough to just log your steps — there have to be a lot of them.",
-            ru: "У вас теперь появляется планка по шагам. Вам необходимо не просто записывать шаги, но ещё их должно быть много.",
+            en: "You now have a step planka. You need not only to log your steps, but also to walk no less than the set planka.",
+            ru: "У вас теперь появляется планка по шагам. Вам необходимо не только записывать шаги, но ещё и ходить не меньше установленной планки.",
         },
     },
     // 3 — why walk at all (deficit / metabolism)

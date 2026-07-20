@@ -806,7 +806,7 @@ const S3: &[Frame] = &[
     // 5 — walking, running or the gym
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("walk-run-gym.png"),
         accent: GREEN,
         kicker: Loc { en: "Activity", ru: "Активность" },
         title: Loc { en: "Walking, running or CrossFit", ru: "Ходьба, бег или Crossfit" },

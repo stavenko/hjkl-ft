@@ -20,9 +20,15 @@ thread_local! {
 /// Call this on resume (foreground) to get a live connection, then re-query.
 pub async fn reopen() {
     let Some(name) = DB_NAME.with(|c| c.borrow().clone()) else { return };
-    let fresh = open(&name).await;
-    DB.with(|cell| cell.replace(Some(fresh)));
-    bump_all();
+    // On failure/timeout keep the existing connection rather than hanging or
+    // dropping it — a resume must never wedge the app.
+    match open(&name).await {
+        Ok(fresh) => {
+            DB.with(|cell| cell.replace(Some(fresh)));
+            bump_all();
+        }
+        Err(e) => leptos::logging::warn!("db::reopen failed: {e}"),
+    }
 }
 
 pub fn version(store_name: &'static str) -> RwSignal<u32> {
@@ -44,7 +50,7 @@ fn bump(store_name: &str) {
 /// The legacy, device-global database. Used before login (no user identity yet)
 /// and as the one-time migration source for users created before per-user scoping.
 const BOOTSTRAP_DB: &str = "hjkl-ft";
-const DB_VERSION: u32 = 15;
+const DB_VERSION: u32 = 16;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -155,18 +161,52 @@ fn builder(name: &str) -> rexie::RexieBuilder {
         .add_object_store(ObjectStore::new("ind_steps").key_path("date"))
 }
 
-async fn open(name: &str) -> Rexie {
-    builder(name)
-        .build()
-        .await
-        .expect("failed to open IndexedDB")
+/// How long to wait for a database open before treating it as blocked. A schema
+/// upgrade blocked by another still-open connection (a not-yet-closed previous
+/// session on a PWA update) makes `build()` hang FOREVER, so we cap it and surface
+/// an actionable error instead of an eternal splash.
+const DB_OPEN_TIMEOUT_MS: u32 = 10_000;
+
+/// Open a database. Returns Err (rather than hanging or panicking) on failure or on
+/// a blocked/stalled open, so the caller can show the update-error screen.
+async fn open(name: &str) -> Result<Rexie, String> {
+    match with_timeout(DB_OPEN_TIMEOUT_MS, builder(name).build()).await {
+        Some(Ok(rexie)) => Ok(rexie),
+        Some(Err(e)) => Err(format!("Не удалось открыть базу данных: {e:?}")),
+        None => Err(
+            "База данных не отвечает при обновлении. Вероятно, приложение открыто \
+             в другой вкладке или прошлая версия ещё не закрылась."
+                .to_string(),
+        ),
+    }
+}
+
+/// Resolve `future`, or `None` if `ms` elapses first (used to bound a blocked DB open).
+async fn with_timeout<F: std::future::Future>(ms: u32, future: F) -> Option<F::Output> {
+    use futures::future::Either;
+    futures::pin_mut!(future);
+    let sleep = sleep_ms(ms);
+    futures::pin_mut!(sleep);
+    match futures::future::select(future, sleep).await {
+        Either::Left((output, _)) => Some(output),
+        Either::Right((_, _)) => None,
+    }
+}
+
+async fn sleep_ms(ms: u32) {
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms as i32);
+        }
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }
 
 /// Open the bootstrap database and create the reactive version signals. The
 /// active database is switched to the per-user one by [`activate_for_user`] once
 /// the signed-in user is known (at launch, and on login / pairing).
-pub async fn init() {
-    let rexie = open(BOOTSTRAP_DB).await;
+pub async fn init() -> Result<(), String> {
+    let rexie = open(BOOTSTRAP_DB).await?;
     DB.with(|cell| cell.replace(Some(rexie)));
     DB_NAME.with(|c| c.replace(Some(BOOTSTRAP_DB.to_string())));
 
@@ -181,6 +221,7 @@ pub async fn init() {
     // (`activate_for_user` re-hydrates once a user's database is swapped in).
     crate::services::profile::migrate_from_local_storage().await;
     crate::services::profile::hydrate().await;
+    Ok(())
 }
 
 /// Switch the active database to this user's per-user IndexedDB.
@@ -192,11 +233,11 @@ pub async fn init() {
 /// `migrate_bootstrap=true` ONLY for the already-signed-in user at launch, where
 /// the bootstrap data is attributable to them; on an explicit login it MUST be
 /// false so a new account never inherits the previous user's leftover data.
-pub async fn activate_for_user(user_id: &str, migrate_bootstrap: bool) {
-    let target = open(&user_db_name(user_id)).await;
+pub async fn activate_for_user(user_id: &str, migrate_bootstrap: bool) -> Result<(), String> {
+    let target = open(&user_db_name(user_id)).await?;
 
     if migrate_bootstrap && is_data_empty(&target).await {
-        let bootstrap = open(BOOTSTRAP_DB).await;
+        let bootstrap = open(BOOTSTRAP_DB).await?;
         if !is_data_empty(&bootstrap).await {
             copy_all(&bootstrap, &target).await;
             clear_db(&bootstrap).await;
@@ -213,6 +254,7 @@ pub async fn activate_for_user(user_id: &str, migrate_bootstrap: bool) {
     crate::services::profile::hydrate().await;
 
     bump_all();
+    Ok(())
 }
 
 /// True when no data store holds any row (`_sync_meta` is ignored — cursors are

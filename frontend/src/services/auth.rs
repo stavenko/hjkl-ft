@@ -69,7 +69,9 @@ pub fn session_valid_here() -> bool {
 /// leftover local data up under its token.
 async fn establish_session(user_id: &str, token: Option<&str>) {
     set_user(user_id);
-    crate::services::db::activate_for_user(user_id, false).await;
+    if let Err(e) = crate::services::db::activate_for_user(user_id, false).await {
+        leptos::logging::error!("activate_for_user on login failed: {e}");
+    }
     crate::services::app_flags::activate().await;
     if let Some(token) = token {
         set_token(token);

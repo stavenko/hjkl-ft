@@ -23,7 +23,14 @@ pub fn main() {
         // fetch REPLACES it). The UI must not wait for the network or the config.
         services::config::load_or_default();
 
-        services::db::init().await;
+        // Opening/upgrading IndexedDB is the one critical-path step that can BLOCK
+        // (a schema upgrade held up by a not-yet-closed previous session on a PWA
+        // update). It's bounded by a timeout and returns an error instead of hanging
+        // the splash forever — surface it on the update-error screen.
+        if let Err(e) = services::db::init().await {
+            show_critical_error(&e);
+            return;
+        }
         services::app_flags::reload().await;
         // Switch to the signed-in user's per-user database before any sync. The
         // bootstrap (`hjkl-ft`) database belongs to this user — they were the last
@@ -36,7 +43,10 @@ pub fn main() {
             // behind a blank splash. If it regularly exceeds this, move its progress
             // into the splash rather than the critical path.
             let t0 = js_sys::Date::now();
-            services::db::activate_for_user(&uid, true).await;
+            if let Err(e) = services::db::activate_for_user(&uid, true).await {
+                show_critical_error(&e);
+                return;
+            }
             let dt = js_sys::Date::now() - t0;
             if dt > 500.0 {
                 leptos::logging::warn!("db::activate_for_user took {dt:.0}ms under the splash");
@@ -77,6 +87,53 @@ pub fn main() {
         // ---- Background network bootstrap: prepare the connection, then use it. ----
         leptos::spawn_local(bootstrap_network());
     });
+}
+
+/// A short, stable code for an error message (6 hex, FNV-1a) — the same failure
+/// always yields the same «Код ошибки», so a user's screenshot pins it down.
+#[cfg(not(test))]
+fn error_code(msg: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in msg.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{:06X}", h & 0xFF_FFFF)
+}
+
+/// Render a critical-error screen IN PLACE of the splash when the launch (schema
+/// upgrade / DB open) fails or stalls — so the user sees an actionable message and
+/// a code instead of an eternal splash. Plain DOM (the Leptos app isn't mounted).
+#[cfg(not(test))]
+fn show_critical_error(msg: &str) {
+    let code = error_code(msg);
+    let short = msg
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    let html = format!(
+        r#"<div style="min-height:100vh;box-sizing:border-box;display:flex;flex-direction:column;\
+           align-items:center;justify-content:center;text-align:center;padding:32px 24px;\
+           background:#F1F4F9;color:#0E1630;font-family:'Golos Text',system-ui,sans-serif;">
+          <div style="font-size:20px;font-weight:800;line-height:1.25;margin-bottom:18px;max-width:340px;">
+            Возникла ошибка при обновлении приложения</div>
+          <div style="font-size:15px;line-height:1.5;color:#39425F;max-width:340px;margin-bottom:10px;">
+            Полностью закройте приложение и откройте снова.</div>
+          <div style="font-size:15px;line-height:1.5;color:#39425F;max-width:340px;margin-bottom:20px;">
+            Если не помогло — сделайте скриншот этого экрана для диагностики.</div>
+          <div style="font-size:13px;line-height:1.45;color:#0E1630;background:#fff;border:1px solid #dfe4ee;\
+               border-radius:12px;padding:12px 14px;max-width:340px;margin-bottom:16px;">{short}</div>
+          <div style="font-size:14px;font-weight:700;letter-spacing:0.04em;color:#F4536B;">
+            Код ошибки: {code}</div>
+        </div>"#
+    );
+    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        if let Some(splash) = doc.get_element_by_id("splash") {
+            splash.set_inner_html(&html);
+        } else if let Some(body) = doc.body() {
+            body.set_inner_html(&html);
+        }
+    }
 }
 
 /// Prepare the network in the background and, once the server is reachable, start

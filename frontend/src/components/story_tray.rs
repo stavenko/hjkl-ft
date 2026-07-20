@@ -222,7 +222,7 @@ fn text_rich(s: &str) -> View {
             out.push(
                 view! {
                     <span style="font-weight: 800; \
-                        background: linear-gradient(115deg, #34d399 0%, #22d3ee 55%, #818cf8 100%); \
+                        background: linear-gradient(115deg, #fde047 0%, #fb923c 45%, #f43f5e 100%); \
                         -webkit-background-clip: text; background-clip: text; \
                         -webkit-text-fill-color: transparent; color: transparent;">
                         {part.to_string()}

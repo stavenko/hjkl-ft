@@ -319,6 +319,26 @@ fn FrameView(frame: Frame) -> impl IntoView {
                 {e}
             </div>
         }.into_view(),
+        // A lightly-tinted panel of benefit bullets set in Unbounded — sits in the
+        // upper area, above the frame's title/body.
+        Media::Bonuses(items) => view! {
+            <div style="position: absolute; top: 5%; left: 0; right: 0; bottom: 42%; z-index: 1; \
+                        display: flex; align-items: center; justify-content: center; padding: 0 22px;">
+                <div style="width: 100%; background: rgba(52,211,153,0.10); \
+                            border: 1px solid rgba(52,211,153,0.30); border-radius: 16px; \
+                            padding: 12px 16px; box-shadow: 0 12px 40px rgba(0,0,0,0.35);">
+                    {items.iter().map(|it| view! {
+                        <div style="display: flex; align-items: baseline; gap: 9px; padding: 5px 0;">
+                            <span style="color: #34d399; flex: 0 0 auto; font-size: 13px;">"●"</span>
+                            <span style="font-family: 'Unbounded', system-ui, sans-serif; font-weight: 700; \
+                                         font-size: 13px; line-height: 1.3; color: #eafff4;">
+                                {it.get()}
+                            </span>
+                        </div>
+                    }).collect_view()}
+                </div>
+            </div>
+        }.into_view(),
     };
 
     view! {

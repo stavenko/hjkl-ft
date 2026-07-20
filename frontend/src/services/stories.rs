@@ -54,6 +54,9 @@ pub enum Media {
     Chart,
     /// A large centred emoji (e.g. a celebration).
     Emoji(&'static str),
+    /// A small lightly-tinted panel listing benefit bullets, set in the Unbounded
+    /// display font (bilingual per item). Used by the «benefit of walking» frame.
+    Bonuses(&'static [Loc]),
 }
 
 /// One story frame: a background, optional media, and the text overlay.
@@ -103,6 +106,13 @@ impl Frame {
             Media::Emoji(e) => {
                 s.push_str("emoji:");
                 s.push_str(e);
+            }
+            Media::Bonuses(items) => {
+                s.push_str("bonuses:");
+                for it in items {
+                    s.push_str(it.ru);
+                    s.push(';');
+                }
             }
         }
         format!("{:016x}", fnv1a(&s))
@@ -240,7 +250,7 @@ fn all_image_paths() -> Vec<String> {
                 Media::Chart => {
                     set.insert("/story-img/weight-chart.svg".to_string());
                 }
-                Media::None | Media::Emoji(_) => {}
+                Media::None | Media::Emoji(_) | Media::Bonuses(_) => {}
             }
             if let Bg::Photo(p) = f.bg {
                 set.insert(format!("/story-img/{p}"));
@@ -732,6 +742,16 @@ const S2: &[Frame] = &[
 
 // --- Story 3 «Неделя активности» — unlocked once the week-2 gate is cleared and
 // the step planka is set (Appears::AfterActivityWeek). ------------------------
+/// Health benefits of regular walking, listed on the «Польза ходьбы» frame.
+const WALK_BONUSES: &[Loc] = &[
+    Loc { en: "Eases anxiety", ru: "Помогает от тревожности" },
+    Loc { en: "Reduces depression symptoms", ru: "Снижает симптомы депрессии" },
+    Loc { en: "Cuts mortality by 47%", ru: "Снижает смертность на 47%" },
+    Loc { en: "Guards against dementia", ru: "Защищает от деменции" },
+    Loc { en: "Guards against heart disease", ru: "Защищает от сердечно-сосудистых" },
+    Loc { en: "Lowers cancer risk", ru: "Снижает риск онкологии" },
+];
+
 const S3: &[Frame] = &[
     // 1 — congrats + intro
     Frame {
@@ -771,16 +791,16 @@ const S3: &[Frame] = &[
             ru: "Если вы начинаете жить в дефиците калорий, ваш организм начинает замедляться так, чтобы из этого дефицита уйти. Чтобы не уходить из дефицита, необходимо тратить калории.",
         },
     },
-    // 4 — separate health benefit of walking
+    // 4 — separate health benefit of walking (with the benefits panel)
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Bonuses(WALK_BONUSES),
         accent: GREEN,
         kicker: Loc { en: "Activity", ru: "Активность" },
         title: Loc { en: "The benefit of walking", ru: "Польза ходьбы" },
         body: Loc {
-            en: "Walking has a separate benefit of its own. Every study confirms the health benefit of walking more than 7000 steps a day.",
-            ru: "У ходьбы есть отдельная польза. Все исследования подтверждают пользу для здоровья, если человек ходит более 7000 шагов в день.",
+            en: "All of this is confirmed by research — when you walk more than 7000 steps a day.",
+            ru: "Всё это подтверждают исследования — при ходьбе более 7000 шагов в день.",
         },
     },
     // 5 — walking, running or the gym

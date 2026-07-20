@@ -739,10 +739,11 @@ const S3: &[Frame] = &[
         media: Media::Emoji("🚶"),
         accent: GREEN,
         kicker: Loc { en: "Activity", ru: "Активность" },
-        title: Loc { en: "Activity week", ru: "Неделя активности" },
+        // `~…~` → rendered as a gradient headline pinned to the bottom.
+        title: Loc { en: "~Activity week~", ru: "~Неделя активности~" },
         body: Loc {
-            en: "Well done — protein and vegetables-and-fruit have been green for a whole week. Now we begin the activity week.",
-            ru: "Вы молодец — белок и фрукты-овощи зелёные уже неделю. Теперь мы начинаем неделю активности.",
+            en: "You've been in the program for two weeks now, and you've kept your indicators green for a whole week. So we begin the next week:",
+            ru: "Вы уже две недели в программе и целую неделю держите индикаторы зелёными. Поэтому мы начинаем следующую неделю:",
         },
     },
     // 2 — the step planka

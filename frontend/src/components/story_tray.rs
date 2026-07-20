@@ -214,22 +214,55 @@ fn text_with_icons(s: &str) -> View {
 
 #[component]
 fn FrameView(frame: Frame) -> impl IntoView {
-    let content = view! {
-        <div style="position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; \
-                    justify-content: flex-end; padding: 30px 28px 92px;">
-            <div style=format!("color: {}; font-weight: 700; font-size: 14px; letter-spacing: 0.05em; \
-                                text-transform: uppercase; margin-bottom: 10px;", frame.accent)>
-                {frame.kicker.get()}
+    // A title wrapped in `~…~` is a GRADIENT HEADLINE: the layout flips so the
+    // supporting copy (body) sits on top and the big gradient headline is the last,
+    // emphasized line at the bottom (used by the activity-week intro frame).
+    let container = "position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; \
+                     justify-content: flex-end; padding: 30px 28px 92px;";
+    let kicker_style = format!(
+        "color: {}; font-weight: 700; font-size: 14px; letter-spacing: 0.05em; \
+         text-transform: uppercase; margin-bottom: 10px;",
+        frame.accent
+    );
+    let title_raw = frame.title.get();
+    let gradient = title_raw
+        .strip_prefix('~')
+        .and_then(|s| s.strip_suffix('~'))
+        .map(|s| s.to_string());
+
+    let content = if let Some(headline) = gradient {
+        view! {
+            <div style=container>
+                <div style=kicker_style>{frame.kicker.get()}</div>
+                <div style="color: rgba(255,255,255,0.93); font-size: 20px; line-height: 1.4; \
+                            margin-bottom: 16px; text-shadow: 0 1px 12px rgba(0,0,0,0.6);">
+                    {text_with_icons(frame.body.get())}
+                </div>
+                <div style="font-size: 40px; line-height: 1.05; font-weight: 800; \
+                            background: linear-gradient(115deg, #34d399 0%, #22d3ee 45%, #818cf8 100%); \
+                            -webkit-background-clip: text; background-clip: text; \
+                            -webkit-text-fill-color: transparent; color: transparent; \
+                            filter: drop-shadow(0 2px 18px rgba(0,0,0,0.45));">
+                    {headline}
+                </div>
             </div>
-            <div style="color: #fff; font-size: 34px; line-height: 1.1; font-weight: 800; margin-bottom: 14px; \
-                        text-shadow: 0 2px 18px rgba(0,0,0,0.55);">
-                {text_with_icons(frame.title.get())}
+        }
+        .into_view()
+    } else {
+        view! {
+            <div style=container>
+                <div style=kicker_style>{frame.kicker.get()}</div>
+                <div style="color: #fff; font-size: 34px; line-height: 1.1; font-weight: 800; margin-bottom: 14px; \
+                            text-shadow: 0 2px 18px rgba(0,0,0,0.55);">
+                    {text_with_icons(title_raw)}
+                </div>
+                <div style="color: rgba(255,255,255,0.93); font-size: 18px; line-height: 1.45; \
+                            text-shadow: 0 1px 12px rgba(0,0,0,0.6);">
+                    {text_with_icons(frame.body.get())}
+                </div>
             </div>
-            <div style="color: rgba(255,255,255,0.93); font-size: 18px; line-height: 1.45; \
-                        text-shadow: 0 1px 12px rgba(0,0,0,0.6);">
-                {text_with_icons(frame.body.get())}
-            </div>
-        </div>
+        }
+        .into_view()
     };
 
     // Background layer.

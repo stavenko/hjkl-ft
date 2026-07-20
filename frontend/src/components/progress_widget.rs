@@ -68,7 +68,10 @@ pub fn icon_for(k: &str) -> (&'static str, &'static str) {
         "red_meat" => (IC_HAM, "Мясо"),
         "veg_fruit" => (IC_APPLE, "Фр/овощи"),
         "steps" => (IC_STEPS, "Шаги"),
-        _ => (IC_WHEAT, "Клетчатка"),
+        "fiber" => (IC_WHEAT, "Клетчатка"),
+        // No silent fallback: an unmapped key is a bug (e.g. a new indicator added
+        // without an icon), so fail loudly instead of mislabeling it as fiber.
+        _ => panic!("icon_for: no icon/label for indicator key {k:?}"),
     }
 }
 
@@ -106,7 +109,8 @@ fn gauge_label(key: &str) -> &'static str {
         "steps" => "Шаги",
         "calcium" => "Кальций",
         "iron" => "Железо",
-        _ => "Клетчатка",
+        "fiber" => "Клетчатка",
+        _ => panic!("gauge_label: no label for gauge key {key:?}"),
     }
 }
 

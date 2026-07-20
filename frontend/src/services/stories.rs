@@ -809,7 +809,7 @@ const S3: &[Frame] = &[
         media: Media::None,
         accent: GREEN,
         kicker: Loc { en: "Activity", ru: "Активность" },
-        title: Loc { en: "Walking, running or the gym", ru: "Ходьба, бег или зал" },
+        title: Loc { en: "Walking, running or CrossFit", ru: "Ходьба, бег или Crossfit" },
         body: Loc {
             en: "It depends on your athletic background. Already a runner — keep running. Doing CrossFit regularly — don't stop. But if you haven't done sport before — start with walking.",
             ru: "Это зависит от вашего спортивного опыта. Если вы уже бегаете — можно оставить бег. Если вы регулярно занимаетесь кроссфитом — не надо останавливаться. Но если вы до этого не занимались спортом — начните с ходьбы.",

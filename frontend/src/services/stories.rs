@@ -750,7 +750,7 @@ const S3: &[Frame] = &[
     // 2 — the step planka
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Shot("walk-park.png"),
         accent: GREEN,
         kicker: Loc { en: "Activity", ru: "Активность" },
         title: Loc { en: "Your step planka", ru: "Планка по шагам" },

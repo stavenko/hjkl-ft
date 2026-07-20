@@ -799,8 +799,8 @@ const S3: &[Frame] = &[
         kicker: Loc { en: "Activity", ru: "Активность" },
         title: Loc { en: "The benefit of walking", ru: "Польза ходьбы" },
         body: Loc {
-            en: "All of this is confirmed by research — when you walk more than 7000 steps a day.",
-            ru: "Всё это подтверждают исследования — при ходьбе более 7000 шагов в день.",
+            en: "Walking has a separate benefit of its own. Every study confirms the health benefit of walking more than 7000 steps a day.",
+            ru: "У ходьбы есть отдельная польза. Все исследования подтверждают пользу для здоровья, если человек ходит более 7000 шагов в день.",
         },
     },
     // 5 — walking, running or the gym

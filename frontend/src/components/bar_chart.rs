@@ -30,13 +30,12 @@ const PB: f64 = 168.0; // plot bottom (room for x-axis labels)
 const BAR: &str = "#cfd8e3";
 const BAR_ACTIVE: &str = "#3b6fd4";
 const AVG: &str = "#e0699b";
-// Planka colouring (matches the closed steps widget + daily-indicator palette):
-// green = day reaches/exceeds the planka, orange = short of it.
-const OVER: &str = "#1fa463";
-const UNDER: &str = "#e8850d";
+// The planka line colour (green). Bars stay neutral — the target is shown by the
+// line only (green planka bars on a green line blended together).
+const PLANKA_LINE: &str = "#1fa463";
 
-/// Optional target line the chart draws INSTEAD of the average, colouring each bar
-/// green (reached) / orange (short). `None` → the average line + neutral bars.
+/// Optional target line the chart draws INSTEAD of the average (green planka vs pink
+/// average). `None` → the average line. Bars are always neutral either way.
 #[component]
 pub fn BarChart(
     series: Signal<Vec<(String, f64)>>,
@@ -136,15 +135,9 @@ pub fn BarChart(
                         let cx = PL + (i as f64 + 0.5) * bw;
                         let y = mapy(*k);
                         let h = (PB - y).max(0.0);
-                        // Selected day → blue highlight; otherwise green/orange vs the
-                        // planka once it's set, else the neutral bar colour.
-                        let fill = if sel == Some(i) {
-                            BAR_ACTIVE
-                        } else if let Some(p) = planka_val {
-                            if *k >= p { OVER } else { UNDER }
-                        } else {
-                            BAR
-                        };
+                        // Bars stay neutral; the target is shown by the line only.
+                        // Selected day → blue highlight.
+                        let fill = if sel == Some(i) { BAR_ACTIVE } else { BAR };
                         view! {
                             <rect x=cx - bar_w / 2.0 y=y width=bar_w height=h rx="1.5" fill=fill/>
                         }
@@ -152,7 +145,7 @@ pub fn BarChart(
 
                     // The reference line + label: green «планка» once set, else pink «среднее».
                     let (line_color, line_key) = if planka_val.is_some() {
-                        (OVER, "chart.planka")
+                        (PLANKA_LINE, "chart.planka")
                     } else {
                         (AVG, "chart.average")
                     };

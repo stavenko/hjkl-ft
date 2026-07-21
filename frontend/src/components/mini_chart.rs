@@ -40,18 +40,17 @@ pub fn chart_block(dates: &[&str], values: &[f64]) -> String {
 }
 
 // ── Steps histogram ─────────────────────────────────────────────────────────
-// Colours matched to the daily-indicator palette (progress_widget `state_colors`):
-// green = reached the planka, orange = short of it.
-const STEPS_OVER: &str = "#1fa463"; // day reaches/exceeds the planka (also the planka line)
-const STEPS_UNDER: &str = "#e8850d"; // day falls short of the planka
+// The bars stay neutral blue; the planka/average is conveyed by the LINE colour
+// only (green planka line vs pink average line). Green bars on a green line all
+// blended together, so the target is shown by the line, not by recolouring bars.
+const STEPS_LINE: &str = "#1fa463"; // the planka line (green)
 const STEPS_AVG: &str = "#e0699b"; // the average line (before a planka is set)
 
 /// Steps histogram block (compact bars + HTML date labels) with a reference line:
-/// - `planka: Some(p)` → a GREEN target line at `p`; bars are GREEN when the day
-///   reaches the planka (`v >= p`) and ORANGE when it falls short.
+/// - `planka: Some(p)` → a GREEN target line at `p`.
 /// - `planka: None`    → a PINK average line over the logged past days (today
-///   excluded); bars keep the neutral link colour. This is what shows BEFORE the
-///   steps planka has been computed/applied.
+///   excluded), shown BEFORE the steps planka has been computed/applied.
+/// Bars are always the neutral link colour.
 pub fn steps_bar_block(dates: &[&str], values: &[f64], planka: Option<f64>) -> String {
     if values.is_empty() {
         return format!(
@@ -107,15 +106,8 @@ fn steps_bar_svg(values: &[f64], planka: Option<f64>) -> String {
             let cx = (i as f64 + 0.5) * slot;
             let bh = (v / max_val) * h;
             let y = h - bh;
-            // With a planka: green when the day reaches it, orange when short.
-            // Without one: the neutral link colour.
-            let fill = match planka {
-                Some(p) if v >= p => STEPS_OVER,
-                Some(_) => STEPS_UNDER,
-                None => "var(--bulma-link)",
-            };
             format!(
-                r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="1" fill="{fill}"/>"#,
+                r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="1" fill="var(--bulma-link)"/>"#,
                 cx - bar_w / 2.0,
                 y,
                 bar_w,
@@ -126,7 +118,7 @@ fn steps_bar_svg(values: &[f64], planka: Option<f64>) -> String {
         .join("\n");
 
     // Reference line ON TOP of the bars: green for the planka, pink for the average.
-    let line_color = if planka.is_some() { STEPS_OVER } else { STEPS_AVG };
+    let line_color = if planka.is_some() { STEPS_LINE } else { STEPS_AVG };
     let target = line
         .map(|p| {
             let y = h - (p / max_val) * h;

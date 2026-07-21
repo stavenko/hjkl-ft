@@ -30,9 +30,19 @@ const PB: f64 = 168.0; // plot bottom (room for x-axis labels)
 const BAR: &str = "#cfd8e3";
 const BAR_ACTIVE: &str = "#3b6fd4";
 const AVG: &str = "#e0699b";
+// Planka colouring (matches the closed steps widget + daily-indicator palette):
+// green = day reaches/exceeds the planka, orange = short of it.
+const OVER: &str = "#1fa463";
+const UNDER: &str = "#e8850d";
 
+/// Optional target line the chart draws INSTEAD of the average, colouring each bar
+/// green (reached) / orange (short). `None` → the average line + neutral bars.
 #[component]
-pub fn BarChart(series: Signal<Vec<(String, f64)>>, unit: String) -> impl IntoView {
+pub fn BarChart(
+    series: Signal<Vec<(String, f64)>>,
+    unit: String,
+    #[prop(optional, into)] planka: MaybeSignal<Option<f64>>,
+) -> impl IntoView {
     let active = create_rw_signal(None::<usize>);
     let svg_ref = create_node_ref::<leptos::svg::Svg>();
 
@@ -99,7 +109,6 @@ pub fn BarChart(series: Signal<Vec<(String, f64)>>, unit: String) -> impl IntoVi
                         }.into_view();
                     }
 
-                    let max = data.iter().map(|(_, k)| *k).fold(0.0_f64, f64::max).max(1.0);
                     // Average over the shown days EXCLUDING today (the last point is
                     // today — a still-partial day that would drag the mean down).
                     // Unlogged (zero) days don't count.
@@ -107,6 +116,17 @@ pub fn BarChart(series: Signal<Vec<(String, f64)>>, unit: String) -> impl IntoVi
                         data[..n - 1].iter().map(|(_, k)| *k).filter(|k| *k > 0.0).collect();
                     let avg = (!logged_past.is_empty())
                         .then(|| logged_past.iter().sum::<f64>() / logged_past.len() as f64);
+
+                    // Reference line: the applied planka once it's set, otherwise the
+                    // running average. Included in the scale so it always fits.
+                    let planka_val = planka.get();
+                    let line_val = planka_val.or(avg);
+                    let max = data
+                        .iter()
+                        .map(|(_, k)| *k)
+                        .fold(0.0_f64, f64::max)
+                        .max(line_val.unwrap_or(0.0))
+                        .max(1.0);
                     let mapy = move |k: f64| PB - (k / max) * (PB - PT);
                     let bw = (PR - PL) / n as f64;
                     let bar_w = (bw * 0.62).max(1.0);
@@ -116,22 +136,36 @@ pub fn BarChart(series: Signal<Vec<(String, f64)>>, unit: String) -> impl IntoVi
                         let cx = PL + (i as f64 + 0.5) * bw;
                         let y = mapy(*k);
                         let h = (PB - y).max(0.0);
-                        let fill = if sel == Some(i) { BAR_ACTIVE } else { BAR };
+                        // Selected day → blue highlight; otherwise green/orange vs the
+                        // planka once it's set, else the neutral bar colour.
+                        let fill = if sel == Some(i) {
+                            BAR_ACTIVE
+                        } else if let Some(p) = planka_val {
+                            if *k >= p { OVER } else { UNDER }
+                        } else {
+                            BAR
+                        };
                         view! {
                             <rect x=cx - bar_w / 2.0 y=y width=bar_w height=h rx="1.5" fill=fill/>
                         }
                     }).collect_view();
 
-                    let avg_unit = unit.clone();
-                    let avg_line = avg.map(|avg| {
-                        let avg_y = mapy(avg);
+                    // The reference line + label: green «планка» once set, else pink «среднее».
+                    let (line_color, line_key) = if planka_val.is_some() {
+                        (OVER, "chart.planka")
+                    } else {
+                        (AVG, "chart.average")
+                    };
+                    let line_unit = unit.clone();
+                    let avg_line = line_val.map(|lv| {
+                        let ly = mapy(lv);
                         view! {
                             <g>
-                                <line x1=PL y1=avg_y x2=PR y2=avg_y
-                                    stroke=AVG stroke-width="1.2" stroke-dasharray="4 3"/>
-                                <text x=PR y=avg_y - 3.0 text-anchor="end"
-                                    fill=AVG font-size="10.5" font-weight="600">
-                                    {format!("{} {:.0} {}", t("chart.average"), avg, avg_unit)}
+                                <line x1=PL y1=ly x2=PR y2=ly
+                                    stroke=line_color stroke-width="1.2" stroke-dasharray="4 3"/>
+                                <text x=PR y=ly - 3.0 text-anchor="end"
+                                    fill=line_color font-size="10.5" font-weight="600">
+                                    {format!("{} {:.0} {}", t(line_key), lv, line_unit)}
                                 </text>
                             </g>
                         }

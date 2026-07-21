@@ -1,7 +1,7 @@
 use leptos::*;
 use api_types::StepEntry;
 
-use crate::components::mini_chart::bar_block_with_line;
+use crate::components::mini_chart::steps_bar_block;
 use crate::components::weight_widget::EmptyPrompt;
 use crate::services::i18n::t;
 use crate::services::{db, local};
@@ -53,5 +53,5 @@ pub fn chart_svg_steps(entries: &[StepEntry], planka: Option<f64>) -> String {
     es.sort_by(|a, b| a.date.cmp(&b.date));
     let dates: Vec<&str> = es.iter().map(|e| e.date.as_str()).collect();
     let values: Vec<f64> = es.iter().map(|e| e.steps as f64).collect();
-    bar_block_with_line(&dates, &values, planka)
+    steps_bar_block(&dates, &values, planka)
 }

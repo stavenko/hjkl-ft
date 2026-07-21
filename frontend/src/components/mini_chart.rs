@@ -39,24 +39,26 @@ pub fn chart_block(dates: &[&str], values: &[f64]) -> String {
     )
 }
 
-/// A self-contained BAR chart block (compact histogram + HTML date labels), for
-/// tiles where a count-per-day reads better as bars than a line (e.g. steps).
-/// Bars grow from a zero baseline. Empty data draws the same axes placeholder.
-pub fn bar_block(dates: &[&str], values: &[f64]) -> String {
-    bar_block_with_line(dates, values, None)
-}
+// ── Steps histogram ─────────────────────────────────────────────────────────
+// Colours matched to the daily-indicator palette (progress_widget `state_colors`):
+// green = reached the planka, orange = short of it.
+const STEPS_OVER: &str = "#1fa463"; // day reaches/exceeds the planka (also the planka line)
+const STEPS_UNDER: &str = "#e8850d"; // day falls short of the planka
+const STEPS_AVG: &str = "#e0699b"; // the average line (before a planka is set)
 
-/// Like [`bar_block`], but also draws a horizontal target line at `line` (e.g. the
-/// steps planka). The line is included in the vertical scale so it always fits, and
-/// the bars scale to `max(tallest day, line)` — so you can see how far a day falls
-/// below the planka.
-pub fn bar_block_with_line(dates: &[&str], values: &[f64], line: Option<f64>) -> String {
+/// Steps histogram block (compact bars + HTML date labels) with a reference line:
+/// - `planka: Some(p)` → a GREEN target line at `p`; bars are GREEN when the day
+///   reaches the planka (`v >= p`) and ORANGE when it falls short.
+/// - `planka: None`    → a PINK average line over the logged past days (today
+///   excluded); bars keep the neutral link colour. This is what shows BEFORE the
+///   steps planka has been computed/applied.
+pub fn steps_bar_block(dates: &[&str], values: &[f64], planka: Option<f64>) -> String {
     if values.is_empty() {
         return format!(
             r#"<div><svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">{AXES}</svg><div style="{LABEL_ROW}"><span></span><span></span></div></div>"#
         );
     }
-    let svg = bar_chart_svg(values, line);
+    let svg = steps_bar_svg(values, planka);
     let first = short_date(dates.first().copied().unwrap_or(""));
     let last = if dates.len() > 1 {
         short_date(dates.last().copied().unwrap_or(""))
@@ -68,12 +70,26 @@ pub fn bar_block_with_line(dates: &[&str], values: &[f64], line: Option<f64>) ->
     )
 }
 
-fn bar_chart_svg(values: &[f64], line: Option<f64>) -> String {
+/// Average over the logged days EXCLUDING today (the last point — a still-partial
+/// day). Unlogged (zero) days don't count. `None` when there's nothing to average.
+pub fn avg_past(values: &[f64]) -> Option<f64> {
+    if values.len() < 2 {
+        return None;
+    }
+    let logged: Vec<f64> =
+        values[..values.len() - 1].iter().copied().filter(|v| *v > 0.0).collect();
+    (!logged.is_empty()).then(|| logged.iter().sum::<f64>() / logged.len() as f64)
+}
+
+fn steps_bar_svg(values: &[f64], planka: Option<f64>) -> String {
     let w = 300.0_f64;
     let h = 80.0_f64;
     let n = values.len();
-    // Bars grow from zero, scaled to the tallest day OR the target line (so the
-    // planka line always fits on the chart).
+
+    // Reference line: the planka once it's set, otherwise the running average.
+    let line = planka.or_else(|| avg_past(values));
+    // Bars grow from zero, scaled to the tallest day OR the reference line (so the
+    // line always fits on the chart).
     let max_val = values
         .iter()
         .copied()
@@ -91,8 +107,15 @@ fn bar_chart_svg(values: &[f64], line: Option<f64>) -> String {
             let cx = (i as f64 + 0.5) * slot;
             let bh = (v / max_val) * h;
             let y = h - bh;
+            // With a planka: green when the day reaches it, orange when short.
+            // Without one: the neutral link colour.
+            let fill = match planka {
+                Some(p) if v >= p => STEPS_OVER,
+                Some(_) => STEPS_UNDER,
+                None => "var(--bulma-link)",
+            };
             format!(
-                r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="1" fill="var(--bulma-link)"/>"#,
+                r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="1" fill="{fill}"/>"#,
                 cx - bar_w / 2.0,
                 y,
                 bar_w,
@@ -102,12 +125,13 @@ fn bar_chart_svg(values: &[f64], line: Option<f64>) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Horizontal target line (the step planka), drawn ON TOP of the bars.
+    // Reference line ON TOP of the bars: green for the planka, pink for the average.
+    let line_color = if planka.is_some() { STEPS_OVER } else { STEPS_AVG };
     let target = line
         .map(|p| {
             let y = h - (p / max_val) * h;
             format!(
-                r#"<line x1="0" y1="{y:.1}" x2="{w:.0}" y2="{y:.1}" stroke="var(--bulma-success)" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>"#
+                r#"<line x1="0" y1="{y:.1}" x2="{w:.0}" y2="{y:.1}" stroke="{line_color}" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>"#
             )
         })
         .unwrap_or_default();

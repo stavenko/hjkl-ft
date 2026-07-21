@@ -28,8 +28,27 @@ else:
   exit 0
 }
 
-# Write to separate file
-echo "$MODULE_CONTENT" > "$DIST/init.js"
+# Write to separate file, gating the WASM instantiation behind the compatibility
+# flag set by the classic script in index.html. Trunk's module is:
+#   import init, * as bindings from '/<hash>.js';
+#   const wasm = await init({ module_or_path: '/<hash>_bg.wasm' });
+#   window.wasmBindings = bindings;
+#   dispatchEvent(...);
+# The static `import` must stay at the top; we wrap everything AFTER it in
+# `if (!globalThis.__RN_INCOMPATIBLE__) { ... }` so a device without reference-types
+# never fetches/instantiates the wasm (init() would throw there). Top-level await is
+# still legal inside a top-level `if` block in a module.
+MODULE_CONTENT="$MODULE_CONTENT" python3 -c "
+import os, re
+content = os.environ['MODULE_CONTENT'].strip()
+m = re.search(r'^\s*import\b.*?;', content, re.DOTALL | re.MULTILINE)
+if not m:
+    raise SystemExit('extract-inline-module: no import statement in trunk module')
+imp = content[m.start():m.end()].strip()
+rest = (content[:m.start()] + content[m.end():]).strip()
+out = imp + '\nif (!globalThis.__RN_INCOMPATIBLE__) {\n' + rest + '\n}\n'
+open('$DIST/init.js', 'w').write(out)
+"
 
 # Replace inline script with external reference
 python3 -c "

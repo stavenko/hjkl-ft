@@ -50,7 +50,7 @@ fn bump(store_name: &str) {
 /// The legacy, device-global database. Used before login (no user identity yet)
 /// and as the one-time migration source for users created before per-user scoping.
 const BOOTSTRAP_DB: &str = "hjkl-ft";
-const DB_VERSION: u32 = 16;
+const DB_VERSION: u32 = 17;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -159,6 +159,7 @@ fn builder(name: &str) -> rexie::RexieBuilder {
         .add_object_store(ObjectStore::new("ind_protein").key_path("date"))
         .add_object_store(ObjectStore::new("ind_veg_fruit").key_path("date"))
         .add_object_store(ObjectStore::new("ind_steps").key_path("date"))
+        .add_object_store(ObjectStore::new("ind_calories").key_path("date"))
 }
 
 /// How long to wait for a database open before treating it as blocked. A schema

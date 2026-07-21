@@ -192,6 +192,14 @@ pub fn DiaryPage() -> impl IntoView {
         },
     );
 
+    // The calorie planka that APPLIED on the selected date: today → the live planka,
+    // a completed past day → the planka frozen for that day (so it stays valid after
+    // the weekly recompute changes the current planka).
+    let cal_planka_res = create_resource(
+        move || (date.get(), version.get()),
+        |(d, _)| async move { crate::services::indicators::calorie_planka_on(&d).await },
+    );
+
 
     // `_data` is `None` only before the first-ever load of that key (→ render
     // nothing); after that it's the fresh-or-last-known value, so switching to the
@@ -339,14 +347,23 @@ pub fn DiaryPage() -> impl IntoView {
                     let sel_date = date.get();
                     let dates = week_dates(&sel_date);
                     let today_str = local::today();
+                    // The planka that applied on the selected day (past day → frozen).
+                    let cal_target = cal_planka_res.get().flatten();
 
-                    gs.iter().filter(|g| g.amount > 0.0).map(|goal| {
+                    // Steps has its own dashboard widget — no gauge in the diary.
+                    gs.iter().filter(|g| g.amount > 0.0 && g.nutrient != "Steps").map(|goal| {
                         let name = if is_standard_nutrient(&goal.nutrient) {
                             crate::services::i18n::nutrient_name(&goal.nutrient).to_string()
                         } else {
                             goal.nutrient.clone()
                         };
-                        let target = goal.amount;
+                        // For calories draw the SELECTED DAY's planka (not today's) so a
+                        // past day stays valid after the weekly recompute.
+                        let target = if goal.nutrient == "Calories" {
+                            cal_target.unwrap_or(goal.amount)
+                        } else {
+                            goal.amount
+                        };
                         let unit = crate::services::i18n::unit_label(goal.unit.label());
                         let is_at_least = goal.direction == GoalDirection::AtLeast;
 

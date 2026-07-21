@@ -179,6 +179,11 @@ async fn bootstrap_network() {
     // regardless of connectivity).
     services::indicators::maybe_unlock_activity_week().await;
 
+    // Freeze each recent completed day's calorie result (its planka) BEFORE the
+    // weekly recompute below might change the planka — so past-day diary gauges keep
+    // the planka that actually applied. Independent of the recompute itself.
+    services::indicators::freeze_calories_recent().await;
+
     // Weekly calorie-planka recompute: one week after the planka was set (and every
     // week after), recompute it from the last 7 days and post a "letter". Local-only;
     // self-limits via a stored anchor, so calling it every launch is safe.
@@ -216,8 +221,9 @@ fn install_foreground_sync() {
                 services::subscription::maybe_recheck().await;
                 // Classify any still-untagged recent food on resume too.
                 services::classify::sweep_diary_unclassified().await;
-                // A day may have rolled over while backgrounded — check the weekly
-                // planka recompute on resume as well (self-limits via its anchor).
+                // A day may have rolled over while backgrounded — freeze recent days'
+                // calorie planka, then check the weekly recompute (self-limits).
+                services::indicators::freeze_calories_recent().await;
                 services::letters::maybe_recompute_weekly_planka().await;
             });
         }

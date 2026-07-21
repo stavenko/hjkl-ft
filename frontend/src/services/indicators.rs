@@ -214,7 +214,7 @@ struct IndDay {
 
 /// Indicator keys that have a per-day cache store. Keep in sync with the `ind_*`
 /// object stores in `db::builder` and with [`invalidate_day`]/[`clear_cache`].
-const CACHED_STORES: &[&str] = &["ind_protein", "ind_veg_fruit", "ind_steps"];
+const CACHED_STORES: &[&str] = &["ind_protein", "ind_veg_fruit", "ind_steps", "ind_calories"];
 
 /// The cache store for `key`, or None if the indicator isn't cached.
 fn cache_store(key: &str) -> Option<&'static str> {
@@ -222,6 +222,7 @@ fn cache_store(key: &str) -> Option<&'static str> {
         "protein" => Some("ind_protein"),
         "veg_fruit" => Some("ind_veg_fruit"),
         "steps" => Some("ind_steps"),
+        "calories" => Some("ind_calories"),
         _ => None,
     }
 }
@@ -232,6 +233,7 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
         "protein" => local::protein_grams_on(date).await,
         "veg_fruit" => local::veg_fruit_grams_on(date).await,
         "steps" => local::steps_on(date).await,
+        "calories" => local::kcal_on(date).await,
         "calcium" => local::nutrient_grams_on(date, N_CALCIUM).await,
         "iron" => local::nutrient_grams_on(date, N_IRON).await,
         "fiber" => local::nutrient_grams_on(date, N_FIBER).await,
@@ -308,6 +310,45 @@ pub async fn record_steps(date: &str) {
     .await;
 }
 
+// ── Calorie planka (per-day, frozen) ─────────────────────────────────────────
+// The calorie planka is an AtMost goal recomputed every week. To keep PAST days
+// honest (the diary must show the planka that applied THAT day, not today's), we
+// freeze each completed day's `(intake, ratio)` — like the other indicators — from
+// which that day's planka is reconstructed (`target = intake / ratio`). This is
+// entirely separate from the weekly recompute: the recompute is unchanged.
+
+/// The calorie planka that APPLIED on `date`. Today → the live planka. A completed
+/// past day → the target frozen when the day was summarized (`intake / ratio`), so
+/// it survives the weekly recompute; falls back to the current planka when there is
+/// no usable frozen record (a 0-intake day, or days before this cache existed).
+pub async fn calorie_planka_on(date: &str) -> Option<f64> {
+    let current = local::calorie_goal_amount().await;
+    let today = fmt(crate::services::local::today_date());
+    if date >= today.as_str() {
+        return current; // today / future: the live planka applies
+    }
+    let (value, ratio) = day_cached("calories", date).await;
+    match ratio {
+        Some(r) if r > 0.0 => Some(value / r),
+        _ => current,
+    }
+}
+
+/// Freeze the last two weeks of completed days' calorie result at the CURRENT planka
+/// (idempotent — already-frozen days are left untouched). Call on launch/resume so a
+/// completed day is captured against the planka that applied to it. Ordered BEFORE
+/// the weekly recompute in the bootstrap, so on a recompute launch the recent days
+/// are frozen at the OLD planka first. No-op until a planka exists.
+pub async fn freeze_calories_recent() {
+    if local::calorie_goal_amount().await.is_none() {
+        return;
+    }
+    let today = crate::services::local::today_date();
+    for i in 1..=14 {
+        let _ = day_cached("calories", &fmt(today - Duration::days(i))).await;
+    }
+}
+
 /// Invalidate cached days affected by a change to `food_id` — every distinct diary
 /// date that food appears on (via the diary `food_id` index). A change to a food
 /// only ever affects the days it was eaten, so classifying/​editing a food logged
@@ -333,6 +374,7 @@ async fn target_for(key: &str) -> f64 {
             .unwrap_or(0.0),
         "veg_fruit" => veg_fruit_per_day_g(),
         "steps" => local::steps_goal_amount().await.unwrap_or(0.0),
+        "calories" => local::calorie_goal_amount().await.unwrap_or(0.0),
         "calcium" => CALCIUM_PER_DAY_MG,
         "iron" => iron_per_day_mg(),
         "fiber" => FIBER_PER_DAY_G,

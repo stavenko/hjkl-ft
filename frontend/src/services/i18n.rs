@@ -207,6 +207,7 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.recalc" => "Recalculate the target",
         "dashboard.progress.done_title" => "Your daily target",
         "dashboard.progress.gate_title" => "Keep these indicators green for a week.",
+        "dashboard.progress.steps_gate_title" => "Keep the steps indicator green for 7 days.",
         "dashboard.progress.gate_progress" => "{n} {w} left.",
         "dashboard.progress.kcal_day" => "kcal/day",
         "dashboard.progress.done_hint" => "We'll adjust it as observations come in.",
@@ -429,6 +430,7 @@ fn en(key: &str) -> &'static str {
         "offline_gate.retry" => "Retry",
         "dashboard.calories_title" => "Calories",
         "chart.average" => "avg",
+        "chart.planka" => "goal",
         "chart.no_data" => "No data yet",
         "chart.hint" => "Touch the chart to see a day",
 
@@ -1014,6 +1016,7 @@ fn ru(key: &str) -> &'static str {
         "dashboard.progress.recalc" => "Пересчитать планку",
         "dashboard.progress.done_title" => "Ваша дневная планка",
         "dashboard.progress.gate_title" => "Держите эти индикаторы зелёными в течение недели.",
+        "dashboard.progress.steps_gate_title" => "Держите индикатор планки по шагам зелёным 7 дней.",
         "dashboard.progress.gate_progress" => "Осталось {n} {w}.",
         "dashboard.progress.kcal_day" => "ккал/день",
         "dashboard.progress.done_hint" => "Мы будем корректировать её по мере наблюдений.",
@@ -1236,6 +1239,7 @@ fn ru(key: &str) -> &'static str {
         "offline_gate.retry" => "Повторить",
         "dashboard.calories_title" => "Калории",
         "chart.average" => "среднее",
+        "chart.planka" => "планка",
         "chart.no_data" => "Пока нет данных",
         "chart.hint" => "Коснитесь графика, чтобы увидеть день",
 

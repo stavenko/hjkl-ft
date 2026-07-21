@@ -25,6 +25,7 @@ thread_local! {
     static INDS_CACHE: RefCell<Option<Vec<(&'static str, IndicatorState)>>> = const { RefCell::new(None) };
     static GAUGES_CACHE: RefCell<Option<Vec<indicators::DailyGauge>>> = const { RefCell::new(None) };
     static GATE_CACHE: RefCell<Option<u32>> = const { RefCell::new(None) };
+    static STEPS_GATE_CACHE: RefCell<Option<u32>> = const { RefCell::new(None) };
 }
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 16px; \
@@ -201,6 +202,14 @@ pub fn ProgressWidget() -> impl IntoView {
     );
     let gate_s = move || sticky(&GATE_CACHE, gate.get());
 
+    // The activity-week (steps) gate: GREEN steps-days accrued toward its own week.
+    // Depends on step logging and the steps planka goal.
+    let steps_gate = create_local_resource(
+        move || (steps_ver.get(), goals_ver.get()),
+        |_| async { indicators::steps_gate_progress().await },
+    );
+    let steps_gate_s = move || sticky(&STEPS_GATE_CACHE, steps_gate.get());
+
     let busy = create_rw_signal(false);
     let calculate = move |_| {
         busy.set(true);
@@ -360,17 +369,43 @@ pub fn ProgressWidget() -> impl IntoView {
                     {(has_food_v).then(|| {
                         let states: std::collections::HashMap<&'static str, IndicatorState> =
                             inds_s().unwrap_or_default().into_iter().collect();
-                        let row: Vec<(&'static str, IndicatorState)> = indicators::displayed_indicators()
+                        let mut row: Vec<(&'static str, IndicatorState)> = indicators::displayed_indicators()
                             .into_iter()
                             .map(|k| (k, states.get(k).copied().unwrap_or(IndicatorState::Unknown)))
                             .collect();
-                        // "Keep them green" gate caption, right before the
-                        // indicators — hidden once the week (7 green days) is cleared.
+                        // Sort left→right by severity: red, then orange, then green
+                        // (unknown/grey last). Equal priority within a colour → by name.
+                        // At most 7 indicators are drawn.
+                        let rank = |s: IndicatorState| match s {
+                            IndicatorState::Red => 0,
+                            IndicatorState::Orange => 1,
+                            IndicatorState::Green => 2,
+                            IndicatorState::Unknown => 3,
+                        };
+                        row.sort_by(|a, b| {
+                            rank(a.1).cmp(&rank(b.1)).then_with(|| icon_for(a.0).1.cmp(icon_for(b.0).1))
+                        });
+                        row.truncate(7);
+                        // "Keep them green" gate caption, right before the indicators.
+                        // Week-2 gate (protein/veg-fruit) first; once it's cleared and
+                        // the activity week is unlocked, the SAME caption tracks the
+                        // steps gate. Hidden once the active gate's 7 green days are done.
                         let green = gate_s().unwrap_or(0);
-                        let gate_caption = (green < indicators::GREEN_GATE_DAYS).then(|| {
+                        let steps_green = steps_gate_s().unwrap_or(0);
+                        let active_gate: Option<(&'static str, u32)> =
+                            if green < indicators::GREEN_GATE_DAYS {
+                                Some(("dashboard.progress.gate_title", green))
+                            } else if indicators::activity_unlocked()
+                                && steps_green < indicators::GREEN_GATE_DAYS
+                            {
+                                Some(("dashboard.progress.steps_gate_title", steps_green))
+                            } else {
+                                None
+                            };
+                        let gate_caption = active_gate.map(|(title_key, done)| {
                             // Show DAYS REMAINING (not "5/7", which read ambiguously as
                             // done-or-left). Russian day-word agrees with the number.
-                            let left = indicators::GREEN_GATE_DAYS.saturating_sub(green);
+                            let left = indicators::GREEN_GATE_DAYS.saturating_sub(done);
                             let word = match crate::services::i18n::get_lang() {
                                 crate::services::i18n::Lang::En => if left == 1 { "day" } else { "days" },
                                 crate::services::i18n::Lang::Ru => {
@@ -390,7 +425,7 @@ pub fn ProgressWidget() -> impl IntoView {
                             view! {
                                 <div style="display: flex; flex-direction: column; gap: 2px;">
                                     <span class="is-size-7 has-text-weight-semibold">
-                                        {move || t("dashboard.progress.gate_title")}
+                                        {move || t(title_key)}
                                     </span>
                                     <span class="is-size-7 has-text-grey">{progress}</span>
                                 </div>

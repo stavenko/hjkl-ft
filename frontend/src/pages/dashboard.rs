@@ -199,6 +199,7 @@ enum Overlay {
     Notifications,
     Cycle,
     Errors,
+    Mail,
     Progress,
     Weight,
     Steps,
@@ -309,6 +310,14 @@ pub fn DashboardPage() -> impl IntoView {
     let errs = crate::services::errors::signal();
     let has_errors = move || !errs.get().is_empty() || !net_problem_entries().is_empty();
 
+    // Mail tile: a program-letters inbox that permanently occupies col 7. A red dot
+    // marks unread letters. The version signal bumps when a letter is added/read.
+    let letters_ver = crate::services::letters::version_signal();
+    let has_unread_mail = move || {
+        letters_ver.get();
+        crate::services::letters::has_unread()
+    };
+
     view! {
         {move || {
             if persona_full() {
@@ -345,6 +354,15 @@ pub fn DashboardPage() -> impl IntoView {
                             show_done=Signal::derive(|| true)
                             on_done=move || overlay.set(Overlay::None)/>
                         <ErrorsPanel/>
+                    </div>
+                }.into_view()
+            } else if overlay.get() == Overlay::Mail {
+                view! {
+                    <div style=EDITOR>
+                        <EditorHead title="mail.title"
+                            show_done=Signal::derive(|| true)
+                            on_done=move || overlay.set(Overlay::None)/>
+                        <LettersPanel/>
                     </div>
                 }.into_view()
             } else if overlay.get() == Overlay::Progress {
@@ -466,15 +484,29 @@ pub fn DashboardPage() -> impl IntoView {
                                 on:click=move |_| overlay.set(Overlay::Persona)>
                                 {icon_user()}
                             </button>
-                            // Error tile (⚠, orange) — left of the bell (col 7), shown
-                            // only when the background queue recorded errors.
+                            // Error tile (⚠, orange) — col 6, one cell left of the mail
+                            // tile. Shown only when the background queue recorded errors
+                            // or there is a network problem.
                             {move || has_errors().then(|| view! {
-                                <button style=format!("{TILE} grid-column: 7 / 8; grid-row: span 1;")
+                                <button style=format!("{TILE} grid-column: 6 / 7; grid-row: span 1;")
                                     attr:data-testid="dash-errors-widget"
                                     on:click=move |_| overlay.set(Overlay::Errors)>
                                     {icon_alert()}
                                 </button>
                             })}
+
+                            // Mail tile (col 7) — ALWAYS present (unlike the errors tile).
+                            // A red dot marks unread program letters.
+                            <button style=format!("{TILE} grid-column: 7 / 8; grid-row: span 1; position: relative;")
+                                attr:data-testid="dash-mail-widget"
+                                on:click=move |_| overlay.set(Overlay::Mail)>
+                                {icon_mail()}
+                                {move || has_unread_mail().then(|| view! {
+                                    <span style="position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; \
+                                        border-radius: 50%; background: #e0304f; \
+                                        box-shadow: 0 0 0 2px var(--bulma-scheme-main);"></span>
+                                })}
+                            </button>
 
                             // Notifications bell lives in the FAR-RIGHT cell (col 8).
                             // It jiggles only until notifications are configured, and
@@ -707,6 +739,41 @@ fn ErrorsPanel() -> impl IntoView {
     }
 }
 
+/// The program-letters inbox. Lists every letter (newest first) and marks them all
+/// read on open — which clears the mail tile's red dot.
+#[component]
+fn LettersPanel() -> impl IntoView {
+    let ver = crate::services::letters::version_signal();
+    // Mark read AFTER mount (an effect, so the version bump doesn't fire mid-render).
+    // The effect tracks no reactive deps → runs exactly once.
+    create_effect(|_| crate::services::letters::mark_all_read());
+    view! {
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            {move || {
+                ver.get();
+                let list = crate::services::letters::all();
+                if list.is_empty() {
+                    return view! {
+                        <p class="is-size-6 has-text-grey" style="padding: 1rem 0.25rem;">
+                            {move || t("mail.empty")}
+                        </p>
+                    }.into_view();
+                }
+                list.into_iter().map(|l| {
+                    let date = l.created_at.get(0..10).unwrap_or("").to_string();
+                    view! {
+                        <div style="border: 0.5px solid var(--bulma-border-weak); border-radius: 14px; \
+                                padding: 14px 16px; background: var(--bulma-scheme-main);">
+                            <p class="is-size-7 has-text-grey" style="margin-bottom: 8px;">{date}</p>
+                            <p class="is-size-6" style="white-space: pre-wrap; line-height: 1.5;">{l.body}</p>
+                        </div>
+                    }
+                }).collect_view()
+            }}
+        </div>
+    }
+}
+
 /// Copy text to the clipboard SYNCHRONOUSLY from the click handler. Uses two
 /// mechanisms for reliability on iOS PWAs: the async Clipboard API (fire-and-forget,
 /// invoked inside the gesture) AND a legacy hidden-textarea + `execCommand('copy')`
@@ -764,6 +831,17 @@ fn icon_alert() -> impl IntoView {
             <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
             <line x1="12" y1="9" x2="12" y2="13"/>
             <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+    }
+}
+
+/// Feather `mail` — the program-letters inbox tile.
+fn icon_mail() -> impl IntoView {
+    view! {
+        <svg xmlns=IC width="28" height="28" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="4" width="20" height="16" rx="2"/>
+            <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
         </svg>
     }
 }

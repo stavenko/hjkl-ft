@@ -1320,6 +1320,10 @@ pub async fn set_calorie_goal(amount: f64) {
     }
     // The planka now matches the current goal/trend again.
     set_planka_stale(false);
+    // Restart the weekly-recompute clock: the planka was just (re)computed, so the
+    // next automatic weekly letter is a full week out. Single point covering BOTH
+    // the manual «Пересчитать» button and the background weekly recompute.
+    crate::services::letters::mark_planka_recomputed();
 }
 
 // ── "Planka needs recalculating" signal ──────────────────────────────────────
@@ -1502,6 +1506,27 @@ pub async fn list_step_entries() -> Vec<api_types::StepEntry> {
     let mut entries: Vec<api_types::StepEntry> = db::list_all("step_entries").await;
     entries.sort_by(|a, b| a.date.cmp(&b.date));
     entries
+}
+
+/// Average steps over the last `days` COMPLETED days (today excluded), averaged over
+/// only the days that actually have an entry — the same "completed days" window the
+/// calorie planka uses for intake. `None` when no day in the window has steps.
+pub async fn avg_steps_last_days(days: i64) -> Option<u32> {
+    let today = chrono::Local::now().date_naive();
+    let window: std::collections::BTreeSet<String> = (1..=days)
+        .map(|i| (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string())
+        .collect();
+    let vals: Vec<u32> = list_step_entries()
+        .await
+        .into_iter()
+        .filter(|e| window.contains(&e.date))
+        .map(|e| e.steps)
+        .collect();
+    if vals.is_empty() {
+        return None;
+    }
+    let sum: u64 = vals.iter().map(|&s| s as u64).sum();
+    Some((sum as f64 / vals.len() as f64).round() as u32)
 }
 
 // --- Progress photos (client-only: front / side / back, for tracking) ---

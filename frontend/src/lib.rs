@@ -63,6 +63,7 @@ pub fn main() {
         services::classify::init(); // reset the background food-classification queue
         services::errors::init(); // background-error log signal at the root
         services::stories::init(); // stories seen-set + tray-ring version signal
+        services::letters::init(); // program-letters inbox version signal (mail widget)
 
         // The database is ready → drop the splash and show the UI IMMEDIATELY.
         // Everything below is background and MUST NOT block the first paint.
@@ -177,6 +178,11 @@ async fn bootstrap_network() {
     // Open the activity week if the week-2 gate is now cleared (local-only; runs
     // regardless of connectivity).
     services::indicators::maybe_unlock_activity_week().await;
+
+    // Weekly calorie-planka recompute: one week after the planka was set (and every
+    // week after), recompute it from the last 7 days and post a "letter". Local-only;
+    // self-limits via a stored anchor, so calling it every launch is safe.
+    services::letters::maybe_recompute_weekly_planka().await;
 }
 
 #[cfg(not(test))]
@@ -210,6 +216,9 @@ fn install_foreground_sync() {
                 services::subscription::maybe_recheck().await;
                 // Classify any still-untagged recent food on resume too.
                 services::classify::sweep_diary_unclassified().await;
+                // A day may have rolled over while backgrounded — check the weekly
+                // planka recompute on resume as well (self-limits via its anchor).
+                services::letters::maybe_recompute_weekly_planka().await;
             });
         }
     });

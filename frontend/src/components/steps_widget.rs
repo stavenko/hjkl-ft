@@ -4,7 +4,7 @@ use api_types::StepEntry;
 use crate::components::mini_chart::steps_bar_block;
 use crate::components::weight_widget::EmptyPrompt;
 use crate::services::i18n::t;
-use crate::services::{db, local};
+use crate::services::{db, profile};
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; padding: 10px 12px; height: 100%; box-sizing: border-box;";
 
@@ -19,12 +19,14 @@ pub fn StepsWidget(entries: Signal<Vec<StepEntry>>) -> impl IntoView {
         }
     };
 
-    // The steps planka (a Steps/AtLeast goal), drawn as a horizontal line on the
-    // chart. Reactive to `goals` so it appears the moment the activity week sets it.
-    let goals_ver = db::version("goals");
-    let planka = create_resource(move || goals_ver.get(), |_| async {
-        local::steps_goal_amount().await
-    });
+    // The steps planka (a system-set profile value), drawn as a horizontal line on
+    // the chart. Reactive to `profile` so it appears the moment the activity week
+    // sets it.
+    let profile_ver = db::version("profile");
+    let planka = move || {
+        profile_ver.get();
+        profile::get_steps_planka()
+    };
 
     view! {
         <div style=CARD>
@@ -32,7 +34,7 @@ pub fn StepsWidget(entries: Signal<Vec<StepEntry>>) -> impl IntoView {
                 if entries.get().len() < 2 {
                     view! { <EmptyPrompt text_key="steps.empty_prompt"/> }.into_view()
                 } else {
-                    let line = planka.get().flatten();
+                    let line = planka();
                     view! {
                         <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px;">
                             <span class="is-size-7 has-text-grey">{move || t("steps.title")}</span>

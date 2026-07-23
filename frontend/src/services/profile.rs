@@ -61,6 +61,7 @@ fn row_or_default() -> ProfileRow {
         birth_year: None,
         goal: None,
         cycle_start: None,
+        steps_planka: None,
         updated_at: String::new(),
     })
 }
@@ -94,6 +95,18 @@ pub fn set_sex(sex: Sex) {
         Sex::Female => "female",
     };
     write(|r| r.sex = Some(v.to_string()));
+}
+
+/// The daily steps planka (activity target), if set. System-set on the activity
+/// week — there is no manual editing UI. Lives here (not in `goals`) so no
+/// nutrient-iterating food UI can ever pick it up.
+pub fn get_steps_planka() -> Option<f64> {
+    CACHE.with(|c| c.borrow().as_ref().and_then(|r| r.steps_planka).filter(|p| *p > 0.0))
+}
+
+/// Store the steps planka. A non-positive value clears it.
+pub fn set_steps_planka(planka: f64) {
+    write(|r| r.steps_planka = if planka > 0.0 { Some(planka) } else { None });
 }
 
 /// The user's height in centimetres, if set (and a positive number).
@@ -250,6 +263,7 @@ pub async fn migrate_from_local_storage() {
         birth_year: None,
         goal: None,
         cycle_start: None,
+        steps_planka: None,
         updated_at: chrono::Utc::now().to_rfc3339(),
     };
     db::put("profile", &row).await;

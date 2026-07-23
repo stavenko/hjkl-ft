@@ -17,7 +17,7 @@ pub fn FoodsPage() -> impl IntoView {
             foods.set(local::list_foods().await);
             let specs: Vec<NutrientSpec> = local::list_goals().await
                 .into_iter()
-                .filter(|g| !matches!(g.nutrient.as_str(), "Calories" | "Protein" | "Fat" | "Carbs"))
+                .filter(|g| g.is_custom_nutrient())
                 .map(|g| NutrientSpec { key: g.key, unit_label: g.unit.label().to_string(), name: g.nutrient })
                 .collect();
             custom_nutrients.set(specs);

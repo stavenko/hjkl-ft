@@ -36,7 +36,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
             let all_goals = local::list_goals().await;
             goals.set(all_goals.clone());
             let specs: Vec<api_types::NutrientSpec> = all_goals.into_iter()
-                .filter(|g| !matches!(g.nutrient.as_str(), "Calories" | "Protein" | "Fat" | "Carbs"))
+                .filter(|g| g.is_custom_nutrient())
                 .map(|g| api_types::NutrientSpec { key: g.key, unit_label: g.unit.label().to_string(), name: g.nutrient })
                 .collect();
             custom_nutrients.set(specs);
@@ -253,7 +253,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                             let has_per100 = r.total_grams.filter(|g| *g > 0.0).is_some();
                             let scale = r.total_grams.filter(|g| *g > 0.0).map(|g| 100.0 / g).unwrap_or(0.0);
                             let custom_goals: Vec<_> = gs.iter()
-                                .filter(|g| !matches!(g.nutrient.as_str(), "Calories" | "Protein" | "Fat" | "Carbs"))
+                                .filter(|g| g.is_custom_nutrient())
                                 .collect();
                             let grid_style = if has_per100 {
                                 "display: grid; grid-template-columns: auto 1fr 1fr; gap: 0.15rem 1rem;"

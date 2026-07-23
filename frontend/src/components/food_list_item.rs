@@ -50,7 +50,7 @@ pub fn FoodListItem(
                         ];
                         for goal in gs.iter()
                             .filter(|g| g.period == GoalPeriod::Day)
-                            .filter(|g| !matches!(g.nutrient.as_str(), "Calories" | "Protein" | "Fat" | "Carbs"))
+                            .filter(|g| g.is_custom_nutrient())
                         {
                             let val = f.nutrients.get(&goal.nutrient).copied().unwrap_or(0.0) * factor;
                             let label: String = goal.nutrient.chars().take(3).collect();

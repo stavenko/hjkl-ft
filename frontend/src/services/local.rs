@@ -1358,39 +1358,20 @@ pub fn set_planka_stale(v: bool) {
     planka_stale_signal().set(v);
 }
 
-/// Create or update the daily Steps `AtLeast` goal to `amount` steps. A real
-/// persisted goal (same machinery as nutrient goals), set when the user accepts
-/// the weekly card's steps lever; backs the steps_planka source threshold.
-pub async fn set_steps_goal(amount: f64) {
-    match list_goals().await.into_iter().find(|g| g.nutrient == "Steps") {
-        Some(mut g) => {
-            g.direction = GoalDirection::AtLeast;
-            g.amount = amount;
-            g.unit = GoalUnit::Steps;
-            g.period = GoalPeriod::Day;
-            g.updated_at = now();
-            update_goal(&g).await;
-        }
-        None => {
-            create_goal(CreateGoalInput {
-                nutrient: "Steps".to_string(),
-                direction: GoalDirection::AtLeast,
-                amount,
-                unit: GoalUnit::Steps,
-                period: GoalPeriod::Day,
-            })
-            .await;
-        }
+/// One-time migration: the steps planka used to live as a `Goal{nutrient:"Steps"}`
+/// in the synced `goals` store, which every nutrient-iterating food UI wrongly
+/// picked up. Move it to its own profile field (`profile::steps_planka`) and delete
+/// the goal (soft-delete + push, so it clears server-side too). Idempotent: a no-op
+/// once no Steps goal remains.
+pub async fn migrate_steps_goal_to_planka() {
+    let Some(g) = list_goals().await.into_iter().find(|g| g.nutrient == "Steps") else {
+        return;
+    };
+    if crate::services::profile::get_steps_planka().is_none() && g.amount > 0.0 {
+        crate::services::profile::set_steps_planka(g.amount);
     }
-}
-
-/// The current daily steps target from the Steps `AtLeast` goal, if set.
-pub async fn steps_goal_amount() -> Option<f64> {
-    list_goals()
-        .await
-        .into_iter()
-        .find(|g| g.nutrient == "Steps" && g.direction == GoalDirection::AtLeast && g.amount > 0.0)
-        .map(|g| g.amount)
+    delete_goal(&g.id).await;
+    crate::services::sync::push_background();
 }
 
 // --- Weight Entries ---

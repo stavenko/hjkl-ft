@@ -350,8 +350,7 @@ pub fn DiaryPage() -> impl IntoView {
                     // The planka that applied on the selected day (past day → frozen).
                     let cal_target = cal_planka_res.get().flatten();
 
-                    // Steps has its own dashboard widget — no gauge in the diary.
-                    gs.iter().filter(|g| g.amount > 0.0 && g.nutrient != "Steps").map(|goal| {
+                    gs.iter().filter(|g| g.amount > 0.0).map(|goal| {
                         let name = if is_standard_nutrient(&goal.nutrient) {
                             crate::services::i18n::nutrient_name(&goal.nutrient).to_string()
                         } else {
@@ -556,7 +555,7 @@ pub fn DiaryPage() -> impl IntoView {
                                                     let gs = goals();
                                                     let custom_badges: Vec<_> = gs.iter()
                                                         .filter(|goal| goal.period == GoalPeriod::Day)
-                                                        .filter(|goal| !matches!(goal.nutrient.as_str(), "Calories" | "Protein" | "Fat" | "Carbs"))
+                                                        .filter(|goal| goal.is_custom_nutrient())
                                                         .map(|goal| {
                                                             let val = food
                                                                 .and_then(|f| f.nutrients.get(&goal.nutrient).copied())

@@ -469,6 +469,17 @@ pub struct Goal {
     pub updated_at: String,
 }
 
+impl Goal {
+    /// A CUSTOM food nutrient shown as an extra field on the food editor and as a
+    /// food badge: any nutrient goal that isn't one of the built-in KBJU fields
+    /// (Calories/Protein/Fat/Carbs). The `goals` store holds ONLY food nutrients —
+    /// the steps planka lives on the profile, not here — so no activity/store-type
+    /// special-casing is needed.
+    pub fn is_custom_nutrient(&self) -> bool {
+        !matches!(self.nutrient.as_str(), "Calories" | "Protein" | "Fat" | "Carbs")
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateGoalInput {
     pub nutrient: String,
@@ -541,6 +552,11 @@ pub struct ProfileRow {
     /// First day of the current menstrual cycle (YYYY-MM-DD), if the user set it.
     #[serde(default)]
     pub cycle_start: Option<String>,
+    /// The daily steps planka (activity target), set by the system on the activity
+    /// week — NOT a food nutrient, so it lives here rather than in the `goals` store
+    /// where every nutrient-iterating UI would pick it up. Not manually editable.
+    #[serde(default)]
+    pub steps_planka: Option<f64>,
     #[serde(default)]
     pub updated_at: String,
 }

@@ -5,7 +5,7 @@ use api_types::StepEntry;
 use crate::components::bar_chart::BarChart;
 use crate::components::mini_chart::short_date;
 use crate::services::i18n::t;
-use crate::services::{db, local};
+use crate::services::{db, profile};
 
 /// Steps widget in its EXPANDED form — content only, to sit inside the shared
 /// full-screen editor overlay (`EDITOR` + `EditorHead`), same as every other new
@@ -17,12 +17,13 @@ pub fn StepsPanel(
 ) -> impl IntoView {
     let navigate = use_navigate();
 
-    // The applied steps planka (Steps/AtLeast goal), reactive to `goals` so the
-    // chart flips from the average line to the planka the moment it's set.
-    let goals_ver = db::version("goals");
-    let planka = create_resource(move || goals_ver.get(), |_| async {
-        local::steps_goal_amount().await
-    });
+    // The applied steps planka (a system-set profile value), reactive to `profile`
+    // so the chart flips from the average line to the planka the moment it's set.
+    let profile_ver = db::version("profile");
+    let planka = move || {
+        profile_ver.get();
+        profile::get_steps_planka()
+    };
 
     // "Today" in local time — the record button resets at local midnight.
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -37,7 +38,7 @@ pub fn StepsPanel(
             <div>
                 <BarChart series=Signal::derive(move || steps_series(&entries.get()))
                     unit=t("common.unit.steps").to_string()
-                    planka=Signal::derive(move || planka.get().flatten())/>
+                    planka=Signal::derive(planka)/>
                 <button
                     class="button is-link is-fullwidth"
                     style="margin-top: 16px;"

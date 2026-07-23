@@ -49,7 +49,7 @@ pub fn DiaryAddPage() -> impl IntoView {
     let custom_nutrients = move || -> Vec<NutrientSpec> {
         goals()
             .into_iter()
-            .filter(|g| !matches!(g.nutrient.as_str(), "Calories" | "Protein" | "Fat" | "Carbs"))
+            .filter(|g| g.is_custom_nutrient())
             .map(|g| NutrientSpec {
                 key: g.key,
                 unit_label: g.unit.label().to_string(),

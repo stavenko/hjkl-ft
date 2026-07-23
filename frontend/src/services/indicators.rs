@@ -185,7 +185,7 @@ pub async fn maybe_unlock_activity_week() {
     let Some(planka) = local::steps_planka_from_history().await else {
         return; // no step history yet → can't set a planka; wait for data
     };
-    local::set_steps_goal(planka as f64).await;
+    crate::services::profile::set_steps_planka(planka as f64);
     // Anchor the step gate at today so "hold steps a week" counts from now.
     let today = crate::services::local::today_date();
     crate::services::app_flags::set(STEPS_GATE_OPEN_KEY, &fmt(today));
@@ -373,7 +373,7 @@ async fn target_for(key: &str) -> f64 {
             .map(|e| profile::protein_target_from_profile(e.weight_kg) as f64)
             .unwrap_or(0.0),
         "veg_fruit" => veg_fruit_per_day_g(),
-        "steps" => local::steps_goal_amount().await.unwrap_or(0.0),
+        "steps" => crate::services::profile::get_steps_planka().unwrap_or(0.0),
         "calories" => local::calorie_goal_amount().await.unwrap_or(0.0),
         "calcium" => CALCIUM_PER_DAY_MG,
         "iron" => iron_per_day_mg(),

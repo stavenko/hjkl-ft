@@ -53,6 +53,13 @@ pub fn main() {
             }
             services::app_flags::activate().await;
         }
+        // One-time: move the legacy steps planka out of the `goals` store (where every
+        // nutrient-iterating food UI wrongly picked it up) into its own profile field.
+        // Runs BEFORE the first paint so `goals` is clean when any food UI renders.
+        if !services::app_flags::get_bool("steps_planka_migrated_v1") {
+            services::local::migrate_steps_goal_to_planka().await;
+            services::app_flags::set_bool("steps_planka_migrated_v1", true);
+        }
         services::i18n::init_lang();
         services::i18n::init_weight_unit();
         services::update::init(); // update-available signal at the root

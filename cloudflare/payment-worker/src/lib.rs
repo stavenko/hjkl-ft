@@ -544,6 +544,153 @@ fn is_terminated(it: &serde_json::Value) -> bool {
     )
 }
 
+/// Admin: lava.top contracts (subscriptions) that are NOT bound to any account in our DB.
+/// Groups lava invoices by their ROOT contract id (parentInvoice.id, else id), keeps the
+/// latest by datetime per root, and returns only roots that are absent from BOTH the
+/// `contract:<root>` (bound account) and `claim-contract:<root>` (pending claim) indexes.
+async fn admin_lava_subscriptions(env: &Env) -> Result<Response> {
+    let provider = match provider_for_env("lava", env).await {
+        Ok(Some(p)) if p.configured() => p,
+        _ => {
+            return Response::from_json(&serde_json::json!({
+                "subscriptions": [],
+                "note": "lava provider not configured",
+            }));
+        }
+    };
+
+    // Latest invoice item per root contract id (dedupe, keep newest by `datetime`).
+    let mut latest: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+    let mut collected = 0i64;
+    for page in 1u32..=10 {
+        let page_json = provider.list_invoices(page, 100).await?;
+        let total = page_json.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
+        let items = match page_json.get("items").and_then(|v| v.as_array()) {
+            Some(a) => a.clone(),
+            None => break,
+        };
+        let n = items.len();
+        for it in &items {
+            let id = it.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let root = it
+                .get("parentInvoice")
+                .and_then(|p| p.get("id"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(id)
+                .to_string();
+            if root.is_empty() {
+                continue;
+            }
+            let dt = it.get("datetime").and_then(|v| v.as_str()).unwrap_or("");
+            let keep = match latest.get(&root) {
+                Some(prev) => dt >= prev.get("datetime").and_then(|v| v.as_str()).unwrap_or(""),
+                None => true,
+            };
+            if keep {
+                latest.insert(root, it.clone());
+            }
+        }
+        collected += n as i64;
+        if collected >= total || n < 100 {
+            break;
+        }
+    }
+
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for (root, it) in latest {
+        // Unbound iff neither the bound-account index nor the pending-claim index knows it.
+        let bound = index_get(env, &format!("contract:{root}")).await?;
+        let claim = index_get(env, &format!("claim-contract:{root}")).await?;
+        if bound.is_some() || claim.is_some() {
+            continue;
+        }
+        let status = it
+            .get("subscriptionStatus")
+            .and_then(|v| v.as_str())
+            .or_else(|| it.get("status").and_then(|v| v.as_str()));
+        let amount = it.get("receipt").and_then(|r| r.get("amount"));
+        let currency = it
+            .get("receipt")
+            .and_then(|r| r.get("currency"))
+            .and_then(|v| v.as_str());
+        let email = it
+            .get("buyer")
+            .and_then(|b| b.get("email"))
+            .and_then(|v| v.as_str());
+        out.push(serde_json::json!({
+            "contractId": root,
+            "status": status,
+            "amount": amount,
+            "currency": currency,
+            "datetime": it.get("datetime"),
+            "email": email,
+        }));
+    }
+
+    Response::from_json(&serde_json::json!({ "subscriptions": out }))
+}
+
+/// Admin: cancel a lava subscription. MONEY-SAFETY: lava has NO refund — this only stops
+/// renewal. If the lava provider call FAILS we return an error and do NOT flip any local
+/// state (mirrors the app-JWT /cancel). If the contract is bound to an account we also mark
+/// the local SubscriptionDO no-renew (access kept until period end) and notify the bot.
+async fn admin_cancel_subscription(mut req: Request, env: &Env) -> Result<Response> {
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let contract_id = body
+        .get("contractId")
+        .or_else(|| body.get("contract_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if contract_id.is_empty() {
+        return Ok(error_response("missing_params", 400));
+    }
+
+    // Resolve the buyer email: explicit body email wins; else derive from the bound account.
+    let mut email = body
+        .get("email")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let bound_user = index_get(env, &format!("contract:{contract_id}")).await?;
+    if email.is_empty() {
+        if let Some(user) = &bound_user {
+            email = format!("{user}@users.renorma.app");
+        }
+    }
+
+    // Provider call FIRST. On misconfig → 503; on lava error → 502 and NO local flip.
+    match provider_for_env("lava", env).await {
+        Err(reason) => {
+            console_error!("admin_cancel_subscription: {reason}");
+            return Ok(error_response_detail("MISCONFIGURED", &reason, 503));
+        }
+        Ok(Some(p)) if p.configured() => {
+            if let Err(e) = p.cancel(&contract_id, &email).await {
+                console_error!(
+                    "admin_cancel_subscription: provider.cancel failed for contract={contract_id}: {e}"
+                );
+                return Ok(error_response_detail("lava_cancel_failed", &e.to_string(), 502));
+            }
+        }
+        Ok(_) => {}
+    }
+
+    // Bound account → mark local no-renew (keeps access until period end) + notify bot.
+    if let Some(user_id) = bound_user {
+        let sub = sub_stub(env, &user_id)?;
+        let mut out = do_post(&sub, "/cancel", &serde_json::json!({})).await?;
+        let sub_json: serde_json::Value = out.json().await?;
+        let end = sub_json.get("end").and_then(|v| v.as_i64()).unwrap_or(0);
+        notify_bot_cancelled(env, &user_id, end).await;
+    }
+
+    Response::from_json(&serde_json::json!({ "ok": true }))
+}
+
 /// Resolve every REQUIRED Store-bound secret at the top of the fetch entry. On the
 /// first failure: log the full reason loudly and return a 503 so ANY request makes
 /// the misconfiguration obvious (Workers have no separate startup — per-request is
@@ -713,6 +860,20 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         let stub = claim_stub(env)?;
         let res = do_post(&stub, "/by-tg", &serde_json::json!({ "tg": tg })).await?;
         return relay(res).await;
+    }
+    // Admin: lava.top subscriptions/contracts NOT bound to any account in our DB.
+    if method == Method::Get && path == "/admin/lava-subscriptions" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        return admin_lava_subscriptions(env).await;
+    }
+    // Admin: cancel a lava subscription (stops renewal only — NO refund).
+    if method == Method::Post && path == "/admin/cancel-subscription" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        return admin_cancel_subscription(req, env).await;
     }
     // ── Internal guest checkout (INTERNAL_PUSH_KEY-guarded; PROD-ONLY) ──
     // Same as /checkout/guest but ALSO returns the claim secret, because the caller

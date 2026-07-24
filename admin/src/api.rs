@@ -310,6 +310,9 @@ pub struct UnboundPayment {
     /// ms-epoch the payment was confirmed paid (used for "waiting since").
     #[serde(default)]
     pub paid_at: Option<i64>,
+    /// ms-epoch the current paid period ends («действует до»).
+    #[serde(default, rename = "periodEnd")]
+    pub period_end: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -323,6 +326,49 @@ pub async fn unbound_payments() -> Result<Vec<UnboundPayment>, ApiError> {
     let r: UnboundResp =
         request_to(&payment_base()?, "GET", "/admin/unbound-payments", None).await?;
     Ok(r.unbound)
+}
+
+/// A lava.top subscription/contract NOT bound to any account in our DB — surfaced so the
+/// operator can inspect it and, if needed, cancel renewal (lava has NO refund API).
+#[derive(Debug, Clone, Deserialize)]
+pub struct LavaSub {
+    #[serde(rename = "contractId")]
+    pub contract_id: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub amount: Option<i64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub datetime: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct LavaSubsResp {
+    subscriptions: Vec<LavaSub>,
+}
+
+/// GET /admin/lava-subscriptions (payment-worker). lava contracts absent from our DB.
+pub async fn lava_subscriptions() -> Result<Vec<LavaSub>, ApiError> {
+    let r: LavaSubsResp =
+        request_to(&payment_base()?, "GET", "/admin/lava-subscriptions", None).await?;
+    Ok(r.subscriptions)
+}
+
+/// POST /admin/cancel-subscription (payment-worker). Stops renewal only — NO refund.
+/// Returns an error if the lava provider call fails (no local state is flipped server-side).
+pub async fn cancel_subscription(contract_id: &str, email: &str) -> Result<(), ApiError> {
+    let body = serde_json::to_string(&serde_json::json!({
+        "contractId": contract_id,
+        "email": email,
+    }))
+    .map_err(|e| ApiError::Other(e.to_string()))?;
+    let _: serde_json::Value =
+        request_to(&payment_base()?, "POST", "/admin/cancel-subscription", Some(body)).await?;
+    Ok(())
 }
 
 /// A paid user who hasn't set up durable access (no passkey) — «paid but can't get in yet».

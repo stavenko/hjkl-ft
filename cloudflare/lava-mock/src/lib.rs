@@ -135,6 +135,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                     let amt = r.get("amount").and_then(|x| x.as_f64()).unwrap_or(0.0);
                     let cur = r.get("currency").and_then(|x| x.as_str()).unwrap_or("RUB");
                     let dt = r.get("created_at").and_then(|x| x.as_i64()).unwrap_or(0);
+                    let email = r.get("email").and_then(|x| x.as_str()).unwrap_or("");
                     serde_json::json!({
                         "id": cid,
                         "status": "COMPLETED",
@@ -143,6 +144,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                         "datetime": iso_from_ms(dt),
                         "subscriptionStatus": "ACTIVE",
                         "subscriptionDetails": { "terminatedAt": serde_json::Value::Null },
+                        "buyer": { "email": email },
                     })
                 })
                 .collect();

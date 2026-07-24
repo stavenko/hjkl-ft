@@ -785,7 +785,7 @@ impl ClaimDO {
             .storage()
             .sql()
             .exec(
-                "SELECT claim_id, provider, plan_id, status, contract_id, email, amount, currency, created_at, paid_at, tg_user_id, tg_username
+                "SELECT claim_id, provider, plan_id, status, contract_id, email, amount, currency, created_at, paid_at, period_end, tg_user_id, tg_username
                    FROM claims WHERE status='paid' ORDER BY paid_at ASC",
                 None,
             )?

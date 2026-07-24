@@ -25,6 +25,8 @@ enum View {
     Thread { user_id: String, label: String },
     /// Operator worklist of paid-but-unbound payments (manual refund in lava).
     Payments,
+    /// lava.top subscriptions/contracts NOT bound to any account in our DB.
+    Subscriptions,
     /// Per-user AI-token consumption histogram (payment-worker UsageDO).
     Usage,
 }
@@ -52,6 +54,7 @@ pub fn App() -> impl IntoView {
                     view! { <Thread view=view user_id=user_id label=label /> }.into_view()
                 }
                 View::Payments => view! { <Payments view=view /> }.into_view(),
+                View::Subscriptions => view! { <Subscriptions view=view /> }.into_view(),
                 View::Usage => view! { <Usage view=view /> }.into_view(),
             }}
         </div>
@@ -63,6 +66,7 @@ pub fn App() -> impl IntoView {
 enum Section {
     Queue,
     Payments,
+    Subscriptions,
     Usage,
 }
 
@@ -81,6 +85,11 @@ fn TabBar(view: RwSignal<View>, active: Section) -> impl IntoView {
                 on:click=move |_| view.set(View::Payments)>
                 <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M3 10.5h18"/></svg>
                 "Платежи"
+            </button>
+            <button class=move || on(Section::Subscriptions) attr:data-testid="tab-subscriptions"
+                on:click=move |_| view.set(View::Subscriptions)>
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/><circle cx="12" cy="12" r="3.2"/></svg>
+                "Подписки"
             </button>
             <button class=move || on(Section::Usage) attr:data-testid="tab-usage"
                 on:click=move |_| view.set(View::Usage)>
@@ -795,6 +804,24 @@ fn dataset_ru(key: &str) -> String {
 }
 
 /// ms-epoch → coarse "N назад" label for the payments worklist.
+/// Absolute local date-time `DD.MM.YYYY HH:MM` — for fields that can be in the FUTURE
+/// (e.g. a subscription's `period_end`), where the relative `since_label` is wrong.
+fn fmt_ts(ms: i64) -> String {
+    if ms <= 0 {
+        return "—".to_string();
+    }
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms as f64));
+    let two = |n: u32| if n < 10 { format!("0{n}") } else { n.to_string() };
+    format!(
+        "{}.{}.{} {}:{}",
+        two(d.get_date()),
+        two(d.get_month() + 1),
+        d.get_full_year(),
+        two(d.get_hours()),
+        two(d.get_minutes()),
+    )
+}
+
 fn since_label(ms: i64) -> String {
     if ms <= 0 {
         return String::new();
@@ -840,6 +867,8 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
     let receipts = create_rw_signal(Vec::<api::Receipt>::new());
     // The receipt whose full body is open in the modal (fetched on demand).
     let selected = create_rw_signal(Option::<api::ReceiptFull>::None);
+    // The unbound payment whose detail (+ cancel action) is open in the modal.
+    let selected_payment = create_rw_signal(Option::<api::UnboundPayment>::None);
     let error = create_rw_signal(Option::<String>::None);
     let loading = create_rw_signal(true);
 
@@ -1038,8 +1067,12 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                             let contract = p.contract_id.clone().unwrap_or_else(|| "—".to_string());
                             let waited = p.paid_at.map(since_label).unwrap_or_default();
                             let has_wait = !waited.is_empty();
+                            // iOS click-delegation: a real <button>, never a bare <a on:click>.
+                            let row = p.clone();
                             view! {
-                                <div attr:data-testid="payment-row" class="row reveal" style=format!("--i:{i}")>
+                                <button attr:data-testid="payment-row" class="row reveal"
+                                        style=format!("--i:{i}; width:100%; text-align:left;")
+                                        on:click=move |_| selected_payment.set(Some(row.clone()))>
                                     <div class="row__top">
                                         <span class="row__title mono">{amount}</span>
                                         {has_wait.then(|| view! {
@@ -1048,7 +1081,7 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                                     </div>
                                     <div class="row__sub">{email}</div>
                                     <div class="row__meta">"lava: "<span class="mono">{contract}</span></div>
-                                </div>
+                                </button>
                             }
                         }).collect_view()}
                     </div>
@@ -1077,9 +1110,199 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                     </div>
                 }
             })}
+
+            // Unbound-payment detail + «отменить подписку» (renewal only, NO refund).
+            {move || selected_payment.get().map(|p| {
+                let amount = match (p.amount, p.currency.clone()) {
+                    (Some(a), Some(c)) => format!("{a} {c}"),
+                    (Some(a), None) => a.to_string(),
+                    _ => "—".to_string(),
+                };
+                let email = p.email.clone().unwrap_or_else(|| "—".to_string());
+                let contract = p.contract_id.clone().unwrap_or_else(|| "—".to_string());
+                let paid = p.paid_at.map(fmt_ts).unwrap_or_else(|| "—".to_string());
+                let until = p.period_end.map(fmt_ts).unwrap_or_else(|| "—".to_string());
+                let contract_for_cancel = p.contract_id.clone().unwrap_or_default();
+                let email_for_cancel = p.email.clone().unwrap_or_default();
+                let cancelling = create_rw_signal(false);
+                let on_cancel = move |_| {
+                    let cid = contract_for_cancel.clone();
+                    let em = email_for_cancel.clone();
+                    if cid.is_empty() {
+                        error.set(Some("нет contractId — нечего отменять".to_string()));
+                        return;
+                    }
+                    cancelling.set(true);
+                    spawn_local(async move {
+                        match api::cancel_subscription(&cid, &em).await {
+                            Ok(()) => {
+                                selected_payment.set(None);
+                                error.set(None);
+                                load.call(());
+                            }
+                            Err(e) if e.is_auth() => {
+                                auth::logout();
+                                view.set(View::Login);
+                            }
+                            Err(e) => {
+                                cancelling.set(false);
+                                error.set(Some(e.message().to_string()));
+                            }
+                        }
+                    });
+                };
+                view! {
+                    <div on:click=move |_| selected_payment.set(None)
+                         style="position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:60; \
+                                display:flex; align-items:center; justify-content:center; padding:16px;">
+                        <div on:click=move |ev: leptos::ev::MouseEvent| ev.stop_propagation()
+                             style="background:#fff; color:#111; max-width:520px; width:100%; \
+                                    max-height:86vh; overflow:auto; border-radius:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; \
+                                        padding:12px 16px; border-bottom:1px solid #eee;">
+                                <div><b>"Платёж"</b>" · "<span class="mono">{amount}</span></div>
+                                <button class="btn btn--ghost" on:click=move |_| selected_payment.set(None)>"✕"</button>
+                            </div>
+                            <div style="padding:12px 16px; display:flex; flex-direction:column; gap:8px;">
+                                <div class="row__sub">{email}</div>
+                                <div class="row__meta">"lava: "<span class="mono">{contract}</span></div>
+                                <div class="row__meta">{format!("Оплачен: {paid}")}</div>
+                                <div class="row__meta">{format!("Действует до: {until}")}</div>
+                                <button class="btn btn--danger"
+                                        attr:data-testid="cancel-subscription"
+                                        prop:disabled=move || cancelling.get()
+                                        style="margin-top:8px;"
+                                        on:click=on_cancel>
+                                    {move || if cancelling.get() { "Отменяю…" } else { "Отменить подписку" }}
+                                </button>
+                                <div class="row__meta" style="color:#a00;">"Только остановит продление — без возврата денег."</div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            })}
         </div>
 
         <TabBar view=view active=Section::Payments/>
+    }
+}
+
+/// Feature A: lava.top subscriptions/contracts NOT bound to any account in our DB.
+/// Each row can be cancelled (stops renewal only — lava has NO refund API).
+#[component]
+fn Subscriptions(view: RwSignal<View>) -> impl IntoView {
+    let items = create_rw_signal(Vec::<api::LavaSub>::new());
+    let error = create_rw_signal(Option::<String>::None);
+    let loading = create_rw_signal(true);
+
+    let load = Callback::new(move |_: ()| {
+        loading.set(true);
+        spawn_local(async move {
+            match api::lava_subscriptions().await {
+                Ok(list) => {
+                    items.set(list);
+                    error.set(None);
+                }
+                Err(e) if e.is_auth() => {
+                    auth::logout();
+                    view.set(View::Login);
+                }
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            loading.set(false);
+        });
+    });
+    load.call(());
+
+    view! {
+        <header class="appbar">
+            <div class="ring"></div>
+            <div style="flex: 1; min-width: 0;">
+                <div class="appbar__title">"Подписки"</div>
+                <div class="appbar__sub">"lava · без привязки к аккаунту"</div>
+            </div>
+            <button class="btn btn--ghost btn--icon" attr:aria-label="Обновить" on:click=move |_| load.call(())>
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
+            </button>
+        </header>
+
+        <div class="screen">
+            {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+
+            {move || {
+                let list = items.get();
+                if list.is_empty() {
+                    if loading.get() {
+                        return view! { <div class="spinner"></div> }.into_view();
+                    }
+                    return view! {
+                        <div class="empty"><div class="empty__ring"></div>
+                            <p>"Нет непривязанных подписок"</p></div>
+                    }.into_view();
+                }
+                view! {
+                    <div class="list">
+                        {list.into_iter().enumerate().map(|(i, s)| {
+                            let amount = match (s.amount, s.currency.clone()) {
+                                (Some(a), Some(c)) => format!("{a} {c}"),
+                                (Some(a), None) => a.to_string(),
+                                _ => "—".to_string(),
+                            };
+                            let email = s.email.clone().unwrap_or_else(|| "—".to_string());
+                            let status = s.status.clone().unwrap_or_else(|| "—".to_string());
+                            let dt = s.datetime.clone().unwrap_or_default();
+                            let contract = s.contract_id.clone();
+                            let email_for_cancel = s.email.clone().unwrap_or_default();
+                            let cancelling = create_rw_signal(false);
+                            let on_cancel = move |_| {
+                                let cid = contract.clone();
+                                let em = email_for_cancel.clone();
+                                cancelling.set(true);
+                                spawn_local(async move {
+                                    match api::cancel_subscription(&cid, &em).await {
+                                        Ok(()) => {
+                                            error.set(None);
+                                            load.call(());
+                                        }
+                                        Err(e) if e.is_auth() => {
+                                            auth::logout();
+                                            view.set(View::Login);
+                                        }
+                                        Err(e) => {
+                                            cancelling.set(false);
+                                            error.set(Some(e.message().to_string()));
+                                        }
+                                    }
+                                });
+                            };
+                            view! {
+                                <div attr:data-testid="subscription-row" class="row reveal" style=format!("--i:{i}")>
+                                    <div class="row__top">
+                                        <span class="row__title mono">{amount}</span>
+                                        <span class="badge badge--plain">{status}</span>
+                                    </div>
+                                    <div class="row__sub">{email}</div>
+                                    <div class="row__meta">"lava: "<span class="mono">{s.contract_id.clone()}</span></div>
+                                    {(!dt.is_empty()).then(|| view! { <div class="row__meta">{dt.clone()}</div> })}
+                                    <button class="btn btn--danger"
+                                            attr:data-testid="subscription-cancel"
+                                            prop:disabled=move || cancelling.get()
+                                            style="margin-top:8px;"
+                                            on:click=on_cancel>
+                                        {move || if cancelling.get() { "Отменяю…" } else { "Отменить" }}
+                                    </button>
+                                </div>
+                            }
+                        }).collect_view()}
+                    </div>
+                    <div class="pad row__meta" style="color:#a00;">
+                        "Отмена останавливает только продление — без возврата денег."
+                    </div>
+                }.into_view()
+            }}
+        </div>
+
+        <TabBar view=view active=Section::Subscriptions/>
     }
 }
 

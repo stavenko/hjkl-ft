@@ -1,4 +1,4 @@
-var CACHE_NAME = 'ft-v37';
+var CACHE_NAME = 'ft-v38';
 // Separate, long-lived cache holding the notification-receipt marker (the ntf code
 // of a received push). Kept across SW activations (excluded from the cleanup below)
 // so an app launched AFTER the push still consumes it. NOT usable as a live channel:
@@ -7,21 +7,46 @@ var CACHE_NAME = 'ft-v37';
 var NOTIF_CACHE = 'notif-deeplink';
 
 // Fixed-name shell: precached on install so an offline launch works even after
-// only a brief online session (iOS is finicky about lazy runtime caching). The
-// hashed assets (wasm/js/css) still cache at runtime, cache-first.
+// only a brief online session (iOS is finicky about lazy runtime caching).
 var SHELL = ['/', '/init.js', '/manifest.json', '/config/frontend.toml',
              '/icon-192.png', '/favicon.ico',
              '/fonts/inter-latin.woff2', '/fonts/inter-cyrillic.woff2'];
 
+// Best-effort cache a URL (never fails the caller).
+function precache(cache, u) {
+    return fetch(u, { cache: 'no-cache' }).then(function(r) {
+        if (r.ok) return cache.put(u, r.clone());
+    }).catch(function() {});
+}
+
+// The CURRENT build's hashed JS glue + WASM live INSIDE init.js
+// (`import … from '/frontend-<hash>.js'` and `module_or_path:'/frontend-<hash>_bg.wasm'`).
+// They MUST be precached at install: otherwise they're only runtime-cached, so a user
+// who updated but never fully loaded online (Cloudflare blocked / no VPN in RU) can't
+// fetch the wasm later — and on iOS the cache-first static fetch then HANGS forever on
+// the missing wasm, so the app never opens. Precaching them here (install runs while
+// online, since fetching the new sw.js already needed the network) guarantees a
+// consistent, self-contained offline build.
+function precacheHashedAssets(cache) {
+    return fetch('/init.js', { cache: 'no-cache' }).then(function(r) {
+        return r.ok ? r.text() : '';
+    }).then(function(txt) {
+        var urls = [];
+        var js = txt.match(/from\s*['"](\/[^'"]+\.js)['"]/);
+        var wasm = txt.match(/module_or_path\s*:\s*['"](\/[^'"]+\.wasm)['"]/);
+        if (js) urls.push(js[1]);
+        if (wasm) urls.push(wasm[1]);
+        return Promise.all(urls.map(function(u) { return precache(cache, u); }));
+    }).catch(function() {});
+}
+
 self.addEventListener('install', function(event) {
     event.waitUntil(
         caches.open(CACHE_NAME).then(function(cache) {
-            // Best-effort: never let one missing URL fail the whole install.
-            return Promise.all(SHELL.map(function(u) {
-                return fetch(u, { cache: 'no-cache' }).then(function(r) {
-                    if (r.ok) return cache.put(u, r.clone());
-                }).catch(function() {});
-            }));
+            return Promise.all([
+                Promise.all(SHELL.map(function(u) { return precache(cache, u); })),
+                precacheHashedAssets(cache),
+            ]);
         }).then(function() { return self.skipWaiting(); })
     );
 });
@@ -100,22 +125,29 @@ self.addEventListener('fetch', function(event) {
         return;
     }
 
-    // Static assets (JS, WASM, CSS, fonts) — cache first, update in background
+    // Static assets (JS, WASM, CSS, fonts) — cache first. A cached asset is served
+    // instantly with NO network (the offline/no-VPN happy path once precached).
     event.respondWith(
         caches.match(event.request).then(function(cached) {
-            var fetchPromise = fetch(event.request).then(function(response) {
+            if (cached) return cached;
+            // Uncached → go to network, but bound it: on iOS a blocked/no-VPN
+            // connection can leave `fetch` PENDING (never resolving/rejecting), which
+            // would hang `respondWith` forever and freeze the app on the splash. Race
+            // a generous timeout (real wasm downloads on slow links still fit) so a
+            // dead connection fails fast to a network error instead of hanging.
+            var network = fetch(event.request).then(function(response) {
                 if (response.ok) {
                     var clone = response.clone();
-                    caches.open(CACHE_NAME).then(function(cache) {
-                        cache.put(event.request, clone);
-                    });
+                    caches.open(CACHE_NAME).then(function(cache) { cache.put(event.request, clone); });
                 }
                 return response;
-            }).catch(function() {
-                return cached;
             });
-
-            return cached || fetchPromise;
+            var timeout = new Promise(function(_, reject) {
+                setTimeout(function() { reject(new Error('sw-static-timeout')); }, 20000);
+            });
+            return Promise.race([network, timeout]).catch(function() {
+                return caches.match(event.request).then(function(c) { return c || Response.error(); });
+            });
         })
     );
 });

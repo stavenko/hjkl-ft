@@ -34,7 +34,7 @@ use crate::services::i18n::t;
 use crate::services::profile::{self, CourseGoal, Sex};
 use crate::services::indicators::{self, IndicatorState};
 use crate::services::sticky::sticky;
-use crate::services::weight_trend::{self, BalanceState};
+use crate::services::weight_trend;
 use crate::services::{db, local, net};
 
 // ── Expanded-view helpers (gauge labels / colours + "?" explanations) ─────────
@@ -66,26 +66,30 @@ fn gauge_label(key: &str) -> &'static str {
 async fn calorie_hint_text(planka: Option<f64>) -> String {
     let avg = local::avg_daily_kcal(7).await;
     let entries = local::list_weight_entries().await;
-    let balance = weight_trend::weight_trend(&entries, weight_trend::DEFAULT_WINDOW_DAYS).balance();
+    let trend = weight_trend::weight_trend(&entries, weight_trend::DEFAULT_WINDOW_DAYS);
+    let weight_kg = entries
+        .iter()
+        .max_by(|a, b| a.date.cmp(&b.date))
+        .map(|e| e.weight_kg)
+        .unwrap_or(0.0);
     let goal = match profile::get_goal() {
         CourseGoal::Lose => "похудение",
         CourseGoal::Maintain => "удержание веса",
         CourseGoal::Gain => "набор веса",
     };
-    // The planka keeps the average when you're ALREADY in a deficit; otherwise it's
-    // 5% below (mirrors `local::calorie_planka`).
-    let (trend, minus) = match balance {
-        BalanceState::Deficit => ("вы уже в дефиците — вес снижается", ""),
-        BalanceState::Surplus => ("мы заметили, что вы в профиците — вес растёт", " − 5%"),
-        BalanceState::Maintenance => {
-            ("мы заметили, что вы в балансе калорий — вес стоит на месте", " − 5%")
-        }
+    // Describe the ACTUAL adjustment via the single-source `planka_factor` (no drift).
+    let f = local::planka_factor(&trend, weight_kg);
+    let why = if f > 1.001 {
+        "а вес снижается слишком быстро — мы приподняли планку на 5% для комфорта"
+    } else if f < 0.999 {
+        "а вес пока не снижается уверенно — мы снизили планку на 5%, чтобы создать мягкий дефицит"
+    } else {
+        "а вес снижается комфортно (или мы ещё уточняем данные за неделю) — мы держим планку на вашем среднем"
     };
     let avg_s = avg.map(|a| format!("{a:.0}")).unwrap_or_else(|| "—".to_string());
     let planka_s = planka.map(|p| format!("{p:.0}")).unwrap_or_else(|| "—".to_string());
     format!(
-        "Поскольку ваша цель — {goal}, а {trend}, мы устанавливаем планку в ваше среднее \
-         потребление за 7 дней{minus}.\n\nВаше среднее потребление калорий: {avg_s} ккал.\n\
+        "Поскольку ваша цель — {goal}, {why}.\n\nВаше среднее потребление за 7 дней: {avg_s} ккал.\n\
          И поэтому ваша планка: {planka_s} ккал."
     )
 }

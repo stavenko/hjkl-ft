@@ -182,27 +182,88 @@ pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
     Some(sum / day_totals.len() as f64)
 }
 
-/// Compute the daily calorie planka from the average daily kcal and the weight
-/// balance. In a deficit the planka is the average itself; for maintenance or a
-/// surplus it is 5% below the average. The result is rounded to the nearest
-/// 50 kcal. Pure (no I/O) so it is unit-testable.
-pub fn calorie_planka(avg_kcal: f64, balance: crate::services::weight_trend::BalanceState) -> f64 {
-    use crate::services::weight_trend::BalanceState;
-    let raw = if balance == BalanceState::Deficit { avg_kcal } else { avg_kcal * 0.95 };
-    (raw / 50.0).round() * 50.0
+// ── Careful calorie-planka control loop ──────────────────────────────────────
+// The planka is the average intake nudged by AT MOST one small step per weekly
+// recompute, and cut ONLY when justified — so a slow, comfortable weight loss is
+// never disrupted by a premature reduction:
+//   • confident loss, rate inside the comfortable band → HOLD;
+//   • confident loss but too SLOW → −5% (gently speed up toward the band);
+//   • confident loss but too FAST → +5% (protect comfort / muscle);
+//   • probably-but-not-confidently losing → HOLD, gather another week;
+//   • flat / gaining → −5% (induce a deficit);
+//   • no usable trend yet (week 1 / too few weigh-ins) → HOLD (baseline = average).
+
+/// Comfortable weekly weight-loss rate, as a FRACTION of body weight.
+const COMFORT_LOSS_MIN: f64 = 0.003; // 0.3 %/week
+const COMFORT_LOSS_MAX: f64 = 0.007; // 0.7 %/week
+/// The largest single-step planka change per weekly recompute.
+const PLANKA_STEP: f64 = 0.05; // ±5 %
+
+/// Multiplier applied to the average intake, chosen from the weight trend +
+/// current body weight. Pure (no I/O) so it is unit-tested. See the block comment.
+pub fn planka_factor(trend: &crate::services::weight_trend::WeightTrend, weight_kg: f64) -> f64 {
+    use crate::services::weight_trend::{Direction, WeightTrend, CONFIDENT, WEAK};
+    // `p_down` = probability the weight is genuinely FALLING; `slope_wk` in kg/week.
+    let (p_down, slope_wk) = match *trend {
+        WeightTrend::Estimated { direction, confidence, slope_kg_per_week, .. } => {
+            let p = match direction {
+                Direction::Down => confidence,
+                Direction::Up => 1.0 - confidence,
+            };
+            (p, slope_kg_per_week)
+        }
+        // < 3 distinct weigh-days: a sign exists but no confidence — HOLD, never cut on noise.
+        WeightTrend::Tentative { .. } | WeightTrend::Insufficient { .. } => return 1.0,
+    };
+
+    if p_down >= CONFIDENT {
+        // Confidently losing → steer toward the comfortable-rate band.
+        if weight_kg <= 0.0 {
+            return 1.0;
+        }
+        let rate = slope_wk.abs() / weight_kg; // fraction of body weight lost per week
+        if rate < COMFORT_LOSS_MIN {
+            1.0 - PLANKA_STEP // too slow → gentle cut
+        } else if rate > COMFORT_LOSS_MAX {
+            1.0 + PLANKA_STEP // too fast → ease up
+        } else {
+            1.0 // comfortable → hold
+        }
+    } else if p_down >= WEAK {
+        1.0 // probably losing but not confirmed → HOLD, wait another week (don't cut prematurely)
+    } else {
+        1.0 - PLANKA_STEP // flat / gaining → induce a deficit
+    }
+}
+
+/// The daily calorie planka: the average intake nudged by [`planka_factor`] and
+/// rounded to the nearest 50 kcal. Pure (no I/O) so it is unit-testable.
+pub fn calorie_planka(
+    avg_kcal: f64,
+    trend: &crate::services::weight_trend::WeightTrend,
+    weight_kg: f64,
+) -> f64 {
+    ((avg_kcal * planka_factor(trend, weight_kg)) / 50.0).round() * 50.0
 }
 
 /// The suggested daily calorie planka shown (and accepted) in ch3: average intake
-/// over the last 7 COMPLETED days (today excluded — it's still in progress),
-/// adjusted for the current weight balance via [`calorie_planka`] (deficit → keep;
-/// maintenance/surplus → −5%, rounded to 50). `None` when there are no logged days
-/// yet. Single source of truth so the widget's displayed figure and the value it
-/// accepts cannot drift apart.
+/// over the last 7 COMPLETED days (today excluded — it's still in progress), nudged
+/// by the weight trend + latest weight via [`calorie_planka`] (see the block
+/// comment — hold while comfortably/probably losing, small −5% only when plateaued).
+/// `None` when there are no logged days yet. Single source of truth so the widget's
+/// displayed figure and the value it accepts cannot drift apart.
 pub async fn calorie_planka_suggestion() -> Option<f64> {
     use crate::services::weight_trend::{self, DEFAULT_WINDOW_DAYS};
     let avg = avg_daily_kcal(7).await?;
-    let balance = weight_trend::weight_trend(&list_weight_entries().await, DEFAULT_WINDOW_DAYS).balance();
-    Some(calorie_planka(avg, balance))
+    let entries = list_weight_entries().await;
+    let trend = weight_trend::weight_trend(&entries, DEFAULT_WINDOW_DAYS);
+    // Latest weigh-in — for the %-of-body-weight loss rate.
+    let weight_kg = entries
+        .iter()
+        .max_by(|a, b| a.date.cmp(&b.date))
+        .map(|e| e.weight_kg)
+        .unwrap_or(0.0);
+    Some(calorie_planka(avg, &trend, weight_kg))
 }
 
 /// The currently-set daily calorie planka (the `Calories`/`AtMost` goal), if any.
@@ -1545,9 +1606,13 @@ pub async fn list_progress_photos() -> Vec<ProgressPhoto> {
 
 #[cfg(test)]
 mod tests {
-    use super::calorie_planka;
     use super::steps_planka_for_avg;
-    use crate::services::weight_trend::BalanceState;
+    use super::{calorie_planka, planka_factor, PLANKA_STEP};
+    use crate::services::weight_trend::{Direction, WeightTrend};
+
+    fn estimated(dir: Direction, slope_wk: f64, conf: f64) -> WeightTrend {
+        WeightTrend::Estimated { direction: dir, slope_kg_per_week: slope_wk, confidence: conf, days: 14 }
+    }
 
     #[test]
     fn steps_planka_bands() {
@@ -1565,23 +1630,55 @@ mod tests {
     }
 
     #[test]
-    fn calorie_planka_deficit_is_avg_rounded_to_50() {
-        // Deficit -> avg itself, rounded to nearest 50.
-        assert_eq!(calorie_planka(2000.0, BalanceState::Deficit), 2000.0);
-        assert_eq!(calorie_planka(2490.0, BalanceState::Deficit), 2500.0); // 49.8 -> 50
-        assert_eq!(calorie_planka(2470.0, BalanceState::Deficit), 2450.0); // 49.4 -> 49
-        assert_eq!(calorie_planka(2475.0, BalanceState::Deficit), 2500.0); // 49.5 -> 50
+    fn planka_factor_confident_loss_steers_to_comfort_band() {
+        // 90 kg → comfortable 0.3..0.7 %/wk = 0.27..0.63 kg/wk.
+        // In band (0.5 kg/wk) → hold.
+        assert_eq!(planka_factor(&estimated(Direction::Down, -0.5, 0.9), 90.0), 1.0);
+        // Too slow (0.1 kg/wk ≈ 0.11 %) → gentle cut.
+        assert_eq!(planka_factor(&estimated(Direction::Down, -0.1, 0.9), 90.0), 1.0 - PLANKA_STEP);
+        // Too fast (1.0 kg/wk ≈ 1.11 %) → ease up.
+        assert_eq!(planka_factor(&estimated(Direction::Down, -1.0, 0.9), 90.0), 1.0 + PLANKA_STEP);
     }
 
     #[test]
-    fn calorie_planka_non_deficit_is_minus_5pct_rounded_to_50() {
-        // Maintenance / Surplus -> avg * 0.95, rounded to nearest 50.
-        // 2000 * 0.95 = 1900.0
-        assert_eq!(calorie_planka(2000.0, BalanceState::Maintenance), 1900.0);
-        assert_eq!(calorie_planka(2000.0, BalanceState::Surplus), 1900.0);
-        // 2100 * 0.95 = 1995.0 -> rounds to 2000.
-        assert_eq!(calorie_planka(2100.0, BalanceState::Maintenance), 2000.0);
-        // 2050 * 0.95 = 1947.5 -> 38.95 -> 39 -> 1950.
-        assert_eq!(calorie_planka(2050.0, BalanceState::Surplus), 1950.0);
+    fn planka_factor_weak_signal_holds_no_premature_cut() {
+        // Probably losing (0.71) but not confident → HOLD (this user's case).
+        assert_eq!(planka_factor(&estimated(Direction::Down, -0.2, 0.71), 90.0), 1.0);
+        // Just over the WEAK threshold (0.66) → still holds.
+        assert_eq!(planka_factor(&estimated(Direction::Down, -0.1, 0.66), 90.0), 1.0);
+    }
+
+    #[test]
+    fn planka_factor_flat_or_gaining_cuts() {
+        // Down but low confidence (p_down 0.55 < WEAK) → plateau-ish → cut.
+        assert_eq!(planka_factor(&estimated(Direction::Down, -0.05, 0.55), 90.0), 1.0 - PLANKA_STEP);
+        // Confident gain (up 0.9 → p_down 0.1) → cut.
+        assert_eq!(planka_factor(&estimated(Direction::Up, 0.4, 0.9), 90.0), 1.0 - PLANKA_STEP);
+        // Weakly gaining (up 0.7 → p_down 0.3) → cut.
+        assert_eq!(planka_factor(&estimated(Direction::Up, 0.2, 0.7), 90.0), 1.0 - PLANKA_STEP);
+    }
+
+    #[test]
+    fn planka_factor_no_trend_holds() {
+        assert_eq!(planka_factor(&WeightTrend::Insufficient { days: 1 }, 90.0), 1.0);
+        assert_eq!(
+            planka_factor(
+                &WeightTrend::Tentative { direction: Direction::Down, slope_kg_per_week: -0.5, days: 2 },
+                90.0,
+            ),
+            1.0
+        );
+    }
+
+    #[test]
+    fn calorie_planka_rounds_to_50() {
+        // Hold (weak down) → avg unchanged, rounded to 50.
+        let hold = estimated(Direction::Down, -0.2, 0.71);
+        assert_eq!(calorie_planka(2600.0, &hold, 90.0), 2600.0);
+        assert_eq!(calorie_planka(2490.0, &hold, 90.0), 2500.0); // 49.8 -> 50
+        // Cut (plateau) → avg*0.95, rounded to 50.
+        let cut = estimated(Direction::Down, -0.05, 0.55);
+        assert_eq!(calorie_planka(2600.0, &cut, 90.0), 2450.0); // 2470 -> 49.4 -> 2450
+        assert_eq!(calorie_planka(2000.0, &cut, 90.0), 1900.0);
     }
 }

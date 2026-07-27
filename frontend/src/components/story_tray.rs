@@ -31,7 +31,8 @@ pub fn StoryTray() -> impl IntoView {
                 {move || {
                     let planka_set = planka.get().flatten().is_some();
                     let activity = crate::services::indicators::activity_unlocked();
-                    stories::visible(planka_set, activity)
+                    let calcium = crate::services::indicators::calcium_unlocked();
+                    stories::visible(planka_set, activity, calcium)
                         .into_iter()
                         .map(|s| view! { <TrayCircle story=s open=open /> })
                         .collect_view()

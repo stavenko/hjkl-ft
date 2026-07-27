@@ -26,6 +26,7 @@ thread_local! {
     static GAUGES_CACHE: RefCell<Option<Vec<indicators::DailyGauge>>> = const { RefCell::new(None) };
     static GATE_CACHE: RefCell<Option<u32>> = const { RefCell::new(None) };
     static STEPS_GATE_CACHE: RefCell<Option<u32>> = const { RefCell::new(None) };
+    static CALCIUM_GATE_CACHE: RefCell<Option<u32>> = const { RefCell::new(None) };
 }
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 16px; \
@@ -210,6 +211,14 @@ pub fn ProgressWidget() -> impl IntoView {
     );
     let steps_gate_s = move || sticky(&STEPS_GATE_CACHE, steps_gate.get());
 
+    // The calcium-week gate: GREEN calcium-days accrued toward its own week. Depends
+    // on food/nutrient data (calcium comes from enriched foods) and the goals store.
+    let calcium_gate = create_local_resource(
+        move || (food_ver.get(), foods_ver.get(), goals_ver.get()),
+        |_| async { indicators::calcium_gate_progress().await },
+    );
+    let calcium_gate_s = move || sticky(&CALCIUM_GATE_CACHE, calcium_gate.get());
+
     let busy = create_rw_signal(false);
     let calculate = move |_| {
         busy.set(true);
@@ -392,6 +401,7 @@ pub fn ProgressWidget() -> impl IntoView {
                         // steps gate. Hidden once the active gate's 7 green days are done.
                         let green = gate_s().unwrap_or(0);
                         let steps_green = steps_gate_s().unwrap_or(0);
+                        let calcium_green = calcium_gate_s().unwrap_or(0);
                         let active_gate: Option<(&'static str, u32)> =
                             if green < indicators::GREEN_GATE_DAYS {
                                 Some(("dashboard.progress.gate_title", green))
@@ -399,6 +409,10 @@ pub fn ProgressWidget() -> impl IntoView {
                                 && steps_green < indicators::GREEN_GATE_DAYS
                             {
                                 Some(("dashboard.progress.steps_gate_title", steps_green))
+                            } else if indicators::calcium_unlocked()
+                                && calcium_green < indicators::GREEN_GATE_DAYS
+                            {
+                                Some(("dashboard.progress.calcium_gate_title", calcium_green))
                             } else {
                                 None
                             };

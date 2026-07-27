@@ -1387,6 +1387,27 @@ pub async fn set_calorie_goal(amount: f64) {
     crate::services::letters::mark_planka_recomputed();
 }
 
+/// Create (idempotently) the daily calcium goal — an `AtLeast` nutrient goal keyed
+/// by the display name `Кальций`, so the food editor shows a calcium field and the
+/// background enricher fills calcium on new foods. Set when the calcium week opens.
+pub async fn set_calcium_goal(amount_mg: f64) {
+    if list_goals()
+        .await
+        .into_iter()
+        .any(|g| g.nutrient == crate::services::indicators::N_CALCIUM)
+    {
+        return; // already exists — don't duplicate or overwrite a user-tuned value
+    }
+    create_goal(CreateGoalInput {
+        nutrient: crate::services::indicators::N_CALCIUM.to_string(),
+        direction: GoalDirection::AtLeast,
+        amount: amount_mg,
+        unit: GoalUnit::Mg,
+        period: GoalPeriod::Day,
+    })
+    .await;
+}
+
 // ── "Planka needs recalculating" signal ──────────────────────────────────────
 // Raised when the course goal changes (the old planka no longer fits the new
 // goal); cleared whenever the planka is (re)computed. Persisted per device.

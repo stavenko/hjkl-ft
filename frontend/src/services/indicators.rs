@@ -153,9 +153,18 @@ pub const UNLOCKED_INDICATORS: &[&str] = &["protein", "veg_fruit"];
 /// App-flag: the activity week (step planka + step indicator) has been unlocked.
 const ACTIVITY_UNLOCKED_KEY: &str = "activity_week_unlocked";
 
+/// App-flag: the calcium week (calcium goal + calcium indicator + gauge) has been
+/// unlocked. Opens once the activity (steps) gate is cleared.
+const CALCIUM_UNLOCKED_KEY: &str = "calcium_week_unlocked";
+
 /// Whether the activity week is unlocked (step indicator visible).
 pub fn activity_unlocked() -> bool {
     crate::services::app_flags::get_bool(ACTIVITY_UNLOCKED_KEY)
+}
+
+/// Whether the calcium week is unlocked (calcium indicator + gauge visible).
+pub fn calcium_unlocked() -> bool {
+    crate::services::app_flags::get_bool(CALCIUM_UNLOCKED_KEY)
 }
 
 /// Indicators shown in the widget (icons + histograms), in display order: the
@@ -166,6 +175,20 @@ pub fn displayed_indicators() -> Vec<&'static str> {
     let mut v: Vec<&'static str> = UNLOCKED_INDICATORS.to_vec();
     if activity_unlocked() {
         v.push("steps");
+    }
+    if calcium_unlocked() {
+        v.push("calcium");
+    }
+    v
+}
+
+/// Daily gauges shown on the dashboard, in display order: the week-1 set plus
+/// `calcium` once the calcium week is unlocked (steps is NOT a gauge — it has its
+/// own widget). Distinct from the gate sets — each unlock has its own gate.
+pub fn displayed_gauges() -> Vec<&'static str> {
+    let mut v: Vec<&'static str> = UNLOCKED_GAUGES.to_vec();
+    if calcium_unlocked() {
+        v.push("calcium");
     }
     v
 }
@@ -190,6 +213,27 @@ pub async fn maybe_unlock_activity_week() {
     let today = crate::services::local::today_date();
     crate::services::app_flags::set(STEPS_GATE_OPEN_KEY, &fmt(today));
     crate::services::app_flags::set_bool(ACTIVITY_UNLOCKED_KEY, true);
+}
+
+/// Unlock the calcium week once the activity (steps) gate is cleared: set the daily
+/// calcium goal (1 g/day) so the AI starts filling calcium on new foods, flip the
+/// flag so the calcium indicator + gauge appear, and anchor the calcium gate at
+/// today so its own "keep it green a week" begins now. Idempotent (guarded by the
+/// flag). Call on launch, after the activity week is (re)checked.
+pub async fn maybe_unlock_calcium_week() {
+    if calcium_unlocked() {
+        return;
+    }
+    if !activity_unlocked() {
+        return; // the activity week must open (and be gated) first
+    }
+    if steps_gate_progress().await < GREEN_GATE_DAYS {
+        return; // steps gate not cleared yet
+    }
+    local::set_calcium_goal(CALCIUM_PER_DAY_MG).await;
+    let today = crate::services::local::today_date();
+    crate::services::app_flags::set(CALCIUM_GATE_OPEN_KEY, &fmt(today));
+    crate::services::app_flags::set_bool(CALCIUM_UNLOCKED_KEY, true);
 }
 
 // ── Per-indicator per-day cache ──────────────────────────────────────────────
@@ -444,6 +488,10 @@ const GATE_OPEN_KEY: &str = "ind_opened_at";
 /// window counts from here, so pre-planka days never count.
 const STEPS_GATE_OPEN_KEY: &str = "steps_gate_opened_at";
 
+/// App-flag holding the date the CALCIUM gate opened — its rolling window counts
+/// from here, so days before the calcium goal existed never count.
+const CALCIUM_GATE_OPEN_KEY: &str = "calcium_gate_opened_at";
+
 /// The date the indicators "opened" for this user — persisted the first time we
 /// evaluate the gate, so the window is anchored to when the nudge began (not to
 /// arbitrary earlier diary history).
@@ -517,6 +565,35 @@ pub async fn steps_gate_progress() -> u32 {
     green.min(GREEN_GATE_DAYS)
 }
 
+/// GREEN calcium-days accrued toward the CALCIUM gate: completed days from the
+/// calcium-gate open date on which calcium met its per-day target (1 g). Calcium
+/// isn't cached (`day_cached` computes it live), and stays 0 until foods carry
+/// calcium — so the gate only advances once calcium data actually appears.
+pub async fn calcium_gate_progress() -> u32 {
+    if !calcium_unlocked() {
+        return 0;
+    }
+    let Some(s) = crate::services::app_flags::get(CALCIUM_GATE_OPEN_KEY) else {
+        return 0;
+    };
+    let Ok(open) = NaiveDate::parse_from_str(&s, "%Y-%m-%d") else {
+        return 0;
+    };
+    let today = crate::services::local::today_date();
+    let mut green = 0u32;
+    for i in 1..=GREEN_GATE_WINDOW {
+        let d = today - Duration::days(i);
+        if d < open {
+            break; // never count days before the calcium goal was set
+        }
+        let (_v, ratio) = day_cached("calcium", &fmt(d)).await;
+        if matches!(ratio, Some(r) if r >= 1.0) {
+            green += 1;
+        }
+    }
+    green.min(GREEN_GATE_DAYS)
+}
+
 /// One indicator's per-day history for the expanded view's histogram: the 7
 /// COMPLETED days (oldest → newest). Each day carries `(date, value, ratio)`, where
 /// `ratio` is the FROZEN `value / target` (see [`day_cached`]) — so the bar colours
@@ -575,7 +652,7 @@ fn unit_for(key: &str) -> &'static str {
 pub async fn daily_gauges() -> Vec<DailyGauge> {
     let today = fmt(crate::services::local::today_date());
     let mut out = Vec::new();
-    for key in UNLOCKED_GAUGES.iter().copied() {
+    for key in displayed_gauges() {
         out.push(DailyGauge {
             key,
             value: compute_day_value(key, &today).await,

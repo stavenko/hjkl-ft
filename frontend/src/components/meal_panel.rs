@@ -10,9 +10,10 @@ use crate::services::i18n::{self, t};
 ///    the food-search flow pre-tagged to this meal (`/diary/add?meal=<key>`). Only
 ///    active when `can_add` (i.e. today) — past days show the header as a label.
 ///  - When `is_empty`, the panel is just that header + «+» — no body, no footer.
-///  - Otherwise a small FOOTER holds a collapse/expand toggle. Collapsing swaps the
-///    product rows for a single КБЖУ summary line; expanding shows the rows again.
-///    Collapse is per-panel and user-driven (no accordion, no auto-collapse).
+///  - Otherwise a small FOOTER always shows the meal's aggregate КБЖУ on the left
+///    and a collapse/expand toggle on the right. Collapsing hides the product rows
+///    (the КБЖУ summary stays); expanding shows them again. Collapse is per-panel
+///    and user-driven (no accordion, no auto-collapse).
 ///
 /// `accent` is a muted 6-digit `#rrggbb`; `accent + "22"` / `"55"` are alpha tints
 /// for the header band / divider. The meal's rows come in as `children`.
@@ -108,21 +109,15 @@ pub fn MealPanel(
                     <div style=move || if collapsed.get() { "display: none;".to_string() } else { "padding: 0.25rem 1rem 0.5rem 1rem;".to_string() }>
                         {children()}
                     </div>
-                    // КБЖУ summary — shown when collapsed.
-                    <div style=move || if collapsed.get() {
-                        "padding: 0.6rem 1rem;".to_string()
-                    } else {
-                        "display: none;".to_string()
-                    }>
-                        <span class="is-size-7 has-text-grey">{macro_line}</span>
-                    </div>
-                    // Footer: collapse / expand toggle — icon only, right-aligned.
+                    // Footer: ALWAYS shows the meal's aggregate КБЖУ on the left, with
+                    // the collapse/expand toggle on the right — in both states.
                     <div style=format!(
-                        "display: flex; justify-content: flex-end; padding: 0.1rem 0.4rem 0.25rem; border-top: 1px solid {divider};"
+                        "display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.35rem 0.4rem 0.35rem 1rem; border-top: 1px solid {divider};"
                     )>
+                        <span class="is-size-7 has-text-grey">{macro_line}</span>
                         <button
                             class="button is-ghost is-small has-text-grey"
-                            style="text-decoration: none; height: auto; padding: 0.25rem 0.5rem;"
+                            style="text-decoration: none; height: auto; padding: 0.25rem 0.5rem; flex-shrink: 0;"
                             aria-label=move || if collapsed.get() { t("diary.expand") } else { t("diary.collapse") }
                             on:click=move |_| collapsed.update(|c| *c = !*c)
                         >

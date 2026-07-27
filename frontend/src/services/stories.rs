@@ -137,6 +137,8 @@ pub enum Appears {
     AfterCaloriePlanka,
     /// Visible once the activity week (step planka) has been unlocked.
     AfterActivityWeek,
+    /// Visible once the calcium week (calcium goal + indicator) has been unlocked.
+    AfterCalciumWeek,
 }
 
 pub struct Story {
@@ -223,13 +225,14 @@ pub fn unviewed_count(story: &Story) -> usize {
 
 /// The stories currently eligible to show, in order. `planka_set` = the weekly
 /// calorie planka has been calculated (gates the second-week story).
-pub fn visible(planka_set: bool, activity_unlocked: bool) -> Vec<&'static Story> {
+pub fn visible(planka_set: bool, activity_unlocked: bool, calcium_unlocked: bool) -> Vec<&'static Story> {
     STORIES
         .iter()
         .filter(|s| match s.appears {
             Appears::Always => true,
             Appears::AfterCaloriePlanka => planka_set,
             Appears::AfterActivityWeek => activity_unlocked,
+            Appears::AfterCalciumWeek => calcium_unlocked,
         })
         .collect()
 }
@@ -817,6 +820,91 @@ const S3: &[Frame] = &[
     },
 ];
 
+// --- Story 4 «Неделя кальция» — unlocked once the activity (steps) gate is cleared
+// and the calcium goal is set (Appears::AfterCalciumWeek).
+//
+// PLACEHOLDER CONTENT: the copy below is a draft skeleton following the user's
+// outline (congrats → why calcium → dairy → plant sources → canned fish → the 1 g
+// planka + gauge/indicator). Exact wording and real photos are still to be found —
+// every image points at `calcium-placeholder.png` for now, and the text is marked
+// with a leading «(черновик)» so it reads as unfinished in the viewer. -----------
+const CALCIUM_PH: &str = "calcium-placeholder.svg";
+
+const S4: &[Frame] = &[
+    // 1 — congrats (mirrors the activity-week intro: emoji + inline emphasis)
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Emoji("🎉"),
+        accent: GREEN,
+        kicker: Loc { en: "Calcium", ru: "Кальций" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "(draft) You held your step planka green for a whole week. Time for the next week: ~the calcium week~.",
+            ru: "(черновик) Вы целую неделю держали планку по шагам зелёной. Пора для следующей недели: ~неделя кальция~.",
+        },
+    },
+    // 2 — announcement of the new indicator + why calcium matters
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot(CALCIUM_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Calcium", ru: "Кальций" },
+        title: Loc { en: "Why calcium?", ru: "Зачем нужен кальций" },
+        body: Loc {
+            en: "(draft) A new indicator appears — calcium. Calcium keeps your bones and teeth strong; on a diet it's especially easy to fall short of it.",
+            ru: "(черновик) Появляется новый индикатор — кальций. Кальций нужен для крепких костей и зубов; на диете его особенно легко недобрать.",
+        },
+    },
+    // 3 — calcium from dairy
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot(CALCIUM_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Calcium", ru: "Кальций" },
+        title: Loc { en: "From dairy", ru: "Из молочных продуктов" },
+        body: Loc {
+            en: "(draft) Milk, yoghurt, cottage cheese and hard cheese are the simplest source of calcium.",
+            ru: "(черновик) Молоко, йогурт, творог и твёрдый сыр — самый простой источник кальция.",
+        },
+    },
+    // 4 — calcium from plant sources
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot(CALCIUM_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Calcium", ru: "Кальций" },
+        title: Loc { en: "From plants", ru: "Из растительных источников" },
+        body: Loc {
+            en: "(draft) Beans, tofu, sesame, almonds and leafy greens give you calcium without dairy.",
+            ru: "(черновик) Бобовые, тофу, кунжут, миндаль и листовая зелень дают кальций без молочки.",
+        },
+    },
+    // 5 — calcium from canned fish
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot(CALCIUM_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Calcium", ru: "Кальций" },
+        title: Loc { en: "From canned fish", ru: "Из рыбных консервов" },
+        body: Loc {
+            en: "(draft) Canned fish with soft bones — sardines, salmon — is a surprisingly rich source of calcium.",
+            ru: "(черновик) Рыбные консервы с мягкими костями — сардины, лосось — неожиданно богатый источник кальция.",
+        },
+    },
+    // 6 — the 1 g/day planka + the new gauge & indicator
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot(CALCIUM_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Calcium", ru: "Кальций" },
+        title: Loc { en: "Your calcium planka", ru: "Планка по кальцию" },
+        body: Loc {
+            en: "(draft) We set a planka of 1 g of calcium a day. A new gauge and indicator now track it — keep it green for a week.",
+            ru: "(черновик) Мы ставим планку 1 г кальция в сутки. За ней теперь следят новый gauge и индикатор — держите его зелёным неделю.",
+        },
+    },
+];
+
 static STORIES: &[Story] = &[
     Story {
         id: "welcome",
@@ -841,5 +929,11 @@ static STORIES: &[Story] = &[
         appears: Appears::AfterActivityWeek,
         badge: Loc { en: "3", ru: "3" },
         frames: S3,
+    },
+    Story {
+        id: "week4",
+        appears: Appears::AfterCalciumWeek,
+        badge: Loc { en: "4", ru: "4" },
+        frames: S4,
     },
 ];

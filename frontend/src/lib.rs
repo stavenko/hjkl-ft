@@ -185,6 +185,8 @@ async fn bootstrap_network() {
     // Open the activity week if the week-2 gate is now cleared (local-only; runs
     // regardless of connectivity).
     services::indicators::maybe_unlock_activity_week().await;
+    // Then the calcium week, once the activity (steps) gate is cleared.
+    services::indicators::maybe_unlock_calcium_week().await;
 
     // Freeze each recent completed day's calorie result (its planka) BEFORE the
     // weekly recompute below might change the planka — so past-day diary gauges keep

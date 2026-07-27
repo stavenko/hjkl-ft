@@ -263,7 +263,12 @@ pub async fn lookup(
         if attempt > 0 {
             leptos::logging::warn!("lookup retry #{attempt}: {last_err}");
         }
-        let executor = build_executor()?;
+        // Thinking OFF: with it ON qwen3 parks a short answer (e.g. «семечки») in
+        // the reasoning channel and returns empty content — the exact failure that
+        // surfaced live. Off makes it answer in content reliably, is faster (no
+        // wasted reasoning tokens) and needs no fallback. Same as the enrichment
+        // path (`lookup_nutrient`). The by-name tab just won't show a 🧠 phase.
+        let executor = build_executor_think(false)?;
         let result = executor
             .execute::<NutritionResponse>(prompt.clone())
             .await
@@ -355,7 +360,9 @@ where
     const ATTEMPTS: usize = 3;
     let mut last_err = String::new();
     for _ in 0..ATTEMPTS {
-        let executor = build_executor()?;
+        // Thinking OFF — see `lookup`: avoids the qwen3 empty-content failure,
+        // faster, and no reasoning UI is needed here (callers pass a no-op cb).
+        let executor = build_executor_think(false)?;
         let result = executor
             .execute::<T>(prompt.clone())
             .await

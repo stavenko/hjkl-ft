@@ -35,6 +35,22 @@ struct DetectedRow {
     suggested: RwSignal<bool>,
 }
 
+/// Fully-resolved enrichment result for one detected food — plain data (no
+/// signals), produced by stage 2 (DB match, else `ai::lookup`) BEFORE any row is
+/// rendered, so the detected list appears atomically with КБЖУ already filled.
+struct Resolved {
+    name: String,
+    grams: f64,
+    kcal: f64,
+    protein: f64,
+    fat: f64,
+    carbs: f64,
+    nutrients: BTreeMap<String, f64>,
+    inferred: bool,
+    suggested: bool,
+    err: Option<String>,
+}
+
 /// Decode any picked image (incl. iOS **HEIC**) and re-encode it as a downscaled
 /// JPEG, returned as base64 (no data-URL prefix).
 ///
@@ -653,39 +669,36 @@ pub fn FoodEditor(
             }
 
             let items = detected.unwrap_or_default();
-            // Detection is done; enrichment continues per-item below.
-            finish(None);
             if items.is_empty() {
+                finish(None);
                 fitems_error.set(Some(t("food_editor.no_food_detected").to_string()));
                 return;
             }
 
-            // Fetch the match candidates once (the user's non-archived, non-recipe
-            // foods) and enrich each detected food into a row. Rows are pushed as
-            // placeholders immediately (in detection order) and filled in as each
-            // enrichment resolves, so the list appears and populates progressively.
-            let candidates = local::match_candidates().await;
-            for det in items {
-                let key = fitems_next_key.get_untracked();
-                fitems_next_key.set(key + 1);
-                let row = DetectedRow {
-                    key,
-                    name: create_rw_signal(det.name.clone()),
-                    grams: create_rw_signal(det.grams),
-                    kcal: create_rw_signal(0.0),
-                    protein: create_rw_signal(0.0),
-                    fat: create_rw_signal(0.0),
-                    carbs: create_rw_signal(0.0),
-                    nutrients: create_rw_signal(BTreeMap::new()),
-                    inferred: det.inferred,
-                    suggested: create_rw_signal(false),
-                };
-                food_items.update(|v| v.push(row.clone()));
-                fitems_pending.update(|n| *n += 1);
+            // Stage 2 (NOT a UI stage): resolve КБЖУ for EVERY detected item before
+            // rendering, so the list appears atomically — food AND nutrition filled
+            // in one reveal, no "detected but КБЖУ still loading" intermediate. Keep
+            // the spinner up with an enrichment message while this runs.
+            fitems_phase.set(0);
+            fitems_vision_msg.set(t("food_editor.ai_filling_kbju").to_string());
 
+            // Match candidates once (the user's non-archived, non-recipe foods).
+            let candidates = local::match_candidates().await;
+            // Enrich each item concurrently (match an existing food, else lookup).
+            // Each task returns plain data; signals/rows are built afterwards.
+            let tasks = items.into_iter().map(|det| {
                 let candidates = candidates.clone();
                 let nutrients_list = nutrients_list.clone();
-                spawn_local(async move {
+                async move {
+                    let mut r = Resolved {
+                        name: det.name.clone(),
+                        grams: det.grams,
+                        kcal: 0.0, protein: 0.0, fat: 0.0, carbs: 0.0,
+                        nutrients: BTreeMap::new(),
+                        inferred: det.inferred,
+                        suggested: false,
+                        err: None,
+                    };
                     // D5 thresholds: ≥0.8 auto-use the matched food; 0.5–0.8 use it
                     // but FLAG as suggested; <0.5 / no match → look КБЖУ up by name.
                     let matched = match ai::match_food(&det.name, &candidates).await {
@@ -695,13 +708,13 @@ pub fn FoodEditor(
                         _ => None,
                     };
                     if let Some((food, conf)) = matched {
-                        row.kcal.set(food.kcal);
-                        row.protein.set(food.protein);
-                        row.fat.set(food.fat);
-                        row.carbs.set(food.carbs);
-                        row.nutrients.set(food.nutrients.clone());
+                        r.kcal = food.kcal;
+                        r.protein = food.protein;
+                        r.fat = food.fat;
+                        r.carbs = food.carbs;
+                        r.nutrients = food.nutrients.clone();
                         // Keep the model's name; flag a fuzzy (0.5–0.8) match.
-                        if conf < 0.8 { row.suggested.set(true); }
+                        if conf < 0.8 { r.suggested = true; }
                     } else {
                         // No confident match → look up per-100g КБЖУ by name.
                         // From a food PHOTO: `det.grams` is the cooked/as-served portion,
@@ -709,25 +722,51 @@ pub fn FoodEditor(
                         let input = AiLookupInput { name: det.name.clone(), custom_nutrients: nutrients_list, as_served: true };
                         match ai::lookup(&input, |_| {}).await {
                             Ok(out) => {
-                                if let Some(n) = out.name { row.name.set(n); }
-                                row.kcal.set(out.kcal.recommended.value);
-                                row.protein.set(out.protein.recommended.value);
-                                row.fat.set(out.fat.recommended.value);
-                                row.carbs.set(out.carbs.recommended.value);
-                                let mut nut = BTreeMap::new();
+                                if let Some(n) = out.name { r.name = n; }
+                                r.kcal = out.kcal.recommended.value;
+                                r.protein = out.protein.recommended.value;
+                                r.fat = out.fat.recommended.value;
+                                r.carbs = out.carbs.recommended.value;
                                 for (name, detail) in &out.nutrients {
-                                    nut.insert(name.clone(), detail.recommended.value);
+                                    r.nutrients.insert(name.clone(), detail.recommended.value);
                                 }
-                                row.nutrients.set(nut);
                             }
-                            Err(e) => {
-                                // Surface the failure; the row stays with zero КБЖУ.
-                                fitems_error.set(Some(e));
-                            }
+                            Err(e) => { r.err = Some(e); }
                         }
                     }
-                    fitems_pending.update(|n| *n = n.saturating_sub(1));
+                    r
+                }
+            });
+            let resolved = futures::future::join_all(tasks).await;
+
+            // Build all rows at once (in detection order) with КБЖУ already set,
+            // then reveal the list in a single update.
+            let mut rows = Vec::with_capacity(resolved.len());
+            let mut first_err = None;
+            for r in resolved {
+                if r.err.is_some() && first_err.is_none() {
+                    first_err = r.err.clone();
+                }
+                let key = fitems_next_key.get_untracked();
+                fitems_next_key.set(key + 1);
+                rows.push(DetectedRow {
+                    key,
+                    name: create_rw_signal(r.name),
+                    grams: create_rw_signal(r.grams),
+                    kcal: create_rw_signal(r.kcal),
+                    protein: create_rw_signal(r.protein),
+                    fat: create_rw_signal(r.fat),
+                    carbs: create_rw_signal(r.carbs),
+                    nutrients: create_rw_signal(r.nutrients),
+                    inferred: r.inferred,
+                    suggested: create_rw_signal(r.suggested),
                 });
+            }
+            food_items.set(rows);
+            finish(None);
+            // If any per-item lookup failed, surface it (that row kept zero КБЖУ).
+            if let Some(e) = first_err {
+                fitems_error.set(Some(e));
             }
         });
     };

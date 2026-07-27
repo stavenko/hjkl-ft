@@ -61,6 +61,44 @@ body {
   touch-action: manipulation;
 }
 
+/* Tactile press feedback ------------------------------------------------------
+   Every interactive control gives an instant visual "press" so a tap always
+   registers. On :active it dims a touch and brightens, applied INSTANTLY
+   (transition 0s = the flash); on release the base rule's short transition
+   fades it back. Uses opacity/filter (NOT transform) so it never fights a
+   control's own inline transform, and it reads on ghost, link and solid
+   buttons alike. The default iOS grey tap-highlight is removed so this is the
+   single, consistent signal across the app. */
+button,
+.button,
+a,
+[role="button"],
+input[type="submit"],
+input[type="button"] {
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+button:active,
+.button:active,
+a:active,
+[role="button"]:active,
+input[type="submit"]:active,
+input[type="button"]:active {
+  opacity: 0.55;
+  filter: brightness(1.15);
+  transition-duration: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .button,
+  a,
+  [role="button"] {
+    transition-duration: 0s;
+  }
+}
+
 .modal-background {
   background-color: rgba(0, 0, 0, 0.4);
 }

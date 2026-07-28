@@ -1299,31 +1299,11 @@ pub fn FoodEditor(
                     value=protein hint=ai_hint("protein").into_view() last=false />
                 <NutrientRow label=t("food_editor.fat") unit=t("common.unit.g") placeholder="0"
                     value=fat hint=ai_hint("fat").into_view() last=false />
+                // КБЖУ only. Extra nutrients (calcium, iron, omega-3, fiber, …) are
+                // NOT entered here — they're filled in the BACKGROUND by `enrich` once
+                // the food is logged, and deliberately kept out of the form UI.
                 <NutrientRow label=t("food_editor.carbs") unit=t("common.unit.g") placeholder="0"
-                    value=carbs hint=ai_hint("carbs").into_view()
-                    last=Signal::derive(move || custom_nutrients.get().is_empty()) />
-                <For
-                    each=move || custom_nutrients.get()
-                    key=|s| s.key.clone()
-                    children=move |spec| {
-                        let key = spec.name.clone();
-                        let key2 = spec.name.clone();
-                        let hint_key = spec.name.clone();
-                        let unit = spec.unit_label.clone();
-                        let sig = create_rw_signal(
-                            custom_values.get_untracked().get(&key).cloned().unwrap_or_default()
-                        );
-                        create_effect(move |_| {
-                            let val = sig.get();
-                            let k = key2.clone();
-                            custom_values.update(|m| { m.insert(k, val); });
-                        });
-                        view! {
-                            <NutrientRow label=spec.name.leak() unit=unit.leak() placeholder="0"
-                                value=sig hint=ai_hint(&hint_key).into_view() last=true />
-                        }
-                    }
-                />
+                    value=carbs hint=ai_hint("carbs").into_view() last=true />
             </div>
 
             // Add button — hidden on the "By food photo" tab (nothing to add yet).

@@ -50,6 +50,11 @@ pub enum Media {
     /// GIF whose highlight sits lower in the frame is panned up to a shared
     /// focal point across a run of frames (same widget, different framing).
     ShotUp(&'static str, u8),
+    /// A full-bleed photo anchored to the TOP of the frame (no rounded corners,
+    /// scaled slightly past the screen edges). The text sits at the bottom on a
+    /// gradient whose translucency begins at the kicker line. Used for editorial
+    /// "topic photo" frames (e.g. dairy sources).
+    Cover(&'static str),
     /// The bundled weight-trend SVG chart.
     Chart,
     /// A large centred emoji (e.g. a celebration).
@@ -101,6 +106,10 @@ impl Frame {
                 s.push_str(p);
                 s.push(':');
                 s.push_str(&up.to_string());
+            }
+            Media::Cover(p) => {
+                s.push_str("cover:");
+                s.push_str(p);
             }
             Media::Chart => s.push_str("chart"),
             Media::Emoji(e) => {
@@ -247,7 +256,7 @@ fn all_image_paths() -> Vec<String> {
     for story in STORIES {
         for f in story.frames {
             match f.media {
-                Media::Shot(p) | Media::ShotUp(p, _) => {
+                Media::Shot(p) | Media::ShotUp(p, _) | Media::Cover(p) => {
                     set.insert(format!("/story-img/{p}"));
                 }
                 Media::Chart => {
@@ -851,7 +860,7 @@ const S4: &[Frame] = &[
     // 2 — why calcium matters (why we start watching it)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("calcium-bones.jpg"),
+        media: Media::Cover("calcium-bones.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
         title: Loc { en: "", ru: "" },
@@ -865,7 +874,7 @@ const S4: &[Frame] = &[
     // 3 — calcium from dairy (incl. low-fat; lactose-intolerant options)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("calcium-dairy.jpg"),
+        media: Media::Cover("calcium-dairy.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
         title: Loc { en: "", ru: "" },
@@ -879,7 +888,7 @@ const S4: &[Frame] = &[
     // 4 — calcium from plant sources
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("calcium-plants.jpg"),
+        media: Media::Cover("calcium-plants.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
         title: Loc { en: "", ru: "" },
@@ -891,7 +900,7 @@ const S4: &[Frame] = &[
     // 5 — calcium from canned fish (eat the soft bones)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("calcium-fish.jpg"),
+        media: Media::Cover("calcium-fish.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
         title: Loc { en: "", ru: "" },

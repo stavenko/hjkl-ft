@@ -552,23 +552,13 @@ pub fn DiaryPage() -> impl IntoView {
                                                         badges.push((i18n::nutrient_badge("Fat"), f.fat * factor, i18n::unit_label("g")));
                                                         badges.push((i18n::nutrient_badge("Carbs"), f.carbs * factor, i18n::unit_label("g")));
                                                     }
-                                                    let gs = goals();
-                                                    let custom_badges: Vec<_> = gs.iter()
-                                                        .filter(|goal| goal.period == GoalPeriod::Day)
-                                                        .filter(|goal| goal.is_custom_nutrient())
-                                                        .map(|goal| {
-                                                            let val = food
-                                                                .and_then(|f| f.nutrients.get(&goal.nutrient).copied())
-                                                                .map(|v| v * factor)
-                                                                .unwrap_or(0.0);
-                                                            let label: String = goal.nutrient.chars().take(3).collect();
-                                                            (label, val, i18n::unit_label(goal.unit.label()).to_string())
-                                                        })
-                                                        .collect();
                                                     // Compact pill (tighter padding than
                                                     // Bulma's tag, no wrap, no shrink) so
                                                     // all four fit on one line inside the
-                                                    // meal panel.
+                                                    // meal panel. Custom-nutrient badges
+                                                    // (e.g. calcium) are intentionally NOT
+                                                    // shown here — a 5th pill doesn't fit the
+                                                    // single-line row and just clips.
                                                     let badge_view = |(l, v, u): &(&str, f64, &str)| {
                                                         let u = u.to_string();
                                                         view! {
@@ -583,10 +573,6 @@ pub fn DiaryPage() -> impl IntoView {
                                                     };
                                                     badges.iter()
                                                         .map(|b| badge_view(b))
-                                                        .chain(custom_badges.iter().map(|(l, v, u)| {
-                                                            let b: (&str, f64, &str) = (l.as_str(), *v, u.as_str());
-                                                            badge_view(&b)
-                                                        }))
                                                         .collect::<Vec<_>>()
                                                 }}
                                             </div>

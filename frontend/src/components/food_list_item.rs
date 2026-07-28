@@ -42,21 +42,15 @@ pub fn FoodListItem(
                                 </span>
                             }.into_view()
                         };
-                        let mut badges: Vec<View> = vec![
+                        // КБЖУ only. Extra background nutrients (calcium, iron, …) are
+                        // deliberately NOT shown as badges — see food_editor / enrich.
+                        let _ = &gs;
+                        let badges: Vec<View> = vec![
                             badge(i18n::nutrient_badge("Calories"), f.effective_kcal() * factor, i18n::unit_label("kcal")),
                             badge(i18n::nutrient_badge("Protein"), f.protein * factor, i18n::unit_label("g")),
                             badge(i18n::nutrient_badge("Fat"), f.fat * factor, i18n::unit_label("g")),
                             badge(i18n::nutrient_badge("Carbs"), f.carbs * factor, i18n::unit_label("g")),
                         ];
-                        for goal in gs.iter()
-                            .filter(|g| g.period == GoalPeriod::Day)
-                            .filter(|g| g.is_custom_nutrient())
-                        {
-                            let val = f.nutrients.get(&goal.nutrient).copied().unwrap_or(0.0) * factor;
-                            let label: String = goal.nutrient.chars().take(3).collect();
-                            let unit = i18n::unit_label(goal.unit.label());
-                            badges.push(badge(&label, val, unit));
-                        }
                         badges
                     }}
                 </div>

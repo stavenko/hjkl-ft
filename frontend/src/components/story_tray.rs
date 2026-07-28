@@ -169,6 +169,12 @@ fn StoryViewer(story: &'static Story, on_close: Callback<()>) -> impl IntoView {
                 style="position: absolute; top: 64px; left: 30%; width: 70%; height: calc(100% - 64px); \
                        background: none; border: none; padding: 0; z-index: 3; cursor: pointer;" />
 
+            // Top scrim so the white progress bars + × stay legible over a bright
+            // full-bleed photo (Cover frames). Sits above the frame media, below the bars.
+            <div style="position: absolute; top: 0; left: 0; right: 0; height: 96px; z-index: 5; \
+                        pointer-events: none; background: linear-gradient(180deg, \
+                        rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.28) 45%, rgba(0,0,0,0) 100%);" />
+
             // Progress bars.
             <div style="position: absolute; top: 14px; left: 14px; right: 14px; display: flex; gap: 5px; z-index: 6;">
                 {(0..n).map(|i| {
@@ -349,6 +355,14 @@ fn FrameView(frame: Frame) -> impl IntoView {
                            box-shadow: 0 18px 50px rgba(0,0,0,0.5); transform: translateY(-{up}%);") />
             </div>
         }.into_view(),
+        // Full-bleed topic photo: anchored to the top, no rounded corners, scaled
+        // slightly past the screen edges. Its reading gradient (below) starts at the
+        // kicker line so the copy stays legible over the lower part of the image.
+        Media::Cover(p) => view! {
+            <img src=format!("/story-img/{p}")
+                style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 0; \
+                       width: 145%; max-width: none; height: auto;" />
+        }.into_view(),
         Media::Emoji(e) => view! {
             <div style="position: absolute; top: 15%; left: 0; right: 0; z-index: 1; \
                         display: flex; justify-content: center; font-size: 120px; line-height: 1;">
@@ -377,14 +391,25 @@ fn FrameView(frame: Frame) -> impl IntoView {
         }.into_view(),
     };
 
+    // The reading scrim under the text. For a full-bleed Cover photo the gradient
+    // is taller and its translucency starts up at the kicker line, so the copy sits
+    // on a darkened band while the top of the image stays clear.
+    let scrim = if matches!(frame.media, Media::Cover(_)) {
+        "position: absolute; left: 0; right: 0; bottom: 0; height: 66%; z-index: 1; \
+         pointer-events: none; background: linear-gradient(180deg, \
+         rgba(7,13,20,0) 0%, rgba(7,13,20,0.5) 22%, rgba(7,13,20,0.88) 46%, #070d14 74%);"
+    } else {
+        "position: absolute; left: 0; right: 0; bottom: 0; height: 60%; z-index: 1; \
+         pointer-events: none; background: linear-gradient(180deg, \
+         rgba(7,13,20,0) 0%, rgba(7,13,20,0.75) 32%, #070d14 58%, #070d14 100%);"
+    };
+
     view! {
         <div style="position: absolute; inset: 0;">
             {bg}
             {media}
             // Gradient scrim under the text so the media card and the copy don't mix.
-            <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 60%; z-index: 1; \
-                        pointer-events: none; background: linear-gradient(180deg, \
-                        rgba(7,13,20,0) 0%, rgba(7,13,20,0.75) 32%, #070d14 58%, #070d14 100%);" />
+            <div style=scrim />
             {content}
         </div>
     }

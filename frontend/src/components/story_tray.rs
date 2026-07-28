@@ -32,8 +32,13 @@ pub fn StoryTray() -> impl IntoView {
                     let planka_set = planka.get().flatten().is_some();
                     let activity = crate::services::indicators::activity_unlocked();
                     let calcium = crate::services::indicators::calcium_unlocked();
-                    stories::visible(planka_set, activity, calcium)
-                        .into_iter()
+                    let mut list = stories::visible(planka_set, activity, calcium);
+                    // Stories with UNREAD frames shift left to draw attention; fully-read
+                    // ones follow. Stable sort → each group keeps its natural appearance
+                    // order. `unviewed_count` tracks the seen-version signal, so the tray
+                    // re-sorts live the moment a story is finished (it slides right).
+                    list.sort_by_key(|s| stories::unviewed_count(s) == 0);
+                    list.into_iter()
                         .map(|s| view! { <TrayCircle story=s open=open /> })
                         .collect_view()
                 }}
@@ -68,18 +73,22 @@ fn TrayCircle(story: &'static Story, open: RwSignal<Option<&'static Story>>) -> 
     };
     let badge = story.badge.get();
 
-    // The welcome story jiggles (like the notifications bell) until it's opened,
-    // inviting a brand-new user to tap it.
+    // The welcome story jiggles (like the notifications bell) until it's opened;
+    // every other circle gets a gentle slide-in-from-right on (re)render, so when
+    // an unread story shifts left into place the move reads as an animated entrance.
+    // One animation class per circle (no conflict).
     let jiggle = move || {
         if story.id == "welcome" && stories::welcome_pending() {
             "dash-bell-jiggle"
         } else {
-            ""
+            "story-pop"
         }
     };
 
     view! {
         <button
+            attr:data-testid="story-circle"
+            attr:data-story-id=story.id
             on:click=move |_| {
                 if story.id == "welcome" {
                     stories::mark_welcome_shown();

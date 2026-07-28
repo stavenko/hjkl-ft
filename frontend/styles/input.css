@@ -103,6 +103,19 @@ input[type="button"]:active {
   background-color: rgba(0, 0, 0, 0.4);
 }
 
+/* Story-tray circle entrance: a gentle slide-in from the right, so a story that
+   shifts left (because it has unread frames) reads as an animated move into place. */
+@keyframes story-pop {
+  from { opacity: 0; transform: translateX(12px) scale(0.92); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+.story-pop {
+  animation: story-pop 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .story-pop { animation: none; }
+}
+
 @media (prefers-color-scheme: dark) {
   input[type="date"],
   input[type="text"],

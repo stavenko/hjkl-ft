@@ -848,16 +848,18 @@ const S4: &[Frame] = &[
                  И у нас начинается неделя ^«крепких костей»^.",
         },
     },
-    // 2 — announcement of the new indicator + why calcium matters
+    // 2 — why calcium matters (why we start watching it)
     Frame {
         bg: Bg::Dark,
         media: Media::Shot(CALCIUM_PH),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
-        title: Loc { en: "Why calcium?", ru: "Зачем нужен кальций" },
+        title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "(draft) A new indicator appears — calcium. Calcium keeps your bones and teeth strong; on a diet it's especially easy to fall short of it.",
-            ru: "(черновик) Появляется новый индикатор — кальций. Кальций нужен для крепких костей и зубов; на диете его особенно легко недобрать.",
+            en: "Strong bones need calcium. You were most likely already getting too little of it before the diet, and on a diet most people cut their calcium intake even further. That puts your bones at risk.\n\n\
+                 So we start keeping an eye on your calcium intake.",
+            ru: "Для крепких костей необходим кальций. Скорее всего, и до диеты вы употребляли его недостаточно. А на диете большинство людей снижают потребление кальция ещё сильнее. Это несёт риски для ваших костей.\n\n\
+                 Поэтому начинаем следить за потреблением кальция.",
         },
     },
     // 3 — calcium from dairy

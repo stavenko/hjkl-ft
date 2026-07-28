@@ -882,10 +882,10 @@ const S4: &[Frame] = &[
         media: Media::Shot(CALCIUM_PH),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
-        title: Loc { en: "From plants", ru: "Из растительных источников" },
+        title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "(draft) Beans, tofu, sesame, almonds and leafy greens give you calcium without dairy.",
-            ru: "(черновик) Бобовые, тофу, кунжут, миндаль и листовая зелень дают кальций без молочки.",
+            en: "If dairy doesn't suit you, there are good plant sources. For example: Chinese cabbage, arugula, tofu, various greens, fermented or heat-treated cabbage.",
+            ru: "Если молочные продукты вам не подходят, есть хорошие растительные источники. Например: пекинская капуста, руккола, тофу, разнообразная зелень, ферментированная или термообработанная капуста.",
         },
     },
     // 5 — calcium from canned fish

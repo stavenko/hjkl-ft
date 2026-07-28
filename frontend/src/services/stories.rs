@@ -903,7 +903,7 @@ const S4: &[Frame] = &[
     // 6 — the new calcium indicator + gauge
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot(CALCIUM_PH),
+        media: Media::Shot("calcium-highlight.gif"),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
         title: Loc { en: "", ru: "" },

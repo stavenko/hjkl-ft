@@ -80,7 +80,7 @@ pub fn icon_for(k: &str) -> (&'static str, &'static str) {
 fn indicator(paths: &'static str, label: &'static str, state: IndicatorState) -> impl IntoView {
     let (color, tint) = state_colors(state);
     view! {
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; min-width: 0;">
+        <div attr:data-ind=label style="display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; min-width: 0;">
             <div style=format!("width: 38px; height: 38px; border-radius: 50%; background: {tint}; \
                     display: flex; align-items: center; justify-content: center;")>
                 <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none"
@@ -264,7 +264,7 @@ pub fn ProgressWidget() -> impl IntoView {
                 return ().into_view();
             };
             view! {
-                <div style=CARD>
+                <div attr:data-testid="progress-widget" style=CARD>
                     {match planka_v {
                         // Planka computed → a calorie GAUGE (eaten today / target),
                         // in place of the old plain number. Green while under the

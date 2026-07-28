@@ -89,7 +89,7 @@ pub fn Gauge(
     });
 
     view! {
-        <div style="position: relative; display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0;">
+        <div attr:data-gauge=label.clone() style="position: relative; display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0;">
             <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;">
                 <span style="display: inline-flex; align-items: center; gap: 6px;">
                     <span class="is-size-7 has-text-weight-medium" style="color: var(--bulma-text-weak);">{label}</span>

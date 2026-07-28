@@ -498,20 +498,28 @@ pub async fn calorie_adherence_state() -> IndicatorState {
     daily_state(over)
 }
 
-/// The full indicator board for the curator food-share — richer than the widget
-/// (which only shows unlocked ones): the calorie-planka adherence first, then
-/// protein, then the seven nutrition indicators, then steps. Each carries its short
-/// key and colour state; the sharer maps keys → labels.
+/// The full indicator board for the curator food-share. It MUST match the colours
+/// the user sees on their own widget, so the DAILY indicators are computed with the
+/// exact same `indicator_state` the widget uses — 7 COMPLETED days, TODAY EXCLUDED.
+/// (`compute()`'s window includes today, an in-progress day that hasn't met its
+/// target yet, which wrongly showed veg-fruit / calcium as orange in the admin
+/// while the user's widget — excluding today — showed green.) The three WEEKLY
+/// indicators have no per-day `indicator_state`, so they come from `compute()`.
 pub async fn share_states() -> Vec<(&'static str, IndicatorState)> {
     let mut out = Vec::new();
+    // Calorie-planka adherence (also last 7 COMPLETED days).
     out.push(("calories", calorie_adherence_state().await));
-    out.push(("protein", indicator_state("protein").await));
-    // The seven nutrition indicators (calcium, omega3, eggs, iron, red_meat,
-    // veg_fruit, fiber), each with its correct daily/weekly logic.
-    for (k, s) in compute().await {
-        out.push((k, s));
+    // Daily indicators — same method + window as the widget.
+    for key in ["protein", "veg_fruit", "calcium", "iron", "fiber", "steps"] {
+        out.push((key, indicator_state(key).await));
     }
-    out.push(("steps", indicator_state("steps").await));
+    // Weekly indicators (rolling-7-day sum vs a weekly target) — only `compute()`
+    // evaluates these correctly; the widget doesn't surface them.
+    for (k, s) in compute().await {
+        if matches!(k, "omega3" | "eggs" | "red_meat") {
+            out.push((k, s));
+        }
+    }
     out
 }
 

@@ -55,10 +55,13 @@ pub fn ChatPage() -> impl IntoView {
     }
     let mode = create_rw_signal(initial_mode);
     let live_messages = create_rw_signal(Vec::<LiveMessage>::new());
-    // Datasets already shared in this thread (top-level keys of every data_share
-    // payload) — drives the «✓ Отправлено» state on the matching curator request.
+    // Every dataset SHARE in this thread as `(seq, dataset_key)` — the top-level
+    // keys of each data_share payload tagged with the message's seq. A curator
+    // request shows «✓ Отправлено» ONLY when a share for its dataset arrived AFTER
+    // that request (seq-aware), so a REPEAT request for the same dataset is still
+    // fulfillable instead of being permanently marked done by an older share.
     let shared_datasets = Signal::derive(move || {
-        let mut set = std::collections::HashSet::<String>::new();
+        let mut out = Vec::<(u64, String)>::new();
         for m in live_messages.get() {
             if m.kind != "data_share" {
                 continue;
@@ -67,13 +70,13 @@ pub fn ChatPage() -> impl IntoView {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(p) {
                     if let Some(obj) = v.as_object() {
                         for k in obj.keys() {
-                            set.insert(k.clone());
+                            out.push((m.seq, k.clone()));
                         }
                     }
                 }
             }
         }
-        set
+        out
     });
     let live_outbox = create_rw_signal(Vec::<OutboxItem>::new());
     let live_sending = create_rw_signal(false);

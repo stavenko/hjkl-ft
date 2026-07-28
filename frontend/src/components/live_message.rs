@@ -11,16 +11,22 @@ use crate::services::support_chat::{self, LiveMessage};
 #[component]
 pub fn LiveBubble(
     msg: LiveMessage,
-    /// The set of datasets already shared in this thread (top-level keys of every
-    /// `data_share` payload) — so a fulfilled request renders as «✓ Отправлено».
-    #[prop(into)] shared: Signal<std::collections::HashSet<String>>,
+    /// Every dataset share in the thread as `(seq, dataset_key)`. A request is
+    /// «✓ Отправлено» only when a matching share arrived AFTER it (seq-aware), so a
+    /// REPEAT request for the same dataset is still offered a fresh share button.
+    #[prop(into)] shared: Signal<Vec<(u64, String)>>,
 ) -> impl IntoView {
     // A curator data-request → the compact share button (only when it names a
     // known dataset; an unknown/garbled request falls through to plain text so we
-    // never silently drop the message). Already-shared → the button shows as done.
+    // never silently drop the message). Fulfilled by a LATER share → shows as done.
     if msg.kind == "data_request" {
         if let Some(dataset) = request_dataset(&msg) {
-            let already = shared.get_untracked().contains(dataset_id(dataset));
+            let req_seq = msg.seq;
+            let key = dataset_id(dataset);
+            let already = shared
+                .get_untracked()
+                .iter()
+                .any(|(seq, k)| *seq > req_seq && k == key);
             return view! { <RequestPanel dataset=dataset already=already /> }.into_view();
         }
     }

@@ -128,6 +128,9 @@ pub struct PlankaDay {
     pub planka: Option<f64>,
     #[serde(default)]
     pub within: Option<bool>,
+    /// The in-progress current day — shown neutrally («Сегодня»), not pass/fail.
+    #[serde(default)]
+    pub today: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -425,13 +428,20 @@ fn food_view(f: &FoodShare) -> impl IntoView {
                     <div style="font-weight:650; margin-bottom:6px;">"Планка по калориям"</div>
                     {planka_days.into_iter().map(|p| {
                         let within = p.within.unwrap_or(true);
-                        let color = if within { "var(--accent)" } else { "var(--danger)" };
                         let planka_s = p.planka.map(|v| format!("{v:.0}")).unwrap_or_else(|| "—".to_string());
+                        // Today is unfinished → neutral colour + «Сегодня» label, so it
+                        // doesn't read as a passed/failed day.
+                        let (label, color, extra) = if p.today {
+                            ("Сегодня".to_string(), "var(--muted)", " · день идёт")
+                        } else {
+                            (p.date.clone(), if within { "var(--accent)" } else { "var(--danger)" }, "")
+                        };
+                        let day_style = if p.today { "color:var(--muted); font-weight:600;" } else { "" };
                         view! {
                             <div class="row__meta mono" style="display:flex; justify-content:space-between; padding:3px 0;">
-                                <span>{p.date}</span>
+                                <span style=day_style>{label}</span>
                                 <span style=format!("color:{color};")>
-                                    {format!("{:.0} / {} ккал", p.intake, planka_s)}
+                                    {format!("{:.0} / {} ккал{}", p.intake, planka_s, extra)}
                                 </span>
                             </div>
                         }

@@ -157,13 +157,15 @@ await apage.getByTestId("data-share-btn").first().click();
 await apage.getByTestId("data-share-modal").waitFor({ state: "visible", timeout: 10000 });
 await apage.waitForTimeout(600);
 await apage.screenshot({ path: "food-share-modal.png", fullPage: true });
-console.log("admin modal rendered ✓");
+const modalTxt = (await apage.getByTestId("data-share-modal").textContent().catch(() => "")) || "";
+const hasToday = modalTxt.includes("Сегодня");
+console.log("admin modal has «Сегодня»:", hasToday);
 
 await cctx.close(); await actx.close(); await b.close();
 
 // Completed days are on target → the share must show GREEN (today excluded),
 // matching the client widget — not orange from counting the incomplete today.
 console.log(`veg_fruit=${veg?.state}  calcium=${calcium?.state} (both must be green)`);
-const ok = veg?.state === "green" && calcium?.state === "green";
-console.log(ok ? "\n✅ PASS — share indicators match the widget (green, today excluded)" : "\n❌ FAIL — share still diverges from the widget");
+const ok = veg?.state === "green" && calcium?.state === "green" && hasToday;
+console.log(ok ? "\n✅ PASS — indicators match the widget (green) + today row marked «Сегодня»" : "\n❌ FAIL");
 process.exit(ok ? 0 : 1);

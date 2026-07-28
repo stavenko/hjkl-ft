@@ -194,6 +194,9 @@ async fn build_food() -> Value {
             "intake": intake,
             "planka": planka,
             "within": planka.map(|p| intake <= p),
+            // Today is still in progress — the admin marks it specially (not a
+            // pass/fail day yet). `today_date()` is the user's local day.
+            "today": i == 0,
         }));
     }
 

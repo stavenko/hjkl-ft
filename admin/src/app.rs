@@ -601,10 +601,13 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                     let uid = uid_send.clone();
                     spawn_local(async move {
                         match api::set_planka(&uid, a).await {
-                            Ok(applied) => {
+                            Ok(_seq) => {
                                 draft.set(String::new());
                                 error.set(None);
-                                notice.set(Some(format!("✓ Планка установлена: {applied:.0} ккал")));
+                                // The app applies it on its side — this is a directive,
+                                // not an immediate server-side write.
+                                notice.set(Some(format!("✓ Планка отправлена клиенту: {a:.0} ккал")));
+                                load.call(());
                             }
                             Err(e) if e.is_auth() => {
                                 auth::logout();
@@ -732,6 +735,22 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                                      class=format!("bubble {side_cls}")
                                      style="opacity:.9; font-size:.9rem;">
                                     <span class="mono">"⤴ запрошено: "</span>{what}
+                                </div>
+                            }.into_view()
+                        }
+                        // A set_planka directive the admin sent → compact chip. The
+                        // client app applies it on its side.
+                        "set_planka" => {
+                            let amt = m.payload.as_deref()
+                                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                                .and_then(|v| v.get("amount").and_then(|a| a.as_f64()))
+                                .map(|a| format!("{a:.0} ккал"))
+                                .unwrap_or_else(|| "—".to_string());
+                            view! {
+                                <div attr:data-testid="msg" attr:data-sender=m.sender.clone()
+                                     class=format!("bubble {side_cls}")
+                                     style="opacity:.9; font-size:.9rem;">
+                                    <span class="mono">"⤴ планка: "</span>{amt}
                                 </div>
                             }.into_view()
                         }

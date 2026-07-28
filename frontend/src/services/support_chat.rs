@@ -321,6 +321,9 @@ async fn poll_inner(first_wait: u32) -> Result<(), String> {
                 db::delete(OUTBOX_STORE, &m.client_id).await;
             }
         }
+        // A curator `set_planka` directive is applied by THE APP here — the server
+        // never writes the user's data. Idempotent (by seq).
+        apply_planka_directives(&r.messages).await;
         store_cursor(r.next_after_seq).await;
         if !r.has_more {
             break;
@@ -328,6 +331,52 @@ async fn poll_inner(first_wait: u32) -> Result<(), String> {
         wait = 0;
     }
     Ok(())
+}
+
+/// App-flag: the highest server `seq` of a `set_planka` directive already applied,
+/// so a directive applies EXACTLY ONCE across polls / relaunches.
+const PLANKA_DIRECTIVE_SEQ_KEY: &str = "planka_directive_seq";
+
+/// Apply any NEW curator `set_planka` directive among `msgs`. The directive carries
+/// `{amount}`; THE APP (not the server) writes the new calorie planka into the
+/// user's own goals and syncs it — nothing outside the frontend ever touches user
+/// data. Only the newest unhandled directive is applied (the planka is one value),
+/// and its seq is recorded so it never re-applies.
+async fn apply_planka_directives(msgs: &[LiveMessage]) {
+    let last = crate::services::app_flags::get(PLANKA_DIRECTIVE_SEQ_KEY)
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let mut newest: Option<(u64, f64)> = None;
+    for m in msgs {
+        if m.kind != "set_planka" || m.seq <= last {
+            continue;
+        }
+        let Some(payload) = m.payload.as_deref() else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) else { continue };
+        let Some(amount) = v.get("amount").and_then(|a| a.as_f64()) else { continue };
+        if !amount.is_finite() || amount <= 0.0 || amount >= 20000.0 {
+            continue;
+        }
+        if newest.map_or(true, |(s, _)| m.seq > s) {
+            newest = Some((m.seq, amount));
+        }
+    }
+    if let Some((seq, amount)) = newest {
+        crate::services::local::set_calorie_goal(amount).await;
+        crate::services::sync::push_background();
+        crate::services::app_flags::set(PLANKA_DIRECTIVE_SEQ_KEY, &seq.to_string());
+        // Tell the user (inbox letter + mail red-dot) that the curator changed it —
+        // so they learn about it even without opening the chat.
+        crate::services::letters::add(crate::services::letters::Letter {
+            id: format!("planka-curator-{seq}"),
+            created_at: chrono::Local::now().to_rfc3339(),
+            body: format!(
+                "Ваш куратор установил вам новую планку по калориям: {amount:.0} ккал.\n\n\
+                 Она уже применена. Дальнейшие еженедельные пересчёты будут отталкиваться от неё.",
+            ),
+            read: false,
+        });
+    }
 }
 
 /// Advance the server-side read marker. Fire-and-forget at the call site.

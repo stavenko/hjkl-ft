@@ -20,9 +20,6 @@ new_sqlite_classes = ["SyncDO"]
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
-# Shared secret guarding the /admin/* endpoints (support sets a client's planka).
-# Prod value is a per-worker secret: `wrangler secret put ADMIN_SYNC_SECRET --env production`.
-ADMIN_SYNC_SECRET = "dev-admin-sync-secret"
 
 # ── Production (separate worker on sync.renorma.app, clean DO data) ──
 # Deploy: wrangler deploy --env production
@@ -45,10 +42,3 @@ class_name = "SyncDO"
 binding = "JWT_SECRET"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "jwt-secret"
-
-# Shared with support-worker-prod (same store secret → identical value on both).
-# One-time: create `admin-sync-secret` in the store before deploying.
-[[env.production.secrets_store_secrets]]
-binding = "ADMIN_SYNC_SECRET"
-store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
-secret_name = "admin-sync-secret"

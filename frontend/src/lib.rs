@@ -181,6 +181,13 @@ async fn bootstrap_network() {
         // Classify any recent/untagged food now that the AI worker is reachable.
         leptos::spawn_local(services::classify::sweep_diary_unclassified());
         leptos::spawn_local(services::classify::sweep_recipe_ingredients());
+        // Poll the support thread so a curator `set_planka` directive is applied by
+        // the app even if the user never opens /chat (the poll applies it locally).
+        leptos::spawn_local(async {
+            if let Err(e) = services::support_chat::poll().await {
+                leptos::logging::warn!("Launch support poll failed: {e}");
+            }
+        });
     }
     // Open the activity week if the week-2 gate is now cleared (local-only; runs
     // regardless of connectivity).
@@ -225,6 +232,10 @@ fn install_foreground_sync() {
                 services::db::reopen().await;
                 if services::auth::get_token().is_some() {
                     services::sync::sync_now_background();
+                    // Apply a pending curator planka directive on resume too.
+                    leptos::spawn_local(async {
+                        let _ = services::support_chat::poll().await;
+                    });
                 }
                 // Daily subscription re-check (no-op unless a day has passed).
                 services::subscription::maybe_recheck().await;

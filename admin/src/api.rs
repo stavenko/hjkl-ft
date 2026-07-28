@@ -232,23 +232,26 @@ pub async fn reply(user_id: &str, text: &str) -> Result<u64, ApiError> {
         .ok_or_else(|| ApiError::Other("reply: missing seq".to_string()))
 }
 
-/// Set the client's daily calorie planka (kcal). Returns the applied amount.
-/// The support-worker delegates to sync-worker, which writes the goal into the
-/// client's SyncDO (adopted last-writer-wins on the client's next sync).
-pub async fn set_planka(user_id: &str, amount: f64) -> Result<f64, ApiError> {
-    let body = serde_json::json!({ "amount": amount }).to_string();
+/// Set the client's daily calorie planka: send a `set_planka` DIRECTIVE message
+/// (kind="set_planka", payload={amount}) into the thread. The server never touches
+/// the user's data — the CLIENT app receives this directive and applies the planka
+/// into its own goals, then syncs it. Returns the message seq.
+pub async fn set_planka(user_id: &str, amount: f64) -> Result<u64, ApiError> {
+    let client_id = uuid::Uuid::now_v7().to_string();
+    let payload = serde_json::json!({ "amount": amount }).to_string();
+    let text = format!("Куратор установил вашу планку по калориям: {amount:.0} ккал");
+    let body = serde_json::to_string(&ReplyReq {
+        client_id: &client_id,
+        text: &text,
+        kind: Some("set_planka"),
+        payload: Some(payload),
+    })
+    .map_err(|e| ApiError::Other(e.to_string()))?;
     let v: serde_json::Value =
-        request("POST", &format!("/conversations/{user_id}/set-planka"), Some(body)).await?;
-    v.get("amount")
-        .and_then(|a| a.as_f64())
-        .ok_or_else(|| ApiError::Other("set_planka: missing amount".to_string()))
-}
-
-/// The client's current calorie planka (kcal), or None if unset.
-pub async fn get_planka(user_id: &str) -> Result<Option<f64>, ApiError> {
-    let v: serde_json::Value =
-        request("GET", &format!("/conversations/{user_id}/planka"), None).await?;
-    Ok(v.get("amount").and_then(|a| a.as_f64()))
+        request("POST", &format!("/conversations/{user_id}/reply"), Some(body)).await?;
+    v.get("seq")
+        .and_then(|s| s.as_u64())
+        .ok_or_else(|| ApiError::Other("set_planka: missing seq".to_string()))
 }
 
 /// Send a typed data_request to the user: kind="data_request",

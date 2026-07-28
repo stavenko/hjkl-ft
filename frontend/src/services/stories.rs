@@ -888,28 +888,30 @@ const S4: &[Frame] = &[
             ru: "Если молочные продукты вам не подходят, есть хорошие растительные источники. Например: пекинская капуста, руккола, тофу, разнообразная зелень, ферментированная или термообработанная капуста.",
         },
     },
-    // 5 — calcium from canned fish
+    // 5 — calcium from canned fish (eat the soft bones)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot(CALCIUM_PH),
+        media: Media::Shot("calcium-fish.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
-        title: Loc { en: "From canned fish", ru: "Из рыбных консервов" },
+        title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "(draft) Canned fish with soft bones — sardines, salmon — is a surprisingly rich source of calcium.",
-            ru: "(черновик) Рыбные консервы с мягкими костями — сардины, лосось — неожиданно богатый источник кальция.",
+            en: "You'll find an excellent source in canned fish — the kind where the fish are small and cooked so that you can eat the bones too. Eat the fish together with the bones. The calcium from their bones is now your calcium.",
+            ru: "Отличный источник вы можете найти в рыбных консервах. Там, где рыбки маленькие и сварены так, что кости тоже можно есть. Ешьте рыбу вместе с костями. Кальций из их костей теперь ваш кальций.",
         },
     },
-    // 6 — the 1 g/day planka + the new gauge & indicator
+    // 6 — the new calcium indicator + gauge
     Frame {
         bg: Bg::Dark,
         media: Media::Shot(CALCIUM_PH),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
-        title: Loc { en: "Your calcium planka", ru: "Планка по кальцию" },
+        title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "(draft) We set a planka of 1 g of calcium a day. A new gauge and indicator now track it — keep it green for a week.",
-            ru: "(черновик) Мы ставим планку 1 г кальция в сутки. За ней теперь следят новый gauge и индикатор — держите его зелёным неделю.",
+            en: "Now, to track calcium, you have a new indicator — it shows how well you're meeting your daily calcium planka.\n\n\
+                 Plus a daily guide: how much more calcium you still need to eat.",
+            ru: "Теперь для отслеживания кальция у вас появился новый индикатор, который покажет, как вы выполняете ежедневную планку по кальцию.\n\n\
+                 Ну и ежедневный ориентир — сколько вам ещё нужно съесть кальция.",
         },
     },
 ];

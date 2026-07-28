@@ -470,6 +470,51 @@ pub async fn unlocked_indicator_states() -> Vec<(&'static str, IndicatorState)> 
     out
 }
 
+/// Calorie-planka adherence over the last 7 COMPLETED days, as an indicator state.
+/// AtMost semantics: a day is a MISS when intake went OVER that day's planka (the
+/// opposite of the AtLeast nutrient indicators). Unknown until a planka exists.
+/// Days with no logged food are skipped (not counted as adhered). Same bands as
+/// [`daily_state`]: 0 over → green · 1–3 → orange · ≥4 → red.
+pub async fn calorie_adherence_state() -> IndicatorState {
+    if local::calorie_goal_amount().await.is_none() {
+        return IndicatorState::Unknown;
+    }
+    let today = crate::services::local::today_date();
+    let mut over = 0u32;
+    for i in 1..=7 {
+        let d = fmt(today - Duration::days(i));
+        let Some(planka) = calorie_planka_on(&d).await else { continue };
+        if planka <= 0.0 {
+            continue;
+        }
+        let intake = local::kcal_on(&d).await;
+        if intake <= 0.0 {
+            continue; // no food logged that day — not an over-eat
+        }
+        if intake > planka {
+            over += 1;
+        }
+    }
+    daily_state(over)
+}
+
+/// The full indicator board for the curator food-share — richer than the widget
+/// (which only shows unlocked ones): the calorie-planka adherence first, then
+/// protein, then the seven nutrition indicators, then steps. Each carries its short
+/// key and colour state; the sharer maps keys → labels.
+pub async fn share_states() -> Vec<(&'static str, IndicatorState)> {
+    let mut out = Vec::new();
+    out.push(("calories", calorie_adherence_state().await));
+    out.push(("protein", indicator_state("protein").await));
+    // The seven nutrition indicators (calcium, omega3, eggs, iron, red_meat,
+    // veg_fruit, fiber), each with its correct daily/weekly logic.
+    for (k, s) in compute().await {
+        out.push((k, s));
+    }
+    out.push(("steps", indicator_state("steps").await));
+    out
+}
+
 // ── "Keep them green" gate ───────────────────────────────────────────────────
 // The widget nudges the user to keep EVERY unlocked indicator green for a full
 // week: 7 GREEN days inside a rolling 8-day window (one day may slip). Counting

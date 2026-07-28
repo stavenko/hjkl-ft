@@ -7,6 +7,7 @@
 
 use serde_json::{json, Value};
 
+use crate::services::indicators::{self, IndicatorState};
 use crate::services::weight_trend::{self, BalanceState, Direction, WeightTrend, DEFAULT_WINDOW_DAYS};
 use crate::services::{i18n, local, profile};
 
@@ -169,7 +170,61 @@ async fn build_food() -> Value {
             "totals": { "kcal": tk, "protein": tp, "fat": tf, "carbs": tc },
         }));
     }
-    json!({ "days": days })
+
+    // Full indicator board (incl. the calorie-planka adherence), so the curator sees
+    // how healthy the diet is at a glance — not just the raw entries.
+    let states = indicators::share_states().await;
+    let indicators_json: Vec<Value> = states
+        .iter()
+        .map(|(k, s)| json!({ "key": k, "label": indicator_label(k), "state": state_str(*s) }))
+        .collect();
+
+    // Per-day calorie-planka adherence, last 7 days (newest first): intake vs the
+    // planka that applied THAT day, and whether it was kept. Only logged days.
+    let mut planka_days: Vec<Value> = Vec::new();
+    for i in 0..7 {
+        let date = (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();
+        let intake = local::kcal_on(&date).await;
+        if intake <= 0.0 {
+            continue;
+        }
+        let planka = indicators::calorie_planka_on(&date).await;
+        planka_days.push(json!({
+            "date": date,
+            "intake": intake,
+            "planka": planka,
+            "within": planka.map(|p| intake <= p),
+        }));
+    }
+
+    json!({ "days": days, "indicators": indicators_json, "planka_days": planka_days })
+}
+
+/// Short indicator key → RU label for the share payload.
+fn indicator_label(key: &str) -> &'static str {
+    match key {
+        "calories" => "Калории",
+        "protein" => "Белок",
+        "veg_fruit" => "Овощи и фрукты",
+        "calcium" => "Кальций",
+        "iron" => "Железо",
+        "omega3" => "Омега-3",
+        "fiber" => "Клетчатка",
+        "eggs" => "Яйца",
+        "red_meat" => "Красное мясо",
+        "steps" => "Шаги",
+        _ => "—",
+    }
+}
+
+/// Indicator colour state → wire string.
+fn state_str(s: IndicatorState) -> &'static str {
+    match s {
+        IndicatorState::Green => "green",
+        IndicatorState::Orange => "orange",
+        IndicatorState::Red => "red",
+        IndicatorState::Unknown => "unknown",
+    }
 }
 
 /// Gather `dataset` into its typed data_share envelope value.

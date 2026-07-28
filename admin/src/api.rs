@@ -232,6 +232,25 @@ pub async fn reply(user_id: &str, text: &str) -> Result<u64, ApiError> {
         .ok_or_else(|| ApiError::Other("reply: missing seq".to_string()))
 }
 
+/// Set the client's daily calorie planka (kcal). Returns the applied amount.
+/// The support-worker delegates to sync-worker, which writes the goal into the
+/// client's SyncDO (adopted last-writer-wins on the client's next sync).
+pub async fn set_planka(user_id: &str, amount: f64) -> Result<f64, ApiError> {
+    let body = serde_json::json!({ "amount": amount }).to_string();
+    let v: serde_json::Value =
+        request("POST", &format!("/conversations/{user_id}/set-planka"), Some(body)).await?;
+    v.get("amount")
+        .and_then(|a| a.as_f64())
+        .ok_or_else(|| ApiError::Other("set_planka: missing amount".to_string()))
+}
+
+/// The client's current calorie planka (kcal), or None if unset.
+pub async fn get_planka(user_id: &str) -> Result<Option<f64>, ApiError> {
+    let v: serde_json::Value =
+        request("GET", &format!("/conversations/{user_id}/planka"), None).await?;
+    Ok(v.get("amount").and_then(|a| a.as_f64()))
+}
+
 /// Send a typed data_request to the user: kind="data_request",
 /// payload={"dataset": …}, text = the human-readable RU fallback. Returns the seq.
 pub async fn reply_data_request(user_id: &str, dataset: &str, text: &str) -> Result<u64, ApiError> {

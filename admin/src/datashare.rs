@@ -107,10 +107,39 @@ impl Default for FoodTotals {
     }
 }
 
+/// One indicator's state in the food share: short key, RU label, colour state
+/// ("green" | "orange" | "red" | "unknown").
+#[derive(Debug, Clone, Deserialize)]
+pub struct IndicatorShare {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub state: String,
+}
+
+/// One day's calorie-planka adherence: intake vs the planka that applied that day.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlankaDay {
+    #[serde(default)]
+    pub date: String,
+    #[serde(default)]
+    pub intake: f64,
+    #[serde(default)]
+    pub planka: Option<f64>,
+    #[serde(default)]
+    pub within: Option<bool>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct FoodShare {
     #[serde(default)]
     pub days: Vec<FoodDay>,
+    /// The full indicator board (calories/protein/…/steps). Empty on older clients.
+    #[serde(default)]
+    pub indicators: Vec<IndicatorShare>,
+    /// Per-day calorie-planka adherence, newest first.
+    #[serde(default)]
+    pub planka_days: Vec<PlankaDay>,
 }
 
 /// One dataset extracted from a data_share message, ready to render as a button.
@@ -351,9 +380,21 @@ fn steps_view(s: &StepsShare) -> impl IntoView {
     .into_view()
 }
 
+/// (soft background, ink) CSS-var pair for an indicator colour state.
+fn state_colors(state: &str) -> (&'static str, &'static str) {
+    match state {
+        "green" => ("var(--accent-soft)", "var(--accent)"),
+        "orange" => ("var(--warn-soft)", "var(--warn-ink)"),
+        "red" => ("var(--danger-soft)", "var(--danger)"),
+        _ => ("var(--surface-2)", "var(--muted)"),
+    }
+}
+
 fn food_view(f: &FoodShare) -> impl IntoView {
     let days = f.days.clone();
-    if days.is_empty() {
+    let indicators = f.indicators.clone();
+    let planka_days = f.planka_days.clone();
+    if days.is_empty() && indicators.is_empty() {
         return view! { <div class="row__meta">"Нет дней в дневнике"</div> }.into_view();
     }
     // Default to the newest day (index 0 — payload is newest-first).
@@ -362,6 +403,41 @@ fn food_view(f: &FoodShare) -> impl IntoView {
 
     view! {
         <div>
+            // Indicator board — every indicator (incl. calorie-planka adherence),
+            // coloured by state, so the curator reads diet health at a glance.
+            {(!indicators.is_empty()).then(|| view! {
+                <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">
+                    {indicators.into_iter().map(|ind| {
+                        let (bg, fg) = state_colors(&ind.state);
+                        view! {
+                            <span style=format!("padding:4px 9px; border-radius:8px; font-size:.82rem; \
+                                                 background:{bg}; color:{fg}; font-weight:600;")>
+                                {ind.label}
+                            </span>
+                        }
+                    }).collect_view()}
+                </div>
+            })}
+            // Calorie-planka adherence per day: intake / that-day's planka, green if
+            // kept, red if over — "как соблюдалась планка последние дни".
+            {(!planka_days.is_empty()).then(|| view! {
+                <div style="margin-bottom:14px; padding:12px; background:var(--surface-2); border-radius:10px;">
+                    <div style="font-weight:650; margin-bottom:6px;">"Планка по калориям"</div>
+                    {planka_days.into_iter().map(|p| {
+                        let within = p.within.unwrap_or(true);
+                        let color = if within { "var(--accent)" } else { "var(--danger)" };
+                        let planka_s = p.planka.map(|v| format!("{v:.0}")).unwrap_or_else(|| "—".to_string());
+                        view! {
+                            <div class="row__meta mono" style="display:flex; justify-content:space-between; padding:3px 0;">
+                                <span>{p.date}</span>
+                                <span style=format!("color:{color};")>
+                                    {format!("{:.0} / {} ккал", p.intake, planka_s)}
+                                </span>
+                            </div>
+                        }
+                    }).collect_view()}
+                </div>
+            })}
             // Day selector.
             <div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; margin-bottom:10px;">
                 {days.iter().enumerate().map(|(i, d)| {

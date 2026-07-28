@@ -143,15 +143,30 @@ pub async fn maybe_recompute_weekly_planka() {
         return;
     }
 
-    // The recompute needs the last 7 days of intake; if there's nothing to average
-    // yet, defer WITHOUT advancing the anchor (retry next launch).
-    let Some(new_planka) = local::calorie_planka_suggestion().await else {
+    // Require recent logging to justify a recompute at all — if the user hasn't
+    // logged any food this week, defer WITHOUT advancing the anchor (retry next
+    // launch). We no longer use the average as the planka base, only as an
+    // activity gate.
+    if local::avg_daily_kcal(7).await.is_none() {
         return;
-    };
+    }
+
+    // Base the new planka on the PREVIOUS planka (`goal.amount`), nudged by AT MOST
+    // ±5% from the weight trend — NOT on raw average intake. This keeps the planka
+    // moving at most one small step per week and stops a low-intake week (e.g.
+    // anxiety undereating) from ratcheting the target downward: eating under the
+    // planka no longer drags the base down, only a confirmed weight trend moves it.
+    // Average intake seeds only the FIRST planka (`calorie_planka_suggestion`).
+    let entries = local::list_weight_entries().await;
+    let weight_kg = entries
+        .iter()
+        .max_by(|a, b| a.date.cmp(&b.date))
+        .map(|e| e.weight_kg)
+        .unwrap_or(0.0);
+    let trend = weight_trend::weight_trend(&entries, DEFAULT_WINDOW_DAYS);
+    let new_planka = local::calorie_planka(goal.amount, &trend, weight_kg);
 
     let avg_steps = local::avg_steps_last_days(7).await;
-    let trend =
-        weight_trend::weight_trend(&local::list_weight_entries().await, DEFAULT_WINDOW_DAYS);
 
     // Apply the new planka (syncs like any goal edit). `set_calorie_goal` also
     // advances the weekly anchor to today via `mark_planka_recomputed`, so the next

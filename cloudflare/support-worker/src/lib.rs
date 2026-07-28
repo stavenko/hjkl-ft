@@ -389,6 +389,91 @@ async fn expert_read(mut req: Request, ctx: RouteContext<()>) -> Result<Response
         .await
 }
 
+// ---- EXPERT: client calorie-planka control ----
+// An approved expert sets/reads a client's daily calorie planka. Delegates to the
+// sync-worker's /admin/* endpoints (service binding + shared ADMIN_SYNC_SECRET),
+// which write the goal into the client's SyncDO so it's adopted last-writer-wins on
+// the client's next sync. The secret stays server-side — never in the admin browser.
+
+/// Call a sync-worker /admin/* endpoint over the SYNC_WORKER service binding with
+/// the shared admin secret. `body` is None for GET.
+async fn sync_admin(
+    env: &Env,
+    method: Method,
+    url: &str,
+    body: Option<String>,
+) -> Result<Response> {
+    let secret = token::secret_or_var(env, "ADMIN_SYNC_SECRET")
+        .await
+        .map_err(|e| Error::RustError(format!("ADMIN_SYNC_SECRET: {e}")))?;
+    let headers = Headers::new();
+    headers
+        .set("X-Admin-Secret", &secret)
+        .map_err(|e| Error::RustError(format!("set header: {e}")))?;
+    let mut init = RequestInit::new();
+    init.with_method(method).with_headers(headers);
+    if let Some(b) = body {
+        let h = Headers::new();
+        let _ = h.set("Content-Type", "application/json");
+        // Re-set both headers (with_headers replaces the set); include the secret.
+        let _ = h.set("X-Admin-Secret", &secret);
+        init.with_headers(h)
+            .with_body(Some(wasm_bindgen::JsValue::from_str(&b)));
+    }
+    let request = Request::new_with_init(url, &init)?;
+    let sync = env
+        .service("SYNC_WORKER")
+        .map_err(|e| Error::RustError(format!("SYNC_WORKER service binding: {e}")))?;
+    sync.fetch_request(request).await
+}
+
+/// Pass a sync-worker response through verbatim (status + JSON body).
+async fn passthrough_json(mut resp: Response) -> Result<Response> {
+    let status = resp.status_code();
+    let text = resp.text().await?;
+    let headers = Headers::new();
+    let _ = headers.set("Content-Type", "application/json");
+    Ok(Response::ok(text)?.with_status(status).with_headers(headers))
+}
+
+/// POST /conversations/:uid/set-planka {amount} — set the client's calorie planka.
+async fn expert_set_planka(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(resp) = auth_expert(&req, &ctx.env).await {
+        return Ok(resp);
+    }
+    let uid = ctx
+        .param("uid")
+        .ok_or_else(|| Error::RustError("missing uid".into()))?
+        .clone();
+    let body: serde_json::Value = req.json().await?;
+    let Some(amount) = body.get("amount").and_then(|v| v.as_f64()) else {
+        return Ok(json_status(400, "amount required"));
+    };
+    let payload = serde_json::json!({ "user_id": uid, "amount": amount }).to_string();
+    let resp = sync_admin(
+        &ctx.env,
+        Method::Post,
+        "https://sync-worker/admin/set-calorie-planka",
+        Some(payload),
+    )
+    .await?;
+    passthrough_json(resp).await
+}
+
+/// GET /conversations/:uid/planka — the client's current calorie planka.
+async fn expert_get_planka(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(resp) = auth_expert(&req, &ctx.env).await {
+        return Ok(resp);
+    }
+    let uid = ctx
+        .param("uid")
+        .ok_or_else(|| Error::RustError("missing uid".into()))?
+        .clone();
+    let url = format!("https://sync-worker/admin/calorie-planka?user_id={uid}");
+    let resp = sync_admin(&ctx.env, Method::Get, &url, None).await?;
+    passthrough_json(resp).await
+}
+
 // ---- ADMIN authorization handlers ----
 
 /// GET /admin/me (user JWT). Returns the DO's {"approved":bool,"code":string|null}
@@ -612,6 +697,9 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/conversations/:uid/messages", expert_messages)
         .post_async("/conversations/:uid/reply", expert_reply)
         .post_async("/conversations/:uid/read", expert_read)
+        // Client calorie-planka control (delegates to sync-worker /admin/*)
+        .get_async("/conversations/:uid/planka", expert_get_planka)
+        .post_async("/conversations/:uid/set-planka", expert_set_planka)
         // ADMIN authorization (request-code + operator secret; no redeploy to add)
         .get_async("/admin/me", admin_me)
         .post_async("/admin/request", admin_request)

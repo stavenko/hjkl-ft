@@ -183,8 +183,14 @@ pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
 }
 
 // ── Careful calorie-planka control loop ──────────────────────────────────────
-// The planka is the average intake nudged by AT MOST one small step per weekly
-// recompute, and cut ONLY when justified — so a slow, comfortable weight loss is
+// `calorie_planka(base, trend, weight)` = `base` nudged by AT MOST one small step
+// (±5%) from the weight trend. The BASE differs by caller:
+//   • FIRST planka (ch3 «Рассчитать») — base = average intake (calibrate to how
+//     much the user actually eats). See `calorie_planka_suggestion`.
+//   • WEEKLY recompute — base = the PREVIOUS planka (`letters::maybe_recompute…`),
+//     so the target moves at most ±5%/week and a low-intake week (e.g. anxiety
+//     undereating) can NOT ratchet it down; only a confirmed weight trend moves it.
+// The step is cut ONLY when justified — so a slow, comfortable weight loss is
 // never disrupted by a premature reduction:
 //   • confident loss, rate inside the comfortable band → HOLD;
 //   • confident loss but too SLOW → −5% (gently speed up toward the band);

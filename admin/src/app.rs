@@ -458,6 +458,8 @@ async fn worker_delay(ms: i32) {
 fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView {
     let messages = create_rw_signal(Vec::<Message>::new());
     let error = create_rw_signal(Option::<String>::None);
+    // Positive feedback (e.g. planka set) — shown in a green banner, not the red one.
+    let notice = create_rw_signal(Option::<String>::None);
     let draft = create_rw_signal(String::new());
     let sending = create_rw_signal(false);
     // The dataset(s) whose shared payload is open in the modal (one modal at a time).
@@ -589,6 +591,36 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
         if text.is_empty() {
             return;
         }
+        // Slash ACTION: `/set-calorie-limit <kcal>` sets the client's calorie planka
+        // (not a chat message). Parse the amount and call the planka endpoint.
+        if let Some(rest) = text.strip_prefix("/set-calorie-limit") {
+            let amount = rest.trim().replace(',', ".").parse::<f64>().ok();
+            match amount {
+                Some(a) if a > 0.0 && a < 20000.0 => {
+                    sending.set(true);
+                    let uid = uid_send.clone();
+                    spawn_local(async move {
+                        match api::set_planka(&uid, a).await {
+                            Ok(applied) => {
+                                draft.set(String::new());
+                                error.set(None);
+                                notice.set(Some(format!("✓ Планка установлена: {applied:.0} ккал")));
+                            }
+                            Err(e) if e.is_auth() => {
+                                auth::logout();
+                                view.set(View::Login);
+                            }
+                            Err(e) => error.set(Some(e.message().to_string())),
+                        }
+                        sending.set(false);
+                    });
+                }
+                _ => error.set(Some(
+                    "Укажите калорийность числом, например: /set-calorie-limit 2600".to_string(),
+                )),
+            }
+            return;
+        }
         sending.set(true);
         let uid = uid_send.clone();
         spawn_local(async move {
@@ -643,6 +675,7 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
         </header>
 
         {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+        {move || notice.get().map(|n| view! { <div class="banner banner--ok">{n}</div> })}
 
         <div class="screen screen--noflow" node_ref=msgs_ref on:scroll=on_msgs_scroll>
             <div class="msgs">
@@ -721,11 +754,27 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                     return ().into_view();
                 }
                 let q = d.to_lowercase();
+                // First token only, so the planka item stays visible while the admin
+                // types its argument ("/set-calorie-limit 2600").
+                let cmd_token = q.split_whitespace().next().unwrap_or("").to_string();
+                let show_planka = "/set-calorie-limit".starts_with(&cmd_token)
+                    || cmd_token.starts_with("/set-calorie-limit");
                 view! {
                     <div attr:data-testid="slash-menu"
                          style="position:sticky; bottom:0; margin:0 16px; background:var(--surface); \
                                 border:1px solid var(--line); border-radius:var(--r); overflow:hidden; \
                                 box-shadow:var(--shadow); z-index:25;">
+                        {show_planka.then(|| view! {
+                            <button attr:data-testid="slash-item"
+                                style="display:flex; flex-direction:column; align-items:flex-start; gap:2px; \
+                                       width:100%; text-align:left; padding:10px 14px; \
+                                       border-bottom:1px solid var(--line-soft);"
+                                // Prime the draft; the admin types the kcal and hits send.
+                                on:click=move |_| draft.set("/set-calorie-limit ".to_string())>
+                                <span style="font-weight:600;">"Установить планку калорий"</span>
+                                <span class="mono row__meta">"/set-calorie-limit <ккал>"</span>
+                            </button>
+                        })}
                         {SLASH_COMMANDS.iter()
                             .filter(|(cmd, _, _, _)| cmd.starts_with(&q))
                             .map(|(cmd, dataset, label, panel_text)| {

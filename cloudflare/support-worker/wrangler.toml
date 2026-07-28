@@ -26,8 +26,15 @@ new_sqlite_classes = ["ConversationDO", "ConversationIndexDO"]
 binding = "MAIN_FLOW"
 service = "main-flow-dev"
 
+# Client calorie-planka control delegates to sync-worker's /admin/* endpoints.
+[[services]]
+binding = "SYNC_WORKER"
+service = "sync-worker-dev"
+
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+# Shared secret guarding sync-worker's /admin/* (MUST equal sync-worker's value).
+ADMIN_SYNC_SECRET = "dev-admin-sync-secret"
 # Shared secret main-flow's /push/notify verifies (X-Internal-Key). Prod:
 # `wrangler secret put INTERNAL_PUSH_KEY --env production` (same value as main-flow-prod).
 INTERNAL_PUSH_KEY = "dev-internal-push-key"
@@ -50,6 +57,10 @@ custom_domain = true
 [[env.production.services]]
 binding = "MAIN_FLOW"
 service = "main-flow-prod"
+
+[[env.production.services]]
+binding = "SYNC_WORKER"
+service = "sync-worker-prod"
 
 [[env.production.durable_objects.bindings]]
 name = "CONVERSATION_DO"
@@ -76,6 +87,13 @@ secret_name = "internal-push-key"
 binding = "ADMIN_APPROVE_SECRET"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "admin-approve-secret"
+
+# Shared with sync-worker-prod (same store secret → identical value on both).
+# One-time: create `admin-sync-secret` in the store before deploying.
+[[env.production.secrets_store_secrets]]
+binding = "ADMIN_SYNC_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "admin-sync-secret"
 
 [env.production.vars]
 # INTERNAL_PUSH_KEY and ADMIN_APPROVE_SECRET are mounted from the Secrets Store

@@ -47,7 +47,7 @@ await page.waitForTimeout(1000);
 // Advance `taps` frames (argv[3], default 0) — right 70% is the advance zone.
 const taps = Number(process.argv[3] || 0);
 for (let i = 0; i < taps; i++) { await page.mouse.click(300, 700); await page.waitForTimeout(400); }
-await page.waitForTimeout(600);
+await page.waitForTimeout(2200); // let the frame's image fully load + paint
 await page.screenshot({ path: `story4-frame${taps + 1}.png` });
 await b.close();
 console.log(`shot ok (frame ${taps + 1})`);

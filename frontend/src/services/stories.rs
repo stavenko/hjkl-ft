@@ -851,7 +851,7 @@ const S4: &[Frame] = &[
     // 2 — why calcium matters (why we start watching it)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot(CALCIUM_PH),
+        media: Media::Shot("calcium-bones.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
         title: Loc { en: "", ru: "" },
@@ -862,16 +862,18 @@ const S4: &[Frame] = &[
                  Поэтому начинаем следить за потреблением кальция.",
         },
     },
-    // 3 — calcium from dairy
+    // 3 — calcium from dairy (incl. low-fat; lactose-intolerant options)
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot(CALCIUM_PH),
+        media: Media::Shot("calcium-dairy.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
-        title: Loc { en: "From dairy", ru: "Из молочных продуктов" },
+        title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "(draft) Milk, yoghurt, cottage cheese and hard cheese are the simplest source of calcium.",
-            ru: "(черновик) Молоко, йогурт, творог и твёрдый сыр — самый простой источник кальция.",
+            en: "Dairy, including low-fat: milk, yoghurt, cottage cheese, hard cheese — a simple and cheap source of calcium. Low-fat products have no less calcium than full-fat ones; calcium is absorbed regardless of the product's fat content.\n\n\
+                 If you're lactose-intolerant, you can have aged cheeses or some fermented-milk products. They contain less lactose.",
+            ru: "Молочные продукты, в том числе обезжиренные: молоко, йогурт, творог, твёрдый сыр — это простой и дешёвый источник кальция. В обезжиренных продуктах кальция не меньше, чем в жирных. Кальций усвоится независимо от жирности продукта.\n\n\
+                 Если у вас непереносимость лактозы, вы можете употреблять выдержанные сыры или некоторое количество кисломолочных продуктов. Там лактозы меньше.",
         },
     },
     // 4 — calcium from plant sources

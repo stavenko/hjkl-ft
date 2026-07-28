@@ -879,7 +879,7 @@ const S4: &[Frame] = &[
     // 4 — calcium from plant sources
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot(CALCIUM_PH),
+        media: Media::Shot("calcium-plants.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Calcium", ru: "Кальций" },
         title: Loc { en: "", ru: "" },

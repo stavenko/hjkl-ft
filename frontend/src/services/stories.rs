@@ -840,8 +840,12 @@ const S4: &[Frame] = &[
         kicker: Loc { en: "Calcium", ru: "Кальций" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "You've successfully completed the task of keeping your step planka green for 7 days. That's excellent. From now on we'll recalculate your step planka much like your calorie planka. Because movement is life. It's far easier to lose weight and stay in shape when you walk a lot. But now we go further with you. And a new week begins — the ^strong-bones^ week.",
-            ru: "Вы успешно выполнили задание держать планку по шагам в течение 7 дней. Это очень хорошо. В дальнейшем мы будем пересчитывать вашу планку по шагам примерно так же, как и планку по калориям. Потому что движение — это жизнь. Намного легче худеть и держать вес в норме, когда вы много ходите. Но мы сейчас с вами пойдём дальше. И у нас начинается неделя ^«крепких костей»^.",
+            en: "You've successfully completed the task of keeping your step planka green for 7 days. That's excellent.\n\n\
+                 From now on we'll recalculate your step planka much like your calorie planka. Because movement is life. It's far easier to lose weight and stay in shape when you walk a lot. But now we go further with you.\n\n\
+                 And a new week begins — the ^strong-bones^ week.",
+            ru: "Вы успешно выполнили задание держать планку по шагам в течение 7 дней. Это очень хорошо.\n\n\
+                 В дальнейшем мы будем пересчитывать вашу планку по шагам примерно так же, как и планку по калориям. Потому что движение — это жизнь. Намного легче худеть и держать вес в норме, когда вы много ходите. Но мы сейчас с вами пойдём дальше.\n\n\
+                 И у нас начинается неделя ^«крепких костей»^.",
         },
     },
     // 2 — announcement of the new indicator + why calcium matters

@@ -296,7 +296,7 @@ fn FrameView(frame: Frame) -> impl IntoView {
                 </div>
             })}
             <div style="color: rgba(255,255,255,0.93); font-size: 18px; line-height: 1.45; \
-                        text-shadow: 0 1px 12px rgba(0,0,0,0.6);">
+                        white-space: pre-line; text-shadow: 0 1px 12px rgba(0,0,0,0.6);">
                 {text_rich(frame.body.get())}
             </div>
         </div>

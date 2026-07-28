@@ -222,10 +222,36 @@ fn text_with_icons(s: &str) -> View {
     out.collect_view().into_view()
 }
 
-/// Render story text with two inline markers: text wrapped in `~…~` becomes a
-/// BOLD GRADIENT span (same font-size as the surrounding text — just emphasized),
-/// and the rest still passes through `text_with_icons` for the «⇄» repeat icon.
+/// Render story text with inline emphasis markers:
+///  * `^…^` → a BOLD WHITE→YELLOW gradient span (the «strong bones» highlight),
+///  * `~…~` → a BOLD YELLOW→ORANGE→RED gradient span,
+/// both the same font-size as the surrounding text; the rest still passes through
+/// `text_with_icons` for the «⇄» repeat icon. `^` is the outer split so a phrase is
+/// either white-yellow or warm, never nested.
 fn text_rich(s: &str) -> View {
+    let mut out: Vec<View> = Vec::new();
+    for (i, part) in s.split('^').enumerate() {
+        if i % 2 == 1 {
+            out.push(
+                view! {
+                    <span style="font-weight: 800; \
+                        background: linear-gradient(115deg, #ffffff 0%, #fff4c2 42%, #fde047 100%); \
+                        -webkit-background-clip: text; background-clip: text; \
+                        -webkit-text-fill-color: transparent; color: transparent;">
+                        {part.to_string()}
+                    </span>
+                }
+                .into_view(),
+            );
+        } else {
+            out.push(text_rich_warm(part));
+        }
+    }
+    out.collect_view().into_view()
+}
+
+/// The warm (`~…~`) gradient + repeat-icon pass, applied to the non-`^` segments.
+fn text_rich_warm(s: &str) -> View {
     let mut out: Vec<View> = Vec::new();
     for (i, part) in s.split('~').enumerate() {
         if i % 2 == 1 {

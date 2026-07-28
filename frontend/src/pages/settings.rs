@@ -60,6 +60,22 @@ pub fn SettingsPage() -> impl IntoView {
         });
     };
 
+    // Manual "Обновить" (reload to the new build). `location.reload()` is network-
+    // first, so ~1s passes before the page swaps — during which the button gave NO
+    // feedback and felt dead. Flip a spinner ON immediately, let it paint, then reload.
+    let updating = create_rw_signal(false);
+    let do_update = move |_| {
+        if updating.get_untracked() {
+            return;
+        }
+        updating.set(true);
+        spawn_local(async move {
+            // A short yield so the spinner actually paints before the reload begins.
+            crate::services::ai::sleep_ms(50).await;
+            update::reload();
+        });
+    };
+
     // Diagnostics («Разработка»): the notif/deep-link breadcrumb log, refreshable.
     let diag_log = create_rw_signal(read_diag_log());
     let refresh_diag = move |_| diag_log.set(read_diag_log());
@@ -201,8 +217,10 @@ pub fn SettingsPage() -> impl IntoView {
                             <button
                                 attr:data-testid="settings-btn-update"
                                 class="button is-link is-small"
+                                class:is-loading=move || updating.get()
                                 style="flex-shrink: 0;"
-                                on:click=move |_| update::reload()
+                                prop:disabled=move || updating.get()
+                                on:click=do_update
                             >
                                 {move || t("settings.version_update")}
                             </button>

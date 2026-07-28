@@ -831,7 +831,8 @@ const S3: &[Frame] = &[
 const CALCIUM_PH: &str = "calcium-placeholder.svg";
 
 const S4: &[Frame] = &[
-    // 1 — congrats (mirrors the activity-week intro: emoji + inline emphasis)
+    // 1 — congrats: steps task done, and the «strong bones» week begins. The phrase
+    // is emphasised with the white→yellow gradient marker `^…^` (bones).
     Frame {
         bg: Bg::Dark,
         media: Media::Emoji("🎉"),
@@ -839,8 +840,8 @@ const S4: &[Frame] = &[
         kicker: Loc { en: "Calcium", ru: "Кальций" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "(draft) You held your step planka green for a whole week. Time for the next week: ~the calcium week~.",
-            ru: "(черновик) Вы целую неделю держали планку по шагам зелёной. Пора для следующей недели: ~неделя кальция~.",
+            en: "You've successfully completed the task of keeping your step planka green for 7 days. That's excellent. From now on we'll recalculate your step planka much like your calorie planka. Because movement is life. It's far easier to lose weight and stay in shape when you walk a lot. But now we go further with you. And a new week begins — the ^strong-bones^ week.",
+            ru: "Вы успешно выполнили задание держать планку по шагам в течение 7 дней. Это очень хорошо. В дальнейшем мы будем пересчитывать вашу планку по шагам примерно так же, как и планку по калориям. Потому что движение — это жизнь. Намного легче худеть и держать вес в норме, когда вы много ходите. Но мы сейчас с вами пойдём дальше. И у нас начинается неделя ^«крепких костей»^.",
         },
     },
     // 2 — announcement of the new indicator + why calcium matters

@@ -358,8 +358,12 @@ pub struct LavaSub {
     pub contract_id: String,
     #[serde(default)]
     pub status: Option<String>,
+    /// lava's invoice receipt amount is a DECIMAL (e.g. `200.0` RUB), not minor
+    /// units — parse it as a float so the list doesn't fail deserialization
+    /// («invalid type: floating point `200.0`, expected i64»). Display-only here;
+    /// cancel acts on contractId+email, never the amount.
     #[serde(default)]
-    pub amount: Option<i64>,
+    pub amount: Option<f64>,
     #[serde(default)]
     pub currency: Option<String>,
     #[serde(default)]

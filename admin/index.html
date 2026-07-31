@@ -228,6 +228,9 @@
         .banner--ok { background: var(--accent-soft); color: var(--accent); }
         .spinner { width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid var(--line);
             border-top-color: var(--accent); animation: spin .8s linear infinite; margin: 32px auto; }
+        /* Small in-button variant (e.g. the cancel-subscription button). */
+        .spinner--btn { width: 14px; height: 14px; border-width: 2px;
+            border-top-color: currentColor; margin: 0; display: inline-block; vertical-align: -2px; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
         /* Auth / centered card layout */

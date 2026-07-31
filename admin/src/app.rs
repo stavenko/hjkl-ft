@@ -1322,15 +1322,19 @@ fn Subscriptions(view: RwSignal<View>) -> impl IntoView {
                             let contract = s.contract_id.clone();
                             let email_for_cancel = s.email.clone().unwrap_or_default();
                             let cancelling = create_rw_signal(false);
+                            // Cancel failure is shown ON THIS ROW (not the global banner).
+                            let row_error = create_rw_signal(None::<String>);
                             let on_cancel = move |_| {
                                 let cid = contract.clone();
                                 let em = email_for_cancel.clone();
                                 cancelling.set(true);
+                                row_error.set(None);
                                 spawn_local(async move {
                                     match api::cancel_subscription(&cid, &em).await {
+                                        // ONLY a confirmed success (worker 2xx after lava
+                                        // accepted the cancel) removes the row from the list.
                                         Ok(()) => {
-                                            error.set(None);
-                                            load.call(());
+                                            items.update(|v| v.retain(|x| x.contract_id != cid));
                                         }
                                         Err(e) if e.is_auth() => {
                                             auth::logout();
@@ -1338,7 +1342,7 @@ fn Subscriptions(view: RwSignal<View>) -> impl IntoView {
                                         }
                                         Err(e) => {
                                             cancelling.set(false);
-                                            error.set(Some(e.message().to_string()));
+                                            row_error.set(Some(e.message().to_string()));
                                         }
                                     }
                                 });
@@ -1360,8 +1364,16 @@ fn Subscriptions(view: RwSignal<View>) -> impl IntoView {
                                             prop:disabled=move || cancelling.get()
                                             style="margin-top:8px;"
                                             on:click=on_cancel>
-                                        {move || if cancelling.get() { "Отменяю…" } else { "Отменить" }}
+                                        {move || if cancelling.get() {
+                                            view! { <span class="spinner spinner--btn"></span> }.into_view()
+                                        } else {
+                                            "Отменить".into_view()
+                                        }}
                                     </button>
+                                    {move || row_error.get().map(|e| view! {
+                                        <div attr:data-testid="subscription-cancel-error"
+                                             class="row__meta" style="color:#a00; margin-top:6px; word-break: break-all;">{e}</div>
+                                    })}
                                 </div>
                             }
                         }).collect_view()}

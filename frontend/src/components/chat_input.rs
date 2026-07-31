@@ -9,6 +9,11 @@ use web_sys::{Blob, MediaRecorder, MediaStream};
 
 use crate::services::i18n::t;
 
+/// TODO: implement voice recording feature (press-and-hold + drag-to-lock, как в Telegram).
+/// Пока флаг выключен: кнопка микрофона скрыта, при пустом вводе показывается
+/// серая задизейбленная кнопка отправки. Весь код записи сохранён ниже.
+const VOICE_RECORDING_ENABLED: bool = false;
+
 /// Format wall-clock seconds as "m:ss" for the live recording / preview label.
 fn fmt_duration(secs: f64) -> String {
     let total = secs.max(0.0) as u32;
@@ -245,6 +250,8 @@ pub fn ChatInput(
     let send_btn = format!("{BTN} border: none; background: var(--bulma-link); color: #fff;");
     let stop_btn = format!("{BTN} border: none; background: var(--bulma-danger); color: #fff;");
     let ghost_btn_mic = ghost_btn.clone();
+    // Disabled placeholder while voice recording is off: grey, non-interactive send.
+    let send_btn_disabled = format!("{BTN} border: none; background: var(--bulma-border); color: var(--bulma-text-weak); cursor: default; pointer-events: none;");
 
     view! {
         <div style="position: fixed; bottom: 4.75rem; left: 50%; transform: translateX(-50%); z-index: 35; width: min(26rem, calc(100% - 1.5rem)); background: var(--bulma-scheme-main); border-radius: 1.25rem; box-shadow: 0 4px 24px rgba(0,0,0,0.15); padding: 0.5rem 0.6rem;">
@@ -336,7 +343,7 @@ pub fn ChatInput(
                             </button>
                             </span>
                         }.into_view()
-                    } else {
+                    } else if VOICE_RECORDING_ENABLED {
                         view! {
                             <button type="button" attr:data-testid="chat-record-voice"
                                 style=ghost_btn_mic.clone() title=move || t("chat.record_voice")
@@ -345,6 +352,17 @@ pub fn ChatInput(
                                     <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
                                     <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
                                     <line x1="12" x2="12" y1="19" y2="22"/>
+                                </svg>
+                            </button>
+                        }.into_view()
+                    } else {
+                        view! {
+                            <button type="button" attr:data-testid="chat-send"
+                                style=send_btn_disabled.clone() title=move || t("chat.send")
+                                disabled=true>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="m22 2-7 20-4-9-9-4z"/>
+                                    <path d="M22 2 11 13"/>
                                 </svg>
                             </button>
                         }.into_view()

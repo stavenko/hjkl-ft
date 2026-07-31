@@ -79,6 +79,36 @@ fn daily_state(misses: u32) -> IndicatorState {
     }
 }
 
+/// The CALORIE indicator's success band: a day is green when intake landed
+/// STRICTLY within ±50 kcal of that day's planka (planka 3000 → 2951…3049 is
+/// green; 2950/3050 already miss). Indicator/gate semantics ONLY.
+const CALORIE_BAND_KCAL: f64 = 50.0;
+
+/// Green-day test for one indicator from its frozen `(value, ratio)` pair.
+/// Calories: within the ±band of the day's planka (reconstructed as
+/// `value / ratio`). Everything else: AtLeast — ratio ≥ 1.0.
+fn day_green(key: &str, value: f64, ratio: Option<f64>) -> bool {
+    match key {
+        "calories" => match ratio {
+            Some(r) if r > 0.0 && value > 0.0 => {
+                let target = value / r;
+                (value - target).abs() < CALORIE_BAND_KCAL
+            }
+            _ => false,
+        },
+        _ => matches!(ratio, Some(r) if r >= 1.0),
+    }
+}
+
+/// Missed-day test — the judgeable inverse of [`day_green`]: a day counts as a
+/// miss only when its frozen ratio exists (the target was known at freeze time).
+fn day_missed(key: &str, value: f64, ratio: Option<f64>) -> bool {
+    match key {
+        "calories" => ratio.is_some() && !day_green(key, value, ratio),
+        _ => ratio.map_or(false, |r| r < 1.0),
+    }
+}
+
 /// Weekly-goal colour. `current_met` = this rolling week hit the goal;
 /// `history_met` = per complete-week whether the goal was met (only weeks with data).
 fn weekly_state(current_met: bool, history_met: &[bool]) -> IndicatorState {
@@ -148,7 +178,10 @@ pub const UNLOCKED_GAUGES: &[&str] = &["protein", "veg_fruit"];
 /// The week-2 indicators — ALSO the set the "keep green 7 days" gate watches. The
 /// step indicator is NOT here: it's added to the DISPLAY by [`displayed_indicators`]
 /// once the activity week unlocks, and gets its OWN separate gate.
-pub const UNLOCKED_INDICATORS: &[&str] = &["protein", "veg_fruit"];
+/// `calories` is the planka-adherence indicator: green day = intake within
+/// ±[`CALORIE_BAND_KCAL`] of that day's planka (indicator/gate semantics only —
+/// the gauge and the goal keep their AtMost meaning).
+pub const UNLOCKED_INDICATORS: &[&str] = &["calories", "protein", "veg_fruit"];
 
 /// App-flag: the activity week (step planka + step indicator) has been unlocked.
 const ACTIVITY_UNLOCKED_KEY: &str = "activity_week_unlocked";
@@ -511,21 +544,22 @@ pub async fn indicator_state(key: &str) -> IndicatorState {
     }
     let today = crate::services::local::today_date();
     let days: Vec<NaiveDate> = (1..=7).map(|i| today - Duration::days(i)).collect();
-    let mut ratios = Vec::with_capacity(days.len());
+    let mut misses = 0u32;
     let mut any_data = false;
     for d in &days {
         let (value, ratio) = day_cached(key, &fmt(*d)).await;
         if value > 0.0 {
             any_data = true;
         }
-        ratios.push(ratio);
+        // Colour off the FROZEN per-day pair (per-key miss rule: calories = the
+        // ±band, the rest = ratio < 1.0), not a fresh compare to the current target.
+        if day_missed(key, value, ratio) {
+            misses += 1;
+        }
     }
     if !is_classifier(key) && !any_data {
         return IndicatorState::Unknown;
     }
-    // Colour off the FROZEN per-day ratios (< 1.0 = missed), not a fresh compare to
-    // the current target.
-    let misses = ratios.iter().filter(|r| r.map_or(false, |x| x < 1.0)).count() as u32;
     daily_state(misses)
 }
 
@@ -626,11 +660,12 @@ fn gate_open_date(today: NaiveDate) -> NaiveDate {
     today
 }
 
-/// Did EVERY unlocked indicator meet its target on `date` (frozen ratio ≥ 1.0)?
+/// Did EVERY unlocked indicator meet its target on `date` (per-key green rule:
+/// calories = the ±band, the rest = frozen ratio ≥ 1.0)?
 async fn all_green_on(date: &str) -> bool {
     for key in UNLOCKED_INDICATORS.iter().copied() {
-        let (_value, ratio) = day_cached(key, date).await;
-        if !matches!(ratio, Some(r) if r >= 1.0) {
+        let (value, ratio) = day_cached(key, date).await;
+        if !day_green(key, value, ratio) {
             return false;
         }
     }
@@ -739,7 +774,10 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
             let (value, ratio) = day_cached(key, &fmt(*d)).await;
             days.push((fmt(*d), value, ratio));
         }
-        let missed = days.iter().filter(|(_, _, ratio)| ratio.map_or(false, |r| r < 1.0)).count() as u32;
+        let missed = days
+            .iter()
+            .filter(|(_, value, ratio)| day_missed(key, *value, *ratio))
+            .count() as u32;
         out.push(IndicatorSeries {
             key,
             state: indicator_state(key).await,
@@ -886,6 +924,29 @@ mod tests {
         assert_eq!(daily_state(3), IndicatorState::Orange);
         assert_eq!(daily_state(4), IndicatorState::Red);
         assert_eq!(daily_state(7), IndicatorState::Red);
+    }
+
+    /// The CALORIE indicator band, exactly per the product spec: planka 3000 →
+    /// 2951…3049 is green; 2950/2948/3050 already miss. The frozen pair stores
+    /// `(value, value/target)`, so the test feeds the same shape.
+    #[test]
+    fn calorie_band() {
+        let pair = |v: f64, planka: f64| (v, Some(v / planka));
+        let green = |(v, r): (f64, Option<f64>)| day_green("calories", v, r);
+        assert!(green(pair(2951.0, 3000.0)));
+        assert!(green(pair(3000.0, 3000.0)));
+        assert!(green(pair(3049.0, 3000.0)));
+        assert!(!green(pair(2950.0, 3000.0)));
+        assert!(!green(pair(3050.0, 3000.0)));
+        assert!(!green(pair(2948.0, 3000.0)));
+        // No data / no target → never green, and a miss only when judgeable.
+        assert!(!day_green("calories", 0.0, Some(0.0)));
+        assert!(!day_green("calories", 3000.0, None));
+        assert!(!day_missed("calories", 3000.0, None));
+        assert!(day_missed("calories", 2900.0, Some(2900.0 / 3000.0)));
+        // Other indicators keep the AtLeast rule.
+        assert!(day_green("protein", 100.0, Some(1.0)));
+        assert!(!day_green("protein", 90.0, Some(0.9)));
     }
 
     #[test]

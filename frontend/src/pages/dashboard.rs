@@ -130,6 +130,21 @@ fn veg_hint_text() -> String {
 /// missed the target, the green/orange/red rule, and why it matters.
 fn indicator_reason(key: &str, state: IndicatorState, missed: u32) -> String {
     use IndicatorState::*;
+    // Calories has band (±50 ккал) semantics, not «добрать норму».
+    if key == "calories" {
+        return match state {
+            Green => "Зелёный: за последнюю неделю вы каждый день попадали в свою планку по калориям (±50 ккал).".to_string(),
+            Orange => format!(
+                "Оранжевый: за последнюю неделю вы {missed} из 7 дней не попали в планку по калориям \
+                 (±50 ккал; 1–3 дня → оранжевый)."
+            ),
+            Red => format!(
+                "Красный: за последнюю неделю вы {missed} из 7 дней не попали в планку по калориям \
+                 (±50 ккал; 4 и более → красный)."
+            ),
+            Unknown => "Пока недостаточно данных, чтобы оценить.".to_string(),
+        };
+    }
     let metric = match key {
         "protein" => "белка",
         "veg_fruit" => "овощей и фруктов",
@@ -434,7 +449,7 @@ pub fn DashboardPage() -> impl IntoView {
                                             <InfoHint text=reason/>
                                         </div>
                                         <DayBars series=Signal::derive(move || days.clone())
-                                            unit="г".to_string()
+                                            unit={if s.key == "calories" { "ккал" } else { "г" }.to_string()}
                                             miss_color=stroke.to_string()/>
                                     </div>
                                 }

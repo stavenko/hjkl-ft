@@ -775,6 +775,10 @@ fn en(key: &str) -> &'static str {
         // Android Yandex
         "pwa.inst.android_yandex.1" => "Tap the menu \u{22ee} (three dots) at the bottom right",
         "pwa.inst.android_yandex.2" => "Tap \"Add shortcut\", then \"Add automatically\"",
+        // System-browser hop screen (Android browsers that can't install a PWA).
+        "pwa.sysbrowser.text" => "re:Norma works best in the system browser.",
+        "pwa.sysbrowser.open" => "Open in the system browser",
+        "pwa.sysbrowser.stay" => "I want to keep using this browser",
         // macOS Safari
         "pwa.inst.macos_safari.1" => "In the menu bar: File \u{2192} Add to Dock",
         "pwa.inst.macos_safari.2" => "The app will appear in your Dock",
@@ -1582,6 +1586,9 @@ fn ru(key: &str) -> &'static str {
         "pwa.inst.android_firefox.3" => "Подтвердите установку",
         "pwa.inst.android_yandex.1" => "Нажмите меню \u{22ee} (три точки) в правом нижнем углу",
         "pwa.inst.android_yandex.2" => "Выберите «Добавить ярлык», затем «Добавить автоматически»",
+        "pwa.sysbrowser.text" => "re:Norma лучше всего работает в системном браузере.",
+        "pwa.sysbrowser.open" => "Открыть в системном браузере",
+        "pwa.sysbrowser.stay" => "Я хочу продолжать использовать в этом браузере",
         "pwa.inst.macos_safari.1" => "В меню: Файл \u{2192} Добавить в Dock",
         "pwa.inst.macos_safari.2" => "Приложение появится в вашем Dock",
         "pwa.inst.chrome.1" => "Нажмите значок установки в адресной строке",

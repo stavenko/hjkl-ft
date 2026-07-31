@@ -228,6 +228,33 @@ fn render_steps(platform: &str) -> View {
     }
 }
 
+/// Android intent URL that opens the app in Chrome SPECIFICALLY (package=), ignoring
+/// the default browser. Carries `?u=<user_id>` so Chrome (fresh localStorage, no
+/// session) can offer the Telegram-code login for this account. Falls back to the
+/// plain https URL when Chrome is absent.
+fn system_browser_intent_url() -> String {
+    let win = web_sys::window().expect("no window");
+    let host = win.location().host().unwrap_or_default();
+    // Account id: the signed-in session first, else the `?u=` this page was
+    // opened with (unauthenticated launch of a `?u=`-carrying link).
+    let url_u = win
+        .location()
+        .search()
+        .ok()
+        .and_then(|s| web_sys::UrlSearchParams::new_with_str(&s).ok())
+        .and_then(|p| p.get("u"))
+        .filter(|s| !s.is_empty());
+    let uid_q = crate::services::auth::get_user_id()
+        .or(url_u)
+        .map(|u| format!("?u={u}"))
+        .unwrap_or_default();
+    let target = format!("https://{host}/{uid_q}");
+    let fallback = js_sys::encode_uri_component(&target);
+    format!(
+        "intent://{host}/{uid_q}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url={fallback};end"
+    )
+}
+
 #[component]
 pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
     let platform = detect_platform();
@@ -238,6 +265,39 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
         platform::dismiss_pwa_prompt();
         on_dismiss.call(());
     };
+
+    // Yandex Browser (and the Yandex app) cannot install a standalone PWA at all —
+    // instead of the useless install steps, route the user into the system browser
+    // (Chrome via an Android intent), with an explicit «stay here» opt-out.
+    // iOS is untouched: this branch is Android-Yandex only.
+    if platform == "android_yandex" {
+        return view! {
+            <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
+                <div style="max-width: 24rem;">
+                    <img src="/icon-192.png" alt="re:Norma" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
+                    <p class="mb-5" style="font-size: 1.05rem; line-height: 1.6;">
+                        {move || t("pwa.sysbrowser.text")}
+                    </p>
+                    <a
+                        attr:data-testid="pwa-btn-open-system-browser"
+                        class="button is-link is-medium is-fullwidth has-text-weight-semibold mb-3"
+                        href=system_browser_intent_url()
+                    >
+                        {move || t("pwa.sysbrowser.open")}
+                    </a>
+                    <button
+                        attr:data-testid="pwa-btn-dismiss"
+                        class="button is-ghost has-text-grey"
+                        style="text-decoration: underline; font-size: 0.85rem; white-space: normal;"
+                        on:click=dismiss
+                    >
+                        {move || t("pwa.sysbrowser.stay")}
+                    </button>
+                </div>
+            </div>
+        }
+        .into_view();
+    }
 
     view! {
         <style>"
@@ -275,4 +335,5 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
             </div>
         </div>
     }
+    .into_view()
 }

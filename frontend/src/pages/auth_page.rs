@@ -305,6 +305,21 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             >
                                 {move || t("auth.phrase_login")}
                             </button>
+                            // Manual Telegram-code entry point: a user who switched
+                            // browsers (system-browser hop) has a known account
+                            // (`?u=`) but no passkey HERE — the auto TgCode fallback
+                            // fires only when passkeys are impossible on the device.
+                            {pwa_user_id.is_some().then(|| view! {
+                                <button
+                                    attr:data-testid="auth-btn-tg-code"
+                                    class="button is-ghost has-text-link"
+                                    style="text-decoration: underline; text-underline-offset: 3px;"
+                                    disabled=move || loading.get()
+                                    on:click=move |_| { error.set(None); step.set(AuthStep::TgCode); }
+                                >
+                                    "Войти по коду из Telegram"
+                                </button>
+                            })}
                         </div>
                     </div>
                 </div>

@@ -356,6 +356,7 @@ fn en(key: &str) -> &'static str {
         "curator.request_weight" => "The curator is asking you for your weight diary",
         "curator.request_steps" => "The curator is asking you for your steps diary",
         "curator.request_all" => "The curator is asking you for all of your data",
+        "curator.request_system" => "The curator is asking you for your device and browser info",
         "curator.share" => "Share",
         "curator.sharing" => "Sharing…",
         "curator.shared_done" => "Data sent",
@@ -364,6 +365,7 @@ fn en(key: &str) -> &'static str {
         "curator.shared_weight" => "Data sent: weight diary",
         "curator.shared_steps" => "Data sent: steps diary",
         "curator.shared_all" => "Data sent: all your data",
+        "curator.shared_system" => "Data sent: device and browser info",
 
         // Diary: relative dates
         "diary.today" => "Today",
@@ -1173,6 +1175,7 @@ fn ru(key: &str) -> &'static str {
         "curator.request_weight" => "Куратор запрашивает у вас ваш дневник веса",
         "curator.request_steps" => "Куратор запрашивает у вас ваш дневник шагов",
         "curator.request_all" => "Куратор запрашивает у вас все ваши данные",
+        "curator.request_system" => "Куратор запрашивает у вас данные об устройстве и браузере",
         "curator.share" => "Поделиться",
         "curator.sharing" => "Отправка…",
         "curator.shared_done" => "Данные отправлены",
@@ -1181,6 +1184,7 @@ fn ru(key: &str) -> &'static str {
         "curator.shared_weight" => "Данные отправлены: дневник веса",
         "curator.shared_steps" => "Данные отправлены: дневник шагов",
         "curator.shared_all" => "Данные отправлены: все ваши данные",
+        "curator.shared_system" => "Данные отправлены: данные об устройстве",
 
         // Дневник: относительные даты
         "diary.today" => "Сегодня",

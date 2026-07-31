@@ -179,6 +179,7 @@ fn dataset_short(d: Dataset) -> &'static str {
         Dataset::Food => "дневник питания",
         Dataset::Weight => "дневник веса",
         Dataset::Steps => "дневник шагов",
+        Dataset::System => "данные об устройстве",
         Dataset::All => "все данные",
     }
 }
@@ -189,6 +190,7 @@ fn dataset_id(d: Dataset) -> &'static str {
         Dataset::Food => "food",
         Dataset::Weight => "weight",
         Dataset::Steps => "steps",
+        Dataset::System => "system",
         Dataset::All => "all",
     }
 }

@@ -152,6 +152,10 @@ pub enum Dataset {
     Weight(WeightShare),
     Steps(StepsShare),
     Food(FoodShare),
+    /// Environment diagnostics — a free-form key→value map (the client decides
+    /// which signals to include; render generically so old admin builds never
+    /// choke on new fields).
+    System(serde_json::Map<String, serde_json::Value>),
 }
 
 impl Dataset {
@@ -162,6 +166,7 @@ impl Dataset {
             Dataset::Weight(_) => "📊 Дневник веса",
             Dataset::Steps(_) => "👟 Дневник шагов",
             Dataset::Food(_) => "🍽 Дневник питания",
+            Dataset::System(_) => "🛠 Устройство и браузер",
         }
     }
 
@@ -172,6 +177,7 @@ impl Dataset {
             Dataset::Weight(_) => "Дневник веса",
             Dataset::Steps(_) => "Дневник шагов",
             Dataset::Food(_) => "Дневник питания",
+            Dataset::System(_) => "Устройство и браузер",
         }
     }
 }
@@ -195,6 +201,11 @@ fn parse_one(key: &str, v: &serde_json::Value) -> Result<Option<Dataset>, String
         "food" => Dataset::Food(
             serde_json::from_value(v.clone()).map_err(|e| format!("food: {e}"))?,
         ),
+        "system" => Dataset::System(
+            v.as_object()
+                .cloned()
+                .ok_or_else(|| format!("system: not an object: {v}"))?,
+        ),
         other => return Err(format!("unknown dataset key: {other}")),
     };
     Ok(Some(ds))
@@ -205,7 +216,7 @@ fn parse_one(key: &str, v: &serde_json::Value) -> Result<Option<Dataset>, String
 /// dataset keys at the top level (the bundle) — otherwise we probe each known
 /// key. FAIL LOUDLY on a present-but-broken payload.
 pub fn datasets_from_payload(payload: &serde_json::Value) -> Result<Vec<Dataset>, String> {
-    const KEYS: [&str; 4] = ["body", "weight", "steps", "food"];
+    const KEYS: [&str; 5] = ["body", "weight", "steps", "food", "system"];
     let mut out = Vec::new();
     let mut matched_any_key = false;
 
@@ -229,7 +240,7 @@ pub fn datasets_from_payload(payload: &serde_json::Value) -> Result<Vec<Dataset>
     // it loudly rather than guessing.
     if !matched_any_key {
         return Err(
-            "data_share payload has no known dataset key (body/weight/steps/food)".to_string(),
+            "data_share payload has no known dataset key (body/weight/steps/food/system)".to_string(),
         );
     }
     Ok(out)
@@ -533,5 +544,28 @@ pub fn render_dataset(ds: &Dataset) -> View {
         Dataset::Weight(w) => weight_view(w).into_view(),
         Dataset::Steps(s) => steps_view(s).into_view(),
         Dataset::Food(f) => food_view(f).into_view(),
+        Dataset::System(m) => system_view(m).into_view(),
     }
+}
+
+/// Environment diagnostics: a plain key → value table, values stringified.
+/// Generic on purpose — the client may add signals without an admin release.
+fn system_view(m: &serde_json::Map<String, serde_json::Value>) -> impl IntoView {
+    let rows: Vec<_> = m
+        .iter()
+        .map(|(k, v)| {
+            let val = match v {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Null => "—".to_string(),
+                other => other.to_string(),
+            };
+            view! {
+                <div style="display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); align-items: baseline;">
+                    <span class="mono" style="flex: 0 0 45%; font-size: 12px; color: #6B7491; word-break: break-all;">{k.clone()}</span>
+                    <span class="mono" style="font-size: 12px; word-break: break-all;">{val}</span>
+                </div>
+            }
+        })
+        .collect();
+    view! { <div>{rows}</div> }
 }

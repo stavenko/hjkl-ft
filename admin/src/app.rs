@@ -6,11 +6,12 @@ use crate::datashare;
 
 /// The admin slash-commands: (command typed, dataset key, human menu label,
 /// RU panel text sent as the message .text fallback).
-const SLASH_COMMANDS: [(&str, &str, &str, &str); 5] = [
+const SLASH_COMMANDS: [(&str, &str, &str, &str); 6] = [
     ("/request-body-params", "body", "Параметры тела", "Куратор запрашивает у вас параметры тела"),
     ("/request-food-diary", "food", "Дневник питания", "Куратор запрашивает у вас ваш дневник питания"),
     ("/request-weight", "weight", "Дневник веса", "Куратор запрашивает у вас ваш дневник веса"),
     ("/request-steps", "steps", "Дневник шагов", "Куратор запрашивает у вас ваш дневник шагов"),
+    ("/request-system", "system", "Данные об устройстве", "Куратор запрашивает у вас данные об устройстве и браузере"),
     ("/request-all", "all", "Все данные", "Куратор запрашивает у вас все ваши данные"),
 ];
 
@@ -865,6 +866,7 @@ fn dataset_ru(key: &str) -> String {
         "food" => "дневник питания",
         "weight" => "дневник веса",
         "steps" => "дневник шагов",
+        "system" => "данные об устройстве",
         "all" => "все данные",
         other => other,
     }

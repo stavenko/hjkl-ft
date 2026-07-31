@@ -3,7 +3,7 @@ use crate::components::pwa_icons::*;
 use crate::services::i18n::t;
 use crate::services::platform;
 
-fn detect_platform() -> &'static str {
+pub fn detect_platform() -> &'static str {
     let ua = web_sys::window()
         .and_then(|w| w.navigator().user_agent().ok())
         .unwrap_or_default()

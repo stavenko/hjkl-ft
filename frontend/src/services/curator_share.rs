@@ -18,6 +18,8 @@ pub enum Dataset {
     Food,
     Weight,
     Steps,
+    /// Environment/system diagnostics: browser, launch mode, passkey signals.
+    System,
     All,
 }
 
@@ -29,6 +31,7 @@ impl Dataset {
             "food" => Dataset::Food,
             "weight" => Dataset::Weight,
             "steps" => Dataset::Steps,
+            "system" => Dataset::System,
             "all" => Dataset::All,
             _ => return None,
         })
@@ -41,6 +44,7 @@ impl Dataset {
             Dataset::Food => "curator.request_food",
             Dataset::Weight => "curator.request_weight",
             Dataset::Steps => "curator.request_steps",
+            Dataset::System => "curator.request_system",
             Dataset::All => "curator.request_all",
         }
     }
@@ -52,6 +56,7 @@ impl Dataset {
             Dataset::Food => "curator.shared_food",
             Dataset::Weight => "curator.shared_weight",
             Dataset::Steps => "curator.shared_steps",
+            Dataset::System => "curator.shared_system",
             Dataset::All => "curator.shared_all",
         }
     }
@@ -230,6 +235,84 @@ fn state_str(s: IndicatorState) -> &'static str {
     }
 }
 
+/// Environment/system diagnostics — REAL browser signals only, no fabrication:
+/// UA, launch (display-mode) flags, PWA verdict, WebAuthn/passkey signals and the
+/// local auth/PWA flags. Everything the «why no passkey / wrong install screen»
+/// debugging needs, without any secret values (presence booleans only).
+async fn build_system() -> Value {
+    use wasm_bindgen::JsCast;
+    let win = web_sys::window().expect("no window");
+    let nav = win.navigator();
+    let mm = |q: &str| {
+        win.match_media(q)
+            .ok()
+            .flatten()
+            .map(|m| m.matches())
+    };
+    let nav_standalone = js_sys::Reflect::get(&nav, &wasm_bindgen::JsValue::from_str("standalone"))
+        .ok()
+        .and_then(|v| v.as_bool());
+
+    // WebAuthn signals, raw: is the API there at all, and does the platform
+    // authenticator answer available? (These two are exactly what the onboarding
+    // passkey gate reads.)
+    let pkc_val = js_sys::Reflect::get(&win, &wasm_bindgen::JsValue::from_str("PublicKeyCredential")).ok();
+    let pkc_present = pkc_val
+        .as_ref()
+        .map(|v| !v.is_undefined() && !v.is_null())
+        .unwrap_or(false);
+    let mut iuvpaa: Option<bool> = None;
+    if let Some(pkc) = pkc_val.filter(|v| !v.is_undefined() && !v.is_null()) {
+        if let Ok(f) = js_sys::Reflect::get(
+            &pkc,
+            &wasm_bindgen::JsValue::from_str("isUserVerifyingPlatformAuthenticatorAvailable"),
+        ) {
+            if let Ok(func) = f.dyn_into::<js_sys::Function>() {
+                if let Ok(p) = func.call0(&pkc) {
+                    if let Ok(promise) = p.dyn_into::<js_sys::Promise>() {
+                        iuvpaa = wasm_bindgen_futures::JsFuture::from(promise)
+                            .await
+                            .ok()
+                            .and_then(|v| v.as_bool());
+                    }
+                }
+            }
+        }
+    }
+
+    let ls = win.local_storage().ok().flatten();
+    let get = |k: &str| ls.as_ref().and_then(|s| s.get_item(k).ok().flatten());
+    // navigator.serviceWorker.controller via Reflect (the typed web-sys accessor
+    // needs a cargo feature we don't enable elsewhere).
+    let sw_controller = js_sys::Reflect::get(&nav, &wasm_bindgen::JsValue::from_str("serviceWorker"))
+        .ok()
+        .filter(|v| !v.is_undefined() && !v.is_null())
+        .and_then(|sw| js_sys::Reflect::get(&sw, &wasm_bindgen::JsValue::from_str("controller")).ok())
+        .map(|c| !c.is_undefined() && !c.is_null())
+        .unwrap_or(false);
+
+    json!({
+        "user_agent": nav.user_agent().unwrap_or_default(),
+        "language": nav.language(),
+        "platform": crate::pages::pwa_prompt::detect_platform(),
+        "display_standalone": mm("(display-mode: standalone)"),
+        "display_wco": mm("(display-mode: window-controls-overlay)"),
+        "display_browser": mm("(display-mode: browser)"),
+        "navigator_standalone": nav_standalone,
+        "is_pwa": crate::services::platform::is_pwa(),
+        "public_key_credential": pkc_present,
+        "platform_authenticator": iuvpaa,
+        "passkey_unavailable": crate::services::auth::passkey_unavailable().await,
+        "auth_ctx": get("auth_ctx"),
+        "pwa_dismissed": get("pwa_dismissed").is_some(),
+        "has_user_id": get("user_id").is_some(),
+        "has_token": get("auth_token").is_some(),
+        "sw_controller": sw_controller,
+        "online": nav.on_line(),
+        "notification_permission": format!("{:?}", web_sys::Notification::permission()),
+    })
+}
+
 /// Gather `dataset` into its typed data_share envelope value.
 ///
 /// The envelope is ALWAYS an object keyed by dataset name — a single dataset is
@@ -242,11 +325,13 @@ pub async fn build(dataset: Dataset) -> Value {
         Dataset::Weight => json!({ "weight": build_weight().await }),
         Dataset::Steps => json!({ "steps": build_steps().await }),
         Dataset::Food => json!({ "food": build_food().await }),
+        Dataset::System => json!({ "system": build_system().await }),
         Dataset::All => json!({
             "body": build_body().await,
             "weight": build_weight().await,
             "steps": build_steps().await,
             "food": build_food().await,
+            "system": build_system().await,
         }),
     }
 }

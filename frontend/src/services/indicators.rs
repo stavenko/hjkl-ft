@@ -438,21 +438,41 @@ pub async fn export_ind_days() -> Vec<api_types::IndDayRow> {
     out
 }
 
-/// Apply the server's (already conflict-resolved) indicator days locally.
-pub async fn apply_ind_days(rows: &[api_types::IndDayRow]) {
-    for r in rows {
-        let Some(store) = cache_store(&r.indicator) else { continue };
-        crate::services::db::put(
-            store,
-            &IndDay {
-                date: r.date.clone(),
-                value: r.value,
-                ratio: r.ratio,
-                computed_at: r.computed_at.clone(),
-            },
-        )
-        .await;
+/// The local `ind_*` cache store for an indicator key (sync wire mapping).
+pub fn store_for_indicator(indicator: &str) -> Option<&'static str> {
+    cache_store(indicator)
+}
+
+/// Sync-apply of ONE wire indicator-day row: UNTRACKED write (remote data must
+/// not re-enter the outbox), skipped entirely when the local row is identical.
+pub async fn apply_ind_day(row: &serde_json::Value) {
+    let parsed: api_types::IndDayRow = match serde_json::from_value(row.clone()) {
+        Ok(p) => p,
+        Err(e) => {
+            leptos::logging::error!("sync v2: bad ind_days row ({e}): {row}");
+            return;
+        }
+    };
+    let Some(store) = cache_store(&parsed.indicator) else {
+        leptos::logging::error!("sync v2: unknown indicator {:?}", parsed.indicator);
+        return;
+    };
+    let incoming = IndDay {
+        date: parsed.date.clone(),
+        value: parsed.value,
+        ratio: parsed.ratio,
+        computed_at: parsed.computed_at.clone(),
+    };
+    if let Some(existing) = crate::services::db::get::<IndDay>(store, &parsed.date).await {
+        if existing.date == incoming.date
+            && existing.value == incoming.value
+            && existing.ratio == incoming.ratio
+            && existing.computed_at == incoming.computed_at
+        {
+            return;
+        }
     }
+    crate::services::db::put_untracked(store, &incoming).await;
 }
 
 // ── Calorie planka (per-day, frozen) ─────────────────────────────────────────

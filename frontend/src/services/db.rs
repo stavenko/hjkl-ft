@@ -50,7 +50,7 @@ fn bump(store_name: &str) {
 /// The legacy, device-global database. Used before login (no user identity yet)
 /// and as the one-time migration source for users created before per-user scoping.
 const BOOTSTRAP_DB: &str = "hjkl-ft";
-const DB_VERSION: u32 = 17;
+const DB_VERSION: u32 = 18;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -160,6 +160,10 @@ fn builder(name: &str) -> rexie::RexieBuilder {
         .add_object_store(ObjectStore::new("ind_veg_fruit").key_path("date"))
         .add_object_store(ObjectStore::new("ind_steps").key_path("date"))
         .add_object_store(ObjectStore::new("ind_calories").key_path("date"))
+        // Sync v2 outbox: one row per LOCAL mutation of a synced store, in the
+        // order the mutations happened (`seq` is a zero-padded monotonic string).
+        // Written by the tracked put/delete below; drained by sync::push.
+        .add_object_store(ObjectStore::new("_outbox").key_path("seq"))
 }
 
 /// How long to wait for a database open before treating it as blocked. A schema
@@ -330,7 +334,119 @@ where
     })
 }
 
+// ── Sync v2 outbox: EVERY local mutation of a synced store is journaled ──────
+// The tracked `put`/`delete` below note the mutation into `_outbox`; sync::push
+// drains it as one ordered batch. Sync APPLY paths must use the `_untracked`
+// variants — remote changes must never re-enter the outbox.
+
+/// One outbox row: what changed, in mutation order. `store`/`id` are already in
+/// WIRE terms (e.g. the four `ind_*` stores collapse into "ind_days" with the
+/// composite `"<indicator>:<date>"` id).
+#[derive(Serialize, serde::Deserialize, Clone)]
+pub struct OutboxEntry {
+    pub seq: String,
+    pub store: String,
+    pub op: String,
+    pub id: String,
+}
+
+thread_local! {
+    /// Last issued outbox seq — keeps seqs strictly monotonic within a session
+    /// even for back-to-back mutations in the same millisecond.
+    static OUTBOX_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn next_outbox_seq() -> String {
+    let now = (js_sys::Date::now() as u64) * 1000;
+    let seq = OUTBOX_SEQ.with(|c| {
+        let next = now.max(c.get() + 1);
+        c.set(next);
+        next
+    });
+    format!("{seq:020}")
+}
+
+/// The local key field of a store (mirrors the object-store key paths above).
+fn key_field(store: &str) -> &'static str {
+    match store {
+        "profile" | "app_flags" | "_sync_meta" => "key",
+        "ind_protein" | "ind_veg_fruit" | "ind_steps" | "ind_calories" => "date",
+        _ => "id",
+    }
+}
+
+/// Wire (store, id) for a local mutation — None when the store isn't synced or
+/// the row is device-local. `deletions` IS synced (v1 peers learn deletions
+/// from these records during the transition).
+fn outbox_target(store: &str, local_key: &str) -> Option<(String, String)> {
+    match store {
+        "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "profile"
+        | "weight_entries" | "step_entries" | "deletions" => {
+            Some((store.to_string(), local_key.to_string()))
+        }
+        "app_flags" => (!crate::services::app_flags::is_device_local(local_key))
+            .then(|| ("app_flags".to_string(), local_key.to_string())),
+        "ind_protein" => Some(("ind_days".into(), format!("protein:{local_key}"))),
+        "ind_veg_fruit" => Some(("ind_days".into(), format!("veg_fruit:{local_key}"))),
+        "ind_steps" => Some(("ind_days".into(), format!("steps:{local_key}"))),
+        "ind_calories" => Some(("ind_days".into(), format!("calories:{local_key}"))),
+        _ => None,
+    }
+}
+
+async fn note_mutation(store: &str, op: &str, local_key: &str) {
+    let Some((wire_store, wire_id)) = outbox_target(store, local_key) else {
+        return;
+    };
+    let entry = OutboxEntry {
+        seq: next_outbox_seq(),
+        store: wire_store,
+        op: op.to_string(),
+        id: wire_id,
+    };
+    put_untracked("_outbox", &entry).await;
+}
+
+/// Is this local store part of sync (its mutations belong in the outbox)?
+fn is_synced_store(store: &str) -> bool {
+    matches!(
+        store,
+        "foods"
+            | "diary"
+            | "recipes"
+            | "recipe_ingredients"
+            | "goals"
+            | "profile"
+            | "weight_entries"
+            | "step_entries"
+            | "deletions"
+            | "app_flags"
+            | "ind_protein"
+            | "ind_veg_fruit"
+            | "ind_steps"
+            | "ind_calories"
+    )
+}
+
+/// Tracked write: persists the row AND journals the mutation into the outbox.
+/// This is the default for ALL app code — every local change syncs.
 pub async fn put<T: Serialize>(store_name: &str, value: &T) {
+    put_untracked(store_name, value).await;
+    if is_synced_store(store_name) {
+        // Extract the row key (costs one extra serialization, synced stores only).
+        let key = serde_json::to_value(value)
+            .ok()
+            .and_then(|v| v.get(key_field(store_name)).and_then(|k| k.as_str().map(String::from)));
+        match key {
+            Some(key) => note_mutation(store_name, "upsert", &key).await,
+            None => leptos::logging::error!("db::put({store_name}): row has no key field — not journaled"),
+        }
+    }
+}
+
+/// Untracked write — ONLY for sync-apply paths (remote data must not re-enter
+/// the outbox).
+pub async fn put_untracked<T: Serialize>(store_name: &str, value: &T) {
     let tx = with_db(|db| {
         db.transaction(&[store_name], TransactionMode::ReadWrite)
             .expect("failed to create transaction")
@@ -353,7 +469,16 @@ pub async fn get<T: DeserializeOwned>(store_name: &str, id: &str) -> Option<T> {
     result.map(|js_val| serde_wasm_bindgen::from_value(js_val).expect("deserialize failed"))
 }
 
+/// Tracked delete: removes the row AND journals the deletion into the outbox.
 pub async fn delete(store_name: &str, id: &str) {
+    delete_untracked(store_name, id).await;
+    if is_synced_store(store_name) {
+        note_mutation(store_name, "delete", id).await;
+    }
+}
+
+/// Untracked delete — ONLY for sync-apply paths.
+pub async fn delete_untracked(store_name: &str, id: &str) {
     let tx = with_db(|db| {
         db.transaction(&[store_name], TransactionMode::ReadWrite)
             .expect("failed to create transaction")

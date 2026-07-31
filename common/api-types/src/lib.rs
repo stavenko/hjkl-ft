@@ -653,6 +653,68 @@ pub struct SyncPushPayload {
     pub deletions: Vec<DeletionRecord>,
 }
 
+// ── Sync v2: incremental, journaled batches ─────────────────────────────────
+// The CLIENT forms the change list (outbox of local mutations). A sync pushes
+// them as ONE batch carrying the client's base version; the server appends the
+// batch to a journal under `version = last + 1` and applies it to the
+// materialized state. A pull fetches only the journal tail newer than the
+// client's version, applied strictly in order. Full data travels exactly once —
+// to a zero client (snapshot).
+
+/// One journaled mutation. `store` is the client-side store name ("diary",
+/// "foods", "goals", "profile", "weight_entries", "step_entries", "recipes",
+/// "recipe_ingredients", "app_flags", "ind_days").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncChange {
+    pub store: String,
+    /// "upsert" | "delete".
+    pub op: String,
+    /// Full row for an upsert.
+    #[serde(default)]
+    pub row: Option<serde_json::Value>,
+    /// Row key for a delete (the store's key: id / date / key).
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
+/// A journaled batch: the version it produced and the version the pushing
+/// client had before it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncBatch {
+    pub version: u64,
+    #[serde(default)]
+    pub base_version: u64,
+    pub changes: Vec<SyncChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncPushV2Request {
+    pub base_version: u64,
+    pub changes: Vec<SyncChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncPushV2Response {
+    pub version: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncPullV2Request {
+    #[serde(default)]
+    pub since_version: u64,
+}
+
+/// Pull result: either the ordered journal tail (`batches`) or — for a zero /
+/// too-far-behind client — a full `snapshot` keyed by client store name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncPullV2Response {
+    pub version: u64,
+    #[serde(default)]
+    pub batches: Vec<SyncBatch>,
+    #[serde(default)]
+    pub snapshot: Option<serde_json::Value>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncPushResponse {
     pub conflicts: Option<SyncDumpResponse>,

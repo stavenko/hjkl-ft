@@ -140,7 +140,12 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
     let path = url.path().to_string();
     let method = req.method();
 
-    if method != Method::Post || (path != "/sync/dump" && path != "/sync/push") {
+    if method != Method::Post
+        || !matches!(
+            path.as_str(),
+            "/sync/dump" | "/sync/push" | "/sync/v2/push" | "/sync/v2/pull"
+        )
+    {
         return error_response("Not found", 404);
     }
 

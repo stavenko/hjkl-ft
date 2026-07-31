@@ -72,6 +72,20 @@ pub async fn pull_full_dump() -> Result<(), String> {
     merge_store("weight_entries", &dump.weight_entries).await;
     merge_store("step_entries", &dump.step_entries).await;
 
+    // Cross-device app flags (story progress, indicator unlocks, letters …).
+    // Device-local keys are filtered on push AND here on apply (defence in depth);
+    // the server dump is already the LWW-merged truth, so a plain upsert is right.
+    let flags: Vec<api_types::AppFlagRow> = dump
+        .app_flags
+        .iter()
+        .filter(|r| !super::app_flags::is_device_local(&r.key))
+        .cloned()
+        .collect();
+    merge_store("app_flags", &flags).await;
+    // Refresh the synchronous flags cache so stories/indicators see the pulled
+    // state without a relaunch (mirrors profile::hydrate below).
+    super::app_flags::reload().await;
+
     // Deletion log: persist the records, then apply them — removing the targets
     // locally even though the server still re-sends the (un-deleted) entities.
     merge_store("deletions", &dump.deletions).await;
@@ -103,6 +117,13 @@ pub async fn push_to_server() -> Result<(), String> {
         profile: db::list_all("profile").await,
         weight_entries: db::list_all("weight_entries").await,
         step_entries: db::list_all("step_entries").await,
+        app_flags: db::list_all::<AppFlagRow>("app_flags")
+            .await
+            .into_iter()
+            // Device-local flags never leave the device; unstamped legacy rows
+            // wait for the reload() migration to stamp them.
+            .filter(|r| !super::app_flags::is_device_local(&r.key) && !r.updated_at.is_empty())
+            .collect(),
         deletions: db::list_all("deletions").await,
     };
     let body = serde_json::to_string(&payload).map_err(|e| e.to_string())?;

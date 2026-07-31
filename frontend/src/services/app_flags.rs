@@ -17,7 +17,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use api_types::AppFlagRow as FlagRow;
 
 use crate::services::db;
 
@@ -25,10 +25,26 @@ thread_local! {
     static CACHE: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
 }
 
-#[derive(Serialize, Deserialize)]
-struct FlagRow {
-    key: String,
-    value: String,
+/// Keys that must stay ON THIS DEVICE and never ride sync: push subscription
+/// state (per-device by nature), caches that each device recomputes, per-device
+/// dismissals, and one-time local-DB migration markers. EVERY OTHER key syncs
+/// across devices (LWW by `updated_at`) — add new device-local keys HERE.
+const DEVICE_LOCAL_KEYS: &[&str] = &[
+    "push_subscribed",
+    "push_onboarding_dismissed",
+    "notif_received",
+    "ft_subscription",
+    "ft_subscription_checked_at",
+    "ft_config_cache",
+    "paywall_skipped_date",
+    "support_chat_mode",
+];
+
+/// Is `key` a device-local flag (excluded from sync in BOTH directions)?
+/// The `_migrated`/`_backfilled` suffix rule covers local-DB migration markers
+/// (e.g. `meal_labels_backfilled_v1`) without listing each one.
+pub fn is_device_local(key: &str) -> bool {
+    DEVICE_LOCAL_KEYS.contains(&key) || key.contains("_migrated") || key.contains("_backfilled")
 }
 
 /// Legacy localStorage keys migrated into `app_flags` on the first launch after
@@ -52,8 +68,24 @@ pub async fn activate() {
 }
 
 /// Reload the in-memory cache from the active database's `app_flags` store.
+/// Also a one-time migration: rows written before flags synced carry no
+/// `updated_at` — stamp them NOW so they participate in cross-device LWW (a
+/// device that never re-writes a set-once flag would otherwise never sync it).
 pub async fn reload() {
     let rows: Vec<FlagRow> = db::list_all("app_flags").await;
+    for r in &rows {
+        if r.updated_at.is_empty() {
+            db::put(
+                "app_flags",
+                &FlagRow {
+                    key: r.key.clone(),
+                    value: r.value.clone(),
+                    updated_at: chrono::Utc::now().to_rfc3339(),
+                },
+            )
+            .await;
+        }
+    }
     CACHE.with(|c| {
         let mut m = c.borrow_mut();
         m.clear();
@@ -123,5 +155,13 @@ pub fn remove(key: &str) {
 }
 
 async fn put(key: &str, value: &str) {
-    db::put("app_flags", &FlagRow { key: key.to_string(), value: value.to_string() }).await;
+    db::put(
+        "app_flags",
+        &FlagRow {
+            key: key.to_string(),
+            value: value.to_string(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        },
+    )
+    .await;
 }

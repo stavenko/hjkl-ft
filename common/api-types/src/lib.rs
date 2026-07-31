@@ -577,6 +577,19 @@ pub struct DeletionRecord {
     pub created_at: String,
 }
 
+/// One `app_flags` row: a per-user key/value flag. Cross-device flags (story
+/// progress, indicator unlocks, letters, planka anchors) ride sync keyed by
+/// `key`, LWW by `updated_at`; device-local keys (push subscription, caches,
+/// migration markers) are filtered out client-side and never reach the server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppFlagRow {
+    pub key: String,
+    pub value: String,
+    /// RFC3339 write stamp; empty on legacy rows written before flags synced.
+    #[serde(default)]
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncDumpResponse {
     pub foods: Vec<Food>,
@@ -590,6 +603,8 @@ pub struct SyncDumpResponse {
     pub weight_entries: Vec<WeightEntry>,
     #[serde(default)]
     pub step_entries: Vec<StepEntry>,
+    #[serde(default)]
+    pub app_flags: Vec<AppFlagRow>,
     #[serde(default)]
     pub deletions: Vec<DeletionRecord>,
 }
@@ -607,6 +622,8 @@ pub struct SyncPushPayload {
     pub weight_entries: Vec<WeightEntry>,
     #[serde(default)]
     pub step_entries: Vec<StepEntry>,
+    #[serde(default)]
+    pub app_flags: Vec<AppFlagRow>,
     #[serde(default)]
     pub deletions: Vec<DeletionRecord>,
 }

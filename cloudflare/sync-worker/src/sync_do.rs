@@ -75,6 +75,11 @@ impl SyncDO {
             "profile".to_string(),
             serde_json::Value::Array(profile.into_values().collect()),
         );
+        let app_flags = self.map("app_flags").await?;
+        out.insert(
+            "app_flags".to_string(),
+            serde_json::Value::Array(app_flags.into_values().collect()),
+        );
         Ok(serde_json::Value::Object(out))
     }
 
@@ -135,6 +140,25 @@ impl SyncDO {
                     }
                 }
                 self.put_map("profile", &m).await?;
+            }
+        }
+
+        // Cross-device app flags (story progress, indicator unlocks, letters …):
+        // keyed by `key`, whole-row LWW by `updated_at`. Device-local keys never
+        // reach us — the client filters them before pushing.
+        if let Some(arr) = payload.get("app_flags").and_then(|v| v.as_array()) {
+            if !arr.is_empty() {
+                let mut m = self.map("app_flags").await?;
+                for row in arr {
+                    let key = match row.get("key").and_then(|v| v.as_str()) {
+                        Some(k) => k.to_string(),
+                        None => continue,
+                    };
+                    if is_newer(row, m.get(&key)) {
+                        m.insert(key, row.clone());
+                    }
+                }
+                self.put_map("app_flags", &m).await?;
             }
         }
 

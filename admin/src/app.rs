@@ -1287,7 +1287,7 @@ fn Subscriptions(view: RwSignal<View>) -> impl IntoView {
             <div class="ring"></div>
             <div style="flex: 1; min-width: 0;">
                 <div class="appbar__title">"Подписки"</div>
-                <div class="appbar__sub">"lava · без привязки к аккаунту"</div>
+                <div class="appbar__sub">"lava · активные, без привязки к аккаунту"</div>
             </div>
             <button class="btn btn--ghost btn--icon" attr:aria-label="Обновить" on:click=move |_| load.call(())>
                 <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
@@ -1305,7 +1305,7 @@ fn Subscriptions(view: RwSignal<View>) -> impl IntoView {
                     }
                     return view! {
                         <div class="empty"><div class="empty__ring"></div>
-                            <p>"Нет непривязанных подписок"</p></div>
+                            <p>"Нет активных непривязанных подписок"</p></div>
                     }.into_view();
                 }
                 view! {

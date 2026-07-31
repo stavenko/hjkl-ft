@@ -609,6 +609,17 @@ async fn admin_lava_subscriptions(env: &Env) -> Result<Response> {
             .get("subscriptionStatus")
             .and_then(|v| v.as_str())
             .or_else(|| it.get("status").and_then(|v| v.as_str()));
+        // The operator only needs contracts that can still charge money (to cancel
+        // them). Keep ACTIVE (recurring alive) / COMPLETED (paid) roots; skip
+        // terminated (cancelled/refunded), FAILED attempts and abandoned
+        // NEW/IN_PROGRESS checkouts — there is nothing to act on for those.
+        if is_terminated(&it) {
+            continue;
+        }
+        match status {
+            Some("ACTIVE") | Some("COMPLETED") => {}
+            _ => continue,
+        }
         let amount = it.get("receipt").and_then(|r| r.get("amount"));
         let currency = it
             .get("receipt")

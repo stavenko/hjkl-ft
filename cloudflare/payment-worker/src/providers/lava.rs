@@ -173,6 +173,42 @@ impl Lava {
         res.json().await
     }
 
+    /// Fresh subscription state: GET /api/v1/subscriptions/{parentContractId}.
+    /// AUTHORITATIVE, unlike the per-invoice snapshots in the invoice list (those
+    /// can keep saying ACTIVE after the subscription died). Returns Ok(None) on
+    /// 404 — the contract is not a (live) subscription at all.
+    pub async fn get_subscription(&self, contract_id: &str) -> Result<Option<serde_json::Value>> {
+        let api_key = self
+            .api_key
+            .as_deref()
+            .ok_or_else(|| Error::RustError("provider_not_configured".into()))?;
+        let url = format!(
+            "{}/api/v1/subscriptions/{}",
+            self.base,
+            url_encode(contract_id)
+        );
+        let headers = Headers::new();
+        headers
+            .set("X-Api-Key", api_key)
+            .map_err(|e| Error::RustError(format!("set header: {e}")))?;
+        let mut init = RequestInit::new();
+        init.with_method(Method::Get).with_headers(headers);
+        let req = Request::new_with_init(&url, &init)?;
+        let mut res = self.send(req).await?;
+        let status = res.status_code();
+        if status == 404 {
+            return Ok(None);
+        }
+        if !(200..300).contains(&status) {
+            let txt = res.text().await.unwrap_or_default();
+            let txt: String = txt.chars().take(300).collect();
+            return Err(Error::RustError(format!(
+                "lava_subscription_failed_{status}: {txt}"
+            )));
+        }
+        Ok(Some(res.json().await?))
+    }
+
     /// The buyer's most recent COMPLETED payment amount for a contract (the parent
     /// contract id OR any recurring child of it), read from lava's invoices. This is
     /// what they ACTUALLY paid (promo applied) — unlike the plan's list price. Returns

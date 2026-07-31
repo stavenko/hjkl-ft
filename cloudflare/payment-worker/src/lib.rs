@@ -605,40 +605,78 @@ async fn admin_lava_subscriptions(env: &Env) -> Result<Response> {
         if bound.is_some() || claim.is_some() {
             continue;
         }
-        let status = it
-            .get("subscriptionStatus")
-            .and_then(|v| v.as_str())
-            .or_else(|| it.get("status").and_then(|v| v.as_str()));
         // The operator only needs contracts that can still charge money (to cancel
-        // them) — i.e. LIVE recurring subscriptions. lava sets subscriptionStatus
-        // ONLY on subscription contracts (ACTIVE | CANCELLED | FAILED), so require
-        // ACTIVE strictly: a bare COMPLETED invoice is a ONE_TIME purchase (or a
-        // child row without the flag) and lava's cancel rejects it («not a
-        // subscription / already cancelled») — listing it is noise.
+        // them) — i.e. LIVE recurring subscriptions. Pre-filter on the invoice-list
+        // snapshot (subscriptionStatus is set only on subscription contracts), then
+        // VERIFY against GET /subscriptions/{id} — the snapshot can keep saying
+        // ACTIVE after the subscription actually died (observed live: an ACTIVE row
+        // whose cancel returns «already cancelled or not a subscription»).
         if it.get("subscriptionStatus").and_then(|v| v.as_str()) != Some("ACTIVE") {
             continue;
         }
         if is_terminated(&it) {
             continue;
         }
-        let amount = it.get("receipt").and_then(|r| r.get("amount"));
-        let currency = it
+        // Authoritative check. 404 → not a subscription; non-ACTIVE status or a set
+        // cancelledAt/terminatedAt → dead, nothing to act on. A transport/API error
+        // propagates loudly (never silently mis-list money state).
+        let fresh = match provider.get_subscription(&root).await? {
+            Some(f) => f,
+            None => continue,
+        };
+        if fresh.get("subscriptionStatus").and_then(|v| v.as_str()) != Some("ACTIVE") {
+            continue;
+        }
+        let dead = ["cancelledAt", "terminatedAt"].iter().any(|k| {
+            fresh
+                .get(*k)
+                .and_then(|v| v.as_str())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false)
+        });
+        if dead {
+            continue;
+        }
+        // Prefer the fresh subscription fields (its buyer.email is what lava's
+        // cancel endpoint matches against); fall back to the invoice snapshot.
+        let amount = fresh
+            .get("receipt")
+            .and_then(|r| r.get("amount"))
+            .filter(|v| !v.is_null())
+            .cloned()
+            .or_else(|| it.get("receipt").and_then(|r| r.get("amount")).cloned());
+        let currency = fresh
             .get("receipt")
             .and_then(|r| r.get("currency"))
-            .and_then(|v| v.as_str());
-        let email = it
+            .and_then(|v| v.as_str())
+            .or_else(|| {
+                it.get("receipt")
+                    .and_then(|r| r.get("currency"))
+                    .and_then(|v| v.as_str())
+            });
+        let email = fresh
             .get("buyer")
             .and_then(|b| b.get("email"))
-            .and_then(|v| v.as_str());
-        // subscriptionDetails.expiredAt = when the paid period ends; for a live
-        // recurring contract that is the moment lava attempts the next charge.
-        let next_charge_at = it
-            .get("subscriptionDetails")
-            .and_then(|d| d.get("expiredAt"))
-            .cloned();
+            .and_then(|v| v.as_str())
+            .or_else(|| {
+                it.get("buyer")
+                    .and_then(|b| b.get("email"))
+                    .and_then(|v| v.as_str())
+            });
+        // expiredAt = when the paid period ends; for a live recurring contract that
+        // is the moment lava attempts the next charge.
+        let next_charge_at = fresh
+            .get("expiredAt")
+            .filter(|v| !v.is_null())
+            .cloned()
+            .or_else(|| {
+                it.get("subscriptionDetails")
+                    .and_then(|d| d.get("expiredAt"))
+                    .cloned()
+            });
         out.push(serde_json::json!({
             "contractId": root,
-            "status": status,
+            "status": "ACTIVE",
             "amount": amount,
             "currency": currency,
             "datetime": it.get("datetime"),

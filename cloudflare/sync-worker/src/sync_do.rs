@@ -80,6 +80,11 @@ impl SyncDO {
             "app_flags".to_string(),
             serde_json::Value::Array(app_flags.into_values().collect()),
         );
+        let ind_days = self.map("ind_days").await?;
+        out.insert(
+            "ind_days".to_string(),
+            serde_json::Value::Array(ind_days.into_values().collect()),
+        );
         Ok(serde_json::Value::Object(out))
     }
 
@@ -159,6 +164,36 @@ impl SyncDO {
                     }
                 }
                 self.put_map("app_flags", &m).await?;
+            }
+        }
+
+        // Frozen indicator-day values, keyed `"<indicator>:<date>"`. Each is
+        // computed ONCE by the first device that had the data — FIRST-writer-wins
+        // by `computed_at`: a row is accepted only when the key is absent or the
+        // incoming computation is strictly EARLIER than the stored one (an empty
+        // stamp sorts earliest, so pre-stamp legacy values keep priority).
+        if let Some(arr) = payload.get("ind_days").and_then(|v| v.as_array()) {
+            if !arr.is_empty() {
+                let mut m = self.map("ind_days").await?;
+                for row in arr {
+                    let key = match row.get("id").and_then(|v| v.as_str()) {
+                        Some(k) => k.to_string(),
+                        None => continue,
+                    };
+                    let accept = match m.get(&key) {
+                        None => true,
+                        Some(cur) => {
+                            let inc = row.get("computed_at").and_then(|v| v.as_str()).unwrap_or("");
+                            let cur_ts =
+                                cur.get("computed_at").and_then(|v| v.as_str()).unwrap_or("");
+                            inc < cur_ts
+                        }
+                    };
+                    if accept {
+                        m.insert(key, row.clone());
+                    }
+                }
+                self.put_map("ind_days", &m).await?;
             }
         }
 

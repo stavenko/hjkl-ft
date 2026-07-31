@@ -86,6 +86,11 @@ pub async fn pull_full_dump() -> Result<(), String> {
     // state without a relaunch (mirrors profile::hydrate below).
     super::app_flags::reload().await;
 
+    // Frozen indicator days: the dump is already conflict-resolved on the server
+    // (first computation wins), so apply it as-is — a device that never computed a
+    // day receives the ready value instead of computing its own.
+    super::indicators::apply_ind_days(&dump.ind_days).await;
+
     // Deletion log: persist the records, then apply them — removing the targets
     // locally even though the server still re-sends the (un-deleted) entities.
     merge_store("deletions", &dump.deletions).await;
@@ -124,6 +129,7 @@ pub async fn push_to_server() -> Result<(), String> {
             // wait for the reload() migration to stamp them.
             .filter(|r| !super::app_flags::is_device_local(&r.key) && !r.updated_at.is_empty())
             .collect(),
+        ind_days: super::indicators::export_ind_days().await,
         deletions: db::list_all("deletions").await,
     };
     let body = serde_json::to_string(&payload).map_err(|e| e.to_string())?;

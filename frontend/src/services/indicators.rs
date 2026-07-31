@@ -254,6 +254,14 @@ struct IndDay {
     /// summarized while the target was unknown).
     #[serde(default)]
     ratio: Option<f64>,
+    /// RFC3339 freeze moment — the sync conflict key (first computation wins).
+    /// Empty on rows frozen before ind-day sync existed.
+    #[serde(default)]
+    computed_at: String,
+}
+
+fn now_stamp() -> String {
+    chrono::Utc::now().to_rfc3339()
 }
 
 /// Indicator keys that have a per-day cache store. Keep in sync with the `ind_*`
@@ -305,13 +313,21 @@ async fn day_cached(key: &str, date: &str) -> (f64, Option<f64>) {
         // Legacy / not-yet-frozen record → freeze now (if the target is known) and store.
         let ratio = ratio_now(key, rec.value).await;
         if ratio.is_some() {
-            crate::services::db::put(store, &IndDay { date: date.to_string(), value: rec.value, ratio }).await;
+            crate::services::db::put(
+                store,
+                &IndDay { date: date.to_string(), value: rec.value, ratio, computed_at: now_stamp() },
+            )
+            .await;
         }
         return (rec.value, ratio);
     }
     let value = compute_day_value(key, date).await;
     let ratio = ratio_now(key, value).await;
-    crate::services::db::put(store, &IndDay { date: date.to_string(), value, ratio }).await;
+    crate::services::db::put(
+        store,
+        &IndDay { date: date.to_string(), value, ratio, computed_at: now_stamp() },
+    )
+    .await;
     (value, ratio)
 }
 
@@ -349,9 +365,61 @@ pub async fn record_steps(date: &str) {
     let ratio = ratio_now("steps", value).await;
     crate::services::db::put(
         "ind_steps",
-        &IndDay { date: date.to_string(), value, ratio },
+        &IndDay { date: date.to_string(), value, ratio, computed_at: now_stamp() },
     )
     .await;
+}
+
+// ── Sync bridge: frozen indicator days ride the regular sync ────────────────
+// A day is computed ONCE (by whichever device had the planka + diary data at
+// that moment) and then travels as DATA; other devices apply the ready value
+// instead of computing their own. Conflict resolution lives on the server
+// (first-writer-wins by `computed_at`).
+
+/// Store name → the indicator key used in the wire `id` (`"<key>:<date>"`).
+fn store_indicator(store: &str) -> &'static str {
+    match store {
+        "ind_protein" => "protein",
+        "ind_veg_fruit" => "veg_fruit",
+        "ind_steps" => "steps",
+        _ => "calories",
+    }
+}
+
+/// Every locally frozen indicator day, in the sync wire shape.
+pub async fn export_ind_days() -> Vec<api_types::IndDayRow> {
+    let mut out = Vec::new();
+    for store in CACHED_STORES {
+        let indicator = store_indicator(store);
+        for r in crate::services::db::list_all::<IndDay>(store).await {
+            out.push(api_types::IndDayRow {
+                id: format!("{indicator}:{}", r.date),
+                indicator: indicator.to_string(),
+                date: r.date,
+                value: r.value,
+                ratio: r.ratio,
+                computed_at: r.computed_at,
+            });
+        }
+    }
+    out
+}
+
+/// Apply the server's (already conflict-resolved) indicator days locally.
+pub async fn apply_ind_days(rows: &[api_types::IndDayRow]) {
+    for r in rows {
+        let Some(store) = cache_store(&r.indicator) else { continue };
+        crate::services::db::put(
+            store,
+            &IndDay {
+                date: r.date.clone(),
+                value: r.value,
+                ratio: r.ratio,
+                computed_at: r.computed_at.clone(),
+            },
+        )
+        .await;
+    }
 }
 
 // ── Calorie planka (per-day, frozen) ─────────────────────────────────────────

@@ -590,6 +590,27 @@ pub struct AppFlagRow {
     pub updated_at: String,
 }
 
+/// One frozen indicator-day value. Computed ONCE — by the first device that had
+/// the planka + diary data for that day — then synced like any other data, so
+/// every other device APPLIES the ready value instead of recomputing its own.
+/// Conflict (two devices computed independently while offline): the EARLIER
+/// `computed_at` wins (first-writer-wins on the server).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndDayRow {
+    /// `"<indicator>:<date>"` — the sync key.
+    pub id: String,
+    /// protein | veg_fruit | steps | calories.
+    pub indicator: String,
+    pub date: String,
+    pub value: f64,
+    #[serde(default)]
+    pub ratio: Option<f64>,
+    /// RFC3339 freeze moment; empty on rows frozen before this field existed
+    /// (sorts earliest, so pre-existing values keep priority).
+    #[serde(default)]
+    pub computed_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncDumpResponse {
     pub foods: Vec<Food>,
@@ -605,6 +626,8 @@ pub struct SyncDumpResponse {
     pub step_entries: Vec<StepEntry>,
     #[serde(default)]
     pub app_flags: Vec<AppFlagRow>,
+    #[serde(default)]
+    pub ind_days: Vec<IndDayRow>,
     #[serde(default)]
     pub deletions: Vec<DeletionRecord>,
 }
@@ -624,6 +647,8 @@ pub struct SyncPushPayload {
     pub step_entries: Vec<StepEntry>,
     #[serde(default)]
     pub app_flags: Vec<AppFlagRow>,
+    #[serde(default)]
+    pub ind_days: Vec<IndDayRow>,
     #[serde(default)]
     pub deletions: Vec<DeletionRecord>,
 }

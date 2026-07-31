@@ -771,8 +771,8 @@ fn en(key: &str) -> &'static str {
         "pwa.inst.android_firefox.2" => "Tap \"Install\"",
         "pwa.inst.android_firefox.3" => "Confirm the installation",
         // Android Yandex
-        "pwa.inst.android_yandex.1" => "Tap the menu \u{22ee} (three dots)",
-        "pwa.inst.android_yandex.2" => "Tap \"Add to Home screen\"",
+        "pwa.inst.android_yandex.1" => "Tap the menu \u{22ee} (three dots) at the bottom right",
+        "pwa.inst.android_yandex.2" => "Tap \"Add shortcut\", then \"Add automatically\"",
         // macOS Safari
         "pwa.inst.macos_safari.1" => "In the menu bar: File \u{2192} Add to Dock",
         "pwa.inst.macos_safari.2" => "The app will appear in your Dock",
@@ -1576,8 +1576,8 @@ fn ru(key: &str) -> &'static str {
         "pwa.inst.android_firefox.1" => "Нажмите меню \u{22ee} (три точки)",
         "pwa.inst.android_firefox.2" => "Нажмите «Установить»",
         "pwa.inst.android_firefox.3" => "Подтвердите установку",
-        "pwa.inst.android_yandex.1" => "Нажмите меню \u{22ee} (три точки)",
-        "pwa.inst.android_yandex.2" => "Нажмите «Добавить на Домашний экран»",
+        "pwa.inst.android_yandex.1" => "Нажмите меню \u{22ee} (три точки) в правом нижнем углу",
+        "pwa.inst.android_yandex.2" => "Выберите «Добавить ярлык», затем «Добавить автоматически»",
         "pwa.inst.macos_safari.1" => "В меню: Файл \u{2192} Добавить в Dock",
         "pwa.inst.macos_safari.2" => "Приложение появится в вашем Dock",
         "pwa.inst.chrome.1" => "Нажмите значок установки в адресной строке",

@@ -18,7 +18,10 @@ fn detect_platform() -> &'static str {
     let is_edge = ua.contains("edg/");
     let is_safari = ua.contains("safari") && !ua.contains("chrome") && !ua.contains("chromium");
     let is_samsung = ua.contains("samsungbrowser");
-    let is_yandex = ua.contains("yabrowser");
+    // Yandex Browser (yabrowser) AND the Yandex app's built-in browser (yasearchbrowser /
+    // yaapp_android) — the latter has NO "yabrowser" in its UA but does contain "chrome",
+    // so without this it would fall through to the Chrome instructions.
+    let is_yandex = ua.contains("yabrowser") || ua.contains("yasearchbrowser") || ua.contains("yaapp_android");
 
     if is_ios && is_safari { return "ios_safari"; }
     if is_ios && is_chrome { return "ios_chrome"; }

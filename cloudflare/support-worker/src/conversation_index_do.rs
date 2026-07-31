@@ -40,6 +40,16 @@ struct SubRow {
     sub: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct CountRow {
+    n: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct MaxTsRow {
+    ts: Option<String>,
+}
+
 impl From<ConvRow> for ConversationSummary {
     fn from(r: ConvRow) -> Self {
         ConversationSummary {
@@ -95,6 +105,19 @@ impl ConversationIndexDO {
         )?;
         sql.exec(
             "CREATE INDEX IF NOT EXISTS idx_pending ON conversations(pending_seq)",
+            None,
+        )?;
+        // Per-user-message log for the hourly admin digest push: one row per
+        // genuinely NEW user message (deduped retries are not logged). Pruned on
+        // /digest-commit, so it only ever holds the not-yet-notified tail.
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS user_msgs (
+                ts TEXT NOT NULL
+            )",
+            None,
+        )?;
+        sql.exec(
+            "CREATE INDEX IF NOT EXISTS idx_user_msgs_ts ON user_msgs(ts)",
             None,
         )?;
         // Expert authorization (request-code + Cloudflare secret) — see the four
@@ -185,6 +208,7 @@ impl ConversationIndexDO {
                         pseq.into(),
                     ],
                 )?;
+                self.log_user_msg(last_ts)?;
             }
             Some(ex) => {
                 let existing_last = ex.last_seq.unwrap_or(0);
@@ -209,6 +233,7 @@ impl ConversationIndexDO {
                             user_id.into(),
                         ],
                     )?;
+                    self.log_user_msg(last_ts)?;
                 }
             }
         }
@@ -432,6 +457,82 @@ impl ConversationIndexDO {
         Response::from_json(&serde_json::json!({ "approved": approved }))
     }
 
+    /// Append one row to the digest log — called for each genuinely NEW user
+    /// message (never for deduped retries; callers gate on last_seq).
+    fn log_user_msg(&self, ts: &str) -> Result<()> {
+        self.state
+            .storage()
+            .sql()
+            .exec("INSERT INTO user_msgs(ts) VALUES (?)", vec![ts.into()])?;
+        Ok(())
+    }
+
+    /// Digest peek: how many user messages arrived AFTER the stored watermark
+    /// (ALL logged messages when no watermark exists yet — the very first digest
+    /// reports the whole backlog accumulated since the feature deployed).
+    /// Read-only: the watermark advances only on /digest-commit, i.e. after the
+    /// push actually went out.
+    fn handle_digest_peek(&self) -> Result<Response> {
+        let sql = self.state.storage().sql();
+        let wm = sql
+            .exec("SELECT v FROM meta WHERE k = 'digest_watermark'", None)?
+            .to_array::<MetaRow>()?
+            .into_iter()
+            .next()
+            .map(|r| r.v);
+        let (count, latest) = match &wm {
+            Some(w) => {
+                let c: CountRow = sql
+                    .exec(
+                        "SELECT COUNT(*) AS n FROM user_msgs WHERE ts > ?",
+                        vec![w.clone().into()],
+                    )?
+                    .one()?;
+                let m: MaxTsRow = sql
+                    .exec(
+                        "SELECT MAX(ts) AS ts FROM user_msgs WHERE ts > ?",
+                        vec![w.clone().into()],
+                    )?
+                    .one()?;
+                (c.n, m.ts)
+            }
+            None => {
+                let c: CountRow = sql
+                    .exec("SELECT COUNT(*) AS n FROM user_msgs", None)?
+                    .one()?;
+                let m: MaxTsRow = sql
+                    .exec("SELECT MAX(ts) AS ts FROM user_msgs", None)?
+                    .one()?;
+                (c.n, m.ts)
+            }
+        };
+        Response::from_json(&serde_json::json!({ "count": count, "latest_ts": latest }))
+    }
+
+    /// Digest commit: the push covering everything up to `ts` was delivered —
+    /// advance the watermark and prune the rows it covers.
+    fn handle_digest_commit(&self, ts: &str) -> Result<Response> {
+        let sql = self.state.storage().sql();
+        sql.exec(
+            "INSERT OR REPLACE INTO meta(k,v) VALUES ('digest_watermark', ?)",
+            vec![ts.into()],
+        )?;
+        sql.exec("DELETE FROM user_msgs WHERE ts <= ?", vec![ts.into()])?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    /// All approved expert subs — the digest push recipients.
+    fn handle_admins_list(&self) -> Result<Response> {
+        let sql = self.state.storage().sql();
+        let subs: Vec<String> = sql
+            .exec("SELECT sub FROM admins", None)?
+            .to_array::<SubRow>()?
+            .into_iter()
+            .map(|r| r.sub)
+            .collect();
+        Response::from_json(&serde_json::json!({ "admins": subs }))
+    }
+
     /// Backs GET /admin/me: {approved, code|null} for the candidate's sub.
     fn handle_admin_get(&self, sub: &str) -> Result<Response> {
         let sql = self.state.storage().sql();
@@ -563,6 +664,16 @@ impl DurableObject for ConversationIndexDO {
                     .ok_or_else(|| Error::RustError("missing sub".into()))?;
                 self.handle_admin_is_approved(sub)
             }
+            "/digest-peek" => self.handle_digest_peek(),
+            "/digest-commit" => {
+                let body: serde_json::Value = req.json().await?;
+                let ts = body
+                    .get("ts")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing ts".into()))?;
+                self.handle_digest_commit(ts)
+            }
+            "/admins-list" => self.handle_admins_list(),
             "/admin-get" => {
                 let body: serde_json::Value = req.json().await?;
                 let sub = body

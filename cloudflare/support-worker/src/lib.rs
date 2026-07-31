@@ -121,14 +121,21 @@ fn truncate_preview(text: &str) -> String {
 /// NOT fail the reply on it (the reply is already committed) — matching
 /// payment-worker's notifyPush policy.
 async fn nudge_user_push(env: &Env, user_id: &str, text: &str) -> Result<()> {
+    push_via_main_flow(env, user_id, &truncate_preview(text), "/chat?notif=1").await
+}
+
+/// Raw push relay: `{userId, body, url}` → main-flow `/push/notify` over the
+/// service binding, authenticated with INTERNAL_PUSH_KEY. Shared by the user
+/// nudge (relative /chat deep-link) and the admin digest (absolute admin URL).
+async fn push_via_main_flow(env: &Env, user_id: &str, text: &str, url: &str) -> Result<()> {
     let key = token::secret_or_var(env, "INTERNAL_PUSH_KEY")
         .await
         .map_err(Error::RustError)?;
 
     let body = serde_json::json!({
         "userId": user_id,
-        "body": truncate_preview(text),
-        "url": "/chat?notif=1",
+        "body": text,
+        "url": url,
     })
     .to_string();
 
@@ -165,6 +172,75 @@ async fn nudge_user_push(env: &Env, user_id: &str, text: &str) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// Hourly admin digest (the cron below; also runnable on demand via
+/// POST /admin/digest-run). Counts user messages logged in the IndexDO since the
+/// last committed watermark; when non-zero, pushes «Новых сообщений в поддержке: N»
+/// to EVERY approved expert (their existing push subscriptions in main-flow) with
+/// a deep link to the admin PWA, then commits the watermark = ts of the newest
+/// counted message. The very first run has no watermark, so it reports the whole
+/// backlog accumulated since this feature deployed. If NO push is delivered the
+/// watermark is NOT moved — the next run retries the same window (fail loudly,
+/// never lose a digest silently).
+async fn run_support_digest(env: &Env) -> Result<serde_json::Value> {
+    let peek_req = do_request("/digest-peek", &serde_json::json!({}))?;
+    let mut resp = index_stub(env)?.fetch_with_request(peek_req).await?;
+    if resp.status_code() != 200 {
+        return Err(Error::RustError("support digest: peek failed".into()));
+    }
+    let v: serde_json::Value = resp.json().await?;
+    let count = v.get("count").and_then(|c| c.as_i64()).unwrap_or(0);
+    let latest = v
+        .get("latest_ts")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
+    if count == 0 || latest.is_empty() {
+        return Ok(serde_json::json!({ "count": 0, "pushed": 0 }));
+    }
+
+    let admins_req = do_request("/admins-list", &serde_json::json!({}))?;
+    let mut aresp = index_stub(env)?.fetch_with_request(admins_req).await?;
+    let av: serde_json::Value = aresp.json().await?;
+    let admins: Vec<String> = av
+        .get("admins")
+        .and_then(|a| a.as_array())
+        .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    if admins.is_empty() {
+        return Err(Error::RustError(
+            "support digest: no approved admins to notify".into(),
+        ));
+    }
+
+    let text = format!("Новых сообщений в поддержке: {count}");
+    let mut pushed = 0;
+    for sub in &admins {
+        match push_via_main_flow(env, sub, &text, "https://admin.renorma.app/?notif=1").await {
+            Ok(()) => pushed += 1,
+            Err(e) => console_error!("support digest: push to {sub} failed: {e}"),
+        }
+    }
+    if pushed == 0 {
+        return Err(Error::RustError("support digest: all pushes failed".into()));
+    }
+
+    let commit_req = do_request("/digest-commit", &serde_json::json!({ "ts": latest }))?;
+    let cresp = index_stub(env)?.fetch_with_request(commit_req).await?;
+    if cresp.status_code() != 200 {
+        return Err(Error::RustError("support digest: commit failed".into()));
+    }
+    Ok(serde_json::json!({ "count": count, "pushed": pushed }))
+}
+
+/// Expert-only: run the digest immediately — same code path as the hourly cron.
+async fn admin_digest_run(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(resp) = auth_expert(&req, &ctx.env).await {
+        return Ok(resp);
+    }
+    let v = run_support_digest(&ctx.env).await?;
+    Response::from_json(&v)
 }
 
 /// Parse an AppendResult from a DO response.
@@ -566,6 +642,17 @@ async fn require_secrets(env: &Env) -> std::result::Result<(), Response> {
     Ok(())
 }
 
+/// Hourly cron (wrangler.toml [triggers]): the support digest push. Errors are
+/// logged loudly — a failed run leaves the watermark untouched, so the next
+/// hour's run re-covers the same messages.
+#[event(scheduled)]
+async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    match run_support_digest(&env).await {
+        Ok(v) => console_log!("support digest: {v}"),
+        Err(e) => console_error!("support digest FAILED: {e}"),
+    }
+}
+
 #[event(fetch)]
 async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let origin = req
@@ -616,6 +703,7 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/admin/me", admin_me)
         .post_async("/admin/request", admin_request)
         .post_async("/admin/approve", admin_approve)
+        .post_async("/admin/digest-run", admin_digest_run)
         // INTERNAL: cross-worker admin check (payment-worker via service binding).
         .post_async("/internal/is-admin", internal_is_admin)
         .run(req, env)

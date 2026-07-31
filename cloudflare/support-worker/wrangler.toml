@@ -20,6 +20,10 @@ class_name = "ConversationIndexDO"
 tag = "v1"
 new_sqlite_classes = ["ConversationDO", "ConversationIndexDO"]
 
+# Hourly support-digest push to the approved experts (see run_support_digest).
+[triggers]
+crons = ["0 * * * *"]
+
 # Expert-reply push nudge goes to main-flow via a SERVICE BINDING (not a public
 # workers.dev fetch — a Worker→Worker fetch over workers.dev returns 404).
 [[services]]
@@ -46,6 +50,10 @@ workers_dev = false
 [[env.production.routes]]
 pattern = "support.renorma.app"
 custom_domain = true
+
+# Triggers are NOT inherited by named environments — redeclared for prod.
+[env.production.triggers]
+crons = ["0 * * * *"]
 
 [[env.production.services]]
 binding = "MAIN_FLOW"

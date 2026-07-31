@@ -384,10 +384,16 @@ impl Lava {
         let mut init = RequestInit::new();
         init.with_method(Method::Delete).with_headers(headers);
         let req = Request::new_with_init(&url, &init)?;
-        let res = self.send(req).await?;
+        let mut res = self.send(req).await?;
         let status = res.status_code();
         if !(200..300).contains(&status) {
-            return Err(Error::RustError(format!("lava_cancel_failed_{status}")));
+            // Surface lava's error body (e.g. «Subscription … not found») — the
+            // bare status code alone is undiagnosable from the admin UI.
+            let body = res.text().await.unwrap_or_default();
+            let body: String = body.chars().take(300).collect();
+            return Err(Error::RustError(format!(
+                "lava_cancel_failed_{status}: {body}"
+            )));
         }
         Ok(())
     }

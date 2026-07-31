@@ -505,7 +505,9 @@ fn en(key: &str) -> &'static str {
         "recipe.add_ingredient" => "+ Add ingredient",
         "recipe.finalize" => "Finalize",
         "recipe.finalize_title" => "Finalize Recipe",
-        "recipe.total_weight" => "Total ingredients weight:",
+        "recipe.total_weight" => "Current ingredients weight:",
+        "recipe.final_weight_label" => "Final weight of the finished dish",
+        "recipe.final_weight_required" => "Enter the final weight of the dish",
         "recipe.unknown_food" => "Unknown food",
 
         // Settings
@@ -1316,7 +1318,9 @@ fn ru(key: &str) -> &'static str {
         "recipe.add_ingredient" => "+ Добавить ингредиент",
         "recipe.finalize" => "Завершить",
         "recipe.finalize_title" => "Завершить рецепт",
-        "recipe.total_weight" => "Общий вес ингредиентов:",
+        "recipe.total_weight" => "Текущий вес ингредиентов:",
+        "recipe.final_weight_label" => "Окончательный вес готового блюда",
+        "recipe.final_weight_required" => "Введите окончательный вес продукта",
         "recipe.unknown_food" => "Неизвестный продукт",
 
         // Настройки

@@ -18,6 +18,8 @@ pub fn RecipeDetailPage() -> impl IntoView {
     let custom_nutrients = create_rw_signal(Vec::<api_types::NutrientSpec>::new());
     let show_finalize = create_rw_signal(false);
     let final_weight = create_rw_signal(String::new());
+    // Finalize submitted with an empty/invalid weight → highlight the input + message.
+    let final_weight_error = create_rw_signal(false);
 
     let weight_modal = create_rw_signal(None::<(String, String, f64, Option<f64>)>);
     let added_food_ids = create_rw_signal(Vec::<String>::new());
@@ -96,7 +98,10 @@ pub fn RecipeDetailPage() -> impl IntoView {
         let r = match r { Some(r) => r, None => return };
         let total_grams: f64 = match final_weight.get_untracked().parse() {
             Ok(v) if v > 0.0 => v,
-            _ => return,
+            _ => {
+                final_weight_error.set(true);
+                return;
+            }
         };
         let recipe_id = r.id.clone();
         spawn_local(async move {
@@ -115,7 +120,8 @@ pub fn RecipeDetailPage() -> impl IntoView {
     };
 
     let total_ingredient_weight = move || -> f64 {
-        recipe.get().map(|r| r.ingredients.iter().map(|i| i.grams).sum()).unwrap_or(0.0)
+        // fold from +0.0: f64 `sum()` of an empty list yields -0.0, which renders as "-0".
+        recipe.get().map(|r| r.ingredients.iter().fold(0.0, |acc, i| acc + i.grams)).unwrap_or(0.0)
     };
 
     view! {
@@ -318,7 +324,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                 <button
                                     attr:data-testid="recipe-detail-btn-finalize"
                                     class="button is-success"
-                                    on:click=move |_| show_finalize.set(true)
+                                    on:click=move |_| { final_weight_error.set(false); show_finalize.set(true); }
                                 >{move || t("recipe.finalize")}</button>
                             </div>
                         </Show>
@@ -359,22 +365,32 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                                 {move || t("recipe.total_weight")} " "
                                                 <span class="has-text-weight-semibold">{move || format!("{:.0}{}", total_ingredient_weight(), t("common.unit.g"))}</span>
                                             </p>
-                                            <div class="field has-addons">
+                                            <label class="label is-size-7">{move || t("recipe.final_weight_label")}</label>
+                                            <div class="field has-addons" style="margin-bottom: 0.25rem;">
                                                 <div class="control is-expanded">
                                                     <input
                                                         attr:data-testid="recipe-detail-input-final-weight"
                                                         type="text"
                                                         inputmode="decimal"
-                                                        placeholder={move || format!("{:.0}", total_ingredient_weight())}
+                                                        placeholder="0"
                                                         class="input"
+                                                        class:is-danger=move || final_weight_error.get()
                                                         prop:value=move || final_weight.get()
-                                                        on:input=move |ev| final_weight.set(event_target_value(&ev))
+                                                        on:input=move |ev| {
+                                                            final_weight.set(event_target_value(&ev));
+                                                            final_weight_error.set(false);
+                                                        }
                                                     />
                                                 </div>
                                                 <div class="control">
                                                     <a class="button is-static">{move || t("common.unit.g")}</a>
                                                 </div>
                                             </div>
+                                            <Show when=move || final_weight_error.get()>
+                                                <p attr:data-testid="recipe-detail-final-weight-error" class="help is-danger">
+                                                    {move || t("recipe.final_weight_required")}
+                                                </p>
+                                            </Show>
                                         </section>
                                         <footer class="modal-card-foot">
                                             <div class="buttons">

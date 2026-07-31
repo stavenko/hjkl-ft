@@ -370,6 +370,10 @@ pub struct LavaSub {
     pub datetime: Option<String>,
     #[serde(default)]
     pub email: Option<String>,
+    /// lava `subscriptionDetails.expiredAt` — end of the paid period, i.e. the
+    /// moment of the next renewal charge for a live recurring contract.
+    #[serde(default, rename = "nextChargeAt")]
+    pub next_charge_at: Option<String>,
 }
 
 #[derive(Deserialize)]

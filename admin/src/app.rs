@@ -1352,6 +1352,9 @@ fn Subscriptions(view: RwSignal<View>) -> impl IntoView {
                                     <div class="row__sub">{email}</div>
                                     <div class="row__meta">"lava: "<span class="mono">{s.contract_id.clone()}</span></div>
                                     {(!dt.is_empty()).then(|| view! { <div class="row__meta">{dt.clone()}</div> })}
+                                    {s.next_charge_at.clone().map(|n| view! {
+                                        <div class="row__meta">{format!("Следующее списание: {n}")}</div>
+                                    })}
                                     <button class="btn btn--danger"
                                             attr:data-testid="subscription-cancel"
                                             prop:disabled=move || cancelling.get()

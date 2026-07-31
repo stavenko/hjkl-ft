@@ -629,6 +629,12 @@ async fn admin_lava_subscriptions(env: &Env) -> Result<Response> {
             .get("buyer")
             .and_then(|b| b.get("email"))
             .and_then(|v| v.as_str());
+        // subscriptionDetails.expiredAt = when the paid period ends; for a live
+        // recurring contract that is the moment lava attempts the next charge.
+        let next_charge_at = it
+            .get("subscriptionDetails")
+            .and_then(|d| d.get("expiredAt"))
+            .cloned();
         out.push(serde_json::json!({
             "contractId": root,
             "status": status,
@@ -636,6 +642,7 @@ async fn admin_lava_subscriptions(env: &Env) -> Result<Response> {
             "currency": currency,
             "datetime": it.get("datetime"),
             "email": email,
+            "nextChargeAt": next_charge_at,
         }));
     }
 

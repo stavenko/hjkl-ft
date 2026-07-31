@@ -370,12 +370,16 @@ pub fn ProgressWidget() -> impl IntoView {
                         }
                     }}
                     // Nutrition indicators (CONSISTENCY over time) as icons at the
-                    // bottom, once there's any diary history. Drawn from the fixed
-                    // unlocked list so they appear GREY immediately, then colour in
-                    // when the cached aggregate resolves. Different purpose from the
-                    // gauges above (what's still left TODAY), so an overlapping metric
-                    // in both is intentional, not a duplicate.
-                    {(has_food_v).then(|| {
+                    // bottom — ONLY once the FIRST PLANKA exists (the observation week
+                    // is done and «Рассчитать» was pressed). Before that a newcomer
+                    // must see just the 7-day counters: the indicators and the «keep
+                    // them green» gate open TOGETHER WITH the planka, not with the
+                    // first food entry. Drawn from the fixed unlocked list so they
+                    // appear GREY immediately, then colour in when the cached
+                    // aggregate resolves. Different purpose from the gauges above
+                    // (what's still left TODAY), so an overlapping metric in both is
+                    // intentional, not a duplicate.
+                    {(planka_v.is_some()).then(|| {
                         let states: std::collections::HashMap<&'static str, IndicatorState> =
                             inds_s().unwrap_or_default().into_iter().collect();
                         let mut row: Vec<(&'static str, IndicatorState)> = indicators::displayed_indicators()

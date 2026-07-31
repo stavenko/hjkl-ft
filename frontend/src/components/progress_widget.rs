@@ -230,6 +230,44 @@ pub fn ProgressWidget() -> impl IntoView {
             busy.set(false);
         });
     };
+
+    // AUTO first planka: the moment the observation week completes (7/7/7 across
+    // food/weight/steps) and no planka exists yet, compute and set it — no button.
+    // Setting the goal bumps the goals version, so the widget flips to the gauge +
+    // indicators + first gate by itself. `auto_tried` keeps a failed attempt from
+    // looping; the in-flight re-check of the goal guards against a double set.
+    let auto_tried = create_rw_signal(false);
+    create_effect(move |_| {
+        let all_done = matches!(counts.get(), Some((f, w, s)) if f >= 7 && w >= 7 && s >= 7);
+        let no_planka = matches!(planka.get(), Some(None));
+        if all_done && no_planka && !busy.get_untracked() && !auto_tried.get_untracked() {
+            auto_tried.set(true);
+            busy.set(true);
+            spawn_local(async move {
+                if local::calorie_goal_amount().await.is_none() {
+                    if let Some(n) = local::calorie_planka_suggestion().await {
+                        local::set_calorie_goal(n).await;
+                        sync::push_background();
+                        // Announce the FIRST planka with an inbox letter — same
+                        // channel as the weekly recompute and the curator's
+                        // set_planka, so the user learns the number even if they
+                        // miss the widget flipping.
+                        crate::services::letters::add(crate::services::letters::Letter {
+                            id: format!("planka-first-{}", chrono::Local::now().format("%Y-%m-%d")),
+                            created_at: chrono::Local::now().to_rfc3339(),
+                            body: format!(
+                                "Неделя наблюдений завершена — мы рассчитали вашу первую планку по калориям: {n:.0} ккал.\n\n\
+                                 Старайтесь не выходить за неё: индикатор на главном экране показывает, сколько калорий осталось на сегодня. Каждую неделю мы будем пересчитывать планку автоматически.\n\n\
+                                 Это письмо — просто уведомление.",
+                            ),
+                            read: false,
+                        });
+                    }
+                }
+                busy.set(false);
+            });
+        }
+    });
     // Raised when the course goal changes → the calorie planka no longer fits, so
     // the widget prompts a recompute instead of showing the (stale) calorie gauge.
     let planka_stale = local::planka_stale_signal();
@@ -336,7 +374,10 @@ pub fn ProgressWidget() -> impl IntoView {
                                 </div>
                             }.into_view()
                         }
-                        // Still collecting the week of observations.
+                        // Still collecting the week of observations. When the week
+                        // completes, the auto-planka effect above computes the planka
+                        // and this branch flips to the gauge state on its own — the
+                        // completed state shows a brief spinner, not a button.
                         None => {
                             let all_done = food >= 7 && weight >= 7 && steps >= 7;
                             view! {
@@ -349,12 +390,9 @@ pub fn ProgressWidget() -> impl IntoView {
                                     {counter("steps.title", steps)}
                                 </div>
                                 {all_done.then(|| view! {
-                                    <button class="button is-link is-fullwidth" style="margin-top: 4px;"
-                                        prop:disabled=move || busy.get()
-                                        on:pointerup=|ev: web_sys::PointerEvent| ev.stop_propagation()
-                                        on:click=calculate>
-                                        {move || t("dashboard.progress.calculate")}
-                                    </button>
+                                    <div style="display: flex; justify-content: center; padding: 6px 0 2px;">
+                                        <div class="ft-spinner"></div>
+                                    </div>
                                 })}
                                 // Documentation-style link (dashed underline) to the "how to
                                 // keep the diary" help hub.

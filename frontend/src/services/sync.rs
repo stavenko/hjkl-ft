@@ -173,14 +173,22 @@ struct ApplyCtx {
     profile_touched: bool,
 }
 
-/// Upsert a wire row into a local store; returns true when it actually wrote
-/// (identical rows are skipped so idle syncs never touch IndexedDB / signals).
+/// Upsert a wire row into a local store; returns true when it actually wrote.
+/// Applies the SAME acceptance rule the server's materialization uses (LWW by
+/// `updated_at`) — journal batches may carry rows the server itself rejected
+/// (stale pushes, our own echo), and blind application would diverge from the
+/// server state. Equal-or-older rows are skipped, which also makes idle syncs
+/// write nothing.
 async fn upsert_row(local_store: &str, key: &str, row: &serde_json::Value) -> bool {
     let existing: Option<serde_json::Value> = db::get(local_store, key).await;
-    if existing.as_ref() == Some(row) {
-        return false;
+    if let Some(cur) = &existing {
+        let inc = row.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
+        let cur_ts = cur.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
+        if inc <= cur_ts {
+            return false;
+        }
     }
-    db::put_untracked(local_store, row).await;
+    db::put_json_untracked(local_store, row).await;
     true
 }
 
@@ -287,9 +295,12 @@ async fn pull_v2() -> Result<(), String> {
         super::profile::hydrate().await;
     }
 
-    let cur = client_version().await.unwrap_or(0);
-    if resp.version > cur {
-        set_client_version(resp.version).await;
+    // A bootstrap pull must record its version even when it is 0 (a fresh
+    // account) — otherwise the client would re-bootstrap on every sync.
+    match client_version().await {
+        None => set_client_version(resp.version).await,
+        Some(cur) if resp.version > cur => set_client_version(resp.version).await,
+        _ => {}
     }
     set_meta("last_pull_at", &chrono::Utc::now().to_rfc3339()).await;
     Ok(())

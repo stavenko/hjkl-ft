@@ -444,6 +444,22 @@ pub async fn put<T: Serialize>(store_name: &str, value: &T) {
     }
 }
 
+/// Untracked write of a RAW JSON row — ONLY for sync-apply paths. Uses the
+/// json-compatible serializer: the default serde_wasm_bindgen turns JSON maps
+/// into JS `Map` objects, whose IndexedDB keyPath evaluation fails.
+pub async fn put_json_untracked(store_name: &str, value: &serde_json::Value) {
+    let tx = with_db(|db| {
+        db.transaction(&[store_name], TransactionMode::ReadWrite)
+            .expect("failed to create transaction")
+    });
+    let store = tx.store(store_name).expect("store not found");
+    let ser = serde_wasm_bindgen::Serializer::json_compatible();
+    let js_val = value.serialize(&ser).expect("serialize failed");
+    store.put(&js_val, None).await.expect("put failed");
+    tx.done().await.expect("transaction failed");
+    bump(store_name);
+}
+
 /// Untracked write — ONLY for sync-apply paths (remote data must not re-enter
 /// the outbox).
 pub async fn put_untracked<T: Serialize>(store_name: &str, value: &T) {

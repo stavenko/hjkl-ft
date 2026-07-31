@@ -377,10 +377,15 @@ impl SyncDO {
         let last: u64 = storage.get(V2_LAST).await?.unwrap_or(0);
         let oldest: u64 = storage.get(V2_OLDEST).await?.unwrap_or(0);
 
+        // A zero client ALWAYS gets the snapshot — the materialized maps may hold
+        // v1-era data even when the journal is still empty (last == 0).
+        if since == 0 {
+            return self.v2_snapshot(last).await;
+        }
         if since >= last {
             return Response::from_json(&serde_json::json!({ "version": last, "batches": [] }));
         }
-        if since == 0 || oldest == 0 || since + 1 < oldest {
+        if oldest == 0 || since + 1 < oldest {
             return self.v2_snapshot(last).await;
         }
         let mut batches = Vec::new();

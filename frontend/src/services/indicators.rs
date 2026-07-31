@@ -463,12 +463,11 @@ pub async fn apply_ind_day(row: &serde_json::Value) {
         ratio: parsed.ratio,
         computed_at: parsed.computed_at.clone(),
     };
+    // Mirror the server's FIRST-writer-wins: an existing local day is replaced
+    // only by a STRICTLY EARLIER computation (the value computed once wins);
+    // identical/later rows are no-ops.
     if let Some(existing) = crate::services::db::get::<IndDay>(store, &parsed.date).await {
-        if existing.date == incoming.date
-            && existing.value == incoming.value
-            && existing.ratio == incoming.ratio
-            && existing.computed_at == incoming.computed_at
-        {
+        if incoming.computed_at >= existing.computed_at {
             return;
         }
     }

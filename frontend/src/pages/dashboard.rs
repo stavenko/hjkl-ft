@@ -450,7 +450,8 @@ pub fn DashboardPage() -> impl IntoView {
                                         </div>
                                         <DayBars series=Signal::derive(move || days.clone())
                                             unit={if s.key == "calories" { "ккал" } else { "г" }.to_string()}
-                                            miss_color=stroke.to_string()/>
+                                            miss_color=stroke.to_string()
+                                            met=s.met_days.clone()/>
                                     </div>
                                 }
                             }).collect_view();

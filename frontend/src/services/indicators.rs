@@ -759,6 +759,10 @@ pub struct IndicatorSeries {
     pub key: &'static str,
     pub state: IndicatorState,
     pub days: Vec<(String, f64, Option<f64>)>,
+    /// Per-day verdict for the bar colours, by THIS indicator's own rule
+    /// (calories = the ±50 kcal band, the rest = ratio ≥ 1.0):
+    /// Some(true) met · Some(false) missed · None unevaluable (no target).
+    pub met_days: Vec<Option<bool>>,
     pub missed: u32,
 }
 
@@ -778,10 +782,15 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
             .iter()
             .filter(|(_, value, ratio)| day_missed(key, *value, *ratio))
             .count() as u32;
+        let met_days = days
+            .iter()
+            .map(|(_, value, ratio)| ratio.map(|_| day_green(key, *value, *ratio)))
+            .collect();
         out.push(IndicatorSeries {
             key,
             state: indicator_state(key).await,
             days,
+            met_days,
             missed,
         });
     }

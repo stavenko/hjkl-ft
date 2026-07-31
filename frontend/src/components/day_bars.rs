@@ -57,6 +57,11 @@ pub fn DayBars(
     /// Colour for MISSED days — one colour for the whole chart, from the indicator's
     /// overall state (orange for an occasional miss, red for a chronic one).
     miss_color: String,
+    /// Per-day met/miss verdicts by the INDICATOR'S OWN rule (calories = the
+    /// ±50 kcal band, AtLeast metrics = ratio ≥ 1.0): Some(true) met ·
+    /// Some(false) missed · None unevaluable. When absent, falls back to the
+    /// generic ratio ≥ 1.0 rule.
+    #[prop(optional)] met: Option<Vec<Option<bool>>>,
 ) -> impl IntoView {
     let active = create_rw_signal(None::<usize>);
     let svg_ref = create_node_ref::<leptos::svg::Svg>();
@@ -118,7 +123,15 @@ pub fn DayBars(
                         let cx = PL + (i as f64 + 0.5) * bw;
                         let y = mapy(*v);
                         let h = (PB - y).max(0.0);
-                        let fill = if sel == Some(i) { BAR_ACTIVE } else { bar_color(*ratio, &miss_color) }.to_string();
+                        // Per-day verdict from the caller (the indicator's own rule)
+                        // when provided; the generic ratio rule otherwise.
+                        let day_fill = match met.as_ref().and_then(|m| m.get(i).copied()) {
+                            Some(Some(true)) => BAR_MET,
+                            Some(Some(false)) => &miss_color,
+                            Some(None) => BAR_NEUTRAL,
+                            None => bar_color(*ratio, &miss_color),
+                        };
+                        let fill = if sel == Some(i) { BAR_ACTIVE } else { day_fill }.to_string();
                         view! {
                             <g>
                                 <rect x=cx - bar_w / 2.0 y=y width=bar_w height=h rx="1.5" fill=fill/>

@@ -610,15 +610,16 @@ async fn admin_lava_subscriptions(env: &Env) -> Result<Response> {
             .and_then(|v| v.as_str())
             .or_else(|| it.get("status").and_then(|v| v.as_str()));
         // The operator only needs contracts that can still charge money (to cancel
-        // them). Keep ACTIVE (recurring alive) / COMPLETED (paid) roots; skip
-        // terminated (cancelled/refunded), FAILED attempts and abandoned
-        // NEW/IN_PROGRESS checkouts — there is nothing to act on for those.
-        if is_terminated(&it) {
+        // them) — i.e. LIVE recurring subscriptions. lava sets subscriptionStatus
+        // ONLY on subscription contracts (ACTIVE | CANCELLED | FAILED), so require
+        // ACTIVE strictly: a bare COMPLETED invoice is a ONE_TIME purchase (or a
+        // child row without the flag) and lava's cancel rejects it («not a
+        // subscription / already cancelled») — listing it is noise.
+        if it.get("subscriptionStatus").and_then(|v| v.as_str()) != Some("ACTIVE") {
             continue;
         }
-        match status {
-            Some("ACTIVE") | Some("COMPLETED") => {}
-            _ => continue,
+        if is_terminated(&it) {
+            continue;
         }
         let amount = it.get("receipt").and_then(|r| r.get("amount"));
         let currency = it

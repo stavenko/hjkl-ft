@@ -279,6 +279,8 @@ impl SyncDO {
         base_version: u64,
         changes: Vec<serde_json::Value>,
     ) -> Result<u64> {
+        // The genesis must be the journal's prefix — no batch may precede it.
+        self.ensure_genesis().await?;
         let storage = self.state.storage();
         let last: u64 = storage.get(V2_LAST).await?.unwrap_or(0);
         if changes.is_empty() {
@@ -347,6 +349,7 @@ impl SyncDO {
     }
 
     async fn v2_push(&self, body: &serde_json::Value) -> Result<Response> {
+        self.ensure_genesis().await?;
         let base_version = body.get("base_version").and_then(|v| v.as_u64()).unwrap_or(0);
         // Compare-and-swap on the VERSION: a client may only push what it built
         // on top of the latest state. A stale base ⇒ reject; the client pulls
@@ -367,24 +370,17 @@ impl SyncDO {
         Response::from_json(&serde_json::json!({ "version": version, "accepted": true }))
     }
 
-    /// Journal tail newer than the client's version, strictly ordered — or a
-    /// full snapshot for a zero client / one behind the retained journal.
+    /// Journal tail newer than the client's version, strictly ordered. The
+    /// JOURNAL IS THE ONLY DATA SOURCE for v2 clients: a zero client (since 0)
+    /// simply replays it from the beginning (complete by construction — genesis).
     async fn v2_pull(&self, body: &serde_json::Value) -> Result<Response> {
+        self.ensure_genesis().await?;
         let since = body.get("since_version").and_then(|v| v.as_u64()).unwrap_or(0);
         let storage = self.state.storage();
         let last: u64 = storage.get(V2_LAST).await?.unwrap_or(0);
-        let oldest: u64 = storage.get(V2_OLDEST).await?.unwrap_or(0);
 
-        // A zero client ALWAYS gets the snapshot — the materialized maps may hold
-        // v1-era data even when the journal is still empty (last == 0).
-        if since == 0 {
-            return self.v2_snapshot(last).await;
-        }
         if since >= last {
             return Response::from_json(&serde_json::json!({ "version": last, "batches": [] }));
-        }
-        if oldest == 0 || since + 1 < oldest {
-            return self.v2_snapshot(last).await;
         }
         let mut batches = Vec::new();
         for v in (since + 1)..=last {
@@ -393,18 +389,34 @@ impl SyncDO {
                 .await?
             {
                 Some(b) => batches.push(b),
-                // A gap (compacted journal) → fall back to the full state.
-                None => return self.v2_snapshot(last).await,
+                // The journal is complete by construction (genesis) — a hole is
+                // corrupted state, and we fail loudly rather than serve gaps.
+                None => {
+                    return Err(Error::RustError(format!(
+                        "sync v2: journal hole at version {v} (last {last})"
+                    )))
+                }
             }
         }
         Response::from_json(&serde_json::json!({ "version": last, "batches": batches }))
     }
 
-    /// Full materialized state keyed by CLIENT store names. Rows targeted by v1
-    /// deletion records are filtered out (v1 never removed them from the maps),
-    /// as are danger-zone diary tombstones — a fresh client receives no dead rows.
-    async fn v2_snapshot(&self, version: u64) -> Result<Response> {
+    /// GENESIS: the one-time act that makes the journal COMPLETE — the client's
+    /// only data source is the journal, so an account whose data predates the
+    /// journal (v1 era, or a journal started mid-life) gets its ENTIRE live
+    /// state appended as chunked batches. Runs once (flag-guarded) on the first
+    /// v2 touch of the account. Rows targeted by v1 deletion records and diary
+    /// tombstones are excluded (and purged from the maps — they are deleted
+    /// data); genesis changes carry `ts: 0`, so any pending local edit wins the
+    /// merge against them.
+    async fn ensure_genesis(&self) -> Result<()> {
         use std::collections::HashSet;
+        let storage = self.state.storage();
+        if storage.get::<bool>("v2:genesis_done").await?.unwrap_or(false) {
+            return Ok(());
+        }
+        let mut version: u64 = storage.get(V2_LAST).await?.unwrap_or(0);
+
         let dels = self.map("deletions").await?;
         let mut dead: HashSet<(String, String)> = HashSet::new();
         for rec in dels.values() {
@@ -416,27 +428,59 @@ impl SyncDO {
                 }
             }
         }
-        let mut snap = serde_json::Map::new();
+
         for (client, coll) in CLIENT_STORES {
-            let m = self.map(coll).await?;
-            let rows: Vec<serde_json::Value> = m
-                .into_iter()
-                .filter(|(k, r)| {
-                    if dead.contains(&((*coll).to_string(), k.clone())) {
-                        return false;
-                    }
-                    if *coll == "diary_entries"
-                        && r.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false)
-                    {
-                        return false;
-                    }
-                    true
-                })
-                .map(|(_, r)| r)
-                .collect();
-            snap.insert((*client).to_string(), serde_json::Value::Array(rows));
+            let mut m = self.map(coll).await?;
+            let before = m.len();
+            m.retain(|k, r| {
+                if dead.contains(&((*coll).to_string(), k.clone())) {
+                    return false;
+                }
+                if *coll == "diary_entries"
+                    && r.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false)
+                {
+                    return false;
+                }
+                true
+            });
+            if m.len() != before {
+                self.put_map(coll, &m).await?;
+            }
+            if m.is_empty() {
+                continue;
+            }
+            let rows: Vec<&serde_json::Value> = m.values().collect();
+            // Chunked: a whole account in one storage value would risk the DO's
+            // per-value size limit.
+            for chunk in rows.chunks(100) {
+                let changes: Vec<serde_json::Value> = chunk
+                    .iter()
+                    .map(|row| {
+                        serde_json::json!({ "store": client, "op": "upsert", "row": row, "ts": 0 })
+                    })
+                    .collect();
+                version += 1;
+                storage
+                    .put(
+                        &format!("j:{version:020}"),
+                        &serde_json::json!({
+                            "version": version,
+                            "base_version": version - 1,
+                            "changes": changes,
+                        }),
+                    )
+                    .await?;
+            }
         }
-        Response::from_json(&serde_json::json!({ "version": version, "snapshot": snap }))
+
+        if version > 0 {
+            storage.put(V2_LAST, version).await?;
+            if storage.get::<u64>(V2_OLDEST).await?.is_none() {
+                storage.put(V2_OLDEST, 1u64).await?;
+            }
+        }
+        storage.put("v2:genesis_done", true).await?;
+        Ok(())
     }
 }
 

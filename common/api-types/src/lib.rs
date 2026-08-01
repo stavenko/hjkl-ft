@@ -719,15 +719,14 @@ pub struct SyncPullV2Request {
     pub since_version: u64,
 }
 
-/// Pull result: either the ordered journal tail (`batches`) or — for a zero /
-/// too-far-behind client — a full `snapshot` keyed by client store name.
+/// Pull result: the ordered journal tail newer than `since_version`. The
+/// journal is the ONLY data source — it is complete from the account's genesis,
+/// so a zero client (since 0) simply replays it from the beginning.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncPullV2Response {
     pub version: u64,
     #[serde(default)]
     pub batches: Vec<SyncBatch>,
-    #[serde(default)]
-    pub snapshot: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

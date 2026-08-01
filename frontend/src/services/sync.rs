@@ -6,7 +6,8 @@
 //! the server appends it to a journal (`version = last + 1`) and applies it to
 //! the materialized state. A PULL fetches only the journal tail newer than the
 //! client's version and applies it strictly in order (a delete is just an op in
-//! the stream). Full data travels exactly once — to a zero client (snapshot).
+//! the stream). The journal is COMPLETE from the account's genesis, so a zero
+//! client simply replays it from the beginning — no snapshot concept at all.
 //!
 //! Applying remote data uses the `_untracked` db variants and writes only rows
 //! that actually differ — an idle sync performs ZERO IndexedDB writes and never
@@ -168,7 +169,7 @@ async fn push_v2() -> Result<bool, String> {
     Ok(true)
 }
 
-// ── Pull: apply the journal tail (or a bootstrap snapshot) in order ──────────
+// ── Pull: apply the journal tail strictly in order ───────────────────────────
 
 /// Pending local (unpushed) mutations per wire (store, id): the latest event
 /// time and every outbox seq touching that row. Consulted during the merge.
@@ -323,35 +324,20 @@ async fn apply_change(ch: &SyncChange, ctx: &mut ApplyCtx) {
     }
 }
 
-async fn apply_snapshot(snapshot: &serde_json::Value, ctx: &mut ApplyCtx) {
-    let Some(map) = snapshot.as_object() else {
-        leptos::logging::error!("sync v2: snapshot is not an object");
-        return;
-    };
-    for (store, rows) in map {
-        let Some(rows) = rows.as_array() else { continue };
-        for row in rows {
-            apply_upsert(store, row, ctx).await;
-        }
-    }
-}
-
 async fn pull_v2() -> Result<(), String> {
     let since = client_version().await.unwrap_or(0);
     let body = serde_json::json!({ "since_version": since }).to_string();
     let resp: SyncPullV2Response = post_json("/sync/v2/pull", &body).await?;
 
+    // The journal is the ONLY data source: a zero client replays it from the
+    // genesis; everyone else applies just the tail. Strictly in order.
     let mut ctx = ApplyCtx {
         pending: pending_map().await,
         ..Default::default()
     };
-    if let Some(snapshot) = &resp.snapshot {
-        apply_snapshot(snapshot, &mut ctx).await;
-    } else {
-        for batch in &resp.batches {
-            for ch in &batch.changes {
-                apply_change(ch, &mut ctx).await;
-            }
+    for batch in &resp.batches {
+        for ch in &batch.changes {
+            apply_change(ch, &mut ctx).await;
         }
     }
 
@@ -403,7 +389,7 @@ async fn push_full_legacy() -> Result<(), String> {
 }
 
 /// One-time bootstrap for a device without a version: full legacy push (bridged
-/// into the journal), then a snapshot pull which sets the version.
+/// into the journal), then a from-genesis journal replay which sets the version.
 async fn ensure_bootstrapped() -> Result<(), String> {
     if client_version().await.is_some() {
         return Ok(());

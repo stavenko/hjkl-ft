@@ -355,6 +355,14 @@ async fn day_cached(key: &str, date: &str) -> (f64, Option<f64>) {
         return (rec.value, ratio);
     }
     let value = compute_day_value(key, date).await;
+    // Steps are ENTERED, not derived from the diary: a day with no step entry is
+    // "not logged yet", NOT a 0-step miss. It can only be judged once the user
+    // enters the number (record_steps write-through) — so freeze NOTHING here.
+    // Freezing 0 poisoned the day forever: the frozen miss synced everywhere and
+    // won the merge (first computation wins) against the later real entry.
+    if key == "steps" && local::get_steps_for_date(date).await.is_none() {
+        return (value, None);
+    }
     let ratio = ratio_now(key, value).await;
     crate::services::db::put(
         store,
@@ -362,6 +370,21 @@ async fn day_cached(key: &str, date: &str) -> (f64, Option<f64>) {
     )
     .await;
     (value, ratio)
+}
+
+/// One-time repair of step-days poisoned by the old freeze-on-render: a frozen
+/// row for a date with NO step entry is deleted (a day without entered steps
+/// cannot be judged at all), and a frozen 0 for a date whose entry HAS steps is
+/// re-frozen from the entry (an early 0-freeze that beat the real value).
+/// Tracked writes — the corrections sync out as later journal batches.
+pub async fn repair_steps_unentered_days() {
+    for rec in crate::services::db::list_all::<IndDay>("ind_steps").await {
+        match local::get_steps_for_date(&rec.date).await {
+            None => crate::services::db::delete("ind_steps", &rec.date).await,
+            Some(e) if rec.value == 0.0 && e.steps > 0 => record_steps(&rec.date).await,
+            _ => {}
+        }
+    }
 }
 
 /// `value / target` at the CURRENT target — `None` when the target isn't known yet.

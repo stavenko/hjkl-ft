@@ -392,6 +392,7 @@ dependencies = [
  "chrono",
  "postcard",
  "serde",
+ "serde_json",
  "uuid",
 ]
 

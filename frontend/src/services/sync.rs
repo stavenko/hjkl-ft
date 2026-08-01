@@ -356,6 +356,9 @@ async fn pull_v2() -> Result<(), String> {
     // Refresh the synchronous caches only when their data actually changed.
     if ctx.flags_touched {
         super::app_flags::reload().await;
+        // The stories seen-set is a SEPARATE in-memory copy seeded at launch —
+        // reload alone leaves the tray drawing pre-sync rings.
+        super::stories::reseed();
     }
     if ctx.profile_touched {
         super::profile::hydrate().await;
@@ -550,6 +553,7 @@ async fn adopt_from_server(resp: SyncPullV2Response) -> Result<(), String> {
         }
     }
     super::app_flags::reload().await;
+    super::stories::reseed();
     super::profile::hydrate().await;
     set_client_version(resp.version).await;
     set_meta("last_pull_at", &chrono::Utc::now().to_rfc3339()).await;

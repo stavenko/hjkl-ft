@@ -192,6 +192,37 @@ pub fn init() {
     WELCOME_PENDING_SIG.with(|s| *s.borrow_mut() = Some(create_rw_signal(pending)));
 }
 
+/// Re-seed the seen-set from `app_flags` after SYNC applied a remote change.
+/// [`init`] seeds it once at launch — before the first sync of the session — so
+/// without this the tray keeps drawing the pre-sync state until the next launch
+/// (progress made on another device shows a launch late). Keeps the existing
+/// signals (they belong to the root owner) and bumps the version so the tray
+/// redraws; a no-op when nothing actually changed.
+pub fn reseed() {
+    let set: HashSet<String> = app_flags::get(VIEWED_KEY)
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default();
+    let changed = VIEWED.with(|v| {
+        let mut b = v.borrow_mut();
+        match b.as_mut() {
+            Some(st) if st.set != set => {
+                st.set = set;
+                true
+            }
+            _ => false,
+        }
+    });
+    if changed {
+        version().update(|v| *v += 1);
+    }
+    let pending = !app_flags::get_bool(WELCOME_KEY);
+    if let Some(sig) = WELCOME_PENDING_SIG.with(|s| *s.borrow()) {
+        if sig.get_untracked() != pending {
+            sig.set(pending);
+        }
+    }
+}
+
 /// The root-scope signal holding the story currently open in the viewer.
 pub fn open_signal() -> RwSignal<Option<&'static Story>> {
     OPEN.with(|o| *o.borrow()).expect("stories::init() must run first")

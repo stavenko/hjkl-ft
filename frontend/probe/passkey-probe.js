@@ -72,6 +72,18 @@ el("try").onclick = async () => {
   render();
 };
 
+// Открыть ЭТУ ЖЕ страницу в системном Chrome (Android intent). Так видно, чем
+// среда Chrome отличается от Яндекс.Браузера на том же телефоне. Если Chrome не
+// установлен, browser_fallback_url возвращает на обычную https-ссылку.
+{
+  const target = location.href.split("#")[0];
+  const host = location.host;
+  const path = location.pathname + location.search;
+  el("chrome").href =
+    `intent://${host}${path}#Intent;scheme=https;package=com.android.chrome;` +
+    `S.browser_fallback_url=${encodeURIComponent(target)};end`;
+}
+
 el("copy").onclick = async () => {
   try { await navigator.clipboard.writeText(el("report").value); el("copy").textContent = "Скопировано"; }
   catch { el("report").select(); el("copy").textContent = "Выделено — скопируйте вручную"; }

@@ -19,6 +19,9 @@
   button.sec { background: #fff; color: #0e1630; border: 1px solid #cfd6e4; }
   pre { white-space: pre-wrap; background: #fff; border-radius: 12px; padding: 12px; margin-top: 14px;
         font-size: 13px; }
+  .btn-link { display: block; margin-top: 12px; padding: 14px; font-size: 16px; font-weight: 700;
+              text-align: center; text-decoration: none; border-radius: 12px;
+              background: #fff; color: #0e1630; border: 1px solid #cfd6e4; }
   textarea { width: 100%; height: 150px; margin-top: 12px; border-radius: 12px; border: 1px solid #cfd6e4;
              padding: 10px; font: 12px/1.4 ui-monospace, monospace; background: #fff; color: #0e1630; }
 </style>
@@ -31,6 +34,7 @@
   <pre id="out">Нажмите кнопку — здесь появится точная причина отказа.</pre>
   <textarea id="report" readonly></textarea>
   <button id="copy" class="sec">Скопировать отчёт</button>
+  <a id="chrome" class="btn-link" href="#">Открыть эту страницу в Chrome</a>
   <script src="/passkey-probe.js"></script>
 </body>
 </html>

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Проверка passkey</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 20px; background: #f1f4f9; color: #0e1630; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 12px; overflow: hidden; }
+  td { padding: 10px 12px; border-bottom: 1px solid #e6eaf2; vertical-align: top; word-break: break-word; }
+  td:first-child { color: #5a6580; width: 45%; }
+  .v { font-weight: 700; }
+  .yes { color: #1fa463; } .no { color: #e0304f; }
+  button { margin-top: 18px; width: 100%; padding: 14px; font-size: 16px; font-weight: 700;
+           border: none; border-radius: 12px; background: #0e1630; color: #fff; }
+  pre { white-space: pre-wrap; background: #fff; border-radius: 12px; padding: 12px; margin-top: 14px; }
+</style>
+</head>
+<body>
+  <h1>Проверка passkey в этом браузере</h1>
+  <table id="t"></table>
+  <button id="try">Попробовать создать ключ</button>
+  <pre id="out">Нажмите кнопку — здесь появится точная причина отказа.</pre>
+  <script src="/passkey-probe.js"></script>
+</body>
+</html>

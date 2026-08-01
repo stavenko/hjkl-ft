@@ -6,8 +6,12 @@
 //! the server appends it to a journal (`version = last + 1`) and applies it to
 //! the materialized state. A PULL fetches only the journal tail newer than the
 //! client's version and applies it strictly in order (a delete is just an op in
-//! the stream). The journal is COMPLETE from the account's genesis, so a zero
-//! client simply replays it from the beginning — no snapshot concept at all.
+//! the stream). The SOURCE OF TRUTH is the local database: a server store starts
+//! UNINITIALIZED and refuses pulls; the first device MIGRATES its local data in
+//! (one batch per calendar day, all stores), the server confirms the batch count
+//! (/sync/v2/init) and only then the store becomes readable. Any later device
+//! without a version but with an initialized store ADOPTS the server copy —
+//! wipes its local synced data and replays the journal from the beginning.
 //!
 //! Applying remote data uses the `_untracked` db variants and writes only rows
 //! that actually differ — an idle sync performs ZERO IndexedDB writes and never
@@ -20,9 +24,9 @@ use wasm_bindgen_futures::JsFuture;
 
 use super::{auth, config, db};
 
-/// POST `body` (JSON) to `{sync_base_url}{path}` with the bearer token and parse
-/// the JSON response into `O`. Fails loudly — sync is not allowed to swallow errors.
-async fn post_json<O: DeserializeOwned>(path: &str, body: &str) -> Result<O, String> {
+/// POST `body` (JSON) to `{sync_base_url}{path}` with the bearer token; returns
+/// the HTTP status and raw body (the bootstrap probe needs to branch on a 409).
+async fn post_raw(path: &str, body: &str) -> Result<(u16, String), String> {
     let base = &config::get().sync_base_url;
     if base.is_empty() {
         return Err("sync_base_url is not configured".to_string());
@@ -59,8 +63,15 @@ async fn post_json<O: DeserializeOwned>(path: &str, body: &str) -> Result<O, Str
         .map_err(|e| format!("{e:?}"))?;
     let text = text.as_string().ok_or("response not a string")?;
 
-    if !resp.ok() {
-        return Err(format!("HTTP {}: {}", resp.status(), text));
+    Ok((resp.status(), text))
+}
+
+/// POST and parse the JSON response into `O`. Any non-2xx status is an error —
+/// sync is not allowed to swallow failures.
+async fn post_json<O: DeserializeOwned>(path: &str, body: &str) -> Result<O, String> {
+    let (status, text) = post_raw(path, body).await?;
+    if !(200..300).contains(&status) {
+        return Err(format!("HTTP {status}: {text}"));
     }
     serde_json::from_str(&text).map_err(|e| format!("parse error: {e}"))
 }
@@ -360,42 +371,171 @@ async fn pull_v2() -> Result<(), String> {
     Ok(())
 }
 
-// ── Bootstrap: the ONE full-data exchange of a device's lifetime ─────────────
+// ── Bootstrap: migrate the local truth in, or adopt the server copy ──────────
 
-/// Legacy full-state push (v1 endpoint). Used exactly once per device — before
-/// it has a version — so its complete local state lands on the server (the v1
-/// handler bridges accepted rows into the v2 journal).
-async fn push_full_legacy() -> Result<(), String> {
-    let payload = SyncPushPayload {
-        foods: db::list_all("foods").await,
-        diary_entries: db::list_all("diary").await,
-        recipes: db::list_all("recipes").await,
-        recipe_ingredients: db::list_all("recipe_ingredients").await,
-        goals: db::list_all("goals").await,
-        profile: db::list_all("profile").await,
-        weight_entries: db::list_all("weight_entries").await,
-        step_entries: db::list_all("step_entries").await,
-        app_flags: db::list_all::<AppFlagRow>("app_flags")
-            .await
-            .into_iter()
-            .filter(|r| !super::app_flags::is_device_local(&r.key) && !r.updated_at.is_empty())
-            .collect(),
-        ind_days: crate::services::indicators::export_ind_days().await,
-        deletions: db::list_all("deletions").await,
+/// The event day (`YYYY-MM-DD`) a row belongs to, for day-batching the
+/// migration: the row's own `date` when it has one (diary, weight, steps,
+/// ind_days), otherwise the date part of its creation/update stamp.
+fn day_of(row: &serde_json::Value) -> String {
+    for f in ["date", "created_at", "updated_at", "computed_at"] {
+        if let Some(v) = row.get(f).and_then(|v| v.as_str()) {
+            if v.len() >= 10 {
+                return v[..10].to_string();
+            }
+        }
+    }
+    "1970-01-01".to_string()
+}
+
+/// The row's event time in ms epoch (merge key of the resulting change) —
+/// parsed from its RFC3339 stamps; a stampless row sorts earliest.
+fn event_ts_ms(row: &serde_json::Value) -> u64 {
+    for f in ["updated_at", "computed_at", "created_at"] {
+        if let Some(v) = row.get(f).and_then(|v| v.as_str()) {
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(v) {
+                return dt.timestamp_millis().max(0) as u64;
+            }
+        }
+    }
+    0
+}
+
+/// All local synced data grouped into day-batches (BTreeMap ⇒ chronological
+/// order): one batch per calendar day, holding that day's rows of ALL stores.
+/// `deletions` records are not migrated (in v2 absence IS deletion) and neither
+/// are diary tombstones or device-local app_flags.
+async fn migration_days() -> std::collections::BTreeMap<String, Vec<serde_json::Value>> {
+    let mut days: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
+        std::collections::BTreeMap::new();
+    let mut add = |store: &str, row: serde_json::Value| {
+        let day = day_of(&row);
+        let ts = event_ts_ms(&row);
+        days.entry(day)
+            .or_default()
+            .push(serde_json::json!({ "store": store, "op": "upsert", "row": row, "ts": ts }));
     };
-    let body = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
-    let _resp: SyncPushResponse = post_json("/sync/push", &body).await?;
+    for store in [
+        "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries",
+        "step_entries", "profile",
+    ] {
+        for row in db::list_all::<serde_json::Value>(store).await {
+            if store == "diary"
+                && row.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false)
+            {
+                continue;
+            }
+            add(store, row);
+        }
+    }
+    for r in db::list_all::<AppFlagRow>("app_flags").await {
+        if super::app_flags::is_device_local(&r.key) || r.updated_at.is_empty() {
+            continue;
+        }
+        add("app_flags", serde_json::to_value(&r).expect("AppFlagRow serialize"));
+    }
+    for r in crate::services::indicators::export_ind_days().await {
+        add("ind_days", serde_json::to_value(&r).expect("IndDayRow serialize"));
+    }
+    days
+}
+
+/// MIGRATION: this device's local database is the source of truth — upload it
+/// as sequential day-batches on top of `start_version`, then have the server
+/// verify the batch count and flip the store to initialized (/sync/v2/init).
+/// The outbox is left alone: pre-existing entries re-push rows the migration
+/// already carried (idempotent upserts), and entries born mid-migration keep
+/// their edits for the next regular push.
+async fn migrate_to_server(start_version: u64) -> Result<(), String> {
+    let days = migration_days().await;
+    let total = days.len() as u64;
+    let mut base = start_version;
+    for (day, changes) in &days {
+        let body =
+            serde_json::json!({ "base_version": base, "changes": changes }).to_string();
+        let resp: SyncPushV2Response = post_json("/sync/v2/push", &body).await?;
+        if !resp.accepted {
+            return Err(format!(
+                "sync v2: миграция — сервер отклонил батч дня {day} (версия сервера {})",
+                resp.version
+            ));
+        }
+        base = resp.version;
+    }
+    // Both sides must agree on the batch count: ours vs the server's version
+    // growth here, and the server re-checks the absolute version in init.
+    if base != start_version + total {
+        return Err(format!(
+            "sync v2: миграция — число батчей не сходится: клиент {total}, сервер {}",
+            base - start_version
+        ));
+    }
+    let body = serde_json::json!({ "expected_version": base }).to_string();
+    let init: SyncPushV2Response = post_json("/sync/v2/init", &body).await?;
+    if !init.accepted {
+        return Err(format!("sync v2: init отклонён (версия сервера {})", init.version));
+    }
+    set_client_version(base).await;
+    set_meta("last_push_at", &chrono::Utc::now().to_rfc3339()).await;
     Ok(())
 }
 
-/// One-time bootstrap for a device without a version: full legacy push (bridged
-/// into the journal), then a from-genesis journal replay which sets the version.
+/// Local stores wiped by an ADOPT (app_flags is handled separately — its
+/// device-local keys must survive).
+const ADOPT_WIPE_STORES: &[&str] = &[
+    "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries",
+    "step_entries", "profile", "deletions", "ind_protein", "ind_veg_fruit", "ind_steps",
+    "ind_calories",
+];
+
+/// ADOPT: the store is initialized, so the source of truth has already been
+/// copied there — take everything from it. Local pre-existing data (a device
+/// that never migrated) is DELETED first, then the journal is replayed from
+/// the beginning.
+async fn adopt_from_server(resp: SyncPullV2Response) -> Result<(), String> {
+    for store in ADOPT_WIPE_STORES {
+        db::clear(store).await;
+    }
+    for r in db::list_all::<AppFlagRow>("app_flags").await {
+        if !super::app_flags::is_device_local(&r.key) {
+            db::delete_untracked("app_flags", &r.key).await;
+        }
+    }
+    db::clear("_outbox").await;
+
+    let mut ctx = ApplyCtx::default(); // outbox is empty — nothing pending to merge
+    for batch in &resp.batches {
+        for ch in &batch.changes {
+            apply_change(ch, &mut ctx).await;
+        }
+    }
+    super::app_flags::reload().await;
+    super::profile::hydrate().await;
+    set_client_version(resp.version).await;
+    set_meta("last_pull_at", &chrono::Utc::now().to_rfc3339()).await;
+    Ok(())
+}
+
+/// First contact of a device without a version: probe the store with a
+/// from-zero pull. Uninitialized (409) ⇒ this device carries the truth —
+/// migrate it in. Initialized ⇒ adopt the server copy.
 async fn ensure_bootstrapped() -> Result<(), String> {
     if client_version().await.is_some() {
         return Ok(());
     }
-    push_full_legacy().await?;
-    pull_v2().await
+    let body = serde_json::json!({ "since_version": 0u64 }).to_string();
+    let (status, text) = post_raw("/sync/v2/pull", &body).await?;
+    if status == 409 && text.contains("store_not_initialized") {
+        let v: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("parse error: {e}"))?;
+        let server_version = v.get("version").and_then(|x| x.as_u64()).unwrap_or(0);
+        return migrate_to_server(server_version).await;
+    }
+    if (200..300).contains(&status) {
+        let resp: SyncPullV2Response =
+            serde_json::from_str(&text).map_err(|e| format!("parse error: {e}"))?;
+        return adopt_from_server(resp).await;
+    }
+    Err(format!("HTTP {status}: {text}"))
 }
 
 // ── Public entry points (same names as v1) ───────────────────────────────────

@@ -31,11 +31,19 @@ fn is_newer(incoming: &serde_json::Value, current: Option<&serde_json::Value>) -
 // The client forms the change list (its outbox); a push appends ONE batch to a
 // journal under `version = last + 1` and applies it to the same materialized
 // maps v1 uses. A pull returns only the journal tail (`version > since`),
-// applied by the client strictly in order. Full data travels exactly once — to
-// a zero client (snapshot). Versions are integers; no wall clocks involved.
+// applied by the client strictly in order. Versions are integers; no wall
+// clocks involved.
+//
+// The SOURCE OF TRUTH is the client's local database — this DO is dumb storage
+// and never synthesizes data. A store starts UNINITIALIZED: pulls are refused
+// (409 store_not_initialized) until the first client MIGRATES its local data in
+// (one day-batch at a time) and confirms the batch count via /sync/v2/init,
+// which flips the initialized flag. From then on the journal is the complete
+// data source for every device.
 
 const V2_LAST: &str = "v2:last_version";
 const V2_OLDEST: &str = "v2:oldest_version";
+const V2_INIT: &str = "v2:initialized";
 
 /// (client store name, server collection name) — every v2-synced store.
 const CLIENT_STORES: &[(&str, &str)] = &[
@@ -279,8 +287,6 @@ impl SyncDO {
         base_version: u64,
         changes: Vec<serde_json::Value>,
     ) -> Result<u64> {
-        // The genesis must be the journal's prefix — no batch may precede it.
-        self.ensure_genesis().await?;
         let storage = self.state.storage();
         let last: u64 = storage.get(V2_LAST).await?.unwrap_or(0);
         if changes.is_empty() {
@@ -349,7 +355,6 @@ impl SyncDO {
     }
 
     async fn v2_push(&self, body: &serde_json::Value) -> Result<Response> {
-        self.ensure_genesis().await?;
         let base_version = body.get("base_version").and_then(|v| v.as_u64()).unwrap_or(0);
         // Compare-and-swap on the VERSION: a client may only push what it built
         // on top of the latest state. A stale base ⇒ reject; the client pulls
@@ -372,11 +377,19 @@ impl SyncDO {
 
     /// Journal tail newer than the client's version, strictly ordered. The
     /// JOURNAL IS THE ONLY DATA SOURCE for v2 clients: a zero client (since 0)
-    /// simply replays it from the beginning (complete by construction — genesis).
+    /// simply replays it from the beginning. NOTHING can be read from an
+    /// uninitialized store — the first client must migrate its local data in
+    /// first (/sync/v2/push day-batches + /sync/v2/init).
     async fn v2_pull(&self, body: &serde_json::Value) -> Result<Response> {
-        self.ensure_genesis().await?;
-        let since = body.get("since_version").and_then(|v| v.as_u64()).unwrap_or(0);
         let storage = self.state.storage();
+        if !storage.get::<bool>(V2_INIT).await?.unwrap_or(false) {
+            let last: u64 = storage.get(V2_LAST).await?.unwrap_or(0);
+            return Ok(Response::from_json(
+                &serde_json::json!({ "error": "store_not_initialized", "version": last }),
+            )?
+            .with_status(409));
+        }
+        let since = body.get("since_version").and_then(|v| v.as_u64()).unwrap_or(0);
         let last: u64 = storage.get(V2_LAST).await?.unwrap_or(0);
 
         if since >= last {
@@ -401,86 +414,27 @@ impl SyncDO {
         Response::from_json(&serde_json::json!({ "version": last, "batches": batches }))
     }
 
-    /// GENESIS: the one-time act that makes the journal COMPLETE — the client's
-    /// only data source is the journal, so an account whose data predates the
-    /// journal (v1 era, or a journal started mid-life) gets its ENTIRE live
-    /// state appended as chunked batches. Runs once (flag-guarded) on the first
-    /// v2 touch of the account. Rows targeted by v1 deletion records and diary
-    /// tombstones are excluded (and purged from the maps — they are deleted
-    /// data); genesis changes carry `ts: 0`, so any pending local edit wins the
-    /// merge against them.
-    async fn ensure_genesis(&self) -> Result<()> {
-        use std::collections::HashSet;
+    /// Finalize the client-driven migration: the client uploaded its local data
+    /// as sequential day-batches and now confirms the resulting version. The
+    /// counts must MATCH exactly (each batch bumps the version by 1, so
+    /// `last_version == expected_version` ⇔ the server holds exactly the batches
+    /// the client sent) — only then does the store become initialized and
+    /// readable. A mismatch is a loud 409, never a silent acceptance.
+    async fn v2_init(&self, body: &serde_json::Value) -> Result<Response> {
         let storage = self.state.storage();
-        if storage.get::<bool>("v2:genesis_done").await?.unwrap_or(false) {
-            return Ok(());
+        let expected = body
+            .get("expected_version")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| Error::RustError("sync v2: init without expected_version".into()))?;
+        let last: u64 = storage.get(V2_LAST).await?.unwrap_or(0);
+        if last != expected {
+            return Ok(Response::from_json(&serde_json::json!({
+                "error": "init_version_mismatch", "version": last,
+            }))?
+            .with_status(409));
         }
-        let mut version: u64 = storage.get(V2_LAST).await?.unwrap_or(0);
-
-        let dels = self.map("deletions").await?;
-        let mut dead: HashSet<(String, String)> = HashSet::new();
-        for rec in dels.values() {
-            let kind = rec.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-            let target = rec.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(coll) = collection_for(kind) {
-                if !target.is_empty() {
-                    dead.insert((coll.to_string(), target.to_string()));
-                }
-            }
-        }
-
-        for (client, coll) in CLIENT_STORES {
-            let mut m = self.map(coll).await?;
-            let before = m.len();
-            m.retain(|k, r| {
-                if dead.contains(&((*coll).to_string(), k.clone())) {
-                    return false;
-                }
-                if *coll == "diary_entries"
-                    && r.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false)
-                {
-                    return false;
-                }
-                true
-            });
-            if m.len() != before {
-                self.put_map(coll, &m).await?;
-            }
-            if m.is_empty() {
-                continue;
-            }
-            let rows: Vec<&serde_json::Value> = m.values().collect();
-            // Chunked: a whole account in one storage value would risk the DO's
-            // per-value size limit.
-            for chunk in rows.chunks(100) {
-                let changes: Vec<serde_json::Value> = chunk
-                    .iter()
-                    .map(|row| {
-                        serde_json::json!({ "store": client, "op": "upsert", "row": row, "ts": 0 })
-                    })
-                    .collect();
-                version += 1;
-                storage
-                    .put(
-                        &format!("j:{version:020}"),
-                        &serde_json::json!({
-                            "version": version,
-                            "base_version": version - 1,
-                            "changes": changes,
-                        }),
-                    )
-                    .await?;
-            }
-        }
-
-        if version > 0 {
-            storage.put(V2_LAST, version).await?;
-            if storage.get::<u64>(V2_OLDEST).await?.is_none() {
-                storage.put(V2_OLDEST, 1u64).await?;
-            }
-        }
-        storage.put("v2:genesis_done", true).await?;
-        Ok(())
+        storage.put(V2_INIT, true).await?;
+        Response::from_json(&serde_json::json!({ "version": last, "accepted": true }))
     }
 }
 
@@ -508,6 +462,10 @@ impl DurableObject for SyncDO {
             (Method::Post, "/sync/v2/pull") => {
                 let payload: serde_json::Value = req.json().await?;
                 self.v2_pull(&payload).await
+            }
+            (Method::Post, "/sync/v2/init") => {
+                let payload: serde_json::Value = req.json().await?;
+                self.v2_init(&payload).await
             }
             _ => Response::error("Not found", 404),
         }

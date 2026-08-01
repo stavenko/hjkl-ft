@@ -79,9 +79,23 @@ el("try").onclick = async () => {
   const target = location.href.split("#")[0];
   const host = location.host;
   const path = location.pathname + location.search;
-  el("chrome").href =
-    `intent://${host}${path}#Intent;scheme=https;package=com.android.chrome;` +
-    `S.browser_fallback_url=${encodeURIComponent(target)};end`;
+  const fb = `S.browser_fallback_url=${encodeURIComponent(target)};`;
+  // 1. Как в приложении: package + запасной адрес. Chromium отказывается
+  //    запускать intent, если цель — обычный браузер, и тогда молча уходит по
+  //    запасному адресу (выглядит как «открылось здесь же»).
+  el("chrome").href = `intent://${host}${path}#Intent;scheme=https;package=com.android.chrome;${fb}end`;
+  // 2. Явный компонент вместо package.
+  el("chrome2").href = `intent://${host}${path}#Intent;scheme=https;` +
+    `component=com.android.chrome/com.google.android.apps.chrome.Main;${fb}end`;
+  // 3. Без запасного адреса: отказ виден как «ничего не произошло».
+  el("chrome3").href = `intent://${host}${path}#Intent;scheme=https;action=android.intent.action.VIEW;` +
+    `category=android.intent.category.BROWSABLE;package=com.android.chrome;end`;
+  // 4. Собственная схема Chrome (официально iOS; на Android может не быть).
+  el("chrome4").href = `googlechrome://navigate?url=${encodeURIComponent(target)}`;
+  el("copylink").onclick = async () => {
+    try { await navigator.clipboard.writeText(target); el("copylink").textContent = "Адрес скопирован"; }
+    catch { el("copylink").textContent = target; }
+  };
 }
 
 el("copy").onclick = async () => {

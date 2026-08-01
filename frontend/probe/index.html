@@ -34,7 +34,14 @@
   <pre id="out">Нажмите кнопку — здесь появится точная причина отказа.</pre>
   <textarea id="report" readonly></textarea>
   <button id="copy" class="sec">Скопировать отчёт</button>
-  <a id="chrome" class="btn-link" href="#">Открыть эту страницу в Chrome</a>
+  <h2 style="font-size:16px;margin:22px 0 6px;">Открыть в Chrome — какие варианты работают</h2>
+  <p class="sub">Жмите по очереди. Вариант 3 — БЕЗ запасного адреса: если браузер откажется
+     передать ссылку, ничего не произойдёт (это и есть ответ), вместо тихого открытия здесь же.</p>
+  <a id="chrome" class="btn-link" href="#">1. intent + package (как сейчас в приложении)</a>
+  <a id="chrome2" class="btn-link" href="#">2. intent + component (явный экран Chrome)</a>
+  <a id="chrome3" class="btn-link" href="#">3. intent + package, без запасного адреса</a>
+  <a id="chrome4" class="btn-link" href="#">4. googlechrome://navigate</a>
+  <button id="copylink" class="sec">Скопировать адрес страницы</button>
   <script src="/passkey-probe.js"></script>
 </body>
 </html>

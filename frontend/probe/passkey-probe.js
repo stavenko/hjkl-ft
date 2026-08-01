@@ -92,6 +92,11 @@ el("try").onclick = async () => {
     `category=android.intent.category.BROWSABLE;package=com.android.chrome;end`;
   // 4. Собственная схема Chrome (официально iOS; на Android может не быть).
   el("chrome4").href = `googlechrome://navigate?url=${encodeURIComponent(target)}`;
+  // 5. Последний кандидат: системный лист «Поделиться» — приложение выбирает
+  //    пользователь, поэтому запрет Chromium на передачу другому браузеру здесь
+  //    не действует.
+  el("chrome5").href = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;` +
+    `S.android.intent.extra.TEXT=${encodeURIComponent(target)};end`;
   el("copylink").onclick = async () => {
     try { await navigator.clipboard.writeText(target); el("copylink").textContent = "Адрес скопирован"; }
     catch { el("copylink").textContent = target; }

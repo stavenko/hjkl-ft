@@ -60,14 +60,6 @@ pub fn main() {
             services::local::migrate_steps_goal_to_planka().await;
             services::app_flags::set_bool("steps_planka_migrated_v1", true);
         }
-        // One-time: drop frozen step-days for dates with no step entry (the old
-        // freeze-on-render judged un-entered days as 0-step misses) and re-freeze
-        // early 0-freezes that beat the real entry. Device-local flag (suffix
-        // rule) — every device repairs its own store; the fixes sync out.
-        if !services::app_flags::get_bool("ind_steps_unentered_backfilled_v1") {
-            services::indicators::repair_steps_unentered_days().await;
-            services::app_flags::set_bool("ind_steps_unentered_backfilled_v1", true);
-        }
         services::i18n::init_lang();
         services::i18n::init_weight_unit();
         services::update::init(); // update-available signal at the root

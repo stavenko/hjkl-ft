@@ -300,30 +300,6 @@ for (let i = 0; i < 4 && !storyBack; i++) {
 }
 check("истории: дополненный прогресс вернулся на A", storyBack);
 
-// ── Шаги: замороженный 0-день БЕЗ записи шагов — отравление старого бага.
-// Ремонт при запуске удаляет строку, удаление синкается на другие устройства.
-const DZ = dayStr(23);
-const plantPoisonedStepDay = (page, clearFlag) => idb(page, async ({ uid, arg }) => {
-  const db = await new Promise((res, rej) => { const q = indexedDB.open(`hjkl-ft-${uid}`); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
-  await new Promise((res) => {
-    const tx = db.transaction(["ind_steps", "app_flags"], "readwrite");
-    tx.objectStore("ind_steps").put({ date: arg.DZ, value: 0, ratio: 0, computed_at: new Date(Date.now() - 86400e3).toISOString() });
-    if (arg.clearFlag) tx.objectStore("app_flags").delete("ind_steps_unentered_backfilled_v1");
-    tx.oncomplete = res;
-  });
-  db.close();
-}, { DZ, clearFlag });
-await plantPoisonedStepDay(A, true);  // на A ремонт прогонится заново при запуске
-await plantPoisonedStepDay(B, false); // на B строка ждёт удаления из журнала
-await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
-check("шаги: ремонт удалил 0-день без записи локально", !(await storeRow(A, "ind_steps", DZ)));
-let stepGoneB = false;
-for (let i = 0; i < 4 && !stepGoneB; i++) {
-  await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
-  stepGoneB = !(await storeRow(B, "ind_steps", DZ));
-}
-check("шаги: удаление отравленного дня доехало до B", stepGoneB);
-
 // ── Настоящее UI-удаление сегодняшней записи на A → исчезает на B ──
 await A.goto(FE + "/diary", { waitUntil: "domcontentloaded" });
 await A.waitForTimeout(4000);

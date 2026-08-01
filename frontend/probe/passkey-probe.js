@@ -22,6 +22,11 @@ add("Android в UA", isAndroid ? "да" : "нет", isAndroid);
 add("Домен страницы", location.hostname);
 add("PublicKeyCredential есть", hasPKC ? "да" : "нет", hasPKC);
 
+const hasCreds = !!navigator.credentials;
+const hasCreate = !!(navigator.credentials && typeof navigator.credentials.create === "function");
+add("navigator.credentials есть", hasCreds ? "да" : "нет", hasCreds);
+add("credentials.create — функция", hasCreate ? "да" : "нет", hasCreate);
+
 (async () => {
   let uv = false;
   if (hasPKC) {
@@ -35,8 +40,14 @@ add("PublicKeyCredential есть", hasPKC ? "да" : "нет", hasPKC);
       add("Автозаполнение ключом (conditional)", String(cm), cm === true);
     } catch (e) { add("conditional", "ошибка: " + e.name, false); }
   }
-  add("Приложение сочло бы ключ недоступным",
-      (isAndroid && !uv) ? "да — покажет вход по коду" : "нет — предложит ключ");
+  // Два правила рядом: старое (только IUVPAA) и новое (плюс наличие самого
+  // вызова create) — чтобы видеть, что именно меняется в этом браузере.
+  add("СТАРОЕ правило (по IUVPAA)",
+      (isAndroid && !uv) ? "ключ недоступен — вход по коду" : "ключ доступен — предложит ключ",
+      !(isAndroid && !uv));
+  add("НОВОЕ правило (+ credentials.create)",
+      (isAndroid && (!uv || !hasCreate)) ? "ключ недоступен — вход по коду" : "ключ доступен — предложит ключ",
+      !(isAndroid && (!uv || !hasCreate)));
 })();
 
 el("try").onclick = async () => {

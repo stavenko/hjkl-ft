@@ -39,6 +39,21 @@ pub enum CourseGoal {
 
 thread_local! {
     static CACHE: RefCell<Option<ProfileRow>> = const { RefCell::new(None) };
+    /// Bumped whenever the cached row CHANGES (a sync brought another device's
+    /// profile), so UI reading the synchronous getters re-renders.
+    static VERSION: RefCell<Option<leptos::RwSignal<u32>>> = const { RefCell::new(None) };
+}
+
+/// Create the root reactivity signal. Call once from `main()` BEFORE the first
+/// [`hydrate`] (which runs inside `db::init`).
+pub fn init() {
+    VERSION.with(|c| *c.borrow_mut() = Some(leptos::create_rw_signal(0u32)));
+}
+
+/// The signal UI subscribes to for profile changes (the getters below are
+/// synchronous cache reads and are NOT reactive on their own).
+pub fn version_signal() -> leptos::RwSignal<u32> {
+    VERSION.with(|c| c.borrow().expect("profile::init() must run first"))
 }
 
 fn local_storage() -> Option<web_sys::Storage> {
@@ -49,7 +64,22 @@ fn local_storage() -> Option<web_sys::Storage> {
 /// Called after the active database is switched (launch / login / pairing).
 pub async fn hydrate() {
     let row = db::get::<ProfileRow>("profile", PROFILE_KEY).await;
-    CACHE.with(|c| *c.borrow_mut() = row);
+    let changed = CACHE.with(|c| {
+        let mut cur = c.borrow_mut();
+        if *cur == row {
+            return false;
+        }
+        *cur = row;
+        true
+    });
+    // A profile arriving by SYNC must show at once: the persona screen and every
+    // profile-derived widget read the cache synchronously, so without this bump
+    // they keep the pre-sync state until the next launch.
+    if changed {
+        if let Some(sig) = VERSION.with(|c| *c.borrow()) {
+            leptos::SignalUpdate::update(&sig, |v| *v += 1);
+        }
+    }
 }
 
 /// Read the cached row (a clone), or a fresh empty row keyed "profile".

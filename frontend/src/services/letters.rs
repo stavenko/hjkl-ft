@@ -45,6 +45,12 @@ pub fn version_signal() -> RwSignal<u32> {
     VERSION.with(|c| c.borrow().expect("letters::init() must run first"))
 }
 
+/// Re-render the inbox after SYNC replaced the letters blob: [`all`] reads the
+/// (already refreshed) app_flags cache, but nothing tells the widget to re-read.
+pub fn refresh() {
+    bump();
+}
+
 /// Record that the calorie planka was (re)computed today — restarts the weekly
 /// clock. Called from [`crate::services::local::set_calorie_goal`], so EVERY planka
 /// change resets the anchor: the manual «Пересчитать» button (e.g. after a course-

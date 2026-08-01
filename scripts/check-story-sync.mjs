@@ -150,10 +150,62 @@ for (let i = 0; i < 20 && !liveOk; i++) {
 check("B: данные прогресса доехали в базу", flagArrived);
 check("B: кольцо БЕЗ перезапуска показывает просмотренную историю", liveOk);
 
+// ── Письма: содержимое и статус должны появляться без перезапуска ──
+// A кладёт письмо (синкаемый app_flags-блоб) и пушит; B — та же живая сессия.
+const letterId = `L-${Date.now()}`;
+const letterBody = `Тестовое письмо ${Date.now() % 100000}`;
+await A.evaluate(({ uid, id, body }) => new Promise((res) => {
+  const q = indexedDB.open(`hjkl-ft-${uid}`);
+  q.onsuccess = () => {
+    const db = q.result;
+    const tx = db.transaction(["app_flags", "_outbox"], "readwrite");
+    const value = JSON.stringify([{ id, created_at: new Date().toISOString(), body, read: false }]);
+    tx.objectStore("app_flags").put({ key: "letters_v1", value, updated_at: new Date().toISOString() });
+    tx.objectStore("_outbox").put({ seq: String(Date.now() * 1000 + 7).padStart(20, "0"), store: "app_flags", op: "upsert", id: "letters_v1", ts: Date.now() });
+    tx.oncomplete = () => { db.close(); res(true); };
+  };
+}), { uid, id: letterId, body: letterBody });
+await A.reload({ waitUntil: "domcontentloaded" });
+await A.waitForTimeout(9000);
+const hasDot = (page) => page.evaluate(() =>
+  !!document.querySelector('[data-testid="dash-mail-widget"] span[style*="e0304f"]'));
+let dotB = false;
+for (let i = 0; i < 12 && !dotB; i++) {
+  await B.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await B.waitForTimeout(4000);
+  dotB = await hasDot(B);
+}
+check("письма: красная точка появилась БЕЗ перезапуска", dotB);
+await B.locator('[data-testid="dash-mail-widget"]').click();
+await B.waitForTimeout(1200);
+const mailText = await B.locator("body").innerText();
+check("письма: содержимое письма показано", mailText.includes(letterBody), mailText.replace(/\s+/g, " ").slice(0, 90));
+
 // Контроль: после перезапуска состояние обязано быть верным в любом случае.
 await B.reload({ waitUntil: "domcontentloaded" });
 await B.waitForTimeout(9000);
 check("B: после перезапуска кольцо корректное", (await hasArc(B, "welcome")) === false);
+
+// ── Персона: заполнена на A, устройство C её ещё не видело ──
+// C стартует без профиля и с заблокированным синком → экран «Персона».
+// Синк приносит профиль → дашборд обязан открыться без перезапуска.
+const ctxC = await b.newContext({ viewport: { width: 430, height: 920 }, serviceWorkers: "block" });
+await ctxC.route(`${SYNC}/**`, (r) => r.abort());
+const C = await ctxC.newPage();
+C.on("console", (m) => { const t = m.text(); if (/panicked/.test(t)) console.log("[C]", t.slice(0, 200)); });
+await seed(C);
+await C.goto(FE, { waitUntil: "domcontentloaded" });
+await C.waitForTimeout(9000);
+const personaShown = (await C.locator("body").innerText()).includes("Год рождения");
+check("персона: до синка показан экран «Персона»", personaShown);
+await ctxC.unroute(`${SYNC}/**`);
+let dashC = false;
+for (let i = 0; i < 15 && !dashC; i++) {
+  await C.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await C.waitForTimeout(4000);
+  dashC = await C.locator('[data-testid="dash-mail-widget"]').isVisible().catch(() => false);
+}
+check("персона: пришла синком — дашборд открылся БЕЗ перезапуска", dashC);
 
 console.log(fail === 0 ? "\n=== ALL OK ===" : `\n=== FAILURES: ${fail} ===`);
 await b.close();

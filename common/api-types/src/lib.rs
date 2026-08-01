@@ -537,7 +537,7 @@ pub struct StepEntry {
 /// "profile") so it rides the same array-of-keyed-rows, LWW-by-`updated_at`
 /// machinery as the other synced stores. All fields `#[serde(default)]` so old clients and
 /// servers stay compatible.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProfileRow {
     pub key: String, // always "profile"
     #[serde(default)]

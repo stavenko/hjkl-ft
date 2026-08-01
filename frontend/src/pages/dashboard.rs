@@ -242,8 +242,12 @@ const EDITOR: &str = "display: flex; flex-direction: column; gap: 14px; min-heig
 pub fn DashboardPage() -> impl IntoView {
     // Profile reads are synchronous (cached); bump this to re-read after an edit.
     let bump = create_rw_signal(0u32);
+    // …and re-read when SYNC brings a profile from another device (the persona
+    // was filled there, so this device must leave the persona screen at once).
+    let profile_ver = profile::version_signal();
     let persona_complete = move || {
         bump.get();
+        profile_ver.get();
         profile::get_height_cm().is_some()
             && profile::get_birth_year().is_some()
             && profile::get_sex().is_some()

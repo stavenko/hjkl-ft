@@ -22,6 +22,8 @@ pub fn main() {
         // panics and network code has a base to read (empty until the background
         // fetch REPLACES it). The UI must not wait for the network or the config.
         services::config::load_or_default();
+        // Profile reactivity BEFORE db::init (which hydrates the profile cache).
+        services::profile::init();
 
         // Opening/upgrading IndexedDB is the one critical-path step that can BLOCK
         // (a schema upgrade held up by a not-yet-closed previous session on a PWA

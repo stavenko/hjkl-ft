@@ -1,27 +1,32 @@
 // Диагностика passkey: показывает ровно те сигналы, по которым приложение решает,
 // предлагать ключ или запасной вход по коду, плюс НАСТОЯЩУЮ попытку создания
 // (её ошибка — единственное, что говорит правду о браузере).
-// Ничего никуда не отправляет; созданный ключ (если создастся) не используется.
+// Ничего никуда не отправляет; созданный ключ не используется.
 const rows = [];
-const add = (k, v, good) => rows.push([k, v, good]);
+const add = (k, v, good) => { rows.push([k, v, good]); render(); };
 
-const ua = navigator.userAgent;
-add("User-Agent", ua);
-add("Android в UA", /Android/.test(ua) ? "да" : "нет", /Android/.test(ua));
-const hasPKC = typeof window.PublicKeyCredential !== "undefined";
-add("PublicKeyCredential есть", hasPKC ? "да" : "нет", hasPKC);
-
-const render = () => {
-  document.getElementById("t").innerHTML = rows.map(([k, v, good]) =>
+const el = (id) => document.getElementById(id);
+function render() {
+  el("t").innerHTML = rows.map(([k, v, good]) =>
     `<tr><td>${k}</td><td class="v ${good === true ? "yes" : good === false ? "no" : ""}">${String(v)}</td></tr>`
   ).join("");
-};
-render();
+  el("report").value = rows.map(([k, v]) => `${k}: ${v}`).join("\n")
+    + "\n\nПопытка создания: " + el("out").textContent.replace(/\n/g, " | ");
+}
+
+const ua = navigator.userAgent;
+const isAndroid = /Android/.test(ua);
+const hasPKC = typeof window.PublicKeyCredential !== "undefined";
+add("User-Agent", ua);
+add("Android в UA", isAndroid ? "да" : "нет", isAndroid);
+add("Домен страницы", location.hostname);
+add("PublicKeyCredential есть", hasPKC ? "да" : "нет", hasPKC);
 
 (async () => {
+  let uv = false;
   if (hasPKC) {
     try {
-      const uv = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      uv = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
       add("Платформенный аутентификатор (IUVPAA)", uv ? "доступен" : "нет", uv);
     } catch (e) { add("IUVPAA", "ошибка: " + e.name, false); }
     try {
@@ -29,16 +34,13 @@ render();
         ? await PublicKeyCredential.isConditionalMediationAvailable() : "метода нет";
       add("Автозаполнение ключом (conditional)", String(cm), cm === true);
     } catch (e) { add("conditional", "ошибка: " + e.name, false); }
-    add("Приложение сочло бы ключ недоступным",
-        (/Android/.test(ua) && !(await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(() => false)))
-          ? "да — покажет вход по коду" : "нет — предложит ключ");
   }
-  render();
+  add("Приложение сочло бы ключ недоступным",
+      (isAndroid && !uv) ? "да — покажет вход по коду" : "нет — предложит ключ");
 })();
 
-document.getElementById("try").onclick = async () => {
-  const out = document.getElementById("out");
-  out.textContent = "Пробуем…";
+el("try").onclick = async () => {
+  el("out").textContent = "Пробуем…"; render();
   const t0 = Date.now();
   try {
     const challenge = new Uint8Array(32); crypto.getRandomValues(challenge);
@@ -52,8 +54,14 @@ document.getElementById("try").onclick = async () => {
       timeout: 60000,
       attestation: "none",
     }});
-    out.textContent = `УСПЕХ за ${Date.now() - t0} мс\nтип: ${cred.type}\nid: ${cred.id.slice(0, 24)}…`;
+    el("out").textContent = `УСПЕХ за ${Date.now() - t0} мс\nтип: ${cred.type}\nid: ${cred.id.slice(0, 24)}…`;
   } catch (e) {
-    out.textContent = `ОТКАЗ за ${Date.now() - t0} мс\nname: ${e.name}\nmessage: ${e.message}`;
+    el("out").textContent = `ОТКАЗ за ${Date.now() - t0} мс\nname: ${e.name}\nmessage: ${e.message}`;
   }
+  render();
+};
+
+el("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText(el("report").value); el("copy").textContent = "Скопировано"; }
+  catch { el("report").select(); el("copy").textContent = "Выделено — скопируйте вручную"; }
 };

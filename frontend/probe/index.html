@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>re:Norma — проверка passkey</title>
+<style>
+  body { font: 16px/1.5 system-ui, -apple-system, sans-serif; margin: 0; padding: 20px 16px 40px;
+         background: #f1f4f9; color: #0e1630; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p.sub { margin: 0 0 16px; color: #5a6580; font-size: 14px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 12px; overflow: hidden; }
+  td { padding: 10px 12px; border-bottom: 1px solid #e6eaf2; vertical-align: top; word-break: break-word; font-size: 14px; }
+  td:first-child { color: #5a6580; width: 46%; }
+  .v { font-weight: 700; }
+  .yes { color: #1fa463; } .no { color: #e0304f; }
+  button { margin-top: 14px; width: 100%; padding: 14px; font-size: 16px; font-weight: 700;
+           border: none; border-radius: 12px; background: #0e1630; color: #fff; }
+  button.sec { background: #fff; color: #0e1630; border: 1px solid #cfd6e4; }
+  pre { white-space: pre-wrap; background: #fff; border-radius: 12px; padding: 12px; margin-top: 14px;
+        font-size: 13px; }
+  textarea { width: 100%; height: 150px; margin-top: 12px; border-radius: 12px; border: 1px solid #cfd6e4;
+             padding: 10px; font: 12px/1.4 ui-monospace, monospace; background: #fff; color: #0e1630; }
+</style>
+</head>
+<body>
+  <h1>Проверка passkey в этом браузере</h1>
+  <p class="sub">Страница ничего никуда не отправляет. Созданный ключ (если создастся) не используется.</p>
+  <table id="t"></table>
+  <button id="try">Попробовать создать ключ</button>
+  <pre id="out">Нажмите кнопку — здесь появится точная причина отказа.</pre>
+  <textarea id="report" readonly></textarea>
+  <button id="copy" class="sec">Скопировать отчёт</button>
+  <script src="/passkey-probe.js"></script>
+</body>
+</html>

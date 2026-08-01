@@ -65,21 +65,11 @@ fn key_field_for(store: &str) -> &'static str {
     }
 }
 
-/// Per-store acceptance rule for an upsert — the SAME rules v1 uses: ind_days
-/// is first-writer-wins by `computed_at`; everything else LWW by `updated_at`.
-fn accept_row(store: &str, incoming: &serde_json::Value, current: Option<&serde_json::Value>) -> bool {
-    match store {
-        "ind_days" => match current {
-            None => true,
-            Some(cur) => {
-                let inc = incoming.get("computed_at").and_then(|v| v.as_str()).unwrap_or("");
-                let cur_ts = cur.get("computed_at").and_then(|v| v.as_str()).unwrap_or("");
-                inc < cur_ts
-            }
-        },
-        _ => is_newer(incoming, current),
-    }
-}
+// v2 applies batch changes UNCONDITIONALLY, in journal order: a batch is only
+// accepted from a client whose base_version == last (compare-and-swap), i.e.
+// the pusher has already SEEN and MERGED every earlier batch — its changes ARE
+// the merge outcome. `updated_at` is informational; conflict resolution happens
+// client-side during the merge (by event time; ind_days keeps first-wins).
 
 /// Per-user data store: one instance per JWT `sub` (idFromName(sub)). Records merge
 /// last-writer-wins by their RFC3339 `updated_at`. Each collection is a JSON map
@@ -322,9 +312,7 @@ impl SyncDO {
                         console_error!("sync v2: upsert row without key field {kf}: {ch}");
                         continue;
                     };
-                    if accept_row(store, row, m.get(&key)) {
-                        m.insert(key, row.clone());
-                    }
+                    m.insert(key, row.clone());
                 }
                 Some("delete") => {
                     if let Some(id) = ch.get("id").and_then(|v| v.as_str()) {
@@ -360,13 +348,23 @@ impl SyncDO {
 
     async fn v2_push(&self, body: &serde_json::Value) -> Result<Response> {
         let base_version = body.get("base_version").and_then(|v| v.as_u64()).unwrap_or(0);
+        // Compare-and-swap on the VERSION: a client may only push what it built
+        // on top of the latest state. A stale base ⇒ reject; the client pulls
+        // the newer batches, merges, and retries. The DO is single-threaded, so
+        // this check + append are atomic — no version races.
+        let last: u64 = self.state.storage().get(V2_LAST).await?.unwrap_or(0);
+        if base_version != last {
+            return Response::from_json(
+                &serde_json::json!({ "version": last, "accepted": false }),
+            );
+        }
         let changes = body
             .get("changes")
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
         let version = self.v2_append_batch(base_version, changes).await?;
-        Response::from_json(&serde_json::json!({ "version": version }))
+        Response::from_json(&serde_json::json!({ "version": version, "accepted": true }))
     }
 
     /// Journal tail newer than the client's version, strictly ordered — or a

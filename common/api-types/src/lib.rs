@@ -675,6 +675,12 @@ pub struct SyncChange {
     /// Row key for a delete (the store's key: id / date / key).
     #[serde(default)]
     pub id: Option<String>,
+    /// EVENT time of the mutation (ms epoch, stamped by the device that made
+    /// it). Used ONLY for automatic conflict resolution during the client-side
+    /// merge (same-row edit/edit or edit/delete): the later event wins (ind_days
+    /// keeps first-computation-wins). `updated_at` on rows is informational.
+    #[serde(default)]
+    pub ts: u64,
 }
 
 /// A journaled batch: the version it produced and the version the pushing
@@ -693,9 +699,18 @@ pub struct SyncPushV2Request {
     pub changes: Vec<SyncChange>,
 }
 
+fn default_accepted() -> bool {
+    true
+}
+
+/// Push result. `accepted == false` ⇒ the batch was REJECTED because the client
+/// pushed from a stale base (`base_version != server last`): pull the newer
+/// batches, merge, and push again. Nothing is journaled on a rejection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncPushV2Response {
     pub version: u64,
+    #[serde(default = "default_accepted")]
+    pub accepted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

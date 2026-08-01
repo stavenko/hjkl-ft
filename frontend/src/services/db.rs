@@ -348,6 +348,10 @@ pub struct OutboxEntry {
     pub store: String,
     pub op: String,
     pub id: String,
+    /// EVENT time of the mutation (ms epoch) — the automatic conflict-resolution
+    /// key (later event wins; ind_days: earlier computation wins).
+    #[serde(default)]
+    pub ts: u64,
 }
 
 thread_local! {
@@ -403,6 +407,7 @@ async fn note_mutation(store: &str, op: &str, local_key: &str) {
         store: wire_store,
         op: op.to_string(),
         id: wire_id,
+        ts: js_sys::Date::now() as u64,
     };
     put_untracked("_outbox", &entry).await;
 }

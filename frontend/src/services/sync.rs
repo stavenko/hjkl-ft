@@ -117,28 +117,32 @@ async fn wire_row(store: &str, id: &str) -> Option<serde_json::Value> {
     Some(row)
 }
 
-// ── Push: drain the outbox as one ordered batch ──────────────────────────────
+// ── Push: drain the outbox as one ordered batch (CAS on the version) ─────────
 
-async fn push_v2() -> Result<(), String> {
+/// Push the outbox as one batch built on `base_version = client version`.
+/// Returns `Ok(true)` when the server ACCEPTED it (or there was nothing to
+/// send); `Ok(false)` when the base was stale — the caller must pull (merge the
+/// newer batches) and retry. The outbox is cleared ONLY on acceptance.
+async fn push_v2() -> Result<bool, String> {
     let base_version = client_version()
         .await
         .ok_or_else(|| "sync v2: push before bootstrap".to_string())?;
     // `_outbox` keys are zero-padded monotonic seqs → get_all returns mutation order.
     let entries: Vec<db::OutboxEntry> = db::list_all("_outbox").await;
     if entries.is_empty() {
-        return Ok(());
+        return Ok(true);
     }
 
     let mut changes = Vec::with_capacity(entries.len());
     for e in &entries {
         match e.op.as_str() {
             "delete" => changes.push(serde_json::json!({
-                "store": e.store, "op": "delete", "id": e.id,
+                "store": e.store, "op": "delete", "id": e.id, "ts": e.ts,
             })),
             _ => {
                 if let Some(row) = wire_row(&e.store, &e.id).await {
                     changes.push(serde_json::json!({
-                        "store": e.store, "op": "upsert", "row": row,
+                        "store": e.store, "op": "upsert", "row": row, "ts": e.ts,
                     }));
                 }
             }
@@ -149,44 +153,86 @@ async fn push_v2() -> Result<(), String> {
         let body =
             serde_json::json!({ "base_version": base_version, "changes": changes }).to_string();
         let resp: SyncPushV2Response = post_json("/sync/v2/push", &body).await?;
-        // Advance only when NOTHING landed between our version and our batch —
-        // otherwise the next pull must fetch the intervening batches (our own
-        // batch coming back with them is an idempotent no-op).
-        if resp.version == base_version + 1 {
-            set_client_version(resp.version).await;
+        if !resp.accepted {
+            // Someone pushed after our last pull: merge their batches first.
+            return Ok(false);
         }
+        set_client_version(resp.version).await;
     }
 
-    // Sent (or resolved-to-nothing) — clear the drained entries.
+    // Accepted (or resolved-to-nothing) — clear the drained entries.
     for e in &entries {
         db::delete("_outbox", &e.seq).await;
     }
     set_meta("last_push_at", &chrono::Utc::now().to_rfc3339()).await;
-    Ok(())
+    Ok(true)
 }
 
 // ── Pull: apply the journal tail (or a bootstrap snapshot) in order ──────────
+
+/// Pending local (unpushed) mutations per wire (store, id): the latest event
+/// time and every outbox seq touching that row. Consulted during the merge.
+type PendingMap = std::collections::HashMap<(String, String), (u64, Vec<String>)>;
+
+async fn pending_map() -> PendingMap {
+    let mut map: PendingMap = std::collections::HashMap::new();
+    for e in db::list_all::<db::OutboxEntry>("_outbox").await {
+        let entry = map
+            .entry((e.store.clone(), e.id.clone()))
+            .or_insert((0, Vec::new()));
+        entry.0 = entry.0.max(e.ts);
+        entry.1.push(e.seq);
+    }
+    map
+}
+
+/// Automatic conflict resolution for a row touched BOTH remotely and by a
+/// pending local mutation, by EVENT TIME: the later event wins (covers the two
+/// real cases — a grams edit on the same diary entry on two devices, and an
+/// edit vs a deletion of the same entry). `ind_days` keeps first-computation-
+/// wins, so there the EARLIER event wins. Ties keep the local change.
+fn local_wins(store: &str, local_ts: u64, remote_ts: u64) -> bool {
+    match store {
+        "ind_days" => local_ts <= remote_ts,
+        _ => local_ts >= remote_ts,
+    }
+}
 
 #[derive(Default)]
 struct ApplyCtx {
     flags_touched: bool,
     profile_touched: bool,
+    pending: PendingMap,
 }
 
-/// Upsert a wire row into a local store; returns true when it actually wrote.
-/// Applies the SAME acceptance rule the server's materialization uses (LWW by
-/// `updated_at`) — journal batches may carry rows the server itself rejected
-/// (stale pushes, our own echo), and blind application would diverge from the
-/// server state. Equal-or-older rows are skipped, which also makes idle syncs
-/// write nothing.
-async fn upsert_row(local_store: &str, key: &str, row: &serde_json::Value) -> bool {
-    let existing: Option<serde_json::Value> = db::get(local_store, key).await;
-    if let Some(cur) = &existing {
-        let inc = row.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
-        let cur_ts = cur.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
-        if inc <= cur_ts {
+impl ApplyCtx {
+    /// Merge gate for one incoming change: true ⇒ apply it (dropping the losing
+    /// local pending ops), false ⇒ the local pending change wins, skip it.
+    async fn remote_wins(&mut self, store: &str, id: &str, remote_ts: u64) -> bool {
+        let key = (store.to_string(), id.to_string());
+        let Some((local_ts, seqs)) = self.pending.get(&key).cloned() else {
+            return true; // no local pending change → nothing to merge
+        };
+        if local_wins(store, local_ts, remote_ts) {
             return false;
         }
+        // Remote wins: the losing local ops must not be pushed later.
+        for seq in &seqs {
+            db::delete("_outbox", seq).await;
+        }
+        self.pending.remove(&key);
+        true
+    }
+}
+
+/// Upsert a wire row into a local store; identical rows are skipped so idle
+/// syncs never touch IndexedDB / the UI's version signals. Batches are applied
+/// in journal order — the order IS the truth (the server applied them the same
+/// way); per-row conflicts were already resolved by the merge gate.
+async fn upsert_row(local_store: &str, key: &str, row: &serde_json::Value) -> bool {
+    let existing: Option<serde_json::Value> = db::get(local_store, key).await;
+    if existing.as_ref() == Some(row) {
+        return false;
     }
     db::put_json_untracked(local_store, row).await;
     true
@@ -244,7 +290,26 @@ async fn apply_delete(store: &str, id: &str, ctx: &mut ApplyCtx) {
     }
 }
 
+/// The wire id of an incoming change (for upserts — extracted from the row).
+fn change_id(ch: &SyncChange) -> Option<String> {
+    if let Some(id) = &ch.id {
+        return Some(id.clone());
+    }
+    let row = ch.row.as_ref()?;
+    match ch.store.as_str() {
+        "profile" | "app_flags" => row.get("key").and_then(|v| v.as_str()).map(String::from),
+        _ => row.get("id").and_then(|v| v.as_str()).map(String::from),
+    }
+}
+
 async fn apply_change(ch: &SyncChange, ctx: &mut ApplyCtx) {
+    // Merge gate: a row also touched by a pending LOCAL mutation resolves by
+    // event time before anything is applied.
+    if let Some(id) = change_id(ch) {
+        if !ctx.remote_wins(&ch.store, &id, ch.ts).await {
+            return;
+        }
+    }
     match ch.op.as_str() {
         "upsert" => match &ch.row {
             Some(row) => apply_upsert(&ch.store, row, ctx).await,
@@ -276,7 +341,10 @@ async fn pull_v2() -> Result<(), String> {
     let body = serde_json::json!({ "since_version": since }).to_string();
     let resp: SyncPullV2Response = post_json("/sync/v2/pull", &body).await?;
 
-    let mut ctx = ApplyCtx::default();
+    let mut ctx = ApplyCtx {
+        pending: pending_map().await,
+        ..Default::default()
+    };
     if let Some(snapshot) = &resp.snapshot {
         apply_snapshot(snapshot, &mut ctx).await;
     } else {
@@ -346,22 +414,30 @@ async fn ensure_bootstrapped() -> Result<(), String> {
 
 // ── Public entry points (same names as v1) ───────────────────────────────────
 
-/// Reconcile with the server: push local changes, then pull others' changes.
-pub async fn sync_now() -> Result<(), String> {
+/// One full reconcile: pull (merging newer batches with pending local changes),
+/// then push from the fresh base. A CAS rejection (someone pushed in between)
+/// loops back through pull; bounded retries fail loudly.
+async fn sync_cycle() -> Result<(), String> {
     ensure_bootstrapped().await?;
-    push_v2().await?;
-    pull_v2().await
+    pull_v2().await?;
+    for _ in 0..4 {
+        if push_v2().await? {
+            return Ok(());
+        }
+        pull_v2().await?;
+    }
+    Err("sync v2: push kept conflicting after retries".to_string())
 }
 
-/// Fire-and-forget push after a local mutation. Logs (does not hide) failures.
+/// Reconcile with the server (launch / foreground / login).
+pub async fn sync_now() -> Result<(), String> {
+    sync_cycle().await
+}
+
+/// Fire-and-forget sync after a local mutation. Logs (does not hide) failures.
 pub fn push_background() {
     leptos::spawn_local(async {
-        let res = async {
-            ensure_bootstrapped().await?;
-            push_v2().await
-        }
-        .await;
-        if let Err(e) = res {
+        if let Err(e) = sync_cycle().await {
             leptos::logging::warn!("Background sync push failed: {e}");
         }
     });

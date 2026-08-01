@@ -57,6 +57,7 @@ check("A bootstrap: снапшот применён (дневник не пус�
 // добавим еду+запись за СЕГОДНЯ прямым put в IndexedDB и продублируем это в outbox,
 // имитируя tracked-путь (сам трекинг проверяется ниже настоящим UI-удалением).
 const fid = `v2f-${Date.now()}`, eid = `v2e-${Date.now()}`;
+const fidGlobal = fid;
 const foodName = `V2 еда ${Date.now() % 100000}`;
 await idb(A, async ({ uid, arg }) => {
   const db = await new Promise((res, rej) => { const q = indexedDB.open(`hjkl-ft-${uid}`); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
@@ -68,8 +69,8 @@ await idb(A, async ({ uid, arg }) => {
     tx.objectStore("diary").put({ id: arg.eid, food_id: arg.fid, date: today, time: "13:00", grams: 200, waste_grams: 0, meal_label: "lunch", deleted: false, created_at: nowIso, updated_at: nowIso });
     const base = Date.now() * 1000;
     window.__seqs = [String(base).padStart(20, "0"), String(base + 1).padStart(20, "0")];
-    tx.objectStore("_outbox").put({ seq: window.__seqs[0], store: "foods", op: "upsert", id: arg.fid });
-    tx.objectStore("_outbox").put({ seq: window.__seqs[1], store: "diary", op: "upsert", id: arg.eid });
+    tx.objectStore("_outbox").put({ seq: window.__seqs[0], store: "foods", op: "upsert", id: arg.fid, ts: Date.now() });
+    tx.objectStore("_outbox").put({ seq: window.__seqs[1], store: "diary", op: "upsert", id: arg.eid, ts: Date.now() });
     tx.oncomplete = res;
   });
   db.close();
@@ -100,22 +101,23 @@ const verB0 = await getVersion(B);
 check("B: версия консистентна с A", verB0 >= verA1, `B=${verB0} A=${verA1}`);
 
 // ── Одновременные изменения на A и B (разные строки одного стора) ──
-const plantFlag = (page, key, value, ts) => idb(page, async ({ uid, arg }) => {
+const plantFlag = (page, key, value, tsMs) => idb(page, async ({ uid, arg }) => {
   const db = await new Promise((res, rej) => { const q = indexedDB.open(`hjkl-ft-${uid}`); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
   await new Promise((res) => {
     const tx = db.transaction(["app_flags", "_outbox"], "readwrite");
-    tx.objectStore("app_flags").put({ key: arg.key, value: arg.value, updated_at: arg.ts });
-    tx.objectStore("_outbox").put({ seq: String(Date.now() * 1000 + Math.floor(Math.random() * 900)).padStart(20, "0"), store: "app_flags", op: "upsert", id: arg.key });
+    tx.objectStore("app_flags").put({ key: arg.key, value: arg.value, updated_at: new Date(arg.tsMs).toISOString() });
+    tx.objectStore("_outbox").put({ seq: String(Date.now() * 1000 + Math.floor(Math.random() * 900)).padStart(20, "0"), store: "app_flags", op: "upsert", id: arg.key, ts: arg.tsMs });
     tx.oncomplete = res;
   });
   db.close();
-}, { key, value, ts });
-await plantFlag(A, "v2_test_a", "from-A", now());
-await plantFlag(B, "v2_test_b", "from-B", now());
-// конфликт по одной строке: B пишет ПОЗЖЕ → должен победить на обоих
+}, { key, value, tsMs });
+await plantFlag(A, "v2_test_a", "from-A", Date.now());
+await plantFlag(B, "v2_test_b", "from-B", Date.now());
+// конфликт по одной строке: СОБЫТИЕ B позже → B побеждает на обоих (ts события,
+// а не updated_at — тот теперь информативный)
 const conflictKey = `v2_conflict_${Date.now()}`;
-await plantFlag(A, conflictKey, "A-early", new Date(Date.now() - 3600e3).toISOString());
-await plantFlag(B, conflictKey, "B-late", new Date().toISOString());
+await plantFlag(A, conflictKey, "A-early", Date.now() - 3600e3);
+await plantFlag(B, conflictKey, "B-late", Date.now());
 await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
 await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
 let conflSettled = false;
@@ -164,6 +166,67 @@ for (let i = 0; i < 4 && !deletedOnB; i++) {
   deletedOnB = !(await storeRow(B, "diary", eid));
 }
 check("B: удаление доехало (записи нет)", deletedOnB);
+
+// ── Конфликт «вес одной записи» и «удаление против правки» ──
+const editEntry = (page, id, grams, tsMs, op = "upsert") => idb(page, async ({ uid, arg }) => {
+  const db = await new Promise((res, rej) => { const q = indexedDB.open(`hjkl-ft-${uid}`); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+  await new Promise((res) => {
+    const tx = db.transaction(["diary", "_outbox"], "readwrite");
+    if (arg.op === "upsert") {
+      const st = tx.objectStore("diary");
+      const rq = st.get(arg.id);
+      rq.onsuccess = () => { const r = rq.result; if (r) { r.grams = arg.grams; r.updated_at = new Date().toISOString(); st.put(r); } };
+    } else {
+      tx.objectStore("diary").delete(arg.id);
+    }
+    tx.objectStore("_outbox").put({ seq: String(Date.now() * 1000 + Math.floor(Math.random() * 900)).padStart(20, "0"), store: "diary", op: arg.op, id: arg.id, ts: arg.tsMs });
+    tx.oncomplete = res;
+  });
+  db.close();
+}, { id, grams, tsMs, op });
+// Общая запись уже есть на обоих: используем вторую посаженную пару.
+const gid = `v2ge-${Date.now()}`;
+await idb(A, async ({ uid, arg }) => {
+  const db = await new Promise((res, rej) => { const q = indexedDB.open(`hjkl-ft-${uid}`); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+  const today = new Date(Date.now() - 4 * 3600e3).toLocaleDateString('sv');
+  const nowIso = new Date().toISOString();
+  await new Promise((res) => {
+    const tx = db.transaction(["diary", "_outbox"], "readwrite");
+    tx.objectStore("diary").put({ id: arg.gid, food_id: arg.fid, date: today, time: "14:00", grams: 100, waste_grams: 0, meal_label: "lunch", deleted: false, created_at: nowIso, updated_at: nowIso });
+    tx.objectStore("_outbox").put({ seq: String(Date.now() * 1000 + 990).padStart(20, "0"), store: "diary", op: "upsert", id: arg.gid, ts: Date.now() });
+    tx.oncomplete = res;
+  });
+  db.close();
+}, { gid, fid: fidGlobal });
+await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000); // push
+await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000); // получил
+check("grams: базовая запись доехала до B", !!(await storeRow(B, "diary", gid)));
+// A правит 150 (раньше), B правит 200 (позже) → 200 на обоих
+await editEntry(A, gid, 150, Date.now() - 60000);
+await editEntry(B, gid, 200, Date.now());
+await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
+await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
+let gramsOk = false;
+for (let i = 0; i < 4 && !gramsOk; i++) {
+  await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
+  const ra = await storeRow(A, "diary", gid);
+  const rb = await storeRow(B, "diary", gid);
+  gramsOk = ra?.grams === 200 && rb?.grams === 200;
+  if (!gramsOk) { await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000); }
+}
+check("grams-конфликт: поздняя правка (200) победила на обоих", gramsOk);
+// удаление против правки: B правит 300 (раньше), A удаляет (позже) → удалена на обоих
+await editEntry(B, gid, 300, Date.now() - 60000);
+await editEntry(A, gid, 0, Date.now(), "delete");
+await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
+await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
+let delOk = false;
+for (let i = 0; i < 4 && !delOk; i++) {
+  await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
+  delOk = !(await storeRow(A, "diary", gid)) && !(await storeRow(B, "diary", gid));
+  if (!delOk) { await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000); }
+}
+check("удаление-vs-правка: позднее удаление победило на обоих", delOk);
 
 // ── Холостой синк: объём частичный, ноль записей в IndexedDB ──
 let pullResp = null, pushBodies = [];

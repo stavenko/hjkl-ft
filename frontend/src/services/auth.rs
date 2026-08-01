@@ -134,6 +134,21 @@ pub async fn passkey_unavailable() -> bool {
         Ok(v) if !v.is_undefined() && !v.is_null() => v,
         _ => return true, // no PublicKeyCredential → passkey is impossible
     };
+    // …and can we actually CREATE one? Yandex Browser (26.6, Android 15) exposes
+    // `PublicKeyCredential` — its IUVPAA even answers `true` — while omitting
+    // `navigator.credentials` entirely, so `credentials.create` throws a
+    // TypeError the moment it's touched. The capability answer that matters is
+    // the presence of the call itself, not the interface object.
+    let creds = js_sys::Reflect::get(win.navigator().as_ref(), &JsValue::from_str("credentials"));
+    let create_fn = match creds {
+        Ok(c) if !c.is_undefined() && !c.is_null() => {
+            js_sys::Reflect::get(&c, &JsValue::from_str("create")).ok()
+        }
+        _ => None,
+    };
+    if !matches!(create_fn, Some(ref f) if f.is_function()) {
+        return true; // no navigator.credentials.create → passkey is impossible
+    }
     // Platform authenticator available? (isUserVerifyingPlatformAuthenticatorAvailable)
     let f = match js_sys::Reflect::get(
         &pkc,

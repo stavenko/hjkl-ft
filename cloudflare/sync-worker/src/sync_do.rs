@@ -141,44 +141,22 @@ impl SyncDO {
     }
 
     async fn push(&self, payload: &serde_json::Value) -> Result<()> {
-        // v1→v2 bridge: every row/deletion a v1 client gets ACCEPTED here is also
-        // journaled as a v2 batch, so v2 clients receive old-client changes during
-        // the transition. Re-applying the batch to the maps in v2_append_batch is
-        // idempotent (equal rows lose LWW/FWW; repeated deletes are no-ops).
-        let mut bridge: Vec<serde_json::Value> = Vec::new();
+        // Pure v1: LWW into the materialized maps only. The v2 journal is fed
+        // EXCLUSIVELY by v2 clients (migration + /sync/v2/push) — v1 and v2
+        // worlds meet only through a device's one-time migration.
         for name in ID_COLLECTIONS {
             let incoming = match payload.get(name).and_then(|v| v.as_array()) {
                 Some(arr) if !arr.is_empty() => arr,
                 _ => continue,
             };
-            let client_store = if name == "diary_entries" { "diary" } else { name };
             let mut m = self.map(name).await?;
             for row in incoming {
                 let id = match row.get("id").and_then(|v| v.as_str()) {
                     Some(id) => id.to_string(),
                     None => continue,
                 };
-                let cur = m.get(&id);
-                let accepted = is_newer(row, cur);
-                if accepted {
+                if is_newer(row, m.get(&id)) {
                     m.insert(id, row.clone());
-                    if name == "deletions" {
-                        // Translate a v1 deletion record into a v2 delete op (the
-                        // record itself also stays in the log for v1 peers).
-                        let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-                        let target = row.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
-                        if collection_for(kind).is_some() && !target.is_empty() {
-                            bridge.push(serde_json::json!({
-                                "store": kind, "op": "delete", "id": target,
-                            }));
-                        } else if !kind.is_empty() {
-                            console_error!("sync v1 bridge: deletion with unknown kind {kind:?}");
-                        }
-                    } else {
-                        bridge.push(serde_json::json!({
-                            "store": client_store, "op": "upsert", "row": row,
-                        }));
-                    }
                 }
             }
             self.put_map(name, &m).await?;
@@ -212,7 +190,6 @@ impl SyncDO {
                     };
                     if is_newer(row, m.get(&key)) {
                         m.insert(key, row.clone());
-                        bridge.push(serde_json::json!({ "store": "profile", "op": "upsert", "row": row }));
                     }
                 }
                 self.put_map("profile", &m).await?;
@@ -232,7 +209,6 @@ impl SyncDO {
                     };
                     if is_newer(row, m.get(&key)) {
                         m.insert(key, row.clone());
-                        bridge.push(serde_json::json!({ "store": "app_flags", "op": "upsert", "row": row }));
                     }
                 }
                 self.put_map("app_flags", &m).await?;
@@ -263,25 +239,20 @@ impl SyncDO {
                     };
                     if accept {
                         m.insert(key, row.clone());
-                        bridge.push(serde_json::json!({ "store": "ind_days", "op": "upsert", "row": row }));
                     }
                 }
                 self.put_map("ind_days", &m).await?;
             }
         }
 
-        // Journal everything this v1 push actually changed (no-op when nothing did).
-        self.v2_append_batch(0, bridge).await?;
-
         Ok(())
     }
 
     // ── v2 handlers ──────────────────────────────────────────────────────────
 
-    /// Apply `changes` to the materialized maps (per-store acceptance rules) and
-    /// append them to the journal as ONE batch. Returns the resulting version
-    /// (unchanged when `changes` is empty). Shared by /sync/v2/push and the v1
-    /// bridge — double application is idempotent by construction.
+    /// Apply `changes` to the materialized maps and append them to the journal
+    /// as ONE batch. Returns the resulting version (unchanged when `changes` is
+    /// empty). The maps stay current so v1 devices (dump) keep seeing v2 writes.
     async fn v2_append_batch(
         &self,
         base_version: u64,

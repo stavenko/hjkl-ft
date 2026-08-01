@@ -299,8 +299,14 @@ await idb(A, async ({ uid, arg }) => {
   db.close();
 }, { gid, fid: fidGlobal });
 await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000); // push
-await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000); // получил
-check("grams: базовая запись доехала до B", !!(await storeRow(B, "diary", gid)));
+// Поллим доставку: правки ниже осмысленны только когда строка уже на B.
+let baseOnB = false;
+for (let i = 0; i < 5 && !baseOnB; i++) {
+  await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
+  baseOnB = !!(await storeRow(B, "diary", gid));
+  if (!baseOnB) { await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000); }
+}
+check("grams: базовая запись доехала до B", baseOnB);
 // A правит 150 (раньше), B правит 200 (позже) → 200 на обоих
 await editEntry(A, gid, 150, Date.now() - 60000);
 await editEntry(B, gid, 200, Date.now());

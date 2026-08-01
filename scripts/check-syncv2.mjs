@@ -234,6 +234,72 @@ const conflB = await storeRow(B, "app_flags", conflictKey);
 check("merge: конфликт — поздний победил на A", conflA?.value === "B-late", String(conflA?.value));
 check("merge: конфликт — поздний победил на B", conflB?.value === "B-late", String(conflB?.value));
 
+// ── Индикаторы: перенос замороженного дня + «раннее вычисление побеждает» ──
+const plantInd = (page, store, date, value, computedAtIso, tsMs) => idb(page, async ({ uid, arg }) => {
+  const db = await new Promise((res, rej) => { const q = indexedDB.open(`hjkl-ft-${uid}`); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+  const wireInd = { ind_protein: "protein", ind_veg_fruit: "veg_fruit", ind_steps: "steps", ind_calories: "calories" }[arg.store];
+  await new Promise((res) => {
+    const tx = db.transaction([arg.store, "_outbox"], "readwrite");
+    tx.objectStore(arg.store).put({ date: arg.date, value: arg.value, ratio: 1.0, computed_at: arg.computedAtIso });
+    tx.objectStore("_outbox").put({ seq: String(Date.now() * 1000 + Math.floor(Math.random() * 900)).padStart(20, "0"), store: "ind_days", op: "upsert", id: `${wireInd}:${arg.date}`, ts: arg.tsMs });
+    tx.oncomplete = res;
+  });
+  db.close();
+}, { store, date, value, computedAtIso, tsMs });
+// Даты за пределами окна автозаморозки, чтобы приложение их не пересчитало.
+const DP = dayStr(20), DI = dayStr(21);
+await plantInd(A, "ind_protein", DP, 77, new Date().toISOString(), Date.now());
+// Конфликт по одному дню калорий: A посчитал РАНЬШЕ (2500), B позже (9999) →
+// для ind_days побеждает раннее вычисление — 2500 на обоих.
+await plantInd(A, "ind_calories", DI, 2500, new Date(Date.now() - 7200e3).toISOString(), Date.now() - 7200e3);
+await plantInd(B, "ind_calories", DI, 9999, new Date().toISOString(), Date.now());
+await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
+await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
+let indTransfer = false, indConfl = false;
+for (let i = 0; i < 4 && !(indTransfer && indConfl); i++) {
+  const bp = await storeRow(B, "ind_protein", DP);
+  const ca = await storeRow(A, "ind_calories", DI);
+  const cb = await storeRow(B, "ind_calories", DI);
+  indTransfer = bp?.value === 77;
+  indConfl = ca?.value === 2500 && cb?.value === 2500;
+  if (!(indTransfer && indConfl)) {
+    await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
+    await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
+  }
+}
+check("индикаторы: замороженный день доехал до B", indTransfer);
+const indA = await storeRow(A, "ind_calories", DI), indB = await storeRow(B, "ind_calories", DI);
+check("индикаторы: конфликт — раннее вычисление победило на обоих", indConfl, `A=${indA?.value} B=${indB?.value}`);
+
+// ── Прогресс историй (app_flags: story_viewed / welcome_shown) ──
+await plantFlag(A, "story_viewed", JSON.stringify(["h1", "h2"]), Date.now());
+await plantFlag(A, "welcome_shown", "true", Date.now());
+await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
+let storyOnB = false, welcomeOnB = false;
+for (let i = 0; i < 4 && !(storyOnB && welcomeOnB); i++) {
+  await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
+  const sv = await storeRow(B, "app_flags", "story_viewed");
+  const ws = await storeRow(B, "app_flags", "welcome_shown");
+  const hashes = sv ? JSON.parse(sv.value) : [];
+  storyOnB = hashes.includes("h1") && hashes.includes("h2");
+  welcomeOnB = ws?.value === "true";
+}
+check("истории: прогресс просмотра доехал до B", storyOnB);
+check("истории: welcome_shown доехал до B", welcomeOnB);
+// B досматривает ещё кадр (позже) → дополненный набор возвращается на A.
+const svB = await storeRow(B, "app_flags", "story_viewed");
+const augmented = [...new Set([...(svB ? JSON.parse(svB.value) : []), "h3"])];
+await plantFlag(B, "story_viewed", JSON.stringify(augmented), Date.now());
+await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
+let storyBack = false;
+for (let i = 0; i < 4 && !storyBack; i++) {
+  await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
+  const sv = await storeRow(A, "app_flags", "story_viewed");
+  const hashes = sv ? JSON.parse(sv.value) : [];
+  storyBack = hashes.includes("h1") && hashes.includes("h3");
+}
+check("истории: дополненный прогресс вернулся на A", storyBack);
+
 // ── Настоящее UI-удаление сегодняшней записи на A → исчезает на B ──
 await A.goto(FE + "/diary", { waitUntil: "domcontentloaded" });
 await A.waitForTimeout(4000);

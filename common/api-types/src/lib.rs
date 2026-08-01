@@ -611,55 +611,14 @@ pub struct IndDayRow {
     pub computed_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncDumpResponse {
-    pub foods: Vec<Food>,
-    pub diary_entries: Vec<DiaryEntry>,
-    pub recipes: Vec<Recipe>,
-    pub recipe_ingredients: Vec<RecipeIngredient>,
-    pub goals: Vec<Goal>,
-    #[serde(default)]
-    pub profile: Vec<ProfileRow>,
-    #[serde(default)]
-    pub weight_entries: Vec<WeightEntry>,
-    #[serde(default)]
-    pub step_entries: Vec<StepEntry>,
-    #[serde(default)]
-    pub app_flags: Vec<AppFlagRow>,
-    #[serde(default)]
-    pub ind_days: Vec<IndDayRow>,
-    #[serde(default)]
-    pub deletions: Vec<DeletionRecord>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncPushPayload {
-    pub foods: Vec<Food>,
-    pub diary_entries: Vec<DiaryEntry>,
-    pub recipes: Vec<Recipe>,
-    pub recipe_ingredients: Vec<RecipeIngredient>,
-    pub goals: Vec<Goal>,
-    #[serde(default)]
-    pub profile: Vec<ProfileRow>,
-    #[serde(default)]
-    pub weight_entries: Vec<WeightEntry>,
-    #[serde(default)]
-    pub step_entries: Vec<StepEntry>,
-    #[serde(default)]
-    pub app_flags: Vec<AppFlagRow>,
-    #[serde(default)]
-    pub ind_days: Vec<IndDayRow>,
-    #[serde(default)]
-    pub deletions: Vec<DeletionRecord>,
-}
-
 // ── Sync v2: incremental, journaled batches ─────────────────────────────────
 // The CLIENT forms the change list (outbox of local mutations). A sync pushes
 // them as ONE batch carrying the client's base version; the server appends the
-// batch to a journal under `version = last + 1` and applies it to the
-// materialized state. A pull fetches only the journal tail newer than the
-// client's version, applied strictly in order. Full data travels exactly once —
-// to a zero client (snapshot).
+// batch to a journal under `version = last + 1` — dumb storage, nothing else.
+// A pull fetches only the journal tail newer than the client's version,
+// applied strictly in order. A store starts uninitialized (pull = 409) until
+// the first device migrates its local data in and confirms the batch count
+// (/sync/v2/init); a later device without a version adopts the journal.
 
 /// One journaled mutation. `store` is the client-side store name ("diary",
 /// "foods", "goals", "profile", "weight_entries", "step_entries", "recipes",
@@ -720,16 +679,11 @@ pub struct SyncPullV2Request {
 }
 
 /// Pull result: the ordered journal tail newer than `since_version`. The
-/// journal is the ONLY data source — it is complete from the account's genesis,
+/// journal is the ONLY data source — complete from the account's migration,
 /// so a zero client (since 0) simply replays it from the beginning.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncPullV2Response {
     pub version: u64,
     #[serde(default)]
     pub batches: Vec<SyncBatch>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SyncPushResponse {
-    pub conflicts: Option<SyncDumpResponse>,
 }

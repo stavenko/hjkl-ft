@@ -1,10 +1,9 @@
-// Cross-device data sync.
+// Cross-device data sync: a per-user journaled batch log (sync v2).
 //
 // Per-user data lives in a `SyncDO` (one instance per user id, `idFromName(sub)`)
-// so every device authenticating with the same account hits the same dataset.
-// Records merge last-writer-wins by their RFC3339 `updated_at`. Diary deletions are
-// soft: the client pushes a tombstone (`deleted: true`); the DO keeps the tombstone
-// so the deletion isn't resurrected by an older push, and `dump` omits it.
+// so every device authenticating with the same account hits the same journal.
+// The server is dumb storage — the client forms and merges all changes; see
+// sync_do.rs for the protocol (push/pull/init).
 //
 // Wire format is JSON. Auth is HS256 JWT, `sub` = user id, shared `JWT_SECRET`.
 
@@ -143,7 +142,7 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
     if method != Method::Post
         || !matches!(
             path.as_str(),
-            "/sync/dump" | "/sync/push" | "/sync/v2/push" | "/sync/v2/pull" | "/sync/v2/init"
+            "/sync/v2/push" | "/sync/v2/pull" | "/sync/v2/init"
         )
     {
         return error_response("Not found", 404);

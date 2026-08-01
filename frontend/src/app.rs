@@ -148,6 +148,21 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
+        // Blocking migration page: while the one-time sync v2 migration uploads
+        // day-batches, the app is not usable (local mutations would race the
+        // upload) — cover everything and show the batch progress.
+        {move || crate::services::sync::migration_progress().get().map(|(done, total): (u32, u32)| view! {
+            <div attr:data-testid="migration-overlay" style="position: fixed; inset: 0; z-index: 110; background: var(--bulma-scheme-main); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center;">
+                <div style="max-width: 24rem; width: 100%;">
+                    <img src="/icon-192.png" alt="re:Norma" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
+                    <h1 class="title is-5" style="margin-bottom: 0.5rem;">"Делаем миграцию данных"</h1>
+                    <p class="has-text-grey mb-4">"Не закрывайте приложение — это займёт немного времени."</p>
+                    <progress class="progress is-primary" value=done.to_string() max=total.max(1).to_string()></progress>
+                    <p class="has-text-grey is-size-7">{format!("{done} из {total}")}</p>
+                </div>
+            </div>
+        })}
+
         // Overlays
         {move || match state.get() {
             AppState::PwaPrompt => Some(view! {

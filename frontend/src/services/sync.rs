@@ -18,6 +18,7 @@
 //! disturbs the UI's version signals.
 
 use api_types::*;
+use leptos::SignalSet;
 use serde::de::DeserializeOwned;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -439,16 +440,54 @@ async fn migration_days() -> std::collections::BTreeMap<String, Vec<serde_json::
     days
 }
 
+// ── Migration progress (drives the blocking overlay in app.rs) ───────────────
+
+thread_local! {
+    static MIGRATION_SIG: std::cell::RefCell<Option<leptos::RwSignal<Option<(u32, u32)>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Create the migration-progress signal at the ROOT owner. Call once from
+/// `lib.rs` inside the Leptos runtime, before anything can sync — a lazily
+/// created signal would belong to (and die with) whatever scope touched it
+/// first.
+pub fn init() {
+    MIGRATION_SIG.with(|c| *c.borrow_mut() = Some(leptos::create_rw_signal(None)));
+}
+
+/// `(uploaded, total)` day-batches of an in-flight migration; `None` when no
+/// migration is running. The UI blocks on `Some` («Делаем миграцию данных»).
+pub fn migration_progress() -> leptos::RwSignal<Option<(u32, u32)>> {
+    MIGRATION_SIG.with(|c| (*c.borrow()).expect("sync::init() must run first"))
+}
+
 /// MIGRATION: this device's local database is the source of truth — upload it
 /// as sequential day-batches on top of `start_version`, then have the server
 /// verify the batch count and flip the store to initialized (/sync/v2/init).
 /// The outbox is left alone: pre-existing entries re-push rows the migration
 /// already carried (idempotent upserts), and entries born mid-migration keep
 /// their edits for the next regular push.
+///
+/// An INTERRUPTED migration (network loss, app killed) needs no special state:
+/// the client version is set only after a successful init, so the next launch
+/// simply STARTS THE MIGRATION ANEW on top of whatever the journal already
+/// holds (repeated day-batches are idempotent upserts on replay).
 async fn migrate_to_server(start_version: u64) -> Result<(), String> {
+    let progress = migration_progress();
+    let result = migrate_inner(start_version, progress).await;
+    progress.set(None);
+    result
+}
+
+async fn migrate_inner(
+    start_version: u64,
+    progress: leptos::RwSignal<Option<(u32, u32)>>,
+) -> Result<(), String> {
     let days = migration_days().await;
     let total = days.len() as u64;
+    progress.set(Some((0, total as u32)));
     let mut base = start_version;
+    let mut done: u32 = 0;
     for (day, changes) in &days {
         let body =
             serde_json::json!({ "base_version": base, "changes": changes }).to_string();
@@ -460,6 +499,8 @@ async fn migrate_to_server(start_version: u64) -> Result<(), String> {
             ));
         }
         base = resp.version;
+        done += 1;
+        progress.set(Some((done, total as u32)));
     }
     // Both sides must agree on the batch count: ours vs the server's version
     // growth here, and the server re-checks the absolute version in init.

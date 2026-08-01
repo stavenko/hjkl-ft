@@ -71,6 +71,7 @@ pub fn main() {
         services::errors::init(); // background-error log signal at the root
         services::stories::init(); // stories seen-set + tray-ring version signal
         services::letters::init(); // program-letters inbox version signal (mail widget)
+        services::sync::init(); // migration-progress signal at the root
 
         // The database is ready → drop the splash and show the UI IMMEDIATELY.
         // Everything below is background and MUST NOT block the first paint.

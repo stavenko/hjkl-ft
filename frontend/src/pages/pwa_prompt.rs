@@ -356,14 +356,21 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                     {steps}
                 </div>
 
-                <button
-                    attr:data-testid="pwa-btn-dismiss"
-                    class="button is-ghost has-text-grey"
-                    style="text-decoration: underline; font-size: 0.85rem;"
-                    on:click=dismiss
-                >
-                    {move || t("pwa.use_browser")}
-                </button>
+                // «Продолжить в браузере» есть только на десктопе. На телефоне
+                // приложение обязано стоять как PWA: браузерная вкладка на
+                // Android открывается системным браузером (у части людей это
+                // Яндекс, где приложение не работает), поэтому выхода из
+                // инструкции нет — ставим PWA.
+                {(!platform.starts_with("android") && !platform.starts_with("ios")).then(|| view! {
+                    <button
+                        attr:data-testid="pwa-btn-dismiss"
+                        class="button is-ghost has-text-grey"
+                        style="text-decoration: underline; font-size: 0.85rem;"
+                        on:click=dismiss
+                    >
+                        {move || t("pwa.use_browser")}
+                    </button>
+                })}
             </div>
         </div>
     }

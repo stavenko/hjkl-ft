@@ -41,6 +41,7 @@ async function open({ ua, path = "/", dismissed = false, shot = null }) {
       .every((i) => i.complete && i.naturalWidth > 0)).catch(() => false),
     // Ни кнопки «остаться», ни любого другого выхода на экране быть не должно.
     exits: await p.locator('[data-testid="pwa-yandex-screen"] button, [data-testid="pwa-yandex-screen"] a').count().catch(() => 0),
+    dismiss: await p.locator('[data-testid="pwa-btn-dismiss"]').count().catch(() => 0),
   };
   if (shot) await p.screenshot({ path: shot, fullPage: true });
   await ctx.close();
@@ -69,7 +70,13 @@ const onboard = await open({ ua: YA, path: "/onboard?u=probe-user" });
 check("Яндекс: показан и на странице онбординга из Telegram", onboard.visible);
 
 const chrome = await open({ ua: CHROME });
-check("Chrome на Android: экран НЕ показан", !chrome.visible, chrome.text.slice(0, 60));
+check("Chrome на Android: экран Яндекса НЕ показан", !chrome.visible, chrome.text.slice(0, 60));
+check("Chrome на Android: показана инструкция установки PWA",
+  chrome.fullText.includes("Нажмите на кебаб") && chrome.fullText.includes("подождите немного"));
+check("Chrome на Android: выхода «использовать в браузере» нет", chrome.dismiss === 0, `кнопок=${chrome.dismiss}`);
+
+const desktop = await open({ ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36" });
+check("Десктоп: выход в браузер сохранён", desktop.dismiss === 1, `кнопок=${desktop.dismiss}`);
 
 console.log(fail === 0 ? "\n=== ALL OK ===" : `\n=== FAILURES: ${fail} ===`);
 await b.close();

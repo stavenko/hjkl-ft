@@ -29,12 +29,31 @@ const drawSpark = ({ rects, frame }) => {
   const gap = 4;
   for (const rect of rects) {
     const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
-    const N = 22;
+    // Широкие цели (строка меню, кнопка диалога) излучают росчерки из периметра
+    // скруглённого прямоугольника, квадратные — радиально из центра.
+    const wide = rect.w > rect.h * 1.8;
+    const N = wide ? 34 : 22;
     for (let i = 0; i < N; i++) {
+      let sx, sy, dx, dy;
+      if (wide) {
+        const hw = rect.w / 2 + gap, hh = rect.h / 2 + gap;
+        const W = 2 * hw, H = 2 * hh, P = 2 * (W + H);
+        const d = ((((i + (rS(i, 7) - 0.5) * 0.7) / N) * P) % P + P) % P;
+        let lx, ly, nx, ny;
+        if (d < W) { lx = -hw + d; ly = -hh; nx = 0; ny = -1; }
+        else if (d < W + H) { lx = hw; ly = -hh + (d - W); nx = 1; ny = 0; }
+        else if (d < 2 * W + H) { lx = hw - (d - W - H); ly = hh; nx = 0; ny = 1; }
+        else { lx = -hw; ly = hh - (d - 2 * W - H); nx = -1; ny = 0; }
+        sx = cx + lx; sy = cy + ly;
+        const ja = (rS(i, 1) - 0.5) * 0.5;
+        dx = nx * Math.cos(ja) - ny * Math.sin(ja);
+        dy = nx * Math.sin(ja) + ny * Math.cos(ja);
+      } else {
       const a = (i / N) * 2 * Math.PI + (rS(i, 1) - 0.5) * 0.34;
       const r0 = Math.max(rect.w, rect.h) / 2 + gap + rS(i, 2) * 2;
-      const sx = cx + Math.cos(a) * r0, sy = cy + Math.sin(a) * r0;
-      const dx = Math.cos(a), dy = Math.sin(a);
+      sx = cx + Math.cos(a) * r0; sy = cy + Math.sin(a) * r0;
+      dx = Math.cos(a); dy = Math.sin(a);
+      }
       const len = (9 + rF(i, 3) * 14) * env;
       if (len < 2) continue;
       const ex = sx + dx * len, ey = sy + dy * len;
@@ -50,14 +69,15 @@ const drawSpark = ({ rects, frame }) => {
 
 const b = await chromium.launch({ headless: true });
 
-async function makeGif({ img, w, h, rects, out }) {
-  const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2 });
+async function makeGif({ img, w, h, rects, out, pad = 0 }) {
+  // pad — поле вокруг картинки, чтобы бурст не обрезался у самого края.
+  const ctx = await b.newContext({ viewport: { width: w + pad * 2, height: h + pad * 2 }, deviceScaleFactor: 2 });
   const page = await ctx.newPage();
   // Картинку вшиваем как data-URI: страница живёт на about:blank, откуда
   // file://-ссылки не грузятся.
   const b64 = readFileSync(`${DIR}/${img}`).toString("base64");
   await page.setContent(
-    `<body style="margin:0;background:#fff;"><img src="data:image/jpeg;base64,${b64}" width="${w}" height="${h}" style="display:block"></body>`
+    `<body style="margin:0;background:#fff;"><img src="data:image/jpeg;base64,${b64}" width="${w}" height="${h}" style="display:block;margin:${pad}px"></body>`
   );
   await page.waitForTimeout(400);
   const tmp = `/tmp/yhop-${out}`;
@@ -79,5 +99,13 @@ await makeGif({ img: "toolbar.jpg", w: 576, h: 99, out: "hop-share",
   rects: [{ x: 33, y: 30, w: 48, h: 44 }] });                 // кнопка «Поделиться»
 await makeGif({ img: "sheet.jpg", w: 576, h: 379, out: "hop-chrome",
   rects: [{ x: 318, y: 248, w: 72, h: 72 }] });               // иконка Chrome
+
+// ── Установка PWA в Chrome: кебаб (или значок обновления), строка меню, «Установить» ──
+await makeGif({ img: "menu-icon.jpg", w: 37, h: 39, out: "pwa-menu", pad: 26,
+  rects: [{ x: 26, y: 26, w: 37, h: 39 }] });                  // сам значок
+await makeGif({ img: "menu-row.jpg", w: 361, h: 101, out: "pwa-addscreen", pad: 16,
+  rects: [{ x: 22, y: 38, w: 330, h: 42 }] });                 // строка «Добавить на гл. экран»
+await makeGif({ img: "install-dialog.jpg", w: 576, h: 361, out: "pwa-install", pad: 6,
+  rects: [{ x: 60, y: 130, w: 460, h: 84 }] });                // кнопка «Установить»
 
 await b.close();

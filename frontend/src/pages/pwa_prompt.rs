@@ -90,23 +90,36 @@ fn render_steps(platform: &str) -> View {
             </div>
         }.into_view(),
 
+        // Chrome on Android — the flow the user actually sees, illustrated with
+        // screenshots of the live UI and a blinking hint on what to tap
+        // (scripts/shot-yandex-hop-gifs.mjs builds them).
         "android_chrome" => view! {
             <div class="steps">
                 <div class="step">
                     <span class="step-num">"1"</span>
                     <div class="step-body">
-                        {move || t("pwa.inst.android_chrome.1")} " " <ThreeDotsIcon />
+                        {move || t("pwa.inst.android_chrome.1")}
+                        <img src="/onboard-img/pwa-menu.gif" alt="" class="step-shot"
+                             style="width: 5.5rem; margin-left: 0;" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
                     <div class="step-body">
-                        {move || t("pwa.inst.android_chrome.2")} " " <AddToHomeIcon />
+                        {move || t("pwa.inst.android_chrome.2")}
+                        <img src="/onboard-img/pwa-addscreen.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"3"</span>
-                    <div class="step-body">{move || t("pwa.inst.android_chrome.3")}</div>
+                    <div class="step-body">
+                        {move || t("pwa.inst.android_chrome.3")}
+                        <img src="/onboard-img/pwa-install.gif" alt="" class="step-shot" />
+                    </div>
+                </div>
+                <div class="step">
+                    <span class="step-num">"4"</span>
+                    <div class="step-body">{move || t("pwa.inst.android_chrome.4")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -323,8 +336,14 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                 font-size: 0.85rem; font-weight: 600;
             }
             .step-body { font-size: 0.95rem; line-height: 1.5; padding-top: 0.15rem; }
+            /* Скриншот живого интерфейса под текстом шага — мигающая подсказка
+               показывает, куда нажимать. */
+            .step-shot {
+                display: block; width: 100%; margin-top: 0.5rem;
+                border-radius: 10px; border: 1px solid var(--bulma-border);
+            }
         "</style>
-        <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
+        <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main); overflow-y: auto;">
             <div style="max-width: 24rem;">
                 <img src="/icon-192.png" alt="Food Tracker" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
                 <h1 class="title is-3" style="margin-bottom: 0.5rem;">"Food Tracker"</h1>

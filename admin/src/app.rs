@@ -949,6 +949,7 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
                         let auth = c.auth.clone();
                         let sub = c.subscription.clone();
                         let claims = c.claims.clone();
+                        let receipts = c.receipts.clone();
                         view! {
                             {c.auth_error.clone().map(|e| view! {
                                 <div class="banner">{format!("auth-worker недоступен: {e}")}</div>
@@ -996,26 +997,73 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
                                     </div>
                                 }).collect_view()}
 
-                            <div style="font-weight:650; margin:12px 0 6px;">"Оплата"</div>
+                            <div style="font-weight:650; margin:12px 0 6px;">"Подписка"</div>
                             {sub.map(|s| view! {
                                 <div class="row__meta">
-                                    {format!("подписка: {}{} · до {}", s.status,
+                                    {format!("{}{} · до {}", s.status,
                                              if s.active { ", активна" } else { "" }, fmt_ts(s.end))}
                                 </div>
                             })}
-                            {if claims.is_empty() {
-                                view! { <div class="row__meta">"платежей нет"</div> }.into_view()
+
+                            // Оплаченное и висящее разделено: по инвойсам без оплаты
+                            // и аннулированным видно, что у человека пошло не так.
+                            {
+                                let paid: Vec<api::ClaimCard> = claims.iter()
+                                    .filter(|c| c.status == "paid" || c.status == "claimed")
+                                    .cloned().collect();
+                                let invoices: Vec<api::ClaimCard> = claims.iter()
+                                    .filter(|c| c.status != "paid" && c.status != "claimed")
+                                    .cloned().collect();
+                                view! {
+                                    <div style="font-weight:650; margin:12px 0 6px;">
+                                        {format!("Платежи · {}", paid.len())}
+                                    </div>
+                                    {if paid.is_empty() {
+                                        view! { <div class="row__meta">"оплат нет"</div> }.into_view()
+                                    } else {
+                                        paid.into_iter().map(|c| view! {
+                                            <div class="row__meta">
+                                                {format!("{} · оплачен {}",
+                                                    fmt_money(c.amount, c.currency.as_deref()),
+                                                    c.paid_at.or(c.created_at).map(fmt_ts)
+                                                        .unwrap_or_else(|| "—".into()))}
+                                            </div>
+                                        }).collect_view()
+                                    }}
+
+                                    <div style="font-weight:650; margin:12px 0 6px;">
+                                        {format!("Инвойсы без оплаты · {}", invoices.len())}
+                                    </div>
+                                    {if invoices.is_empty() {
+                                        view! { <div class="row__meta">"нет"</div> }.into_view()
+                                    } else {
+                                        invoices.into_iter().map(|c| view! {
+                                            <div class="row__meta">
+                                                {format!("{} · {} · выставлен {}",
+                                                    match c.status.as_str() {
+                                                        "pending" => "не оплачен",
+                                                        "void" => "аннулирован",
+                                                        other => other,
+                                                    },
+                                                    fmt_money(c.amount, c.currency.as_deref()),
+                                                    c.created_at.map(fmt_ts).unwrap_or_else(|| "—".into()))}
+                                            </div>
+                                        }).collect_view()
+                                    }}
+                                }
+                            }
+
+                            <div style="font-weight:650; margin:12px 0 6px;">
+                                {format!("Чеки · {}", receipts.len())}
+                            </div>
+                            {if receipts.is_empty() {
+                                view! { <div class="row__meta">"нет"</div> }.into_view()
                             } else {
-                                claims.into_iter().map(|c| view! {
+                                receipts.into_iter().map(|r| view! {
                                     <div class="row__meta">
-                                        {format!("{} · {} · оплачен {}",
-                                            c.status,
-                                            match (c.amount, c.currency.clone()) {
-                                                (Some(a), Some(cur)) => format!("{} {}", a as f64 / 100.0, cur),
-                                                _ => "—".to_string(),
-                                            },
-                                            c.paid_at.or(c.created_at).map(fmt_ts)
-                                                .unwrap_or_else(|| "—".into()))}
+                                        {format!("{} · получен {}",
+                                            fmt_money(r.amount, r.currency.as_deref()),
+                                            r.received_at.map(fmt_ts).unwrap_or_else(|| "—".into()))}
                                     </div>
                                 }).collect_view()
                             }}
@@ -1156,7 +1204,7 @@ fn fmt_money(amount: Option<i64>, currency: Option<&str>) -> String {
 fn Payments(view: RwSignal<View>) -> impl IntoView {
     let items = create_rw_signal(Vec::<api::UnboundPayment>::new());
     let refunds = create_rw_signal(Vec::<api::RefundRequest>::new());
-    let no_access = create_rw_signal(Vec::<api::PaidNoAccess>::new());
+    let users = create_rw_signal(Vec::<api::UserRow>::new());
     // Открытая карточка пользователя (обнуление живёт внутри неё).
     let user_open = create_rw_signal(Option::<String>::None);
     let receipts = create_rw_signal(Vec::<api::Receipt>::new());
@@ -1190,14 +1238,14 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                 }
                 Err(e) => error.set(Some(e.message().to_string())),
             }
-            // Paid-but-no-access — best-effort.
-            match api::paid_no_access().await {
-                Ok(list) => no_access.set(list),
+            // Уникальные пользователи. Ошибку показываем, а не проглатываем.
+            match api::users().await {
+                Ok(list) => users.set(list),
                 Err(e) if e.is_auth() => {
                     auth::logout();
                     view.set(View::Login);
                 }
-                Err(_) => {}
+                Err(e) => error.set(Some(format!("список пользователей: {}", e.message()))),
             }
             // Caught receipts — best-effort.
             match api::receipts().await {
@@ -1218,7 +1266,7 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
             <div class="ring"></div>
             <div style="flex: 1; min-width: 0;">
                 <div class="appbar__title">"Пользователи"</div>
-                <div class="appbar__sub">"непривязанные · сверено с lava"</div>
+                <div class="appbar__sub">"по одному на человека · нажмите для карточки"</div>
             </div>
             <button class="btn btn--ghost btn--icon" attr:aria-label="Обновить" on:click=move |_| load.call(())>
                 <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
@@ -1228,35 +1276,45 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
         <div class="screen">
             {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
 
-            // Paid but no access yet (no passkey) — nudge them to finish onboarding.
+            // Список ПОЛЬЗОВАТЕЛЕЙ: ровно одна строка на человека, сколько бы у
+            // него ни было платежей и инвойсов. Что именно пошло не так — видно
+            // в карточке по клику.
             {move || {
-                let list = no_access.get();
+                let list = users.get();
                 (!list.is_empty()).then(|| view! {
                     <div style="padding: 16px 16px 2px;">
-                        <span class="badge badge--danger">{format!("Оплатили, нет доступа · {}", list.len())}</span>
+                        <span class="badge">{format!("Пользователи · {}", list.len())}</span>
                     </div>
                     <div class="list">
-                        {list.into_iter().enumerate().map(|(i, r)| {
-                            let who = r.tg_username.clone()
-                                .map(|u| format!("@{u}"))
-                                .or_else(|| r.tg_user_id.map(|id| format!("tg:{id}")))
-                                .or_else(|| r.user_id.clone())
-                                .unwrap_or_else(|| "—".into());
-                            let amount = match (r.amount, r.currency.clone()) {
-                                (Some(a), Some(c)) => format!("{a} {c}"),
-                                _ => "—".into(),
-                            };
-                            let when = r.paid_at.or(r.created_at).map(since_label).unwrap_or_default();
-                            let uid = r.user_id.clone();
+                        {list.into_iter().enumerate().map(|(i, u)| {
+                            let who = u.tg_username.clone().map(|n| format!("@{n}"))
+                                .or_else(|| u.tg_user_id.map(|id| format!("tg:{id}")))
+                                .or_else(|| u.email.clone())
+                                .unwrap_or_else(|| short_uid(&u.user_id));
+                            let uid = u.user_id.clone();
+                            let when = u.last_at.map(since_label).unwrap_or_default();
+                            let mut facts: Vec<String> = Vec::new();
+                            if u.paid_count > 0 { facts.push(format!("оплат: {}", u.paid_count)); }
+                            if u.pending_count > 0 { facts.push(format!("неоплаченных счетов: {}", u.pending_count)); }
+                            if u.void_count > 0 { facts.push(format!("аннулировано: {}", u.void_count)); }
+                            let facts = facts.join(" · ");
+                            let no_key = u.has_credentials == Some(false);
+                            let key_unknown = u.has_credentials.is_none();
                             view! {
-                                <div attr:data-testid="no-access-row" class="row reveal" style=format!("--i:{i}")
-                                     attr:data-user-id=uid.clone().unwrap_or_default()
-                                     on:click=move |_| { if let Some(u) = uid.clone() { user_open.set(Some(u)); } }>
+                                <div attr:data-testid="user-row" class="row reveal"
+                                     attr:data-user-id=uid.clone()
+                                     style=format!("--i:{i}; cursor:pointer;")
+                                     on:click=move |_| user_open.set(Some(uid.clone()))>
                                     <div class="row__top">
                                         <span class="row__title">{who}</span>
-                                        <span class="badge badge--danger">"нет ключа"</span>
+                                        {no_key.then(|| view! {
+                                            <span class="badge badge--danger">"нет ключа"</span>
+                                        })}
+                                        {key_unknown.then(|| view! {
+                                            <span class="badge badge--warn badge--plain">"ключ: неизвестно"</span>
+                                        })}
                                     </div>
-                                    <div class="row__sub mono">{amount}</div>
+                                    <div class="row__sub">{facts}</div>
                                     <div class="row__meta">{when}</div>
                                 </div>
                             }
@@ -1301,12 +1359,15 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                 })
             }}
 
-            // Caught receipts (bound to a payment). Tap a row → full text in a modal.
+            // Чеки, которые НЕ удалось привязать к пользователю. Привязанные видны
+            // в карточке своего пользователя — здесь они только дублировали бы его.
             {move || {
-                let list = receipts.get();
+                let list: Vec<api::Receipt> = receipts.get().into_iter()
+                    .filter(|r| r.user_id.is_none())
+                    .collect();
                 (!list.is_empty()).then(|| view! {
                     <div style="padding: 16px 16px 2px;">
-                        <span class="badge">{format!("Чеки · {}", list.len())}</span>
+                        <span class="badge">{format!("Чеки без пользователя · {}", list.len())}</span>
                     </div>
                     <div class="list">
                         {list.into_iter().enumerate().map(|(i, r)| {

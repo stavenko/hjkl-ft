@@ -927,6 +927,13 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
     }
     // Admin: cancel a lava subscription (stops renewal only — NO refund).
     // ── Account teardown for test accounts: who is this, and erase them ──
+    if method == Method::Get && path == "/admin/users" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        return admin_users(env).await;
+    }
+
     if method == Method::Get && path == "/admin/user-card" {
         if let Err(resp) = require_admin(&req, env).await {
             return Ok(resp);
@@ -1150,6 +1157,33 @@ async fn binding_call(
     serde_json::from_str(&text).map_err(|e| format!("parse {binding}: {e}"))
 }
 
+/// GET /admin/users — ОДНА строка на пользователя (не на платёж): счётчики
+/// оплат и инвойсов, времена, есть ли у него ключ. Заменяет список «оплатили,
+/// нет доступа», который дублировал пользователя на каждый платёж.
+async fn admin_users(env: &Env) -> Result<Response> {
+    let claim = claim_stub(env)?;
+    let mut r = do_get(&claim, "/users-summary").await?;
+    let v: serde_json::Value = r.json().await?;
+    let empty = vec![];
+    let users = v.get("users").and_then(|x| x.as_array()).unwrap_or(&empty);
+    let mut out: Vec<serde_json::Value> = Vec::with_capacity(users.len());
+    for u in users {
+        let uid = u.get("user_id").and_then(|x| x.as_str()).unwrap_or("");
+        if uid.is_empty() {
+            continue;
+        }
+        let mut row = u.clone();
+        // None → «неизвестно»: показываем как есть, а не прячем строку.
+        let has_key = auth_has_credentials(env, uid).await;
+        row["has_credentials"] = match has_key {
+            Some(b) => serde_json::json!(b),
+            None => serde_json::Value::Null,
+        };
+        out.push(row);
+    }
+    Response::from_json(&serde_json::json!({ "users": out }))
+}
+
 /// GET /admin/user-card?user_id= — who exactly is about to be erased: account,
 /// passkeys and tokens with their timestamps (auth-worker) plus the payment facts
 /// owned here. A failed lookup is reported in the payload, never hidden.
@@ -1184,12 +1218,22 @@ async fn admin_user_card(env: &Env, user_id: &str) -> Result<Response> {
         r.json().await?
     };
 
+    let receipts: serde_json::Value = {
+        let stub = claim_stub(env)?;
+        let mut r = do_post(&stub, "/receipts-by-user", &serde_json::json!({ "user_id": user_id }))
+            .await?;
+        r.json().await?
+    };
+
     Response::from_json(&serde_json::json!({
         "user_id": user_id,
         "auth": auth,
         "auth_error": auth_error,
         "subscription": sub,
+        // Все обращения к оплате: и удачные, и висящие инвойсы, и аннулированные —
+        // по ним видно, что у пользователя пошло не так.
         "claims": claims.get("claims").cloned().unwrap_or(serde_json::json!([])),
+        "receipts": receipts.get("receipts").cloned().unwrap_or(serde_json::json!([])),
     }))
 }
 

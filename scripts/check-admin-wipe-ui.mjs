@@ -89,8 +89,17 @@ await p.waitForTimeout(4000);
 // обнулит чужой аккаунт.
 // Строку выбираем по идентификатору пользователя: в списке живут жертвы
 // прошлых прогонов с похожими именами.
-const row = p.locator(`[data-testid="no-access-row"][data-user-id="${victim.userId}"]`).first();
-check("список пользователей не пуст", await p.locator('[data-testid="no-access-row"]').first().isVisible().catch(() => false));
+const row = p.locator(`[data-testid="user-row"][data-user-id="${victim.userId}"]`).first();
+check("список пользователей не пуст", await p.locator('[data-testid="user-row"]').first().isVisible().catch(() => false));
+// Уникальность: пользователь не должен появляться дважды, сколько бы у него ни
+// было платежей и чеков.
+{
+  const ids = await p.$$eval('[data-testid="user-row"]', (els) => els.map((e) => e.getAttribute("data-user-id")));
+  check("в списке нет повторов пользователей", new Set(ids).size === ids.length,
+    `строк ${ids.length}, уникальных ${new Set(ids).size}`);
+  check("жертва в списке ровно один раз",
+    ids.filter((x) => x === victim.userId).length === 1);
+}
 check("строка жертвы найдена", await row.isVisible().catch(() => false), victim.userId);
 
 await row.click();
@@ -102,7 +111,11 @@ const text = (await modal.innerText().catch(() => "")).replace(/\s+/g, " ");
 console.log("  карточка:", text.slice(0, 220));
 check("в карточке: время создания аккаунта", /создан \d{2}\.\d{2}\.\d{4}/.test(text));
 check("в карточке: токены", /Токены · [1-9]/.test(text), text.match(/Токены · \d+/)?.[0] || "");
-check("в карточке: оплата", /Оплата/.test(text) && /оплачен \d{2}\./.test(text));
+check("в карточке: платежи", /Платежи · [1-9]/.test(text) && /оплачен \d{2}\./.test(text),
+  text.match(/Платежи · \d+/)?.[0] || "");
+check("в карточке: раздел инвойсов", /Инвойсы без оплаты · \d+/.test(text),
+  text.match(/Инвойсы без оплаты · \d+/)?.[0] || "");
+check("в карточке: раздел чеков", /Чеки · \d+/.test(text), text.match(/Чеки · \d+/)?.[0] || "");
 
 // Медленные нажатия НЕ взводят кнопку.
 const arm = p.locator('[data-testid="user-wipe-arm"]');

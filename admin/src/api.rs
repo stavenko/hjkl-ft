@@ -500,6 +500,8 @@ pub struct SubscriptionCard {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClaimCard {
+    /// pending — счёт выставлен и не оплачен, void — аннулирован,
+    /// paid/claimed — оплачен.
     #[serde(default)]
     pub status: String,
     #[serde(default)]
@@ -528,6 +530,55 @@ pub struct UserCard {
     pub subscription: Option<SubscriptionCard>,
     #[serde(default)]
     pub claims: Vec<ClaimCard>,
+    #[serde(default)]
+    pub receipts: Vec<ReceiptRow>,
+}
+
+/// Одна строка списка пользователей — уникальный пользователь, а не платёж.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserRow {
+    #[serde(default)]
+    pub user_id: String,
+    #[serde(default)]
+    pub tg_user_id: Option<i64>,
+    #[serde(default)]
+    pub tg_username: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub paid_count: i64,
+    #[serde(default)]
+    pub pending_count: i64,
+    #[serde(default)]
+    pub void_count: i64,
+    #[serde(default)]
+    pub last_at: Option<i64>,
+    #[serde(default)]
+    pub first_at: Option<i64>,
+    /// None — узнать не удалось (показываем «?», а не прячем).
+    #[serde(default)]
+    pub has_credentials: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct UsersResp {
+    users: Vec<UserRow>,
+}
+
+/// GET /admin/users (payment-worker) — уникальные пользователи.
+pub async fn users() -> Result<Vec<UserRow>, ApiError> {
+    let r: UsersResp = request_to(&payment_base()?, "GET", "/admin/users", None).await?;
+    Ok(r.users)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReceiptRow {
+    #[serde(default)]
+    pub amount: Option<i64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub received_at: Option<i64>,
 }
 
 /// GET /admin/user-card?user_id= (payment-worker).

@@ -1048,6 +1048,53 @@ impl DurableObject for ClaimDO {
             }
             (Method::Get, "/unbound") => self.unbound(),
             (Method::Get, "/paid-with-user") => self.paid_with_user(),
+            // ОДНА строка на пользователя: сколько оплат, сколько неоплаченных и
+            // аннулированных инвойсов, когда первая и последняя активность. Это
+            // список пользователей, а не платежей — дубли недопустимы.
+            (Method::Get, "/users-summary") => {
+                let rows = self
+                    .state
+                    .storage()
+                    .sql()
+                    .exec(
+                        "SELECT COALESCE(user_id, claimed_by) AS user_id, \
+                                MAX(tg_user_id)  AS tg_user_id, \
+                                MAX(tg_username) AS tg_username, \
+                                MAX(email)       AS email, \
+                                SUM(CASE WHEN status IN ('paid','claimed') THEN 1 ELSE 0 END) AS paid_count, \
+                                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END)           AS pending_count, \
+                                SUM(CASE WHEN status = 'void' THEN 1 ELSE 0 END)              AS void_count, \
+                                MAX(COALESCE(paid_at, created_at)) AS last_at, \
+                                MIN(created_at)                    AS first_at \
+                         FROM claims \
+                         WHERE COALESCE(user_id, claimed_by) IS NOT NULL \
+                         GROUP BY COALESCE(user_id, claimed_by) \
+                         ORDER BY last_at DESC",
+                        None,
+                    )?
+                    .to_array::<serde_json::Value>()
+                    .map_err(|e| Error::RustError(format!("users-summary: {e}")))?;
+                Response::from_json(&serde_json::json!({ "users": rows }))
+            }
+            // Чеки одного пользователя (через его платежи) — для карточки.
+            (Method::Post, "/receipts-by-user") => {
+                let b: serde_json::Value = req.json().await?;
+                let user_id = str_field(&b, "user_id")?;
+                let rows = self
+                    .state
+                    .storage()
+                    .sql()
+                    .exec(
+                        "SELECT r.id, r.claim_id, r.amount, r.currency, r.received_at \
+                         FROM receipts r JOIN claims c ON c.claim_id = r.claim_id \
+                         WHERE c.user_id = ? OR c.claimed_by = ? \
+                         ORDER BY r.received_at DESC",
+                        Some(vec![user_id.as_str().into(), user_id.as_str().into()]),
+                    )?
+                    .to_array::<serde_json::Value>()
+                    .map_err(|e| Error::RustError(format!("receipts-by-user: {e}")))?;
+                Response::from_json(&serde_json::json!({ "receipts": rows }))
+            }
             // Every payment row of one account — the admin card's «when did they pay».
             (Method::Post, "/by-user") => {
                 let b: serde_json::Value = req.json().await?;

@@ -4,9 +4,16 @@
 // Ничего никуда не отправляет; созданный ключ не используется.
 const rows = [];
 const add = (k, v, good) => { rows.push([k, v, good]); render(); };
+const drows = [];
+const dadd = (k, v, good) => { drows.push([k, v, good]); render(); };
 
 const el = (id) => document.getElementById(id);
+const tbl = (list) => list.map(([k, v, good]) =>
+  `<tr><td>${k}</td><td class="v ${good === true ? "yes" : good === false ? "no" : ""}">${String(v)}</td></tr>`
+).join("");
+
 function render() {
+  el("det").innerHTML = tbl(drows);
   el("t").innerHTML = rows.map(([k, v, good]) =>
     `<tr><td>${k}</td><td class="v ${good === true ? "yes" : good === false ? "no" : ""}">${String(v)}</td></tr>`
   ).join("");
@@ -16,6 +23,34 @@ function render() {
 
 const ua = navigator.userAgent;
 const isAndroid = /Android/.test(ua);
+
+// ── Ровно та же логика, что в приложении (pages/pwa_prompt.rs detect_platform) ──
+{
+  const u = ua.toLowerCase();
+  const ios = u.includes("iphone") || u.includes("ipad") || u.includes("ipod");
+  const android = u.includes("android");
+  const mac = u.includes("macintosh") || u.includes("mac os");
+  const chrome = u.includes("chrome") && !u.includes("edg") && !u.includes("opr");
+  const firefox = u.includes("firefox");
+  const edge = u.includes("edg/");
+  const safari = u.includes("safari") && !u.includes("chrome") && !u.includes("chromium");
+  const samsung = u.includes("samsungbrowser");
+  // Яндекс.Браузер + встроенный браузер приложения Яндекс (в его UA нет
+  // yabrowser, но есть chrome — без этих токенов он уходил бы в ветку Chrome).
+  const yandex = u.includes("yabrowser") || u.includes("yasearchbrowser") || u.includes("yaapp_android");
+  const platform =
+    ios && safari ? "ios_safari" : ios && chrome ? "ios_chrome" : ios && firefox ? "ios_firefox" : ios ? "ios_safari" :
+    android && samsung ? "android_samsung" : android && yandex ? "android_yandex" :
+    android && firefox ? "android_firefox" : android ? "android_chrome" :
+    mac && safari ? "macos_safari" : mac && chrome ? "macos_chrome" : mac && edge ? "macos_edge" :
+    mac && firefox ? "macos_firefox" : mac ? "macos_chrome" :
+    chrome ? "desktop_chrome" : edge ? "desktop_edge" : firefox ? "desktop_firefox" : "desktop_chrome";
+  dadd("Токен yabrowser / yasearchbrowser / yaapp_android", yandex ? "найден" : "нет", yandex);
+  dadd("Android определён", android ? "да" : "нет", android);
+  dadd("Приложение определит платформу как", platform, platform === "android_yandex");
+  dadd("Экран «как открыть в Chrome» покажется", platform === "android_yandex" ? "ДА" : "нет",
+       platform === "android_yandex");
+}
 const hasPKC = typeof window.PublicKeyCredential !== "undefined";
 add("User-Agent", ua);
 add("Android в UA", isAndroid ? "да" : "нет", isAndroid);

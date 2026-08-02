@@ -85,7 +85,7 @@ fn TabBar(view: RwSignal<View>, active: Section) -> impl IntoView {
             <button class=move || on(Section::Payments) attr:data-testid="tab-payments"
                 on:click=move |_| view.set(View::Payments)>
                 <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M3 10.5h18"/></svg>
-                "Платежи"
+                "Пользователи"
             </button>
             <button class=move || on(Section::Subscriptions) attr:data-testid="tab-subscriptions"
                 on:click=move |_| view.set(View::Subscriptions)>
@@ -859,6 +859,229 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
     }
 }
 
+/// Карточка пользователя с обнулением. Открывается по строке в списке
+/// пользователей. Кнопка обнуления заряжается 10 быстрыми нажатиями подряд
+/// (интервал < 500 мс) — случайно её не нажать; затем подтверждение.
+#[component]
+fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
+    let card = create_rw_signal(Option::<api::UserCard>::None);
+    let error = create_rw_signal(Option::<String>::None);
+    let loading = create_rw_signal(true);
+    // Взвод кнопки: сколько нажатий подряд и когда было последнее (мс).
+    let taps = create_rw_signal(0u32);
+    let last_tap = create_rw_signal(0.0f64);
+    let confirming = create_rw_signal(false);
+    let wiping = create_rw_signal(false);
+    let report = create_rw_signal(Option::<api::WipeReport>::None);
+
+    let uid_load = user_id.clone();
+    spawn_local(async move {
+        match api::user_card(&uid_load).await {
+            Ok(c) => card.set(Some(c)),
+            Err(e) => error.set(Some(e.message().to_string())),
+        }
+        loading.set(false);
+    });
+
+    const NEEDED: u32 = 10;
+    const MAX_GAP_MS: f64 = 500.0;
+
+    let on_arm = move |_| {
+        let now = js_sys::Date::now();
+        let prev = last_tap.get_untracked();
+        let n = if prev > 0.0 && now - prev < MAX_GAP_MS { taps.get_untracked() + 1 } else { 1 };
+        last_tap.set(now);
+        taps.set(n);
+        if n >= NEEDED {
+            taps.set(0);
+            last_tap.set(0.0);
+            confirming.set(true);
+        }
+    };
+
+    // store_value: замыкание подтверждения вызывается многократно (Fn), поэтому
+    // id нельзя «съедать» перемещением.
+    let uid_wipe = store_value(user_id.clone());
+    let on_confirm = move |_| {
+        let uid = uid_wipe.get_value();
+        confirming.set(false);
+        wiping.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match api::user_wipe(&uid).await {
+                Ok(r) => {
+                    if !r.ok {
+                        // Частичный провал — показать целиком, не молчать.
+                        error.set(Some(r.error.clone().unwrap_or_else(||
+                            "обнуление прошло не полностью — см. шаги".to_string())));
+                    }
+                    report.set(Some(r));
+                }
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            wiping.set(false);
+        });
+    };
+
+    let uid_title = user_id.clone();
+    view! {
+        <div on:click=move |_| on_close.call(())
+             style="position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:70; \
+                    display:flex; align-items:center; justify-content:center; padding:16px;">
+            <div on:click=move |ev: leptos::ev::MouseEvent| ev.stop_propagation()
+                 attr:data-testid="user-modal"
+                 style="background:var(--surface); color:var(--text); max-width:560px; width:100%; \
+                        max-height:86vh; overflow:auto; border-radius:12px; border:1px solid var(--line);">
+                <div style="display:flex; justify-content:space-between; align-items:center; \
+                            padding:12px 16px; border-bottom:1px solid var(--line); \
+                            position:sticky; top:0; background:var(--surface);">
+                    <b class="mono" style="font-size:0.85rem; word-break:break-all;">{uid_title}</b>
+                    <button class="btn btn--ghost" on:click=move |_| on_close.call(())>"✕"</button>
+                </div>
+
+                <div style="padding:14px 16px;">
+                    {move || error.get().map(|e| view! {
+                        <div attr:data-testid="user-modal-error" class="banner">{e}</div>
+                    })}
+                    {move || loading.get().then(|| view! { <div class="row__meta">"Загружаем…"</div> })}
+
+                    {move || card.get().map(|c| {
+                        let auth = c.auth.clone();
+                        let sub = c.subscription.clone();
+                        let claims = c.claims.clone();
+                        view! {
+                            {c.auth_error.clone().map(|e| view! {
+                                <div class="banner">{format!("auth-worker недоступен: {e}")}</div>
+                            })}
+
+                            <div style="font-weight:650; margin:4px 0 6px;">"Аккаунт"</div>
+                            <div class="row__meta">
+                                {match auth.as_ref().and_then(|a| a.created_at) {
+                                    Some(ms) => format!("создан {}", fmt_ts(ms)),
+                                    None => "создан — нет данных".to_string(),
+                                }}
+                            </div>
+                            {auth.as_ref().and_then(|a| a.identity.clone()).map(|i| view! {
+                                <div class="row__meta">
+                                    {format!("личность: {} {}{}", i.provider, i.provider_uid,
+                                             i.username.map(|u| format!(" (@{u})")).unwrap_or_default())}
+                                </div>
+                            })}
+                            {auth.as_ref().map(|a| a.has_phrase).unwrap_or(false).then(|| view! {
+                                <div class="row__meta">"есть парольная фраза"</div>
+                            })}
+
+                            <div style="font-weight:650; margin:12px 0 6px;">
+                                {format!("Ключи · {}", auth.as_ref().map(|a| a.passkeys.len()).unwrap_or(0))}
+                            </div>
+                            {auth.as_ref().map(|a| a.passkeys.clone()).unwrap_or_default().into_iter()
+                                .map(|k| view! {
+                                    <div class="row__meta">
+                                        {format!("{} · создан {} · использован {}",
+                                                 k.name.unwrap_or_else(|| "без имени".into()),
+                                                 fmt_ts(k.created_at), fmt_ts(k.last_used_at))}
+                                    </div>
+                                }).collect_view()}
+
+                            <div style="font-weight:650; margin:12px 0 6px;">
+                                {format!("Токены · {}", auth.as_ref().map(|a| a.tokens.len()).unwrap_or(0))}
+                            </div>
+                            {auth.as_ref().map(|a| a.tokens.clone()).unwrap_or_default().into_iter()
+                                .map(|t| view! {
+                                    <div class="row__meta mono" style="font-size:0.72rem;">
+                                        // created_at токенов — В СЕКУНДАХ.
+                                        {format!("{}… · создан {} · использован {}",
+                                                 t.token_id.chars().take(10).collect::<String>(),
+                                                 fmt_ts(t.created_at * 1000), fmt_ts(t.last_used_at * 1000))}
+                                    </div>
+                                }).collect_view()}
+
+                            <div style="font-weight:650; margin:12px 0 6px;">"Оплата"</div>
+                            {sub.map(|s| view! {
+                                <div class="row__meta">
+                                    {format!("подписка: {}{} · до {}", s.status,
+                                             if s.active { ", активна" } else { "" }, fmt_ts(s.end))}
+                                </div>
+                            })}
+                            {if claims.is_empty() {
+                                view! { <div class="row__meta">"платежей нет"</div> }.into_view()
+                            } else {
+                                claims.into_iter().map(|c| view! {
+                                    <div class="row__meta">
+                                        {format!("{} · {} · оплачен {}",
+                                            c.status,
+                                            match (c.amount, c.currency.clone()) {
+                                                (Some(a), Some(cur)) => format!("{} {}", a as f64 / 100.0, cur),
+                                                _ => "—".to_string(),
+                                            },
+                                            c.paid_at.or(c.created_at).map(fmt_ts)
+                                                .unwrap_or_else(|| "—".into()))}
+                                    </div>
+                                }).collect_view()
+                            }}
+                        }
+                    })}
+
+                    // ── Обнуление ──
+                    <div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--line);">
+                        {move || report.get().map(|r| view! {
+                            <div attr:data-testid="wipe-report" style="margin-bottom:10px;">
+                                {r.steps.into_iter().map(|st| view! {
+                                    <div class="row__meta">
+                                        {format!("{} {}{}", if st.ok { "✓" } else { "✗" }, st.step,
+                                                 st.error.map(|e| format!(" — {e}")).unwrap_or_default())}
+                                    </div>
+                                }).collect_view()}
+                            </div>
+                        })}
+                        <button
+                            attr:data-testid="user-wipe-arm"
+                            class="btn btn--ghost"
+                            style="width:100%; color:var(--danger, #e0304f);"
+                            disabled=move || wiping.get()
+                            on:click=on_arm
+                        >
+                            {move || if wiping.get() {
+                                "Обнуляем…".to_string()
+                            } else if taps.get() > 0 {
+                                format!("Обнулить пользователя ({}/{})", taps.get(), NEEDED)
+                            } else {
+                                "Обнулить пользователя".to_string()
+                            }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            // Подтверждение — отдельным слоем поверх карточки.
+            {move || confirming.get().then(|| view! {
+                <div on:click=move |ev: leptos::ev::MouseEvent| ev.stop_propagation()
+                     attr:data-testid="wipe-confirm"
+                     style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:80; \
+                            display:flex; align-items:center; justify-content:center; padding:16px;">
+                    <div style="background:var(--surface); color:var(--text); max-width:440px; width:100%; \
+                                border-radius:12px; border:1px solid var(--line); padding:16px;">
+                        <div style="font-weight:700; margin-bottom:8px;">"Обнулить пользователя?"</div>
+                        <div class="row__meta" style="line-height:1.5;">
+                            "Этот пользователь будет удалён: аккаунт, ключи и токены, дневник, \
+                             переписка с поддержкой, уведомления, платежи и чеки. Его подписка \
+                             будет отменена, чтобы больше не списывалась. Так, как будто этого \
+                             пользователя никогда не существовало. Деньги за уже прошедший \
+                             платёж не возвращаются. Вы уверены, что хотите сделать так?"
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:14px;">
+                            <button class="btn btn--ghost" style="flex:1;"
+                                    on:click=move |_| confirming.set(false)>"Отмена"</button>
+                            <button attr:data-testid="wipe-confirm-yes" class="btn" style="flex:1;"
+                                    on:click=on_confirm>"Да, обнулить"</button>
+                        </div>
+                    </div>
+                </div>
+            })}
+        </div>
+    }
+}
+
 /// Human RU name for a dataset key (for the compact "запрошено" chip).
 fn dataset_ru(key: &str) -> String {
     match key {
@@ -934,6 +1157,8 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
     let items = create_rw_signal(Vec::<api::UnboundPayment>::new());
     let refunds = create_rw_signal(Vec::<api::RefundRequest>::new());
     let no_access = create_rw_signal(Vec::<api::PaidNoAccess>::new());
+    // Открытая карточка пользователя (обнуление живёт внутри неё).
+    let user_open = create_rw_signal(Option::<String>::None);
     let receipts = create_rw_signal(Vec::<api::Receipt>::new());
     // The receipt whose full body is open in the modal (fetched on demand).
     let selected = create_rw_signal(Option::<api::ReceiptFull>::None);
@@ -992,7 +1217,7 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
         <header class="appbar">
             <div class="ring"></div>
             <div style="flex: 1; min-width: 0;">
-                <div class="appbar__title">"Платежи"</div>
+                <div class="appbar__title">"Пользователи"</div>
                 <div class="appbar__sub">"непривязанные · сверено с lava"</div>
             </div>
             <button class="btn btn--ghost btn--icon" attr:aria-label="Обновить" on:click=move |_| load.call(())>
@@ -1022,8 +1247,11 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                                 _ => "—".into(),
                             };
                             let when = r.paid_at.or(r.created_at).map(since_label).unwrap_or_default();
+                            let uid = r.user_id.clone();
                             view! {
-                                <div attr:data-testid="no-access-row" class="row reveal" style=format!("--i:{i}")>
+                                <div attr:data-testid="no-access-row" class="row reveal" style=format!("--i:{i}")
+                                     attr:data-user-id=uid.clone().unwrap_or_default()
+                                     on:click=move |_| { if let Some(u) = uid.clone() { user_open.set(Some(u)); } }>
                                     <div class="row__top">
                                         <span class="row__title">{who}</span>
                                         <span class="badge badge--danger">"нет ключа"</span>
@@ -1252,6 +1480,11 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                 }
             })}
         </div>
+
+        // Карточка пользователя: открывается по строке списка.
+        {move || user_open.get().map(|uid| view! {
+            <UserModal user_id=uid on_close=Callback::new(move |_| user_open.set(None)) />
+        })}
 
         <TabBar view=view active=Section::Payments/>
     }

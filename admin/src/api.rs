@@ -433,6 +433,144 @@ pub async fn paid_no_access() -> Result<Vec<PaidNoAccess>, ApiError> {
     Ok(r.users)
 }
 
+// ── Карточка пользователя и его обнуление (тестовые аккаунты) ────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PasskeyInfo {
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Миллисекунды.
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub last_used_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenInfo {
+    #[serde(default)]
+    pub token_id: String,
+    #[serde(default)]
+    pub fingerprint: String,
+    /// СЕКУНДЫ (в отличие от ключей — так хранит auth-worker).
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub last_used_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct IdentityInfo {
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub provider_uid: String,
+    #[serde(default)]
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthCard {
+    #[serde(default)]
+    pub exists: bool,
+    /// Миллисекунды.
+    #[serde(default)]
+    pub created_at: Option<i64>,
+    #[serde(default)]
+    pub has_phrase: bool,
+    #[serde(default)]
+    pub identity: Option<IdentityInfo>,
+    #[serde(default)]
+    pub passkeys: Vec<PasskeyInfo>,
+    #[serde(default)]
+    pub tokens: Vec<TokenInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SubscriptionCard {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub active: bool,
+    #[serde(default)]
+    pub end: i64,
+    #[serde(rename = "contractId", default)]
+    pub contract_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClaimCard {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub amount: Option<i64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    /// Момент оплаты (мс). Каноническое «когда заплатил».
+    #[serde(default)]
+    pub paid_at: Option<i64>,
+    #[serde(default)]
+    pub created_at: Option<i64>,
+    #[serde(default)]
+    pub contract_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserCard {
+    #[serde(default)]
+    pub user_id: String,
+    #[serde(default)]
+    pub auth: Option<AuthCard>,
+    /// Ошибка обращения к auth-worker — показывается, а не проглатывается.
+    #[serde(default)]
+    pub auth_error: Option<String>,
+    #[serde(default)]
+    pub subscription: Option<SubscriptionCard>,
+    #[serde(default)]
+    pub claims: Vec<ClaimCard>,
+}
+
+/// GET /admin/user-card?user_id= (payment-worker).
+pub async fn user_card(user_id: &str) -> Result<UserCard, ApiError> {
+    request_to(
+        &payment_base()?,
+        "GET",
+        &format!(
+            "/admin/user-card?user_id={}",
+            js_sys::encode_uri_component(user_id).as_string().unwrap_or_default()
+        ),
+        None,
+    )
+    .await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WipeStep {
+    #[serde(default)]
+    pub step: String,
+    #[serde(default)]
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WipeReport {
+    #[serde(default)]
+    pub ok: bool,
+    #[serde(default)]
+    pub steps: Vec<WipeStep>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// POST /admin/user-wipe (payment-worker). Возвращает пошаговый отчёт — в том
+/// числе при частичном провале (207), чтобы оператор видел, что именно не вышло.
+pub async fn user_wipe(user_id: &str) -> Result<WipeReport, ApiError> {
+    let body = serde_json::json!({ "userId": user_id }).to_string();
+    request_to(&payment_base()?, "POST", "/admin/user-wipe", Some(body)).await
+}
+
 /// A client-requested refund (access already revoked). The operator processes it
 /// manually in lava using contract_id / email.
 #[derive(Debug, Clone, Deserialize)]

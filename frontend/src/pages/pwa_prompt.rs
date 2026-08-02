@@ -266,33 +266,46 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
         on_dismiss.call(());
     };
 
-    // Yandex Browser (and the Yandex app) cannot install a standalone PWA at all —
-    // instead of the useless install steps, route the user into the system browser
-    // (Chrome via an Android intent), with an explicit «stay here» opt-out.
+    // Yandex Browser (and the Yandex app): a passkey cannot be created there
+    // (`navigator.credentials` is absent) and a PWA cannot be installed, so the
+    // user is walked into Chrome instead. An intent hand-off does NOT work —
+    // Chromium refuses to launch an intent whose target is another browser and
+    // silently follows `browser_fallback_url`, i.e. reopens the page HERE — so
+    // the screen teaches the only route that does work: the browser's own share
+    // button → pick Chrome. Blocking by design: there is no way past it.
     // iOS is untouched: this branch is Android-Yandex only.
     if platform == "android_yandex" {
         return view! {
-            <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
-                <div style="max-width: 24rem;">
-                    <img src="/icon-192.png" alt="re:Norma" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
-                    <p class="mb-5" style="font-size: 1.05rem; line-height: 1.6;">
-                        {move || t("pwa.sysbrowser.text")}
+            <div attr:data-testid="pwa-yandex-screen"
+                 style="min-height: 100vh; padding: 28px 20px 40px; text-align: center; \
+                        background: var(--bulma-scheme-main); overflow-y: auto;">
+                <div style="max-width: 26rem; margin: 0 auto;">
+                    <img src="/icon-192.png" alt="re:Norma"
+                         style="width: 72px; height: 72px; border-radius: 16px; margin-bottom: 18px;" />
+                    <h1 class="title is-5" style="line-height: 1.3; margin-bottom: 10px;">
+                        {move || t("pwa.yandex.title")}
+                    </h1>
+                    <p class="has-text-grey" style="line-height: 1.55; margin-bottom: 26px;">
+                        {move || t("pwa.yandex.lead")}
                     </p>
-                    <a
-                        attr:data-testid="pwa-btn-open-system-browser"
-                        class="button is-link is-medium is-fullwidth has-text-weight-semibold mb-3"
-                        href=system_browser_intent_url()
-                    >
-                        {move || t("pwa.sysbrowser.open")}
-                    </a>
-                    <button
-                        attr:data-testid="pwa-btn-dismiss"
-                        class="button is-ghost has-text-grey"
-                        style="text-decoration: underline; font-size: 0.85rem; white-space: normal;"
-                        on:click=dismiss
-                    >
-                        {move || t("pwa.sysbrowser.stay")}
-                    </button>
+
+                    <div style="text-align: left; margin-bottom: 22px;">
+                        <p style="line-height: 1.5; margin-bottom: 10px;">
+                            <span style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bulma-text-strong); color: var(--bulma-scheme-main); font-size: 13px; font-weight: 700; margin-right: 8px; vertical-align: 1px;">"1"</span>
+                            {move || t("pwa.yandex.step1")}
+                        </p>
+                        <img src="/onboard-img/hop-share.gif" alt=""
+                             style="display: block; width: 100%; border-radius: 14px; border: 1px solid var(--bulma-border);" />
+                    </div>
+
+                    <div style="text-align: left;">
+                        <p style="line-height: 1.5; margin-bottom: 10px;">
+                            <span style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bulma-text-strong); color: var(--bulma-scheme-main); font-size: 13px; font-weight: 700; margin-right: 8px; vertical-align: 1px;">"2"</span>
+                            {move || t("pwa.yandex.step2")}
+                        </p>
+                        <img src="/onboard-img/hop-chrome.gif" alt=""
+                             style="display: block; width: 100%; border-radius: 14px; border: 1px solid var(--bulma-border);" />
+                    </div>
                 </div>
             </div>
         }

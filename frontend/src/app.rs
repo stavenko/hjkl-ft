@@ -45,6 +45,13 @@ fn is_onboard_entry() -> bool {
 }
 
 fn initial_state() -> AppState {
+    // Yandex Browser comes FIRST — before the onboarding bypass. The Telegram
+    // link lands on `/onboard`, which is exactly where a Yandex user gets stuck
+    // (no passkey there), so the «open it in Chrome» screen must cover that page
+    // too.
+    if platform::detect_platform_is_yandex() {
+        return AppState::PwaPrompt;
+    }
     // Onboarding drives its own flow; bypass all overlays so neither the Auth (login) nor the
     // PWA-install overlay covers it.
     if is_onboard_entry() {

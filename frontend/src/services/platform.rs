@@ -60,7 +60,20 @@ pub fn dismiss_pwa_prompt() {
     storage.set_item("pwa_dismissed", "true").expect("localStorage write failed");
 }
 
+/// Yandex Browser / the Yandex app's built-in browser (Android). The app cannot
+/// work there at all, so several entry points route straight to the «open it in
+/// Chrome» screen.
+pub fn detect_platform_is_yandex() -> bool {
+    crate::pages::pwa_prompt::detect_platform() == "android_yandex"
+}
+
 pub fn needs_pwa_prompt() -> bool {
+    // Yandex Browser: ALWAYS. The app is unusable there (no passkey, no PWA), so
+    // the «open it in Chrome» screen is shown on every launch and cannot be
+    // dismissed — an earlier dismissal from the old screen must not hide it.
+    if detect_platform_is_yandex() {
+        return true;
+    }
     let pwa = is_pwa();
     let dismissed = pwa_dismissed();
     leptos::logging::log!("needs_pwa_prompt: is_pwa={}, dismissed={}", pwa, dismissed);

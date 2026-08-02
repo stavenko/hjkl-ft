@@ -117,6 +117,24 @@ check("в карточке: раздел инвойсов", /Инвойсы бе
   text.match(/Инвойсы без оплаты · \d+/)?.[0] || "");
 check("в карточке: раздел чеков", /Чеки · \d+/.test(text), text.match(/Чеки · \d+/)?.[0] || "");
 
+// Кнопка сброса доступа — рядом, с обычным подтверждением (не 10 нажатий).
+check("в карточке есть кнопка сброса доступа",
+  await p.locator('[data-testid="user-reset"]').isVisible().catch(() => false));
+await p.locator('[data-testid="user-reset"]').click();
+const resetConfirm = p.locator('[data-testid="reset-confirm"]');
+await resetConfirm.waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
+check("сброс: показано подтверждение", await resetConfirm.isVisible().catch(() => false));
+const rc = (await resetConfirm.innerText().catch(() => "")).replace(/\s+/g, " ");
+check("сброс: сказано, что деньги и данные остаются",
+  rc.includes("Платежи, подписка и чеки останутся") && rc.includes("Получить доступ"),
+  rc.slice(0, 140));
+await p.locator('[data-testid="reset-confirm-yes"]').click();
+await p.waitForTimeout(6000);
+{
+  const rep = (await p.locator('[data-testid="wipe-report"]').innerText().catch(() => "")).replace(/\s+/g, " ");
+  check("сброс: отчёт без провалов", rep.includes("доступ:") && !rep.includes("✗"), rep.slice(0, 160));
+}
+
 // Медленные нажатия НЕ взводят кнопку.
 const arm = p.locator('[data-testid="user-wipe-arm"]');
 for (let i = 0; i < 4; i++) { await arm.click(); await p.waitForTimeout(700); }
@@ -136,7 +154,13 @@ check("в подтверждении описано, что произойдёт
 
 await p.locator('[data-testid="wipe-confirm-yes"]').click();
 const report = p.locator('[data-testid="wipe-report"]');
-await report.waitFor({ state: "visible", timeout: 30000 }).catch(() => {});
+// Отчёт от сброса уже на экране, поэтому ждём ИМЕННО отчёт обнуления —
+// иначе прочитаем предыдущий и решим, что всё прошло.
+await p.waitForFunction(() => {
+  const el = document.querySelector('[data-testid="wipe-report"]');
+  // Строка есть ТОЛЬКО в отчёте обнуления (в отчёте сброса её нет).
+  return el && el.innerText.includes("журнал синхронизации");
+}, null, { timeout: 40000 }).catch(() => {});
 const rtext = (await report.innerText().catch(() => "")).replace(/\s+/g, " ");
 console.log("  отчёт:", rtext.slice(0, 260));
 check("показан пошаговый отчёт", rtext.includes("аккаунт, ключи и токены"));

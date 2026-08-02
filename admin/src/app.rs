@@ -871,6 +871,10 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
     let taps = create_rw_signal(0u32);
     let last_tap = create_rw_signal(0.0f64);
     let confirming = create_rw_signal(false);
+    // Сброс доступа — отдельное, куда менее разрушительное действие: деньги и
+    // личные данные остаются, поэтому взвода на 10 нажатий тут нет, только
+    // подтверждение.
+    let confirming_reset = create_rw_signal(false);
     let wiping = create_rw_signal(false);
     let report = create_rw_signal(Option::<api::WipeReport>::None);
 
@@ -914,6 +918,27 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
                         // Частичный провал — показать целиком, не молчать.
                         error.set(Some(r.error.clone().unwrap_or_else(||
                             "обнуление прошло не полностью — см. шаги".to_string())));
+                    }
+                    report.set(Some(r));
+                }
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            wiping.set(false);
+        });
+    };
+
+    let uid_reset = store_value(user_id.clone());
+    let on_reset = move |_| {
+        let uid = uid_reset.get_value();
+        confirming_reset.set(false);
+        wiping.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match api::user_reset(&uid).await {
+                Ok(r) => {
+                    if !r.ok {
+                        error.set(Some(r.error.clone().unwrap_or_else(||
+                            "сброс прошёл не полностью — см. шаги".to_string())));
                     }
                     report.set(Some(r));
                 }
@@ -1083,6 +1108,15 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
                             </div>
                         })}
                         <button
+                            attr:data-testid="user-reset"
+                            class="btn btn--ghost"
+                            style="width:100%; margin-bottom:8px;"
+                            disabled=move || wiping.get()
+                            on:click=move |_| confirming_reset.set(true)
+                        >
+                            "Сбросить доступ (онбординг заново)"
+                        </button>
+                        <button
                             attr:data-testid="user-wipe-arm"
                             class="btn btn--ghost"
                             style="width:100%; color:var(--danger, #e0304f);"
@@ -1100,6 +1134,32 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
                     </div>
                 </div>
             </div>
+
+            // Подтверждение сброса доступа.
+            {move || confirming_reset.get().then(|| view! {
+                <div on:click=move |ev: leptos::ev::MouseEvent| ev.stop_propagation()
+                     attr:data-testid="reset-confirm"
+                     style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:80; \
+                            display:flex; align-items:center; justify-content:center; padding:16px;">
+                    <div style="background:var(--surface); color:var(--text); max-width:440px; width:100%; \
+                                border-radius:12px; border:1px solid var(--line); padding:16px;">
+                        <div style="font-weight:700; margin-bottom:8px;">"Сбросить доступ?"</div>
+                        <div class="row__meta" style="line-height:1.5;">
+                            "У пользователя будут сняты ключи, токены, выданные коды и отметки \
+                             открытых глав — он вернётся в состояние сразу после оплаты, и в \
+                             мини-аппе снова появится «Получить доступ к re:Norma», чтобы пройти \
+                             онбординг заново. Платежи, подписка и чеки останутся, как и все его \
+                             личные данные: дневник, прогресс историй, переписка."
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:14px;">
+                            <button class="btn btn--ghost" style="flex:1;"
+                                    on:click=move |_| confirming_reset.set(false)>"Отмена"</button>
+                            <button attr:data-testid="reset-confirm-yes" class="btn" style="flex:1;"
+                                    on:click=on_reset>"Да, сбросить"</button>
+                        </div>
+                    </div>
+                </div>
+            })}
 
             // Подтверждение — отдельным слоем поверх карточки.
             {move || confirming.get().then(|| view! {

@@ -159,6 +159,23 @@ pub async fn user_card(mut req: Request, ctx: RouteContext<()>) -> Result<Respon
     Response::from_json(&v)
 }
 
+/// POST /internal/user-reset-access {userId} → снять доступ (ключи, токены,
+/// коды, фразу, отметки глав), оставив аккаунт и его личность. Состояние
+/// «оплатил, но ещё не входил» — онбординг проходится заново.
+pub async fn user_reset_access(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(resp) = require_binding_internal(&req, &ctx).await {
+        return Ok(resp);
+    }
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let user_id = body.get("userId").and_then(|v| v.as_str()).unwrap_or("");
+    if user_id.is_empty() {
+        return err(400, "missing userId");
+    }
+    let v = do_call(&ctx, "/user/reset-access", &serde_json::json!({ "user_id": user_id })).await?;
+    console_log!("auth: reset access for {user_id}");
+    Response::from_json(&v)
+}
+
 /// POST /internal/user-wipe {userId} → erase the account: passkeys, tokens, the
 /// account record, identity/phrase indexes, chapter marks, outstanding codes.
 pub async fn user_wipe(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {

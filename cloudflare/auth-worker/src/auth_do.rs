@@ -1076,6 +1076,87 @@ impl AuthDO {
         }))
     }
 
+    /// Сброс ДОСТУПА без потери личности и без потери данных: удаляем ключи,
+    /// токены, выданные коды и отметки открытых глав (по ним мини-апп понимает,
+    /// «вошёл ли» пользователь), а также способы входа по фразе. Сам аккаунт и
+    /// его привязка к телеграму остаются — иначе оплата потеряет владельца.
+    /// Это ровно состояние «сразу после оплаты»: онбординг можно пройти заново.
+    async fn handle_user_reset_access(&self, user_id: &str) -> Result<Response> {
+        let storage = self.state.storage();
+        let mut keys: Vec<String> = Vec::new();
+
+        for cred_id in self.load_user_cred_ids(user_id).await? {
+            keys.push(format!("{STORAGE_KEY_CRED_PREFIX}{cred_id}"));
+        }
+        keys.push(format!("{STORAGE_KEY_USER_CREDS_PREFIX}{user_id}"));
+
+        let list_key = format!("{STORAGE_KEY_USER_TOKENS_PREFIX}{user_id}");
+        let stored: Option<String> = storage.get(&list_key).await?;
+        let token_ids: Vec<String> = match stored {
+            Some(json) => serde_json::from_str(&json)
+                .map_err(|e| Error::RustError(format!("parse user_tokens: {e}")))?,
+            None => Vec::new(),
+        };
+        for tid in &token_ids {
+            keys.push(format!("{STORAGE_KEY_TOKEN_PREFIX}{tid}"));
+        }
+        keys.push(list_key);
+
+        // Отметки открытых глав — именно они решают «Открыть приложение» против
+        // «Получить доступ к re:Norma» в мини-аппе.
+        keys.push(format!("{STORAGE_KEY_CHAPTERS_PREFIX}{user_id}"));
+        keys.push(format!("{STORAGE_KEY_CODE_COOLDOWN_PREFIX}{user_id}"));
+
+        // Фраза — это способ входа, а не личные данные: снимаем вместе с индексом.
+        let mut meta = self.load_user_metadata(user_id).await?;
+        if let Some(m) = meta.as_ref() {
+            if let Some(phrase) = m.recovery_phrase.as_deref() {
+                let norm = normalize_phrase(phrase);
+                keys.push(format!("{STORAGE_KEY_PHRASE_PREFIX}{norm}"));
+                keys.push(format!("{STORAGE_KEY_PHRASE_RL_PREFIX}{norm}"));
+            }
+        }
+
+        let codes = storage
+            .list_with_options(
+                worker::durable::ListOptions::new().prefix(STORAGE_KEY_CODEHASH_PREFIX),
+            )
+            .await?;
+        for entry in codes.entries() {
+            let entry = entry.map_err(|e| Error::RustError(format!("codehash entry: {e:?}")))?;
+            let pair: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(entry)
+                .map_err(|e| Error::RustError(format!("codehash pair: {e}")))?;
+            let key = pair
+                .first()
+                .and_then(|k| k.as_str())
+                .ok_or_else(|| Error::RustError("codehash entry without key".into()))?;
+            let val = pair
+                .get(1)
+                .ok_or_else(|| Error::RustError("codehash entry without value".into()))?;
+            if val.get("userId").and_then(|v| v.as_str()) == Some(user_id) {
+                keys.push(key.to_string());
+            }
+        }
+
+        let mut deleted = 0u32;
+        for key in &keys {
+            if storage.delete(key).await? {
+                deleted += 1;
+            }
+        }
+
+        // Аккаунт остаётся, но без способов входа.
+        if let Some(m) = meta.as_mut() {
+            m.recovery_phrase = None;
+            m.recovery_hash_data = None;
+            self.save_user_metadata(user_id, m).await?;
+        }
+
+        Response::from_json(&serde_json::json!({
+            "ok": true, "deleted": deleted, "kept_account": meta.is_some(),
+        }))
+    }
+
     // ---- Recovery handlers ----
 
     async fn handle_recovery_set(
@@ -1688,6 +1769,14 @@ impl DurableObject for AuthDO {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing user_id".into()))?;
                 self.handle_user_card(user_id).await
+            }
+            "/user/reset-access" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_user_reset_access(user_id).await
             }
             "/user/wipe" => {
                 let body: serde_json::Value = req.json().await?;

@@ -946,6 +946,15 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         return admin_user_card(env, &user_id).await;
     }
 
+    if method == Method::Post && path == "/admin/user-reset" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        let mut body_req = req.clone()?;
+        let body: serde_json::Value = body_req.json().await.unwrap_or(serde_json::json!({}));
+        return admin_user_reset(env, &body).await;
+    }
+
     if method == Method::Post && path == "/admin/user-wipe" {
         if let Err(resp) = require_admin(&req, env).await {
             return Ok(resp);
@@ -1235,6 +1244,58 @@ async fn admin_user_card(env: &Env, user_id: &str) -> Result<Response> {
         "claims": claims.get("claims").cloned().unwrap_or(serde_json::json!([])),
         "receipts": receipts.get("receipts").cloned().unwrap_or(serde_json::json!([])),
     }))
+}
+
+/// POST /admin/user-reset {userId} — вернуть пользователя в состояние «сразу
+/// после оплаты»: снять доступ (ключи, токены, коды, отметки открытых глав),
+/// оставив нетронутыми и деньги, и личные данные. После этого мини-апп снова
+/// рисует «Получить доступ к re:Norma», и онбординг проходится честно.
+async fn admin_user_reset(env: &Env, body: &serde_json::Value) -> Result<Response> {
+    let user_id = body
+        .get("userId")
+        .or_else(|| body.get("user_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if user_id.is_empty() {
+        return Ok(error_response("missing userId", 400));
+    }
+    let mut steps: Vec<serde_json::Value> = Vec::new();
+    let mut failed = false;
+    match binding_call(
+        env,
+        "AUTH_WORKER",
+        "auth-worker",
+        "/internal/user-reset-access",
+        &serde_json::json!({ "userId": user_id }),
+    )
+    .await
+    {
+        Ok(v) => steps.push(serde_json::json!({
+            "step": "доступ: ключи, токены, коды, отметки глав", "ok": true, "info": v,
+        })),
+        Err(e) => {
+            console_error!("user-reset {user_id}: auth: {e}");
+            failed = true;
+            steps.push(serde_json::json!({
+                "step": "доступ: ключи, токены, коды, отметки глав", "ok": false, "error": e,
+            }));
+        }
+    }
+    // Ничего больше не трогаем сознательно: платежи, подписка и чеки остаются,
+    // чтобы кнопка в мини-аппе была доступна; дневник и прогресс — тоже.
+    steps.push(serde_json::json!({
+        "step": "платежи, подписка и чеки", "ok": true, "info": { "kept": true },
+    }));
+    steps.push(serde_json::json!({
+        "step": "личные данные (дневник, истории, переписка)", "ok": true, "info": { "kept": true },
+    }));
+
+    console_log!("user-reset {user_id}: failed={failed}");
+    Ok(Response::from_json(&serde_json::json!({
+        "ok": !failed, "user_id": user_id, "steps": steps,
+    }))?
+    .with_status(if failed { 207 } else { 200 }))
 }
 
 /// POST /admin/user-wipe {userId} — erase the account everywhere, as if it had never

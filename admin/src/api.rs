@@ -615,6 +615,13 @@ pub struct WipeReport {
     pub error: Option<String>,
 }
 
+/// POST /admin/user-reset (payment-worker) — снять доступ, оставив деньги и
+/// личные данные: состояние «сразу после оплаты», онбординг проходится заново.
+pub async fn user_reset(user_id: &str) -> Result<WipeReport, ApiError> {
+    let body = serde_json::json!({ "userId": user_id }).to_string();
+    request_to(&payment_base()?, "POST", "/admin/user-reset", Some(body)).await
+}
+
 /// POST /admin/user-wipe (payment-worker). Возвращает пошаговый отчёт — в том
 /// числе при частичном провале (207), чтобы оператор видел, что именно не вышло.
 pub async fn user_wipe(user_id: &str) -> Result<WipeReport, ApiError> {

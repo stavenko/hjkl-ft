@@ -221,9 +221,14 @@ await plantFlag(B, conflictKey, "B-late", Date.now());
 await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
 await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
 let conflSettled = false;
-for (let i = 0; i < 4 && !conflSettled; i++) {
+for (let i = 0; i < 5 && !conflSettled; i++) {
+  // Перезагружаем ОБА устройства: пуш одного и пул другого — разные события,
+  // и ждать надо оба, иначе тест падает на медленной сети, а не на ошибке.
+  await B.reload({ waitUntil: "domcontentloaded" }); await B.waitForTimeout(8000);
   await A.reload({ waitUntil: "domcontentloaded" }); await A.waitForTimeout(8000);
-  conflSettled = (await storeRow(A, "app_flags", conflictKey))?.value === "B-late";
+  conflSettled = (await storeRow(A, "app_flags", conflictKey))?.value === "B-late"
+    && !!(await storeRow(A, "app_flags", "v2_test_b"))
+    && !!(await storeRow(B, "app_flags", "v2_test_a"));
 }
 const aFlagB = await storeRow(A, "app_flags", "v2_test_b");
 const bFlagA = await storeRow(B, "app_flags", "v2_test_a");

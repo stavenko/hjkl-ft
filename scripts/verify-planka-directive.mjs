@@ -140,11 +140,26 @@ const letter = await cpage.evaluate(async (uid) => {
 console.log("inbox letter        :", letter ? "«" + letter.split("\n")[0] + "»" : null);
 
 // ── It reached sync (client pushed its own write) ────────────────────────────
-r = await fetch(`${SYNC}/sync/dump`, { method: "POST", headers: { Authorization: `Bearer ${clientTok}`, "Content-Type": "application/json" }, body: "{}" });
-const dump = await r.json();
-const synced = (dump.goals || []).find((g) => g.nutrient === "Calories" && g.direction === "AtMost");
+// v1 /sync/dump удалён вместе со всем v1-слоем — читаем журнал v2.
+r = await fetch(`${SYNC}/sync/v2/pull`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${clientTok}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ since_version: 0 }),
+});
+let synced = null;
+if (r.ok) {
+  const journal = await r.json();
+  // Планка живёт в goals: берём последнюю версию строки из журнала.
+  for (const batch of journal.batches || []) {
+    for (const ch of batch.changes || []) {
+      // Ключ строки цели стабилен ("calories"), а поле nutrient — английское.
+      if (ch.store === "goals" && ch.op === "upsert" && ch.row?.key === "calories") {
+        synced = { amount: ch.row.amount };
+      }
+    }
+  }
+}
 console.log("synced planka       :", synced ? synced.amount : null);
-
 await cctx.close(); await actx.close(); await b.close();
 const ok = applied === 2600 && synced && synced.amount === 2600 && !!letter;
 console.log(ok ? "\n✅ PASS — app applied the directive (2000→2600), synced it, and notified the user (letter); server never wrote user data" : "\n❌ FAIL");

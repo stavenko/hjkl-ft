@@ -163,7 +163,8 @@ if (btnCount > 0) {
 
 await cctx.close(); await actx.close(); await b.close();
 
-const ok = btnCount === 4 && !errText && modalOk;
-console.log(ok ? "\n✅ PASS — /request-all renders (4 datasets, food modal has planka)" : "\n❌ FAIL — bundle share broken");
+// Датасетов теперь ПЯТЬ: тело, вес, шаги, еда и данные об устройстве (system).
+const ok = btnCount === 5 && !errText && modalOk;
+console.log(ok ? "\n✅ PASS — /request-all renders (5 datasets, food modal has planka)" : "\n❌ FAIL — bundle share broken");
 process.exit(ok ? 0 : 1);
 process.exit(ok ? 0 : 1);

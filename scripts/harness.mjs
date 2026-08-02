@@ -8,7 +8,8 @@
 // MUST stay in sync with story.yaml (section ids + completion rules) and
 // story.rs (TASK_FLAG → flag strings).
 
-export const DEFAULT_URL = "https://hjkl-ft.pages.dev";
+// Тестовое окружение переехало: hjkl-ft.pages.dev больше не существует.
+export const DEFAULT_URL = "https://renorma-fit-dev.pages.dev";
 
 // task id → the milestone flag string the engine reads (story.rs TASK_FLAG).
 export const FLAG = {

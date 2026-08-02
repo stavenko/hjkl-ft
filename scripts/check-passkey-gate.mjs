@@ -5,6 +5,7 @@
 import { chromium } from "playwright";
 const FE = process.env.FE || "https://renorma-fit-dev.pages.dev";
 const YA_UA = "Mozilla/5.0 (Linux; arm_64; Android 15; 25078RA3EY) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.7778.104 YaBrowser/26.6.5.104.00 Mobile Safari/537.36";
+const CHROME_ANDROID = "Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36";
 
 let fail = 0;
 const check = (name, ok, extra = "") => { console.log(`${ok ? "OK " : "FAIL"} ${name}${extra ? " — " + extra : ""}`); if (!ok) fail++; };
@@ -40,6 +41,7 @@ async function probe({ ua, killCredentials }) {
   const text = (await p.locator("body").innerText().catch(() => "")).replace(/\s+/g, " ");
   const state = {
     codeScreen: text.includes("Вход по коду"),
+    yandexScreen: await p.locator('[data-testid="pwa-yandex-screen"]').isVisible().catch(() => false),
     passkeyBtn: await p.locator('[data-testid="auth-btn-try-passkey"]').isVisible().catch(() => false),
     registerBtn: await p.locator('[data-testid="auth-btn-register"]').isVisible().catch(() => false),
     text: text.slice(0, 120),
@@ -48,14 +50,22 @@ async function probe({ ua, killCredentials }) {
   return state;
 }
 
-// 1. Яндекс.Браузер: ключ создать НЕЛЬЗЯ → приложение обязано увести на вход по коду.
+// 1. Яндекс.Браузер: приложение вообще не пускает внутрь — показывает экран
+// «откройте в Chrome» (он появился позже гейта и перекрывает его).
 const ya = await probe({ ua: YA_UA, killCredentials: true });
 console.log("  yandex:", JSON.stringify(ya));
-check("Яндекс.Браузер: приложение увело на вход по коду", ya.codeScreen);
+check("Яндекс.Браузер: показан экран перехода в Chrome", ya.yandexScreen);
 check("Яндекс.Браузер: passkey не предлагается", !ya.passkeyBtn);
 
-// 2. Контроль: тот же Android-UA, но API создания на месте → путь с ключом сохраняется.
-const ok = await probe({ ua: YA_UA.replace("YaBrowser/26.6.5.104.00 ", ""), killCredentials: false });
+// 2. Обычный Android-браузер БЕЗ navigator.credentials — ради этого случая гейт
+// и делался: ключ создать нечем, значит вход по коду.
+const noCreds = await probe({ ua: CHROME_ANDROID, killCredentials: true });
+console.log("  android-no-credentials:", JSON.stringify(noCreds));
+check("Android без credentials: приложение увело на вход по коду", noCreds.codeScreen);
+check("Android без credentials: passkey не предлагается", !noCreds.passkeyBtn);
+
+// 3. Контроль: обычный Android с рабочим API → путь с ключом сохраняется.
+const ok = await probe({ ua: CHROME_ANDROID, killCredentials: false });
 console.log("  control:", JSON.stringify(ok));
 check("обычный Android-браузер: путь с ключом сохранён", ok.passkeyBtn && !ok.codeScreen);
 

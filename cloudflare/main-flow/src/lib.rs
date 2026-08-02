@@ -156,6 +156,51 @@ async fn test_push(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
 /// Server-to-server push (e.g. payment-worker on payment success). Authenticated
 /// by a shared secret header (`X-Internal-Key`), NOT a user JWT — the caller is
 /// trusted and passes the target `userId` explicitly.
+/// Destructive surface, reachable ONLY through a service binding: such a fetch
+/// carries the dummy host the caller dialled (`https://main-flow/…`), which no
+/// public request can produce. Host + shared internal key are both required.
+const INTERNAL_HOST: &str = "main-flow";
+
+/// POST /internal/user-wipe {userId} — drop the user's push subscriptions and
+/// notification schedule. Failures are returned, never swallowed.
+async fn internal_user_wipe(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if req.url()?.host_str() != Some(INTERNAL_HOST) {
+        return Response::error("Not found", 404);
+    }
+    let key = secret_or_var(&ctx.env, "INTERNAL_PUSH_KEY")
+        .await
+        .map_err(Error::RustError)?;
+    let provided = req.headers().get("X-Internal-Key")
+        .map_err(|e| Error::RustError(format!("{e}")))?
+        .unwrap_or_default();
+    if provided != key {
+        return Response::error("unauthorized", 401);
+    }
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let user_id = body.get("userId").and_then(|v| v.as_str()).unwrap_or_default();
+    if user_id.is_empty() {
+        return Response::error("missing userId", 400);
+    }
+
+    let do_req = do_request("/wipe-user", &serde_json::json!({ "user_id": user_id }))?;
+    let mut resp = push_do_stub(&ctx.env)?.fetch_with_request(do_req).await?;
+    if resp.status_code() != 200 {
+        return Response::error(format!("push wipe failed: {}", resp.text().await?), 502);
+    }
+    let push_result: serde_json::Value = resp.json().await?;
+
+    let do_req = do_request("/wipe", &serde_json::json!({}))?;
+    let mut resp = schedule_do_stub(&ctx.env, user_id)?.fetch_with_request(do_req).await?;
+    if resp.status_code() != 200 {
+        return Response::error(format!("schedule wipe failed: {}", resp.text().await?), 502);
+    }
+    console_log!("main-flow: wiped push+schedule for {user_id}");
+    Response::from_json(&serde_json::json!({
+        "ok": true,
+        "push_deleted": push_result.get("deleted").cloned().unwrap_or(serde_json::json!(0)),
+    }))
+}
+
 async fn notify_push(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let key = secret_or_var(&ctx.env, "INTERNAL_PUSH_KEY")
         .await
@@ -466,6 +511,7 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/push/broadcast", broadcast)
         .post_async("/push/test", test_push)
         .post_async("/push/notify", notify_push)
+        .post_async("/internal/user-wipe", internal_user_wipe)
         .post_async("/schedule", update_schedule)
         .get_async("/schedule", get_schedule)
         .post_async("/test-alarm", test_alarm)

@@ -193,6 +193,61 @@ impl DurableObject for QueueDO {
         let path = url.path().to_string();
         let method = req.method();
 
+        // ---- /wipe-user (POST): drop every job (and any leftover image chunk)
+        // belonging to one account. The DO is global, so we sweep by prefix and
+        // match on the job's `owner`. ----
+        if path == "/wipe-user" && method == Method::Post {
+            let b: serde_json::Value = req.json().await?;
+            let user_id = b
+                .get("user_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| Error::RustError("missing user_id".into()))?
+                .to_string();
+            let storage = self.state.storage();
+            let listed = storage
+                .list_with_options(worker::durable::ListOptions::new().prefix("job:"))
+                .await?;
+            let mut victims: Vec<String> = Vec::new();
+            for entry in listed.entries() {
+                let entry = entry.map_err(|e| Error::RustError(format!("job entry: {e:?}")))?;
+                let pair: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(entry)
+                    .map_err(|e| Error::RustError(format!("job pair: {e}")))?;
+                let key = pair
+                    .first()
+                    .and_then(|k| k.as_str())
+                    .ok_or_else(|| Error::RustError("job entry without key".into()))?;
+                let val = pair
+                    .get(1)
+                    .ok_or_else(|| Error::RustError("job entry without value".into()))?;
+                if val.get("owner").and_then(|o| o.as_str()) == Some(user_id.as_str()) {
+                    victims.push(key.trim_start_matches("job:").to_string());
+                }
+            }
+            let mut deleted = 0u32;
+            for id in &victims {
+                if storage.delete(&format!("job:{id}")).await? {
+                    deleted += 1;
+                }
+                // Image chunks are normally dropped on /complete; a job killed
+                // mid-flight can still hold some.
+                let chunks = storage
+                    .list_with_options(
+                        worker::durable::ListOptions::new().prefix(&format!("img:{id}:")),
+                    )
+                    .await?;
+                for entry in chunks.entries() {
+                    let entry =
+                        entry.map_err(|e| Error::RustError(format!("img entry: {e:?}")))?;
+                    let pair: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(entry)
+                        .map_err(|e| Error::RustError(format!("img pair: {e}")))?;
+                    if let Some(key) = pair.first().and_then(|k| k.as_str()) {
+                        storage.delete(key).await?;
+                    }
+                }
+            }
+            return Response::from_json(&serde_json::json!({ "ok": true, "deleted": deleted }));
+        }
+
         // ---- /enqueue (POST) ----
         if path == "/enqueue" && method == Method::Post {
             let b: serde_json::Value = req.json().await?;

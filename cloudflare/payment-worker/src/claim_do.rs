@@ -906,6 +906,45 @@ impl ClaimDO {
         )?;
         Response::from_json(&serde_json::json!({ "ok": true }))
     }
+
+    /// Delete everything tied to `user_id`. Claim ids are collected first so the
+    /// dependent tables (tg_claims, receipts) can be cleaned by claim id.
+    fn wipe_user(&self, user_id: &str) -> Result<Response> {
+        let sql = self.state.storage().sql();
+        let rows = sql
+            .exec(
+                "SELECT claim_id FROM claims WHERE user_id = ? OR claimed_by = ?",
+                Some(vec![user_id.into(), user_id.into()]),
+            )?
+            .to_array::<serde_json::Value>()
+            .map_err(|e| Error::RustError(format!("select claims: {e}")))?;
+        let claim_ids: Vec<String> = rows
+            .iter()
+            .filter_map(|r| r.get("claim_id").and_then(|v| v.as_str()).map(String::from))
+            .collect();
+
+        for cid in &claim_ids {
+            sql.exec(
+                "DELETE FROM receipts WHERE claim_id = ?",
+                Some(vec![cid.as_str().into()]),
+            )?;
+            sql.exec(
+                "DELETE FROM tg_claims WHERE claim_id = ?",
+                Some(vec![cid.as_str().into()]),
+            )?;
+        }
+        sql.exec(
+            "DELETE FROM claims WHERE user_id = ? OR claimed_by = ?",
+            Some(vec![user_id.into(), user_id.into()]),
+        )?;
+        sql.exec(
+            "DELETE FROM refunds WHERE user_id = ?",
+            Some(vec![user_id.into()]),
+        )?;
+        Response::from_json(&serde_json::json!({
+            "ok": true, "claims": claim_ids.len(),
+        }))
+    }
 }
 
 fn str_field(b: &serde_json::Value, key: &str) -> Result<String> {
@@ -935,6 +974,19 @@ impl DurableObject for ClaimDO {
         let method = req.method();
 
         match (method, path.as_str()) {
+            // Erase every row that belongs to one account: its claims (by the
+            // account id recorded at checkout AND by the id that claimed them),
+            // the telegram claim links, receipts of those claims, and any refund
+            // row. Returns per-table counts so the caller can report them.
+            (Method::Post, "/wipe-user") => {
+                let b: serde_json::Value = req.json().await?;
+                let user_id = b
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?
+                    .to_string();
+                self.wipe_user(&user_id)
+            }
             (Method::Post, "/create-pending") => {
                 let b: serde_json::Value = req.json().await?;
                 self.create_pending(&b)
@@ -996,6 +1048,26 @@ impl DurableObject for ClaimDO {
             }
             (Method::Get, "/unbound") => self.unbound(),
             (Method::Get, "/paid-with-user") => self.paid_with_user(),
+            // Every payment row of one account — the admin card's «when did they pay».
+            (Method::Post, "/by-user") => {
+                let b: serde_json::Value = req.json().await?;
+                let user_id = str_field(&b, "user_id")?;
+                let rows = self
+                    .state
+                    .storage()
+                    .sql()
+                    .exec(
+                        "SELECT claim_id, status, amount, currency, paid_at, created_at, \
+                                claimed_at, period_end, contract_id, email, tg_user_id, \
+                                tg_username, promo_code \
+                         FROM claims WHERE user_id = ? OR claimed_by = ? \
+                         ORDER BY COALESCE(paid_at, created_at) DESC",
+                        Some(vec![user_id.as_str().into(), user_id.as_str().into()]),
+                    )?
+                    .to_array::<serde_json::Value>()
+                    .map_err(|e| Error::RustError(format!("select by-user: {e}")))?;
+                Response::from_json(&serde_json::json!({ "claims": rows }))
+            }
             (Method::Post, "/refund-add") => {
                 let b: serde_json::Value = req.json().await?;
                 self.add_refund(&b)

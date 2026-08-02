@@ -116,6 +116,65 @@ pub async fn has_credentials(mut req: Request, ctx: RouteContext<()>) -> Result<
     Response::from_json(&serde_json::json!({ "hasCredentials": count > 0 }))
 }
 
+// ── Destructive admin surface: reachable ONLY through a service binding ───────────
+// The account-erase pair is deliberately NOT part of the public API. A service
+// binding fetch carries the dummy host the caller dialled (`https://auth-worker/…`),
+// which no request off the internet can produce: a public request always arrives
+// with the routed hostname (auth.renorma.app / *.workers.dev). We require BOTH that
+// host AND the shared internal key, and the caller (payment-worker) additionally
+// proves the operator is an approved admin before it ever calls us.
+const INTERNAL_HOST: &str = "auth-worker";
+
+fn arrived_via_binding(req: &Request) -> bool {
+    req.url()
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .map(|h| h == INTERNAL_HOST)
+        .unwrap_or(false)
+}
+
+async fn require_binding_internal(
+    req: &Request,
+    ctx: &RouteContext<()>,
+) -> std::result::Result<(), Response> {
+    if !arrived_via_binding(req) {
+        // Indistinguishable from a non-existent route for anyone probing from outside.
+        return Err(Response::error("Not found", 404).unwrap());
+    }
+    require_internal(req, ctx).await
+}
+
+/// POST /internal/user-card {userId} → identity, passkeys and tokens with their
+/// timestamps. Read-only; used by the admin card before an erase.
+pub async fn user_card(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(resp) = require_binding_internal(&req, &ctx).await {
+        return Ok(resp);
+    }
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let user_id = body.get("userId").and_then(|v| v.as_str()).unwrap_or("");
+    if user_id.is_empty() {
+        return err(400, "missing userId");
+    }
+    let v = do_call(&ctx, "/user/card", &serde_json::json!({ "user_id": user_id })).await?;
+    Response::from_json(&v)
+}
+
+/// POST /internal/user-wipe {userId} → erase the account: passkeys, tokens, the
+/// account record, identity/phrase indexes, chapter marks, outstanding codes.
+pub async fn user_wipe(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(resp) = require_binding_internal(&req, &ctx).await {
+        return Ok(resp);
+    }
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let user_id = body.get("userId").and_then(|v| v.as_str()).unwrap_or("");
+    if user_id.is_empty() {
+        return err(400, "missing userId");
+    }
+    let v = do_call(&ctx, "/user/wipe", &serde_json::json!({ "user_id": user_id })).await?;
+    console_log!("auth: wiped account {user_id}");
+    Response::from_json(&v)
+}
+
 // ── POST /code/request {userId} (PUBLIC; user_id is non-secret) ───────────────────
 /// Generate a one-time code, arm the per-user cooldown, and deliver it to the user's channel
 /// (Telegram → our payment bot). Within the cooldown → 429 {waitMs}. The code itself is the

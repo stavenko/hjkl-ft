@@ -592,6 +592,20 @@ impl DurableObject for ConversationIndexDO {
         let path = url.path().to_string();
 
         match path.as_str() {
+            // Drop the user's row from the operator's queue/index — the thread it
+            // pointed at is erased by ConversationDO /wipe.
+            "/forget-user" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.state.storage().sql().exec(
+                    "DELETE FROM conversations WHERE user_id = ?",
+                    Some(vec![user_id.into()]),
+                )?;
+                Response::from_json(&serde_json::json!({ "ok": true }))
+            }
             "/touch-user" => {
                 let body: serde_json::Value = req.json().await?;
                 let user_id = body

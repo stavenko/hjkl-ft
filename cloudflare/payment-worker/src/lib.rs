@@ -926,6 +926,29 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         return admin_lava_subscriptions(env).await;
     }
     // Admin: cancel a lava subscription (stops renewal only — NO refund).
+    // ── Account teardown for test accounts: who is this, and erase them ──
+    if method == Method::Get && path == "/admin/user-card" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        let user_id = url
+            .query_pairs()
+            .find(|(k, _)| k == "user_id")
+            .map(|(_, v)| v.to_string())
+            .unwrap_or_default();
+        return admin_user_card(env, &user_id).await;
+    }
+
+    if method == Method::Post && path == "/admin/user-wipe" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        // Read the body from a clone: `handle` takes `req` immutably.
+        let mut body_req = req.clone()?;
+        let body: serde_json::Value = body_req.json().await.unwrap_or(serde_json::json!({}));
+        return admin_user_wipe(env, &body).await;
+    }
+
     if method == Method::Post && path == "/admin/cancel-subscription" {
         if let Err(resp) = require_admin(&req, env).await {
             return Ok(resp);
@@ -1075,6 +1098,247 @@ async fn auth_has_credentials(env: &Env, user_id: &str) -> Option<bool> {
     }
     let v: serde_json::Value = res.json().await.ok()?;
     v.get("hasCredentials").and_then(|x| x.as_bool())
+}
+
+// ── Account teardown (test accounts): card + erase ───────────────────────────
+// The destructive endpoint is admin-authenticated HERE (require_admin → the
+// support worker's approved-admins table) and fans out over SERVICE BINDINGS.
+// The wipe endpoints in the other workers answer 404 to anything that did not
+// arrive over a binding, so this worker is the only door.
+
+/// Every worker that owns per-user data: (binding, dummy host, label for the report).
+const WIPE_TARGETS: &[(&str, &str, &str)] = &[
+    ("AUTH_WORKER", "auth-worker", "аккаунт, ключи и токены"),
+    ("SYNC_WORKER", "sync-worker", "дневник (журнал синхронизации)"),
+    ("SUPPORT_WORKER", "support-worker", "переписка с поддержкой"),
+    ("MAIN_FLOW", "main-flow", "push-подписки и расписание"),
+    ("BUG_REPORT_WORKER", "bug-report-worker", "баг-репорты"),
+    ("OCR_QUEUE", "ocr-queue", "задания распознавания"),
+];
+
+/// POST `https://{host}{path}` over a service binding with the shared internal key.
+/// Returns the parsed body on 2xx, or a human-readable reason — never a silent skip.
+async fn binding_call(
+    env: &Env,
+    binding: &str,
+    host: &str,
+    path: &str,
+    body: &serde_json::Value,
+) -> std::result::Result<serde_json::Value, String> {
+    let key = token::secret_or_var(env, "INTERNAL_PUSH_KEY")
+        .await
+        .map_err(|e| format!("internal key: {e}"))?;
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/json").map_err(|e| format!("{e}"))?;
+    headers.set("X-Internal-Key", &key).map_err(|e| format!("{e}"))?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(JsValue::from_str(&body.to_string())));
+    let request = Request::new_with_init(&format!("https://{host}{path}"), &init)
+        .map_err(|e| format!("build request: {e}"))?;
+    let svc = env.service(binding).map_err(|e| format!("binding {binding}: {e}"))?;
+    let mut res = svc
+        .fetch_request(request)
+        .await
+        .map_err(|e| format!("call {binding}: {e}"))?;
+    let status = res.status_code();
+    let text = res.text().await.map_err(|e| format!("read {binding}: {e}"))?;
+    if !(200..300).contains(&status) {
+        return Err(format!("HTTP {status}: {}", text.chars().take(200).collect::<String>()));
+    }
+    serde_json::from_str(&text).map_err(|e| format!("parse {binding}: {e}"))
+}
+
+/// GET /admin/user-card?user_id= — who exactly is about to be erased: account,
+/// passkeys and tokens with their timestamps (auth-worker) plus the payment facts
+/// owned here. A failed lookup is reported in the payload, never hidden.
+async fn admin_user_card(env: &Env, user_id: &str) -> Result<Response> {
+    if user_id.is_empty() {
+        return Ok(error_response("missing user_id", 400));
+    }
+    let (auth, auth_error) = match binding_call(
+        env,
+        "AUTH_WORKER",
+        "auth-worker",
+        "/internal/user-card",
+        &serde_json::json!({ "userId": user_id }),
+    )
+    .await
+    {
+        Ok(v) => (Some(v), None),
+        Err(e) => {
+            console_error!("user-card {user_id}: auth-worker: {e}");
+            (None, Some(e))
+        }
+    };
+
+    let sub: serde_json::Value = {
+        let stub = sub_stub(env, user_id)?;
+        let mut r = do_get(&stub, "/subscription").await?;
+        r.json().await?
+    };
+    let claims: serde_json::Value = {
+        let stub = claim_stub(env)?;
+        let mut r = do_post(&stub, "/by-user", &serde_json::json!({ "user_id": user_id })).await?;
+        r.json().await?
+    };
+
+    Response::from_json(&serde_json::json!({
+        "user_id": user_id,
+        "auth": auth,
+        "auth_error": auth_error,
+        "subscription": sub,
+        "claims": claims.get("claims").cloned().unwrap_or(serde_json::json!([])),
+    }))
+}
+
+/// POST /admin/user-wipe {userId} — erase the account everywhere, as if it had never
+/// existed. Order matters: the provider subscription is cancelled FIRST (otherwise it
+/// keeps charging); only then is local state dropped, and only if that cancellation
+/// succeeded. Every step reports its own ok/error — a partial wipe never reads as
+/// success (207).
+async fn admin_user_wipe(env: &Env, body: &serde_json::Value) -> Result<Response> {
+    let user_id = body
+        .get("userId")
+        .or_else(|| body.get("user_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if user_id.is_empty() {
+        return Ok(error_response("missing userId", 400));
+    }
+    let mut steps: Vec<serde_json::Value> = Vec::new();
+    let mut failed = false;
+
+    // 1. Provider subscription — the one thing that keeps taking money.
+    let sub_status: serde_json::Value = {
+        let stub = sub_stub(env, &user_id)?;
+        let mut r = do_get(&stub, "/subscription").await?;
+        r.json().await?
+    };
+    let contract = sub_status
+        .get("contractId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if contract.is_empty() {
+        steps.push(serde_json::json!({
+            "step": "отмена подписки у провайдера", "ok": true,
+            "info": { "skipped": "контракт не привязан" },
+        }));
+    } else {
+        let email = sub_status
+            .get("email")
+            .and_then(|v| v.as_str())
+            .filter(|e| !e.is_empty())
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| format!("{user_id}@users.renorma.app"));
+        match provider_for_env("lava", env).await {
+            Err(reason) => {
+                console_error!("user-wipe {user_id}: provider: {reason}");
+                failed = true;
+                steps.push(serde_json::json!({
+                    "step": "отмена подписки у провайдера", "ok": false,
+                    "error": format!("провайдер не сконфигурирован: {reason}"),
+                }));
+            }
+            Ok(Some(p)) if p.configured() => match p.cancel(&contract, &email).await {
+                Ok(()) => steps.push(serde_json::json!({
+                    "step": "отмена подписки у провайдера", "ok": true,
+                    "info": { "contract": contract },
+                })),
+                Err(e) => {
+                    console_error!("user-wipe {user_id}: lava cancel: {e}");
+                    failed = true;
+                    steps.push(serde_json::json!({
+                        "step": "отмена подписки у провайдера", "ok": false,
+                        "error": format!("lava: {e}"),
+                    }));
+                }
+            },
+            // No provider configured means the subscription was NOT cancelled — that
+            // must stop the wipe, not pass as success.
+            Ok(_) => {
+                console_error!("user-wipe {user_id}: lava provider unavailable");
+                failed = true;
+                steps.push(serde_json::json!({
+                    "step": "отмена подписки у провайдера", "ok": false,
+                    "error": "провайдер lava недоступен — отмена не выполнена",
+                }));
+            }
+        }
+    }
+    // Money safety: a subscription that is still alive must keep its local trace,
+    // so the operator can see it and retry.
+    if failed {
+        return Ok(Response::from_json(&serde_json::json!({
+            "ok": false,
+            "user_id": user_id,
+            "steps": steps,
+            "error": "подписка не отменена — обнуление остановлено",
+        }))?
+        .with_status(502));
+    }
+
+    // 2. This worker's own stores.
+    for (label, which, payload) in [
+        ("подписка", "sub", serde_json::json!({})),
+        ("платежи и чеки", "claims", serde_json::json!({ "user_id": user_id })),
+        ("индекс контрактов", "index", serde_json::json!({ "userId": user_id })),
+        ("расход нейронов", "usage", serde_json::json!({ "user_id": user_id })),
+    ] {
+        let outcome: std::result::Result<serde_json::Value, String> = async {
+            let (stub, path) = match which {
+                "sub" => (sub_stub(env, &user_id).map_err(|e| e.to_string())?, "/wipe"),
+                "claims" => (claim_stub(env).map_err(|e| e.to_string())?, "/wipe-user"),
+                "index" => (index_stub(env).map_err(|e| e.to_string())?, "/forget-user"),
+                _ => (usage_stub(env).map_err(|e| e.to_string())?, "/wipe-user"),
+            };
+            let mut r = do_post(&stub, path, &payload).await.map_err(|e| e.to_string())?;
+            let status = r.status_code();
+            let text = r.text().await.map_err(|e| e.to_string())?;
+            if !(200..300).contains(&status) {
+                return Err(format!("HTTP {status}: {text}"));
+            }
+            serde_json::from_str(&text).map_err(|e| format!("parse: {e}"))
+        }
+        .await;
+        match outcome {
+            Ok(v) => steps.push(serde_json::json!({ "step": label, "ok": true, "info": v })),
+            Err(e) => {
+                console_error!("user-wipe {user_id}: {label}: {e}");
+                failed = true;
+                steps.push(serde_json::json!({ "step": label, "ok": false, "error": e }));
+            }
+        }
+    }
+
+    // 3. Every other worker that owns per-user data.
+    for (binding, host, label) in WIPE_TARGETS {
+        // sync-worker addresses its per-user DO from the query string.
+        let path = if *binding == "SYNC_WORKER" {
+            format!("/internal/user-wipe?user_id={user_id}")
+        } else {
+            "/internal/user-wipe".to_string()
+        };
+        match binding_call(env, binding, host, &path, &serde_json::json!({ "userId": user_id }))
+            .await
+        {
+            Ok(v) => steps.push(serde_json::json!({ "step": label, "ok": true, "info": v })),
+            Err(e) => {
+                console_error!("user-wipe {user_id}: {label}: {e}");
+                failed = true;
+                steps.push(serde_json::json!({ "step": label, "ok": false, "error": e }));
+            }
+        }
+    }
+
+    console_log!("user-wipe {user_id}: failed={failed}");
+    Ok(Response::from_json(&serde_json::json!({
+        "ok": !failed, "user_id": user_id, "steps": steps,
+    }))?
+    .with_status(if failed { 207 } else { 200 }))
 }
 
 /// Admin worklist: paid users who haven't set up durable access (no passkey). The signal the

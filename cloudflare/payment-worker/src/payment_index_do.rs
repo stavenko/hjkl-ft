@@ -42,6 +42,41 @@ impl DurableObject for PaymentIndexDO {
                 self.state.storage().delete(key).await?;
                 Response::from_json(&serde_json::json!({ "ok": true }))
             }
+            // Drop every index entry that points at this account — otherwise a later
+            // provider webhook would still route a payment to the erased user.
+            (Method::Post, "/forget-user") => {
+                let b: serde_json::Value = req.json().await?;
+                let user_id = b
+                    .get("userId")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing userId".into()))?
+                    .to_string();
+                let storage = self.state.storage();
+                let listed = storage
+                    .list_with_options(worker::durable::ListOptions::new().prefix("contract:"))
+                    .await?;
+                let mut victims: Vec<String> = Vec::new();
+                for entry in listed.entries() {
+                    let entry =
+                        entry.map_err(|e| Error::RustError(format!("index entry: {e:?}")))?;
+                    let pair: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(entry)
+                        .map_err(|e| Error::RustError(format!("index pair: {e}")))?;
+                    let key = pair
+                        .first()
+                        .and_then(|k| k.as_str())
+                        .ok_or_else(|| Error::RustError("index entry without key".into()))?;
+                    if pair.get(1).and_then(|v| v.as_str()) == Some(user_id.as_str()) {
+                        victims.push(key.to_string());
+                    }
+                }
+                let mut deleted = 0u32;
+                for key in &victims {
+                    if storage.delete(key).await? {
+                        deleted += 1;
+                    }
+                }
+                Response::from_json(&serde_json::json!({ "ok": true, "deleted": deleted }))
+            }
             (Method::Get, "/get") => {
                 let key = url
                     .query_pairs()

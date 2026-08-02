@@ -219,6 +219,40 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
     let stub = queue_stub(env)?;
 
     // ----- Client routes (app JWT) -----
+    // ── Erase one user's OCR jobs. Reachable ONLY through a service binding (dummy
+    // host the caller dialled) AND with the shared internal key. ──
+    if path == "/internal/user-wipe" && method == Method::Post {
+        if url.host_str() != Some("ocr-queue") {
+            return Response::error("Not found", 404);
+        }
+        let key = secret_or_var(env, "INTERNAL_PUSH_KEY").await.map_err(Error::RustError)?;
+        let provided = req
+            .headers()
+            .get("X-Internal-Key")
+            .map_err(|e| Error::RustError(format!("{e}")))?
+            .unwrap_or_default();
+        if key.is_empty() || provided != key {
+            return Response::error("unauthorized", 403);
+        }
+        let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+        let user_id = body.get("userId").and_then(|v| v.as_str()).unwrap_or_default();
+        if user_id.is_empty() {
+            return Response::error("missing userId", 400);
+        }
+        let stub = queue_stub(env)?;
+        let mut resp = do_post_body(
+            &stub,
+            "https://do/wipe-user",
+            serde_json::json!({ "user_id": user_id }).to_string(),
+        )
+        .await?;
+        if resp.status_code() != 200 {
+            return Response::error(format!("wipe failed: {}", resp.text().await?), 502);
+        }
+        console_log!("ocr-queue: wiped jobs of {user_id}");
+        return Response::from_json(&serde_json::json!({ "ok": true }));
+    }
+
     if path == "/submit" && method == Method::Post {
         let token = bearer(&req);
         let jwt_secret = secret_or_var(env, "JWT_SECRET").await.map_err(Error::RustError)?;

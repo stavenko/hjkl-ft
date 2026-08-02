@@ -936,6 +936,146 @@ impl AuthDO {
         Response::from_json(&resp)
     }
 
+    // ---- Admin: user card + wipe (test-account teardown) ----
+
+    /// Everything an operator needs to identify WHO they are about to erase:
+    /// when the account was created, its linked identity, every passkey and every
+    /// session token with their timestamps. Read-only.
+    async fn handle_user_card(&self, user_id: &str) -> Result<Response> {
+        let meta = self.load_user_metadata(user_id).await?;
+        let mut passkeys = Vec::new();
+        for cred_id in self.load_user_cred_ids(user_id).await? {
+            let key = format!("{STORAGE_KEY_CRED_PREFIX}{cred_id}");
+            let stored: Option<String> = self.state.storage().get(&key).await?;
+            if let Some(json) = stored {
+                if let Ok(c) = serde_json::from_str::<StoredPasskey>(&json) {
+                    passkeys.push(serde_json::json!({
+                        "cred_id": c.cred_id,
+                        "name": c.name,
+                        "created_at": c.created_at,   // ms
+                        "last_used_at": c.last_used_at, // ms
+                        "counter": c.counter,
+                    }));
+                }
+            }
+        }
+        let list_key = format!("{STORAGE_KEY_USER_TOKENS_PREFIX}{user_id}");
+        let stored: Option<String> = self.state.storage().get(&list_key).await?;
+        let token_ids: Vec<String> = match stored {
+            Some(json) => serde_json::from_str(&json)
+                .map_err(|e| Error::RustError(format!("parse user_tokens: {e}")))?,
+            None => Vec::new(),
+        };
+        let mut tokens = Vec::new();
+        for tid in &token_ids {
+            let key = format!("{STORAGE_KEY_TOKEN_PREFIX}{tid}");
+            let stored: Option<String> = self.state.storage().get(&key).await?;
+            if let Some(json) = stored {
+                if let Ok(t) = serde_json::from_str::<TokenMetadata>(&json) {
+                    tokens.push(serde_json::json!({
+                        "token_id": t.token_id,
+                        "fingerprint": t.fingerprint,
+                        "created_at": t.created_at,     // SECONDS (unlike passkeys)
+                        "last_used_at": t.last_used_at, // seconds
+                    }));
+                }
+            }
+        }
+        Response::from_json(&serde_json::json!({
+            "user_id": user_id,
+            "exists": meta.is_some() || !passkeys.is_empty() || !tokens.is_empty(),
+            "created_at": meta.as_ref().map(|m| m.created_at),
+            "has_phrase": meta.as_ref().map(|m| m.recovery_phrase.is_some()).unwrap_or(false),
+            "identity": meta.as_ref().and_then(|m| m.identity.as_ref()).map(|i| serde_json::json!({
+                "provider": i.provider, "provider_uid": i.provider_uid, "username": i.username,
+            })),
+            "passkeys": passkeys,
+            "tokens": tokens,
+        }))
+    }
+
+    /// Erase every trace of a user from this DO: passkeys, session tokens, the
+    /// account record, the identity and phrase reverse indexes, story-chapter
+    /// marks, and any outstanding login codes. Idempotent — a second call on an
+    /// already-erased user simply deletes nothing.
+    async fn handle_user_wipe(&self, user_id: &str) -> Result<Response> {
+        let storage = self.state.storage();
+        // Every key we intend to remove, gathered first so the actual deletion is a
+        // single loop whose failures are REPORTED, never swallowed.
+        let mut keys: Vec<String> = Vec::new();
+
+        for cred_id in self.load_user_cred_ids(user_id).await? {
+            keys.push(format!("{STORAGE_KEY_CRED_PREFIX}{cred_id}"));
+        }
+        keys.push(format!("{STORAGE_KEY_USER_CREDS_PREFIX}{user_id}"));
+
+        let list_key = format!("{STORAGE_KEY_USER_TOKENS_PREFIX}{user_id}");
+        let stored: Option<String> = storage.get(&list_key).await?;
+        let token_ids: Vec<String> = match stored {
+            Some(json) => serde_json::from_str(&json)
+                .map_err(|e| Error::RustError(format!("parse user_tokens: {e}")))?,
+            None => Vec::new(),
+        };
+        for tid in &token_ids {
+            keys.push(format!("{STORAGE_KEY_TOKEN_PREFIX}{tid}"));
+        }
+        keys.push(list_key);
+
+        // The account record carries the two reverse indexes — read it BEFORE deleting.
+        if let Some(meta) = self.load_user_metadata(user_id).await? {
+            if let Some(phrase) = meta.recovery_phrase.as_deref() {
+                let norm = normalize_phrase(phrase);
+                keys.push(format!("{STORAGE_KEY_PHRASE_PREFIX}{norm}"));
+                keys.push(format!("{STORAGE_KEY_PHRASE_RL_PREFIX}{norm}"));
+            }
+            if let Some(id) = meta.identity.as_ref() {
+                keys.push(format!(
+                    "{STORAGE_KEY_IDENTITY_PREFIX}{}:{}",
+                    id.provider, id.provider_uid
+                ));
+            }
+        }
+        keys.push(format!("{STORAGE_KEY_USER_PREFIX}{user_id}"));
+        keys.push(format!("{STORAGE_KEY_CHAPTERS_PREFIX}{user_id}"));
+        keys.push(format!("{STORAGE_KEY_CODE_COOLDOWN_PREFIX}{user_id}"));
+
+        // Login codes are keyed by their own hash, so the only way to find this
+        // user's outstanding ones is a prefix scan.
+        let codes = storage
+            .list_with_options(
+                worker::durable::ListOptions::new().prefix(STORAGE_KEY_CODEHASH_PREFIX),
+            )
+            .await?;
+        for entry in codes.entries() {
+            let entry = entry.map_err(|e| Error::RustError(format!("codehash entry: {e:?}")))?;
+            let pair: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(entry)
+                .map_err(|e| Error::RustError(format!("codehash pair: {e}")))?;
+            let key = pair
+                .first()
+                .and_then(|k| k.as_str())
+                .ok_or_else(|| Error::RustError("codehash entry without key".into()))?;
+            let val = pair
+                .get(1)
+                .ok_or_else(|| Error::RustError("codehash entry without value".into()))?;
+            if val.get("userId").and_then(|v| v.as_str()) == Some(user_id) {
+                keys.push(key.to_string());
+            }
+        }
+
+        let mut deleted = 0u32;
+        for key in &keys {
+            // A delete that fails leaves a live credential/token behind — that must
+            // NOT pass silently for an operation whose whole point is erasure.
+            if storage.delete(key).await? {
+                deleted += 1;
+            }
+        }
+
+        Response::from_json(&serde_json::json!({
+            "ok": true, "deleted": deleted, "keys": keys.len(),
+        }))
+    }
+
     // ---- Recovery handlers ----
 
     async fn handle_recovery_set(
@@ -1540,6 +1680,22 @@ impl DurableObject for AuthDO {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing token_id".into()))?;
                 self.handle_token_validate(token_id).await
+            }
+            "/user/card" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_user_card(user_id).await
+            }
+            "/user/wipe" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.handle_user_wipe(user_id).await
             }
             "/token/list" => {
                 let body: serde_json::Value = req.json().await?;

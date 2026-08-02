@@ -144,6 +144,9 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/internal/has-credentials", account::has_credentials)
         .post_async("/internal/has-entered", account::has_entered)
         .post_async("/internal/code/mint", account::code_mint)
+        // Erase surface — 404 unless the call came over a service binding (see account.rs).
+        .post_async("/internal/user-card", account::user_card)
+        .post_async("/internal/user-wipe", account::user_wipe)
         .post_async("/code/request", account::code_request)
         .post_async("/code/verify", account::code_verify)
         .post_async("/chapters/available", account::chapter_available)

@@ -128,7 +128,52 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     apply_cors(resp, &origin)
 }
 
+/// Destructive surface, reachable ONLY through a service binding: a binding fetch
+/// carries the dummy host the caller dialled, which no request off the internet can
+/// produce (public traffic always arrives as sync.renorma.app / *.workers.dev). We
+/// require that host AND the shared internal key; the caller (payment-worker) has
+/// already proven the operator is an approved admin.
+const INTERNAL_HOST: &str = "sync-worker";
+
+async fn handle_internal_wipe(req: &Request, env: &Env) -> Result<Response> {
+    let url = req.url()?;
+    if url.host_str() != Some(INTERNAL_HOST) {
+        return Response::error("Not found", 404);
+    }
+    let expected = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) if !k.is_empty() => k,
+        _ => return error_response("internal_not_configured", 500),
+    };
+    let provided = req.headers().get("X-Internal-Key").ok().flatten().unwrap_or_default();
+    if provided != expected {
+        return error_response("unauthorized", 403);
+    }
+    let user_id = url
+        .query_pairs()
+        .find(|(k, _)| k == "user_id")
+        .map(|(_, v)| v.to_string())
+        .unwrap_or_default();
+    if user_id.is_empty() {
+        return error_response("missing user_id", 400);
+    }
+    let stub = env.durable_object("SYNC_DO")?.id_from_name(&user_id)?.get_stub()?;
+    let headers = Headers::new();
+    let _ = headers.set("Content-Type", "application/json");
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post).with_headers(headers);
+    let do_req = Request::new_with_init("https://do/internal/user-wipe", &init)?;
+    let mut res = stub.fetch_with_request(do_req).await?;
+    let text = res.text().await?;
+    console_log!("sync: wiped journal for {user_id}");
+    cors_json(text, res.status_code())
+}
+
 async fn handle(mut req: Request, env: &Env) -> Result<Response> {
+    // Erase surface first: it authenticates by binding host + internal key, NOT by
+    // the user's JWT (there is no user session to erase an account with).
+    if req.method() == Method::Post && req.url()?.path() == "/internal/user-wipe" {
+        return handle_internal_wipe(&req, env).await;
+    }
     // JWT gate: 401 on missing/invalid bearer or undecodable sub.
     let user_id = match validate_from_header(&req, env).await {
         Ok(sub) => sub,

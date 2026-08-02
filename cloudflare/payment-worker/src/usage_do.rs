@@ -236,6 +236,24 @@ impl DurableObject for UsageDO {
                 self.add(&b)
             }
             (Method::Get, "/report") => self.report(),
+            // Erase one account's token accounting (detail + weekly rollup).
+            (Method::Post, "/wipe-user") => {
+                let b: serde_json::Value = req.json().await?;
+                let user_id = b
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let sql = self.state.storage().sql();
+                sql.exec(
+                    "DELETE FROM usage_detail WHERE user_id = ?",
+                    Some(vec![user_id.into()]),
+                )?;
+                sql.exec(
+                    "DELETE FROM usage_weekly WHERE user_id = ?",
+                    Some(vec![user_id.into()]),
+                )?;
+                Response::from_json(&serde_json::json!({ "ok": true }))
+            }
             _ => Response::error("Not found", 404),
         }
     }

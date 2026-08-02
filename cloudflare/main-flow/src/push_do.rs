@@ -23,6 +23,36 @@ impl DurableObject for PushDO {
         let path = url.path();
 
         match path {
+            // Erase every push endpoint of one user (the DO is global, so this is a
+            // prefix sweep) plus the index list.
+            "/wipe-user" => {
+                let body: serde_json::Value = req.json().await?;
+                let user_id = body.get("user_id").and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                let storage = self.state.storage();
+                let listed = storage
+                    .list_with_options(
+                        worker::durable::ListOptions::new()
+                            .prefix(&format!("{SUB_PREFIX}{user_id}:")),
+                    )
+                    .await?;
+                let mut deleted = 0u32;
+                for entry in listed.entries() {
+                    let entry = entry
+                        .map_err(|e| Error::RustError(format!("push entry: {e:?}")))?;
+                    let pair: Vec<serde_json::Value> = serde_wasm_bindgen::from_value(entry)
+                        .map_err(|e| Error::RustError(format!("push pair: {e}")))?;
+                    let key = pair
+                        .first()
+                        .and_then(|k| k.as_str())
+                        .ok_or_else(|| Error::RustError("push entry without key".into()))?;
+                    if storage.delete(key).await? {
+                        deleted += 1;
+                    }
+                }
+                storage.delete(&format!("{USER_SUBS_PREFIX}{user_id}")).await?;
+                Response::from_json(&serde_json::json!({ "ok": true, "deleted": deleted }))
+            }
             "/subscribe" => {
                 let body: serde_json::Value = req.json().await?;
                 let user_id = body.get("user_id").and_then(|v| v.as_str())

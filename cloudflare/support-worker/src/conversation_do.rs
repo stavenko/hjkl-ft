@@ -304,6 +304,14 @@ impl DurableObject for ConversationDO {
         let path = url.path().to_string();
 
         match path.as_str() {
+            // Erase this user's whole thread. The DO is per-user, so the account's
+            // support history disappears with it.
+            "/wipe" => {
+                let sql = self.state.storage().sql();
+                sql.exec("DELETE FROM messages", None)?;
+                sql.exec("DELETE FROM meta", None)?;
+                Response::from_json(&serde_json::json!({ "ok": true }))
+            }
             "/append" => {
                 let body: serde_json::Value = req.json().await?;
                 let client_id = body

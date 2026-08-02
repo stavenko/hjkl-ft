@@ -137,6 +137,19 @@ impl DurableObject for BugReportDO {
                 self.insert(&b)
             }
             (Method::Get, "/reports") => self.list(),
+            // Erase one user's reports (the DO is global, so this is a targeted delete).
+            (Method::Post, "/wipe-user") => {
+                let b: serde_json::Value = req.json().await?;
+                let user = b
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::RustError("missing user_id".into()))?;
+                self.state.storage().sql().exec(
+                    "DELETE FROM reports WHERE user = ?",
+                    Some(vec![user.into()]),
+                )?;
+                Response::from_json(&serde_json::json!({ "ok": true }))
+            }
             _ => Response::error("Not found", 404),
         }
     }

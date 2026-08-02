@@ -110,6 +110,14 @@ impl SyncDO {
         Response::from_json(&serde_json::json!({ "version": last, "batches": batches }))
     }
 
+    /// Erase this user's entire journal — the DO is per-user, so «forget this
+    /// account» is exactly «drop everything here», including the initialized flag,
+    /// so a re-registered account starts from a virgin store.
+    async fn v2_wipe(&self) -> Result<Response> {
+        self.state.storage().delete_all().await?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
     /// Finalize the client-driven migration: the client uploaded its local data
     /// as sequential day-batches and now confirms the resulting version. The
     /// counts must MATCH exactly (each batch bumps the version by 1, so
@@ -153,6 +161,7 @@ impl DurableObject for SyncDO {
                 let payload: serde_json::Value = req.json().await?;
                 self.v2_pull(&payload).await
             }
+            (Method::Post, "/internal/user-wipe") => self.v2_wipe().await,
             (Method::Post, "/sync/v2/init") => {
                 let payload: serde_json::Value = req.json().await?;
                 self.v2_init(&payload).await

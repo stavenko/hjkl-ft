@@ -55,6 +55,25 @@ service = "telegram-worker-dev"
 binding = "AUTH_WORKER"
 service = "auth-worker-dev"
 
+# Account teardown (/admin/user-wipe) fans out over these. The wipe endpoints in
+# each target answer 404 unless the call arrives over a binding, so these are the
+# only way to reach them.
+[[services]]
+binding = "SYNC_WORKER"
+service = "sync-worker-dev"
+
+[[services]]
+binding = "MAIN_FLOW"
+service = "main-flow-dev"
+
+[[services]]
+binding = "BUG_REPORT_WORKER"
+service = "bug-report-worker-dev"
+
+[[services]]
+binding = "OCR_QUEUE"
+service = "ocr-queue-dev"
+
 # DEV-ONLY: reach the lava-mock via a service binding (Cloudflare blocks worker→worker
 # fetch to a *.workers.dev URL on the same account, error 1042). Absent under
 # [env.production.services] → prod fetches the real gate.lava.top over the internet.
@@ -145,6 +164,22 @@ service = "telegram-worker-prod"
 [[env.production.services]]
 binding = "AUTH_WORKER"
 service = "auth-worker-prod"
+
+[[env.production.services]]
+binding = "SYNC_WORKER"
+service = "sync-worker-prod"
+
+[[env.production.services]]
+binding = "MAIN_FLOW"
+service = "main-flow-prod"
+
+[[env.production.services]]
+binding = "BUG_REPORT_WORKER"
+service = "bug-report-worker-prod"
+
+[[env.production.services]]
+binding = "OCR_QUEUE"
+service = "ocr-queue-prod"
 
 [[env.production.secrets_store_secrets]]
 binding = "LAVA_API_KEY"

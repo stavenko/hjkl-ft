@@ -98,6 +98,13 @@ impl DurableObject for SubscriptionDO {
         match (method, path.as_str()) {
             (Method::Get, "/subscription") => Response::from_json(&status_of(&rec)),
 
+            // Erase the subscription entirely (account teardown). The DO is
+            // per-user, so dropping its single record is the whole job.
+            (Method::Post, "/wipe") => {
+                self.state.storage().delete_all().await?;
+                Response::from_json(&serde_json::json!({ "ok": true }))
+            }
+
             // Provider-driven: a payment succeeded → mark paid and extend.
             // Idempotent on activateKey (MONEY-SAFETY #4): a replayed claim/webhook
             // never re-extends. End is anchored to the provider-reported periodEnd,

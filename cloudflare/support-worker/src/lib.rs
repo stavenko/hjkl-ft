@@ -522,6 +522,58 @@ async fn admin_approve(mut req: Request, ctx: RouteContext<()>) -> Result<Respon
 /// store, no redeploy to add an admin. Guarded by the
 /// shared INTERNAL_PUSH_KEY (X-Internal-Key); an unset key fails closed (500), a
 /// wrong/missing key 403s. NEVER swallows: any DO/stub/parse error 500s.
+/// Destructive surface, reachable ONLY through a service binding: a binding fetch
+/// carries the dummy host the caller dialled (`https://support-worker/…`), which no
+/// request off the internet can produce. Host + shared key are BOTH required; the
+/// caller has already proven the operator is an approved admin.
+const INTERNAL_HOST: &str = "support-worker";
+
+async fn require_binding_internal(
+    req: &Request,
+    ctx: &RouteContext<()>,
+) -> std::result::Result<(), Response> {
+    let host = req.url().ok().and_then(|u| u.host_str().map(str::to_string));
+    if host.as_deref() != Some(INTERNAL_HOST) {
+        return Err(Response::error("Not found", 404).unwrap());
+    }
+    let key = match token::secret_or_var(&ctx.env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) if !k.is_empty() => k,
+        Ok(_) => return Err(json_status(500, "internal key not configured")),
+        Err(e) => return Err(json_status(500, &e)),
+    };
+    let provided = req.headers().get("X-Internal-Key").ok().flatten().unwrap_or_default();
+    if provided != key {
+        return Err(json_status(403, "bad internal key"));
+    }
+    Ok(())
+}
+
+/// POST /internal/user-wipe {userId} — erase the support thread and drop the user
+/// from the operator queue/index. Errors are returned, never swallowed.
+async fn internal_user_wipe(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(resp) = require_binding_internal(&req, &ctx).await {
+        return Ok(resp);
+    }
+    let body: serde_json::Value = req.json().await?;
+    let user_id = body.get("userId").and_then(|v| v.as_str()).unwrap_or("");
+    if user_id.is_empty() {
+        return Ok(json_status(400, "userId required"));
+    }
+
+    let do_req = do_request("/wipe", &serde_json::json!({}))?;
+    let resp = conversation_stub(&ctx.env, user_id)?.fetch_with_request(do_req).await?;
+    if resp.status_code() != 200 {
+        return Ok(json_status(502, "conversation wipe failed"));
+    }
+    let do_req = do_request("/forget-user", &serde_json::json!({ "user_id": user_id }))?;
+    let resp = index_stub(&ctx.env)?.fetch_with_request(do_req).await?;
+    if resp.status_code() != 200 {
+        return Ok(json_status(502, "conversation index forget failed"));
+    }
+    console_log!("support: wiped conversation for {user_id}");
+    Response::from_json(&serde_json::json!({ "ok": true }))
+}
+
 async fn internal_is_admin(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let key = match token::secret_or_var(&ctx.env, "INTERNAL_PUSH_KEY").await {
         Ok(k) => k,
@@ -706,6 +758,7 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/admin/digest-run", admin_digest_run)
         // INTERNAL: cross-worker admin check (payment-worker via service binding).
         .post_async("/internal/is-admin", internal_is_admin)
+        .post_async("/internal/user-wipe", internal_user_wipe)
         .run(req, env)
         .await;
 

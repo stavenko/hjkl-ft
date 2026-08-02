@@ -20,6 +20,9 @@ new_sqlite_classes = ["SyncDO"]
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+# Account teardown: payment-worker reaches /internal/user-wipe over a service
+# binding and proves itself with this shared key (prod: Secrets Store below).
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
 
 # ── Production (separate worker on sync.renorma.app, clean DO data) ──
 # Deploy: wrangler deploy --env production
@@ -42,3 +45,8 @@ class_name = "SyncDO"
 binding = "JWT_SECRET"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "jwt-secret"
+
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"

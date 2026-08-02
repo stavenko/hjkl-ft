@@ -167,6 +167,42 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
 
     let stub = bug_stub(env)?;
 
+    // ── Erase one user's reports. Reachable ONLY through a service binding: such a
+    // fetch carries the dummy host the caller dialled, which no public request can
+    // produce. Host + the shared internal key are both required. ──
+    if method == Method::Post && path == "/internal/user-wipe" {
+        if url.host_str() != Some("bug-report-worker") {
+            return Response::error("Not found", 404);
+        }
+        let key = token::secret_or_var(env, "INTERNAL_PUSH_KEY")
+            .await
+            .map_err(Error::RustError)?;
+        let provided = req
+            .headers()
+            .get("X-Internal-Key")
+            .map_err(|e| Error::RustError(format!("{e}")))?
+            .unwrap_or_default();
+        if key.is_empty() || provided != key {
+            return Response::error("unauthorized", 403);
+        }
+        let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+        let user_id = body.get("userId").and_then(|v| v.as_str()).unwrap_or_default();
+        if user_id.is_empty() {
+            return Response::error("missing userId", 400);
+        }
+        let mut resp = do_post(
+            &stub,
+            "/wipe-user",
+            &serde_json::json!({ "user_id": user_id }),
+        )
+        .await?;
+        if resp.status_code() != 200 {
+            return Response::error(format!("wipe failed: {}", resp.text().await?), 502);
+        }
+        console_log!("bug-report: wiped reports of {user_id}");
+        return Response::from_json(&serde_json::json!({ "ok": true }));
+    }
+
     // ── Admin read: gather the collected reports. Gated by ADMIN_KEY (a developer
     // tool), NOT a user JWT — so one signed-in user can't read others' reports. ──
     if method == Method::Get && path == "/reports" {

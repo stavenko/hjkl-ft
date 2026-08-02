@@ -46,6 +46,12 @@ impl DurableObject for ScheduleDO {
         let path = url.path();
 
         match path {
+            // The DO is per-user: erasing the account means dropping everything here
+            // (schedule + armed alarm slot).
+            "/wipe" => {
+                self.state.storage().delete_all().await?;
+                Response::from_json(&serde_json::json!({ "ok": true }))
+            }
             "/update" => {
                 let body: serde_json::Value = req.json().await?;
                 let user_id = body.get("user_id").and_then(|v| v.as_str())

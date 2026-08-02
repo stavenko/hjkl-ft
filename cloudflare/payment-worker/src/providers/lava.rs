@@ -347,14 +347,18 @@ impl Lava {
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        // Minor-unit amount + currency for the manual-refund record (MONEY-SAFETY #8).
+        // Сумма в МИНОРНЫХ единицах (×100) — так объявлена колонка claims.amount и
+        // так пишет путь чекаута. lava присылает мажорные единицы (50.0 ₽), поэтому
+        // умножаем: без этого 50 ₽ ложились как 50 и показывались как «0.50 ₽».
         let amount = b
             .get("amount")
             .or_else(|| b.get("sum"))
             .or_else(|| b.get("price"))
             .and_then(|v| {
                 if v.is_number() {
-                    v.as_f64().filter(|n| n.is_finite()).map(|n| n as i64)
+                    v.as_f64()
+                        .filter(|n| n.is_finite())
+                        .map(|n| (n * 100.0).round() as i64)
                 } else {
                     None
                 }

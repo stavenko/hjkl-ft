@@ -1485,11 +1485,9 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                     </div>
                     <div class="list">
                         {list.into_iter().enumerate().map(|(i, p)| {
-                            let amount = match (p.amount, p.currency.clone()) {
-                                (Some(a), Some(c)) => format!("{a} {c}"),
-                                (Some(a), None) => a.to_string(),
-                                _ => "—".to_string(),
-                            };
+                            // Сумма в минорных единицах, как и везде: печатаем
+                            // тем же форматтером, иначе 990 читается как «990 ₽».
+                            let amount = fmt_money(p.amount, p.currency.as_deref());
                             let email = p.email.clone().unwrap_or_else(|| "—".to_string());
                             let contract = p.contract_id.clone().unwrap_or_else(|| "—".to_string());
                             let waited = p.paid_at.map(since_label).unwrap_or_default();

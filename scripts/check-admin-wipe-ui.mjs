@@ -106,6 +106,10 @@ await row.click();
 const modal = p.locator('[data-testid="user-modal"]');
 await modal.waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
 check("карточка пользователя открылась", await modal.isVisible().catch(() => false));
+// Строка обязана быть КНОПКОЙ: на iOS делегированный клик по <div> не приходит,
+// и карточка не открывается (ровно этот баг был на проде).
+check("строка пользователя — кнопка (иначе не тапается на iOS)",
+  (await row.evaluate((el) => el.tagName)) === "BUTTON");
 await p.waitForTimeout(2500);
 const text = (await modal.innerText().catch(() => "")).replace(/\s+/g, " ");
 console.log("  карточка:", text.slice(0, 220));

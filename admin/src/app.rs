@@ -1361,9 +1361,9 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                             let no_key = u.has_credentials == Some(false);
                             let key_unknown = u.has_credentials.is_none();
                             view! {
-                                <div attr:data-testid="user-row" class="row reveal"
+                                <button attr:data-testid="user-row" class="row reveal"
                                      attr:data-user-id=uid.clone()
-                                     style=format!("--i:{i}; cursor:pointer;")
+                                     style=format!("--i:{i}")
                                      on:click=move |_| user_open.set(Some(uid.clone()))>
                                     <div class="row__top">
                                         <span class="row__title">{who}</span>
@@ -1376,7 +1376,7 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                                     </div>
                                     <div class="row__sub">{facts}</div>
                                     <div class="row__meta">{when}</div>
-                                </div>
+                                </button>
                             }
                         }).collect_view()}
                     </div>
@@ -1448,21 +1448,24 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                                 });
                             };
                             view! {
-                                <div attr:data-testid="receipt-row" class="row reveal"
-                                     style=format!("--i:{i}; cursor:pointer;") on:click=open>
+                                <button attr:data-testid="receipt-row" class="row reveal"
+                                     style=format!("--i:{i}") on:click=open>
                                     <div class="row__top">
                                         <span class="row__title mono">{amount}</span>
                                         <span class="badge">"чек"</span>
                                     </div>
                                     <div class="row__sub">{who}</div>
                                     <div class="row__meta">{when}</div>
-                                </div>
+                                </button>
                             }
                         }).collect_view()}
                     </div>
                 })
             }}
 
+            // Платежи, которые прошли, но не привязаны НИ К КАКОМУ аккаунту:
+            // человек заплатил и не завершил онбординг. Пользователя у них нет,
+            // поэтому в списке выше их быть не может — но и потерять их нельзя.
             {move || {
                 let list = items.get();
                 if list.is_empty() {
@@ -1475,6 +1478,11 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
                     }.into_view();
                 }
                 view! {
+                    <div style="padding: 16px 16px 2px;">
+                        <span class="badge badge--warn badge--plain">
+                            {format!("Платежи без пользователя · {}", list.len())}
+                        </span>
+                    </div>
                     <div class="list">
                         {list.into_iter().enumerate().map(|(i, p)| {
                             let amount = match (p.amount, p.currency.clone()) {

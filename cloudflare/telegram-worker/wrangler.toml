@@ -41,6 +41,9 @@ ONBOARD_BASE_URL = "https://renorma-fit-dev.pages.dev/onboard-tg"
 # opens a real Safari, so we want /onboard, NOT the /onboard-tg bridge). Worker appends
 # `#claim=<id>.<secret>`.
 APP_ONBOARD_URL = "https://renorma-fit-dev.pages.dev/onboard"
+# Смоук-фронт (боевой бэкенд, отдельный домен) — только для отладочной кнопки,
+# которая взводится десятью тапами по строке версии.
+SMOKE_ONBOARD_URL = "https://fit-smoke.renorma.app/onboard"
 # Mini App URL opened from bot messages (dev = this dev worker's own host).
 MINIAPP_URL = "https://telegram-worker-dev.vg-stavenko.workers.dev/"
 # Bot deep-link shown on the out-of-Telegram gate page.
@@ -90,6 +93,9 @@ secret_name = "internal-push-key"
 ONBOARD_BASE_URL = "https://fit.renorma.app/onboard-tg"
 # DIRECT app onboarding entry used by the Mini App (openLink → Safari → /onboard).
 APP_ONBOARD_URL = "https://fit.renorma.app/onboard"
+# Смоук-фронт (тот же боевой бэкенд, отдельный домен) — только для отладочной
+# кнопки, которая взводится десятью тапами по строке версии.
+SMOKE_ONBOARD_URL = "https://fit-smoke.renorma.app/onboard"
 # Mini App URL opened from bot messages (prod = tg.renorma.app custom domain).
 MINIAPP_URL = "https://tg.renorma.app/"
 # Bot deep-link shown on the out-of-Telegram gate page.

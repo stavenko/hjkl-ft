@@ -442,8 +442,21 @@ pub async fn miniapp_access_link(mut req: Request, env: &Env) -> Result<Response
         .var("APP_ONBOARD_URL")
         .map(|v| v.to_string())
         .unwrap_or_default(); // APP_ONBOARD_URL is set in both envs; no hardcoded fallback.
+    // Тот же одноразовый код годится и для смоук-фронта: он ходит в те же
+    // боевые воркеры, отличается только домен. Пусто, если смоук не настроен —
+    // тогда отладочная кнопка в мини-аппе просто не появится.
+    let smoke_base = env
+        .var("SMOKE_ONBOARD_URL")
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let smoke_url = if smoke_base.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!(format!("{smoke_base}?u={user_id}#code={code}"))
+    };
     Response::from_json(&serde_json::json!({
         "onboardUrl": format!("{base}?u={user_id}#code={code}"),
+        "smokeUrl": smoke_url,
     }))
 }
 
@@ -766,6 +779,8 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
   button:disabled { opacity: 0.5; box-shadow: none; cursor: default; }
   button.secondary { background: transparent; color: var(--muted); border: 1.5px solid var(--line);
     box-shadow: none; font-weight: 600; }
+  /* Отладочный вход на тестовую версию — красный, чтобы не спутать с обычным. */
+  button.danger { background: #e0304f; box-shadow: 0 10px 24px rgba(224,48,79,0.25); font-size: 15px; }
   .nav { display: flex; gap: 10px; }
   .nav .secondary { flex: 0 0 34%; }
 
@@ -848,7 +863,25 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
   </div>
 
   <div id="claimInfo" class="sub" style="font-size:11px; word-break:break-all; text-align:left; white-space:pre-line;"></div>
-  <div style="font-size:10px; opacity:0.5; text-align:center; margin-top:10px;">build: pay-r19</div>
+  <button id="devSmokeBtn" class="danger hidden" style="margin-top:10px;">Получить доступ к тестовой версии (для разработчиков)</button>
+  <div id="buildTag" style="font-size:10px; opacity:0.5; text-align:center; margin-top:10px; user-select:none; -webkit-user-select:none;">build: pay-r19</div>
+</div>
+
+<!-- Предупреждение перед уходом на тестовую версию. Кнопки намеренно
+     «перевёрнуты»: продолжение выглядит второстепенным, отмена — основной,
+     чтобы случайный пользователь ушёл отсюда, а не вглубь. -->
+<div id="devWarn" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,0.6);
+     display:flex; align-items:center; justify-content:center; padding:16px; z-index:50;">
+  <div class="card" style="max-width:420px; width:100%;">
+    <p class="sub" style="text-align:left; line-height:1.5;">
+      Эта часть кода служит для отладки приложения. Обычным пользователям сюда заходить не нужно.<br><br>
+      Если вы разработчик и хотите потестировать, продолжайте.
+    </p>
+    <div style="display:flex; gap:10px; margin-top:14px;">
+      <button id="devWarnGo" class="secondary" style="flex:1;">Продолжить</button>
+      <button id="devWarnCancel" style="flex:1;">Отменить</button>
+    </div>
+  </div>
 </div>
 
 <div id="gate" class="card hidden">
@@ -1225,6 +1258,55 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
       accessStatus.textContent = "Не удалось получить ссылку — попробуйте ещё раз.";
     });
   });
+
+  // ── Отладочный вход на тестовую версию ──
+  // Взводится ДЕСЯТЬЮ тапами подряд по строке версии, между тапами не больше
+  // полусекунды. Обычный пользователь так не попадёт, а разработчик — да.
+  var buildTag = document.getElementById("buildTag");
+  var devSmokeBtn = document.getElementById("devSmokeBtn");
+  var devWarn = document.getElementById("devWarn");
+  var devTaps = 0, devLastTap = 0;
+  var DEV_TAPS_NEEDED = 10, DEV_TAP_GAP_MS = 500;
+
+  if (buildTag) {
+    buildTag.addEventListener("click", function () {
+      var now = Date.now();
+      devTaps = (devLastTap && now - devLastTap < DEV_TAP_GAP_MS) ? devTaps + 1 : 1;
+      devLastTap = now;
+      if (devTaps >= DEV_TAPS_NEEDED) {
+        devTaps = 0; devLastTap = 0;
+        show(devSmokeBtn, true);
+      }
+    });
+  }
+
+  if (devSmokeBtn) {
+    devSmokeBtn.addEventListener("click", function () { show(devWarn, true); });
+  }
+  if (devWarn) {
+    document.getElementById("devWarnCancel").addEventListener("click", function () {
+      show(devWarn, false);
+    });
+    document.getElementById("devWarnGo").addEventListener("click", function () {
+      show(devWarn, false);
+      devSmokeBtn.disabled = true;
+      accessStatus.classList.remove("err");
+      // Свежий одноразовый код на каждый вход — как и в основной кнопке.
+      api("/miniapp/access-link", {}).then(function (res) {
+        devSmokeBtn.disabled = false;
+        if (!res.smokeUrl) {
+          accessStatus.classList.add("err");
+          accessStatus.textContent = "Тестовая версия не настроена.";
+          return;
+        }
+        openLink(res.smokeUrl);
+      }).catch(function () {
+        devSmokeBtn.disabled = false;
+        accessStatus.classList.add("err");
+        accessStatus.textContent = "Не удалось получить ссылку — попробуйте ещё раз.";
+      });
+    });
+  }
 
   // Page in background → stop the expiry watch (no checks). Back to foreground → resume it
   // immediately IF the final checkout is open (it does an immediate check on start).

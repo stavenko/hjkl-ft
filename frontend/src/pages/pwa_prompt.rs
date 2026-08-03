@@ -99,6 +99,12 @@ fn render_steps(platform: &str) -> View {
                     <span class="step-num">"1"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.android_chrome.1")}
+                        " "
+                        // Значок обновления — прямо в строке, размером со строку,
+                        // чтобы не раздвигать межстрочный интервал.
+                        <img src="/onboard-img/update-icon.png" alt="значок обновления"
+                             style="height: 1.05em; width: auto; vertical-align: -0.18em;" />
+                        "."
                         <img src="/onboard-img/pwa-menu.gif" alt="" class="step-shot" />
                     </div>
                 </div>

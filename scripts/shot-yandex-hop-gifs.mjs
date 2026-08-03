@@ -83,9 +83,12 @@ async function makeGif({ img, w, h, rects, out, pad = 0 }) {
   const tmp = `/tmp/yhop-${out}`;
   rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
+  // Рамки заданы в координатах САМОЙ картинки, а страница смещает её на pad —
+  // без этой поправки подсветка уезжает ровно на величину поля.
+  const placed = rects.map((r) => ({ ...r, x: r.x + pad, y: r.y + pad }));
   const FRAMES = 9;
   for (let f = 0; f < FRAMES; f++) {
-    await page.evaluate(drawSpark, { rects, frame: f });
+    await page.evaluate(drawSpark, { rects: placed, frame: f });
     await page.screenshot({ path: `${tmp}/f${String(f).padStart(2, "0")}.png` });
   }
   execSync(`ffmpeg -y -framerate 11 -pattern_type glob -i '${tmp}/f*.png' -vf palettegen /tmp/pal-${out}.png`, { stdio: "ignore" });
@@ -104,9 +107,9 @@ await makeGif({ img: "sheet.jpg", w: 576, h: 379, out: "hop-chrome",
 // Скриншоты — с последней версии браузера; подсвечиваем кебаб (не значок
 // обновления) и актуальный пункт меню «Установить и создать ярлык».
 await makeGif({ img: "chrome-toolbar.jpg", w: 576, h: 142, out: "pwa-menu", pad: 8,
-  rects: [{ x: 512, y: 82, w: 34, h: 48 }] });                 // кебаб справа
+  rects: [{ x: 522, y: 87, w: 30, h: 32 }] });                 // кебаб (центр 537,103)
 await makeGif({ img: "chrome-menu.jpg", w: 590, h: 236, out: "pwa-addscreen", pad: 10,
-  rects: [{ x: 175, y: 96, w: 400, h: 56 }] });                // строка «Установить и создать ярлык»
+  rects: [{ x: 176, y: 101, w: 410, h: 50 }] });               // строка меню (центр 375,129)
 await makeGif({ img: "install-dialog.jpg", w: 576, h: 361, out: "pwa-install", pad: 6,
   rects: [{ x: 60, y: 130, w: 460, h: 84 }] });                // кнопка «Установить»
 

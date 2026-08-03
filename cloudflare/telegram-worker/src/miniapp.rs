@@ -871,9 +871,10 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
      «перевёрнуты»: продолжение выглядит второстепенным, отмена — основной,
      чтобы случайный пользователь ушёл отсюда, а не вглубь. -->
 <div id="devWarn" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,0.6);
-     display:flex; align-items:center; justify-content:center; padding:16px; z-index:50;">
-  <div class="card" style="max-width:420px; width:100%;">
-    <p class="sub" style="text-align:left; line-height:1.5;">
+     display:flex; align-items:center; justify-content:center; padding:16px; z-index:200;">
+  <div style="max-width:420px; width:100%; background: var(--bg); color: var(--ink);
+              border-radius:18px; padding:20px; box-shadow:0 18px 48px rgba(0,0,0,0.35);">
+    <p class="sub" style="text-align:left; line-height:1.5; margin:0;">
       Эта часть кода служит для отладки приложения. Обычным пользователям сюда заходить не нужно.<br><br>
       Если вы разработчик и хотите потестировать, продолжайте.
     </p>

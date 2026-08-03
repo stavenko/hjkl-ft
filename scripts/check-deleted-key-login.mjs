@@ -5,6 +5,12 @@
 import { chromium } from "playwright";
 const FE = process.env.FE || "https://renorma-fit-dev.pages.dev";
 const AUTH = process.env.AUTH || "https://auth-worker-dev.vg-stavenko.workers.dev";
+// На боевом домене rpId (renorma.app) не равен хосту страницы — ключ обязан
+// быть выпущен под тот же rpId, иначе церемония до сервера не дойдёт.
+const RP_ID = process.env.RP_ID || "";
+// Третий блок заводит ОПЛАЧЕННОГО пользователя через внутренние ручки — это
+// делается только в dev; на боевом бэкенде блок пропускается.
+const SEED = process.env.SKIP_SEED !== "1";
 
 let fail = 0;
 const check = (name, ok, extra = "") => { console.log(`${ok ? "OK " : "FAIL"} ${name}${extra ? " — " + extra : ""}`); if (!ok) fail++; };
@@ -22,13 +28,13 @@ const check = (name, ok, extra = "") => { console.log(`${ok ? "OK " : "FAIL"} ${
     options: { protocol: "ctap2", transport: "internal", hasResidentKey: true,
                hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
   });
-  const ghost = await p.evaluate(async () => {
+  const ghost = await p.evaluate(async (forced) => {
     const kp = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
     const pkcs8 = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
     const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
     return { credentialId: b64(crypto.getRandomValues(new Uint8Array(32))),
-             privateKey: b64(pkcs8), rpId: location.hostname };
-  });
+             privateKey: b64(pkcs8), rpId: forced || location.hostname };
+  }, RP_ID);
   await cdp.send("WebAuthn.addCredential", {
     authenticatorId,
     credential: { credentialId: ghost.credentialId, isResidentCredential: true, rpId: ghost.rpId,
@@ -75,13 +81,13 @@ const check = (name, ok, extra = "") => { console.log(`${ok ? "OK " : "FAIL"} ${
     options: { protocol: "ctap2", transport: "internal", hasResidentKey: true,
                hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
   });
-  const ghost = await p.evaluate(async () => {
+  const ghost = await p.evaluate(async (forced) => {
     const kp = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
     const pkcs8 = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
     const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
     return { credentialId: b64(crypto.getRandomValues(new Uint8Array(32))),
-             privateKey: b64(pkcs8), rpId: location.hostname };
-  });
+             privateKey: b64(pkcs8), rpId: forced || location.hostname };
+  }, RP_ID);
   await cdp.send("WebAuthn.addCredential", {
     authenticatorId,
     credential: { credentialId: ghost.credentialId, isResidentCredential: true, rpId: ghost.rpId,
@@ -113,6 +119,7 @@ const check = (name, ok, extra = "") => { console.log(`${ok ? "OK " : "FAIL"} ${
 }
 
 // ── Онбординг: «Уже есть аккаунт? Войти», а ключа на сервере нет ──
+if (SEED)
 // Человек больше ничего не делает — значит, ему нужно сказать, что ключ не
 // найден, и вернуть форму регистрации, а не оставить его на пустом экране.
 {
@@ -141,13 +148,13 @@ const check = (name, ok, extra = "") => { console.log(`${ok ? "OK " : "FAIL"} ${
     options: { protocol: "ctap2", transport: "internal", hasResidentKey: true,
                hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
   });
-  const ghost = await p.evaluate(async () => {
+  const ghost = await p.evaluate(async (forced) => {
     const kp = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
     const pkcs8 = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
     const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
     return { credentialId: b64(crypto.getRandomValues(new Uint8Array(32))),
-             privateKey: b64(pkcs8), rpId: location.hostname };
-  });
+             privateKey: b64(pkcs8), rpId: forced || location.hostname };
+  }, RP_ID);
   await cdp.send("WebAuthn.addCredential", {
     authenticatorId,
     credential: { credentialId: ghost.credentialId, isResidentCredential: true, rpId: ghost.rpId,

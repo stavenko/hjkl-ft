@@ -39,6 +39,7 @@ RP_ORIGIN = "https://renorma-fit-dev.pages.dev"
 ADMIN_RP_ID = "renorma-admin-dev.pages.dev"
 ADMIN_RP_ORIGIN = "https://renorma-admin-dev.pages.dev"
 
+
 # ── Production (separate worker on auth.renorma.app, clean DO data) ──
 # Deploy: wrangler deploy --env production
 # Secrets: wrangler secret put JWT_SECRET --env production
@@ -88,3 +89,6 @@ RP_ORIGIN = "https://fit.renorma.app"
 # suffix of "fit.renorma.app", so the scopes cannot cross.
 ADMIN_RP_ID = "admin.renorma.app"
 ADMIN_RP_ORIGIN = "https://admin.renorma.app"
+# Смоук-фронт на соседнем поддомене: rpId тот же (renorma.app — его суффикс),
+# поэтому ключ, созданный на смоуке, действует и на fit.renorma.app.
+RP_ORIGINS_EXTRA = "https://fit-smoke.renorma.app"

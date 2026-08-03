@@ -313,8 +313,27 @@ impl AuthDO {
             return Err(Error::RustError("missing ceremony origin".into()));
         }
 
+        // Дополнительные origin ПРИЛОЖЕНИЯ (например смоук-фронт на соседнем
+        // поддомене). rpId остаётся прежним — он и так суффикс этих доменов, так
+        // что ключ действителен на всех них. Список фиксирован в окружении;
+        // клиентский origin используется ТОЛЬКО как селектор и никогда не
+        // копируется в конфигурацию.
+        let extra_origins = self
+            .env
+            .var("RP_ORIGINS_EXTRA")
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        let extra_match = extra_origins
+            .split(',')
+            .map(str::trim)
+            .filter(|o| !o.is_empty())
+            .find(|o| *o == origin)
+            .map(|o| o.to_string());
+
         let (rp_id, rp_origin) = if select_is_admin(origin, &admin_rp_origin) {
             (admin_rp_id, admin_rp_origin)
+        } else if let Some(o) = extra_match {
+            (app_rp_id, o)
         } else {
             // App path selects EXACTLY the existing app config — no behavior change,
             // no downgrade, and the client origin is discarded here.

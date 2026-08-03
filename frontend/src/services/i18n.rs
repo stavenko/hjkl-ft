@@ -741,7 +741,7 @@ fn en(key: &str) -> &'static str {
         "qr.paste_link" => "Paste link",
 
         "auth.error_network" => "Could not connect to server. Check your internet connection.",
-        "auth.error_key_unknown" => "The server does not know this key — it was deleted. Sign in again via the link from the Telegram bot.",
+        "auth.error_key_unknown" => "We cannot find your key on the server. You will have to register.",
         "auth.error_server" => "The server rejected the sign-in",
         "auth.error_passkey" => "PassKey is not supported in this browser.",
         "auth.error_cancelled" => "PassKey creation was cancelled.",
@@ -1567,7 +1567,7 @@ fn ru(key: &str) -> &'static str {
         "qr.paste_link" => "Вставить ссылку",
 
         "auth.error_network" => "Не удалось подключиться к серверу. Проверьте интернет.",
-        "auth.error_key_unknown" => "Сервер не знает этот ключ — он был удалён. Войдите заново по ссылке из Telegram-бота.",
+        "auth.error_key_unknown" => "Мы не можем найти вашего ключа на сервере. Вам придётся зарегистрироваться.",
         "auth.error_server" => "Сервер отклонил вход",
         "auth.error_passkey" => "PassKey не поддерживается в этом браузере.",
         "auth.error_cancelled" => "Создание PassKey было отменено.",

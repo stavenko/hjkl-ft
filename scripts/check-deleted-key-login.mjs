@@ -102,10 +102,79 @@ const check = (name, ok, extra = "") => { console.log(`${ok ? "OK " : "FAIL"} ${
   const box = p.locator('[data-testid="auth-error"]');
   const msg = (await box.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
   check("сообщение об ошибке показано", await box.isVisible().catch(() => false), msg);
-  check("сказано, что ключ удалён", /ключ/i.test(msg) && /удал/i.test(msg), msg);
+  check("сказано, что ключ не найден и надо зарегистрироваться",
+    msg.includes("не можем найти вашего ключа на сервере") && msg.includes("зарегистрироваться"), msg);
   check("про интернет ничего не сказано", !/интернет/i.test(msg), msg);
   check("причина есть в консоли", errors.some((e) => /passkey_not_found/.test(e)),
     errors.filter((e) => /auth/i.test(e)).slice(0, 2).join(" | ").slice(0, 120));
+
+  await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
+  await b.close();
+}
+
+// ── Онбординг: «Уже есть аккаунт? Войти», а ключа на сервере нет ──
+// Человек больше ничего не делает — значит, ему нужно сказать, что ключ не
+// найден, и вернуть форму регистрации, а не оставить его на пустом экране.
+{
+  const PAY = process.env.PAY || "https://payment-worker-dev.vg-stavenko.workers.dev";
+  const MOCK = process.env.LAVA_MOCK || "https://lava-mock-dev.vg-stavenko.workers.dev";
+  const KEY = process.env.INTERNAL_KEY || "dev-internal-push-key";
+  const j = async (r) => JSON.parse(await r.text());
+  const post = (u, bd, h = {}) => fetch(u, { method: "POST", headers: { "Content-Type": "application/json", ...h }, body: JSON.stringify(bd) });
+
+  const tg = 830000 + Math.floor(Math.random() * 100000);
+  const { userId } = await j(await post(`${AUTH}/internal/account-resolve`,
+    { provider: "telegram", providerUid: String(tg), username: `dk-${tg}` }, { "X-Internal-Key": KEY }));
+  const co = await j(await post(`${PAY}/internal/checkout`,
+    { tgUserId: tg, tgUsername: `dk-${tg}`, currency: "RUB", paymentMethod: "SBP" }, { "X-Internal-Key": KEY }));
+  await post(`${MOCK}/pay/confirm`, { contractId: new URL(co.payUrl).searchParams.get("oid") });
+  const { code } = await j(await post(`${AUTH}/internal/code/mint`, { userId }, { "X-Internal-Key": KEY }));
+
+  const b = await chromium.launch({ headless: true });
+  const ctx = await b.newContext({ viewport: { width: 430, height: 932 }, serviceWorkers: "block" });
+  const p = await ctx.newPage();
+  await p.goto(FE, { waitUntil: "domcontentloaded" });
+  await p.waitForTimeout(3000);
+  const cdp = await ctx.newCDPSession(p);
+  await cdp.send("WebAuthn.enable");
+  const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: { protocol: "ctap2", transport: "internal", hasResidentKey: true,
+               hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+  });
+  const ghost = await p.evaluate(async () => {
+    const kp = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const pkcs8 = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
+    const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+    return { credentialId: b64(crypto.getRandomValues(new Uint8Array(32))),
+             privateKey: b64(pkcs8), rpId: location.hostname };
+  });
+  await cdp.send("WebAuthn.addCredential", {
+    authenticatorId,
+    credential: { credentialId: ghost.credentialId, isResidentCredential: true, rpId: ghost.rpId,
+                  privateKey: ghost.privateKey, userHandle: btoa("ghost-user"), signCount: 0 },
+  });
+
+  await p.goto(`${FE}/onboard?u=${userId}#code=${code}`, { waitUntil: "domcontentloaded" });
+  await p.waitForTimeout(14000);
+  const reg = p.locator('[data-testid="onboard-btn-register"]');
+  const login = p.locator('[data-testid="onboard-btn-login"]');
+  const nameInput = p.locator('[data-testid="onboard-input-name"]');
+  check("онбординг: экран создания ключа показан", await reg.isVisible().catch(() => false));
+
+  await login.click();
+  await p.waitForTimeout(5000);
+
+  const msg = (await p.locator(".notification.is-danger").innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+  check("онбординг: сказано, что ключа нет и надо зарегистрироваться",
+    msg === "Мы не можем найти вашего ключа на сервере. Вам придётся зарегистрироваться.", msg);
+  check("онбординг: поле имени вернулось", await nameInput.isVisible().catch(() => false));
+  check("онбординг: кнопка регистрации вернулась", await reg.isVisible().catch(() => false));
+  check("онбординг: спиннер убран",
+    !(await p.locator('[data-testid="onboard-signing-in"]').isVisible().catch(() => false)));
+  // Форма не просто вернулась, а работает: имя вводится, кнопка оживает.
+  await nameInput.fill("Вася");
+  check("онбординг: регистрация снова доступна", !(await reg.isDisabled().catch(() => true)),
+    `disabled=${await reg.isDisabled().catch(() => "?")}`);
 
   await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
   await b.close();

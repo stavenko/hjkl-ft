@@ -21,13 +21,16 @@ const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
 });
 
 // Ключ, которого сервер никогда не видел (или уже забыл).
-const { credentialId, privateKey, rpId } = await p.evaluate(async () => {
+// rpId ключа обязан совпадать с тем, что выдаёт сервер (на смоуке домен и rpId
+// различаются: renorma.app против fit-smoke.renorma.app).
+const RP_ID = process.env.RP_ID || "";
+const { credentialId, privateKey, rpId } = await p.evaluate(async (forced) => {
   const kp = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
   const pkcs8 = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
   const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
   const id = crypto.getRandomValues(new Uint8Array(32));
-  return { credentialId: b64(id), privateKey: b64(pkcs8), rpId: location.hostname };
-});
+  return { credentialId: b64(id), privateKey: b64(pkcs8), rpId: forced || location.hostname };
+}, RP_ID);
 await cdp.send("WebAuthn.addCredential", {
   authenticatorId,
   credential: { credentialId, isResidentCredential: true, rpId, privateKey,

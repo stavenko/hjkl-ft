@@ -96,6 +96,14 @@ pub fn OnboardPage() -> impl IntoView {
     // consumed code, DON'T show «stale». A verify failure with NO session → genuinely stale link.
     create_effect(move |_| {
         spawn_local(async move {
+            // Первое открытие в НОВОМ браузере (переход из Яндекса в Chrome) идёт
+            // без кэша конфигурации: сперва дожидаемся адресов воркеров, иначе
+            // проверка кода уйдёт в никуда и ссылка ложно объявится устаревшей.
+            if let Err(e) = crate::services::config::ensure_ready().await {
+                leptos::logging::error!("onboard: {e}");
+                step.set(Step::Failed);
+                return;
+            }
             let cp = !auth::passkey_unavailable().await;
             can_passkey.set(cp);
             let onboarding_step = move || step.set(if cp { Step::Passkey } else { Step::InstallPwa });

@@ -76,6 +76,34 @@ pub fn load_or_default() {
     }
 }
 
+/// Гарантировать, что адреса воркеров известны. На ПЕРВОМ открытии в новом
+/// браузере кэша конфига нет, и `load_or_default` ставит пустой — тогда любой
+/// запрос ушёл бы относительным путём на наш же Pages-домен и вернул 405,
+/// а приложение прочитало бы это как «ссылка устарела». Поэтому здесь мы ЖДЁМ
+/// сеть; провал — громкая ошибка, а не молчаливый пропуск.
+pub async fn ensure_ready() -> Result<(), String> {
+    if !get().auth_base_url.is_empty() {
+        return Ok(());
+    }
+    match fetch_from_network().await {
+        Some(cfg) => {
+            save_to_cache(&cfg);
+            set(cfg);
+            if get().auth_base_url.is_empty() {
+                let msg = "конфигурация загружена, но адрес auth-воркера пуст".to_string();
+                leptos::logging::error!("config::ensure_ready: {msg}");
+                return Err(msg);
+            }
+            Ok(())
+        }
+        None => {
+            let msg = "не удалось загрузить конфигурацию приложения".to_string();
+            leptos::logging::error!("config::ensure_ready: {msg}");
+            Err(msg)
+        }
+    }
+}
+
 pub fn save_to_cache(cfg: &FrontendConfig) {
     let Ok(json) = serde_json::to_string(cfg) else { return };
     let Some(storage) = window_storage() else { return };

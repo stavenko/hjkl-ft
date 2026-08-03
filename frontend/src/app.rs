@@ -154,6 +154,19 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // Yandex Browser: render ONLY the «open it in Chrome» screen — nothing else
+    // must run. The router is otherwise mounted UNDER the overlay, and /onboard
+    // would burn the one-time login code from the Telegram link right there,
+    // invisibly, leaving the link stale by the time the user reaches Chrome.
+    if platform::detect_platform_is_yandex() {
+        return view! {
+            <div style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main); overflow-y: auto;">
+                <pages::pwa_prompt::PwaPrompt on_dismiss=Callback::new(|_| {}) />
+            </div>
+        }
+        .into_view();
+    }
+
     view! {
         // Blocking migration page: while the one-time sync v2 migration uploads
         // day-batches, the app is not usable (local mutations would race the
@@ -349,4 +362,5 @@ pub fn App() -> impl IntoView {
         // open over any screen, including the first-launch persona editor.
         <crate::components::story_tray::StoryViewerHost/>
     }
+    .into_view()
 }

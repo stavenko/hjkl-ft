@@ -253,7 +253,15 @@ fn auth_base_url() -> String {
 }
 
 async fn post_json(path: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let url = format!("{}{}", auth_base_url(), path);
+    let base = auth_base_url();
+    if base.is_empty() {
+        // Иначе запрос ушёл бы относительным путём на наш собственный домен и
+        // вернул 405, который вызывающий код принял бы за отказ сервера.
+        let msg = "auth_base_url не сконфигурирован".to_string();
+        leptos::logging::error!("auth::post_json({path}): {msg}");
+        return Err(msg);
+    }
+    let url = format!("{base}{path}");
     let body_str = serde_json::to_string(body).map_err(|e| e.to_string())?;
 
     let opts = web_sys::RequestInit::new();

@@ -574,6 +574,31 @@ pub async fn register(display_name: &str) -> Result<String, String> {
     Ok(user_id)
 }
 
+/// Сообщить серверу, что пользователь ДОШЁЛ до работающего приложения: первая
+/// глава истории ему доступна. Этим и только этим признаком мини-апп в Telegram
+/// отличает «Открыть приложение» от «Получить доступ к re:Norma» — без вызова
+/// отсюда кнопка навсегда остаётся на «Получить доступ».
+///
+/// Идемпотентно на сервере (хранится первая отметка), локальный флаг избавляет
+/// от запроса на каждом запуске. Ошибку не глотаем: пишем в консоль, флаг не
+/// ставим — на следующем запуске попробуем снова.
+pub async fn report_entered() {
+    let Some(user_id) = get_user_id() else { return };
+    let flag = format!("entered_reported:{user_id}");
+    let storage = web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .expect("no localStorage");
+    if storage.get_item(&flag).ok().flatten().is_some() {
+        return;
+    }
+    match post_json_auth("/chapters/available", &serde_json::json!({ "chapter": "ch1" })).await {
+        Ok(_) => {
+            let _ = storage.set_item(&flag, "1");
+        }
+        Err(e) => leptos::logging::error!("auth::report_entered: {e}"),
+    }
+}
+
 // ---- Backup phrase (username-less recovery) ----
 
 /// Set/replace this account's backup phrase. Returns the server status:

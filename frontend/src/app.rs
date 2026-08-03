@@ -154,6 +154,15 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // Пользователь дошёл до работающего приложения — сообщаем это серверу. По
+    // этому признаку мини-апп в Telegram показывает «Открыть приложение» вместо
+    // «Получить доступ к re:Norma»; без отметки кнопка остаётся неверной навсегда.
+    create_effect(move |_| {
+        if state.get() == AppState::Ready && auth::session_valid_here() {
+            spawn_local(async { auth::report_entered().await });
+        }
+    });
+
     // Yandex Browser: render ONLY the «open it in Chrome» screen — nothing else
     // must run. The router is otherwise mounted UNDER the overlay, and /onboard
     // would burn the one-time login code from the Telegram link right there,

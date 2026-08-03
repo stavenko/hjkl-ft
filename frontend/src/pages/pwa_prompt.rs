@@ -99,8 +99,7 @@ fn render_steps(platform: &str) -> View {
                     <span class="step-num">"1"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.android_chrome.1")}
-                        <img src="/onboard-img/pwa-menu.gif" alt="" class="step-shot"
-                             style="width: 5.5rem; margin-left: 0;" />
+                        <img src="/onboard-img/pwa-menu.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">

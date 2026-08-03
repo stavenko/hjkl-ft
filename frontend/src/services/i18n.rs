@@ -765,7 +765,7 @@ fn en(key: &str) -> &'static str {
         "pwa.inst.ios_other.2" => "Open this page in Safari and follow the instructions",
         // Android Chrome
         "pwa.inst.android_chrome.1" => "Tap the kebab menu — an update icon may be shown in its place.",
-        "pwa.inst.android_chrome.2" => "Then the menu row \"Add to Home screen\".",
+        "pwa.inst.android_chrome.2" => "Then the menu row \"Install and create a shortcut\".",
         "pwa.inst.android_chrome.3" => "Then tap \"Install\".",
         "pwa.inst.android_chrome.4" => "And wait a little. The app icon will appear on the home screen.",
         // Android Samsung
@@ -1586,7 +1586,7 @@ fn ru(key: &str) -> &'static str {
         "pwa.inst.ios_other.1" => "Установка PWA на iOS работает только в Safari",
         "pwa.inst.ios_other.2" => "Откройте эту страницу в Safari и следуйте инструкции",
         "pwa.inst.android_chrome.1" => "Нажмите на кебаб — вместо него может быть значок обновления.",
-        "pwa.inst.android_chrome.2" => "Затем — строчка меню «Добавить на гл. экран».",
+        "pwa.inst.android_chrome.2" => "Затем — строчка меню «Установить и создать ярлык».",
         "pwa.inst.android_chrome.3" => "Затем нажмите «Установить».",
         "pwa.inst.android_chrome.4" => "И подождите немного. Значок приложения будет показан на главном экране.",
         "pwa.inst.android_samsung.1" => "Нажмите меню \u{2261} в правом нижнем углу",

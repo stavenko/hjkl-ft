@@ -100,11 +100,13 @@ await makeGif({ img: "toolbar.jpg", w: 576, h: 99, out: "hop-share",
 await makeGif({ img: "sheet.jpg", w: 576, h: 379, out: "hop-chrome",
   rects: [{ x: 318, y: 248, w: 72, h: 72 }] });               // иконка Chrome
 
-// ── Установка PWA в Chrome: кебаб (или значок обновления), строка меню, «Установить» ──
-await makeGif({ img: "menu-icon.jpg", w: 37, h: 39, out: "pwa-menu", pad: 26,
-  rects: [{ x: 26, y: 26, w: 37, h: 39 }] });                  // сам значок
-await makeGif({ img: "menu-row.jpg", w: 361, h: 101, out: "pwa-addscreen", pad: 16,
-  rects: [{ x: 22, y: 38, w: 330, h: 42 }] });                 // строка «Добавить на гл. экран»
+// ── Установка PWA в Chrome: кебаб в панели, строка меню, «Установить» ──
+// Скриншоты — с последней версии браузера; подсвечиваем кебаб (не значок
+// обновления) и актуальный пункт меню «Установить и создать ярлык».
+await makeGif({ img: "chrome-toolbar.jpg", w: 576, h: 142, out: "pwa-menu", pad: 8,
+  rects: [{ x: 512, y: 82, w: 34, h: 48 }] });                 // кебаб справа
+await makeGif({ img: "chrome-menu.jpg", w: 590, h: 236, out: "pwa-addscreen", pad: 10,
+  rects: [{ x: 175, y: 96, w: 400, h: 56 }] });                // строка «Установить и создать ярлык»
 await makeGif({ img: "install-dialog.jpg", w: 576, h: 361, out: "pwa-install", pad: 6,
   rects: [{ x: 60, y: 130, w: 460, h: 84 }] });                // кнопка «Установить»
 

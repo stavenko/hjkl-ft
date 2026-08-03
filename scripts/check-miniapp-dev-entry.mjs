@@ -9,7 +9,9 @@ let fail = 0;
 const check = (name, ok, extra = "") => { console.log(`${ok ? "OK " : "FAIL"} ${name}${extra ? " — " + extra : ""}`); if (!ok) fail++; };
 
 const b = await chromium.launch({ headless: true });
-const ctx = await b.newContext({ viewport: { width: 430, height: 932 } });
+// Мобильный контекст с тач-вводом: на телефоне это ТАПЫ, а не клики мышью —
+// именно на этом отличии механика и ломалась в Android.
+const ctx = await b.newContext({ viewport: { width: 430, height: 932 }, isMobile: true, hasTouch: true });
 const p = await ctx.newPage();
 // Страница подгружает настоящий SDK Telegram, который вне мессенджера отдаёт
 // пустой initData и уводит в заглушку. Подменяем сам скрипт — иначе клиентскую
@@ -33,18 +35,22 @@ check("строка версии на месте", await tag.isVisible().catch((
 check("кнопка тестовой версии скрыта", !(await btn.isVisible().catch(() => false)));
 
 // Медленные тапы не взводят.
-for (let i = 0; i < 6; i++) { await tag.click({ force: true }); await p.waitForTimeout(700); }
+for (let i = 0; i < 6; i++) { await tag.tap({ force: true }); await p.waitForTimeout(700); }
 check("медленные тапы не открывают кнопку", !(await btn.isVisible().catch(() => false)));
 
-// Десять быстрых — взводят.
-for (let i = 0; i < 10; i++) { await tag.click({ force: true }); await p.waitForTimeout(60); }
+// Десять быстрых — взводят. По дороге проверяем видимый счётчик.
+for (let i = 0; i < 4; i++) { await tag.tap({ force: true }); await p.waitForTimeout(60); }
+check("после нескольких тапов виден счётчик", /· 4\/10/.test(await tag.innerText()), await tag.innerText());
+for (let i = 0; i < 6; i++) { await tag.tap({ force: true }); await p.waitForTimeout(60); }
 check("десять быстрых тапов открыли кнопку", await btn.isVisible().catch(() => false));
 check("кнопка красная", (await btn.evaluate((el) => getComputedStyle(el).backgroundColor)) === "rgb(224, 48, 79)",
   await btn.evaluate((el) => getComputedStyle(el).backgroundColor));
 check("надпись на кнопке", (await btn.innerText()).includes("тестовой версии"), await btn.innerText());
 
 // Предупреждение и «перевёрнутые» кнопки.
-await btn.click();
+check("счётчик убран после срабатывания", !/\d\/10/.test(await tag.innerText()), await tag.innerText());
+
+await btn.tap();
 const warn = p.locator("#devWarn");
 check("показано предупреждение", await warn.isVisible().catch(() => false));
 const wtext = (await warn.innerText().catch(() => "")).replace(/\s+/g, " ");
@@ -58,7 +64,7 @@ check("«Продолжить» выглядит второстепенной (�
 check("«Отменить» выглядит основной (синяя заливка)", cancelBg.includes("gradient"), cancelBg.slice(0, 60));
 
 // Отмена закрывает.
-await p.locator("#devWarnCancel").click();
+await p.locator("#devWarnCancel").tap();
 await p.waitForTimeout(300);
 check("отмена закрывает предупреждение", !(await warn.isVisible().catch(() => false)));
 

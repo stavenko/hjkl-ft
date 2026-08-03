@@ -864,7 +864,9 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
 
   <div id="claimInfo" class="sub" style="font-size:11px; word-break:break-all; text-align:left; white-space:pre-line;"></div>
   <button id="devSmokeBtn" class="danger hidden" style="margin-top:10px;">Получить доступ к тестовой версии (для разработчиков)</button>
-  <div id="buildTag" style="font-size:10px; opacity:0.5; text-align:center; margin-top:10px; user-select:none; -webkit-user-select:none;">build: pay-r19</div>
+  <div id="buildTag" style="font-size:10px; opacity:0.5; text-align:center; margin-top:10px;
+       padding:14px 0; touch-action:manipulation; user-select:none; -webkit-user-select:none;
+       -webkit-tap-highlight-color:transparent; cursor:pointer;">build: pay-r19</div>
 </div>
 
 <!-- Предупреждение перед уходом на тестовую версию. Кнопки намеренно
@@ -1270,15 +1272,33 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
   var DEV_TAPS_NEEDED = 10, DEV_TAP_GAP_MS = 500;
 
   if (buildTag) {
-    buildTag.addEventListener("click", function () {
+    var buildLabel = buildTag.textContent;
+    var onDevTap = function (ev) {
+      // pointerdown, а не click: в Android-вебвью click приходит с задержкой
+      // распознавания двойного тапа, и часть быстрых тапов просто теряется.
+      if (ev && ev.cancelable) { ev.preventDefault(); }
       var now = Date.now();
       devTaps = (devLastTap && now - devLastTap < DEV_TAP_GAP_MS) ? devTaps + 1 : 1;
       devLastTap = now;
+      // Видимый счётчик — иначе на телефоне непонятно, считаются ли тапы.
+      buildTag.textContent = devTaps >= 3
+        ? buildLabel + " · " + devTaps + "/" + DEV_TAPS_NEEDED
+        : buildLabel;
       if (devTaps >= DEV_TAPS_NEEDED) {
         devTaps = 0; devLastTap = 0;
+        buildTag.textContent = buildLabel;
         show(devSmokeBtn, true);
       }
-    });
+    };
+    // pointerdown покрывает и тач, и мышь; touchstart — запасной путь для
+    // вебвью без Pointer Events. Оба вместе не удваивают счёт: touchstart
+    // отменяется, когда pointerdown уже сработал.
+    if (window.PointerEvent) {
+      buildTag.addEventListener("pointerdown", onDevTap);
+    } else {
+      buildTag.addEventListener("touchstart", onDevTap);
+      buildTag.addEventListener("click", onDevTap);
+    }
   }
 
   if (devSmokeBtn) {

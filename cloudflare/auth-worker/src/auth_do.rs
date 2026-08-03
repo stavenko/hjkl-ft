@@ -629,9 +629,20 @@ impl AuthDO {
             serde_json::from_value(credential)
                 .map_err(|e| Error::RustError(format!("parse credential: {e}")))?;
 
-        let user_id = finish_login(&store, &config, response, now_ms())
-            .await
-            .map_err(|e| Error::RustError(format!("login finish: {e}")))?;
+        // Ключа нет в хранилище — это НЕ сбой сервера, а нормальный отказ: ключ
+        // удалили (например, «Сбросить доступ» из админки), а на устройстве он
+        // остался. Отдаём 401 с кодом, чтобы приложение назвало причину, а не
+        // выдало 500 за проблему с сетью.
+        let user_id = match finish_login(&store, &config, response, now_ms()).await {
+            Ok(uid) => uid,
+            Err(passkey_server::error::PasskeyError::PasskeyNotFound) => {
+                return Ok(Response::from_json(&serde_json::json!({
+                    "error": "passkey_not_found"
+                }))?
+                .with_status(401));
+            }
+            Err(e) => return Err(Error::RustError(format!("login finish: {e}"))),
+        };
 
         self.flush_store(&store).await?;
 

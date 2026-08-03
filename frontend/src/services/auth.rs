@@ -252,45 +252,86 @@ fn auth_base_url() -> String {
     }
 }
 
+/// Отказ обращения к auth-воркеру. Разделение принципиально: «запрос не дошёл»
+/// и «сервер ответил отказом» — разные вещи, и путать их нельзя, иначе отказ
+/// сервера показывается пользователю как проблема с интернетом.
+pub enum AuthApiError {
+    /// Запрос не ушёл или ответа не было: сеть, DNS, CORS, пустая конфигурация.
+    Network(String),
+    /// Сервер ответил, но отказом. `body` — как есть, без интерпретации.
+    Http { status: u16, body: String },
+}
+
+impl AuthApiError {
+    /// Код ошибки из тела ответа (`{"error":"…"}`), если сервер его прислал.
+    fn code(&self) -> Option<String> {
+        match self {
+            AuthApiError::Http { body, .. } => serde_json::from_str::<serde_json::Value>(body)
+                .ok()
+                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string)),
+            AuthApiError::Network(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for AuthApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthApiError::Network(e) => write!(f, "{e}"),
+            AuthApiError::Http { status, body } => write!(f, "HTTP {status}: {body}"),
+        }
+    }
+}
+
 async fn post_json(path: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
+    post_json_typed(path, body).await.map_err(|e| e.to_string())
+}
+
+async fn post_json_typed(
+    path: &str,
+    body: &serde_json::Value,
+) -> std::result::Result<serde_json::Value, AuthApiError> {
     let base = auth_base_url();
     if base.is_empty() {
         // Иначе запрос ушёл бы относительным путём на наш собственный домен и
         // вернул 405, который вызывающий код принял бы за отказ сервера.
         let msg = "auth_base_url не сконфигурирован".to_string();
         leptos::logging::error!("auth::post_json({path}): {msg}");
-        return Err(msg);
+        return Err(AuthApiError::Network(msg));
     }
     let url = format!("{base}{path}");
-    let body_str = serde_json::to_string(body).map_err(|e| e.to_string())?;
+    let body_str = serde_json::to_string(body).map_err(|e| AuthApiError::Network(e.to_string()))?;
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("POST");
     opts.set_body(&JsValue::from_str(&body_str));
 
-    let headers = web_sys::Headers::new().map_err(|e| format!("{:?}", e))?;
-    headers.set("Content-Type", "application/json").map_err(|e| format!("{:?}", e))?;
+    let net = |e: JsValue| AuthApiError::Network(format!("{:?}", e));
+
+    let headers = web_sys::Headers::new().map_err(net)?;
+    headers.set("Content-Type", "application/json").map_err(net)?;
     opts.set_headers(&headers);
 
-    let request = web_sys::Request::new_with_str_and_init(&url, &opts)
-        .map_err(|e| format!("{:?}", e))?;
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts).map_err(net)?;
 
     let window = web_sys::window().expect("no window");
     let resp_val = JsFuture::from(window.fetch_with_request(&request))
         .await
-        .map_err(|e| format!("{:?}", e))?;
-    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response")?;
+        .map_err(net)?;
+    let resp: web_sys::Response = resp_val
+        .dyn_into()
+        .map_err(|_| AuthApiError::Network("not a Response".into()))?;
 
-    let text = JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
-        .await
-        .map_err(|e| format!("{:?}", e))?;
-    let text = text.as_string().ok_or("response not string")?;
+    let text = JsFuture::from(resp.text().map_err(net)?).await.map_err(net)?;
+    let text = text
+        .as_string()
+        .ok_or_else(|| AuthApiError::Network("response not string".into()))?;
 
     if !resp.ok() {
-        return Err(format!("HTTP {}: {}", resp.status(), text));
+        return Err(AuthApiError::Http { status: resp.status(), body: text });
     }
 
-    serde_json::from_str(&text).map_err(|e| e.to_string())
+    serde_json::from_str(&text).map_err(|e| AuthApiError::Network(e.to_string()))
 }
 
 fn b64url_to_u8array(b64: &str) -> js_sys::Uint8Array {
@@ -478,11 +519,11 @@ fn serialize_credential(credential: &JsValue) -> Result<serde_json::Value, Strin
 /// Register a new account
 pub async fn register(display_name: &str) -> Result<String, String> {
     let fingerprint = generate_fingerprint();
-    let begin_resp = post_json("/register/begin", &serde_json::json!({
+    let begin_resp = post_json_typed("/register/begin", &serde_json::json!({
         "display_name": display_name,
         "fingerprint": fingerprint
     })).await
-        .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
+        .map_err(|e| auth_api_message("register begin", e))?;
 
     let user_id = begin_resp.get("user_id")
         .and_then(|v| v.as_str())
@@ -516,12 +557,12 @@ pub async fn register(display_name: &str) -> Result<String, String> {
 
     let credential_json = serialize_credential(&credential)?;
 
-    let finish_resp = post_json("/register/finish", &serde_json::json!({
+    let finish_resp = post_json_typed("/register/finish", &serde_json::json!({
         "user_id": user_id,
         "credential": credential_json,
         "fingerprint": fingerprint
     })).await
-        .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
+        .map_err(|e| auth_api_message("register finish", e))?;
 
     let user_id = finish_resp.get("user_id")
         .and_then(|v| v.as_str())
@@ -645,13 +686,31 @@ pub async fn add_passkey_named(display_name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Отказ auth-воркера в человеческом виде. Ответ сервера НИКОГДА не выдаём за
+/// проблему с сетью: «проверьте интернет» на 401 — ложь, из-за которой
+/// настоящую причину не видно ни пользователю, ни нам.
+fn auth_api_message(stage: &str, e: AuthApiError) -> String {
+    leptos::logging::error!("auth::authenticate {stage}: {e}");
+    match &e {
+        AuthApiError::Network(_) => crate::services::i18n::t("auth.error_network").to_string(),
+        AuthApiError::Http { status, .. } => {
+            // Ключ, которого сервер не знает: его удалили, а на устройстве он остался.
+            if e.code().as_deref() == Some("passkey_not_found") {
+                crate::services::i18n::t("auth.error_key_unknown").to_string()
+            } else {
+                format!("{} (HTTP {status})", crate::services::i18n::t("auth.error_server"))
+            }
+        }
+    }
+}
+
 /// Authenticate with existing PassKey (discoverable credential)
 pub async fn authenticate() -> Result<String, String> {
     let fingerprint = generate_fingerprint();
-    let begin_resp = post_json("/authenticate/begin", &serde_json::json!({
+    let begin_resp = post_json_typed("/authenticate/begin", &serde_json::json!({
         "fingerprint": fingerprint
     })).await
-        .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
+        .map_err(|e| auth_api_message("begin", e))?;
 
     let public_key = begin_resp.get("publicKey")
         .ok_or("missing publicKey")?;
@@ -680,11 +739,11 @@ pub async fn authenticate() -> Result<String, String> {
 
     let credential_json = serialize_credential(&credential)?;
 
-    let finish_resp = post_json("/authenticate/finish", &serde_json::json!({
+    let finish_resp = post_json_typed("/authenticate/finish", &serde_json::json!({
         "credential": credential_json,
         "fingerprint": fingerprint
     })).await
-        .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
+        .map_err(|e| auth_api_message("finish", e))?;
 
     let user_id = finish_resp.get("user_id")
         .and_then(|v| v.as_str())

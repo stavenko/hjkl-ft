@@ -159,8 +159,13 @@ pub fn OnboardPage() -> impl IntoView {
             }
         });
     };
+    // Вход по существующему ключу — это НЕ создание аккаунта, поэтому вместо
+    // подмены надписи на кнопке регистрации («Создаю…») экран целиком уходит
+    // в ожидание: поле имени и кнопки прячутся, остаётся спиннер.
+    let signing_in = create_rw_signal(false);
     let on_login = move |_| {
         loading.set(true);
+        signing_in.set(true);
         error.set(None);
         spawn_local(async move {
             match auth::authenticate().await {
@@ -168,6 +173,7 @@ pub fn OnboardPage() -> impl IntoView {
                 Err(e) => {
                     error.set(Some(e));
                     loading.set(false);
+                    signing_in.set(false);
                 }
             }
         });
@@ -208,6 +214,15 @@ pub fn OnboardPage() -> impl IntoView {
                     }.into_view(),
 
                     // ── Screen 2 (its own screen): create the passkey — original screen ──
+                    // Пока идёт вход по существующему ключу, формы на экране нет —
+                    // только спиннер (см. signing_in).
+                    Step::Passkey if signing_in.get() => view! {
+                        <div attr:data-testid="onboard-signing-in" style="display: flex; flex-direction: column; align-items: center; gap: 18px;">
+                            <div class="ft-spinner"></div>
+                            <p class="is-size-6 has-text-grey">"Заходим в приложение"</p>
+                        </div>
+                    }.into_view(),
+
                     Step::Passkey => view! {
                         <div>
                             <h1 class="title is-4" style="margin-bottom: 0.5rem;">{move || t("onboard.title")}</h1>

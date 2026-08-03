@@ -38,17 +38,15 @@ check("кнопка тестовой версии скрыта", !(await btn.isV
 for (let i = 0; i < 6; i++) { await tag.tap({ force: true }); await p.waitForTimeout(700); }
 check("медленные тапы не открывают кнопку", !(await btn.isVisible().catch(() => false)));
 
-// Десять быстрых — взводят. По дороге проверяем видимый счётчик.
-for (let i = 0; i < 4; i++) { await tag.tap({ force: true }); await p.waitForTimeout(60); }
-check("после нескольких тапов виден счётчик", /· 4\/10/.test(await tag.innerText()), await tag.innerText());
-for (let i = 0; i < 6; i++) { await tag.tap({ force: true }); await p.waitForTimeout(60); }
+// Десять быстрых — взводят.
+for (let i = 0; i < 10; i++) { await tag.tap({ force: true }); await p.waitForTimeout(60); }
 check("десять быстрых тапов открыли кнопку", await btn.isVisible().catch(() => false));
 check("кнопка красная", (await btn.evaluate((el) => getComputedStyle(el).backgroundColor)) === "rgb(224, 48, 79)",
   await btn.evaluate((el) => getComputedStyle(el).backgroundColor));
 check("надпись на кнопке", (await btn.innerText()).includes("тестовой версии"), await btn.innerText());
 
 // Предупреждение и «перевёрнутые» кнопки.
-check("счётчик убран после срабатывания", !/\d\/10/.test(await tag.innerText()), await tag.innerText());
+check("строка версии не изменилась", (await tag.innerText()).trim() === "build: pay-r19", await tag.innerText());
 
 await btn.tap();
 const warn = p.locator("#devWarn");

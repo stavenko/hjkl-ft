@@ -1272,21 +1272,15 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
   var DEV_TAPS_NEEDED = 10, DEV_TAP_GAP_MS = 500;
 
   if (buildTag) {
-    var buildLabel = buildTag.textContent;
     var onDevTap = function (ev) {
-      // pointerdown, а не click: в Android-вебвью click приходит с задержкой
-      // распознавания двойного тапа, и часть быстрых тапов просто теряется.
+      // pointerdown, а не click: в вебвью click приходит только после
+      // распознавания двойного тапа, и быстрые тапы могут теряться.
       if (ev && ev.cancelable) { ev.preventDefault(); }
       var now = Date.now();
       devTaps = (devLastTap && now - devLastTap < DEV_TAP_GAP_MS) ? devTaps + 1 : 1;
       devLastTap = now;
-      // Видимый счётчик — иначе на телефоне непонятно, считаются ли тапы.
-      buildTag.textContent = devTaps >= 3
-        ? buildLabel + " · " + devTaps + "/" + DEV_TAPS_NEEDED
-        : buildLabel;
       if (devTaps >= DEV_TAPS_NEEDED) {
         devTaps = 0; devLastTap = 0;
-        buildTag.textContent = buildLabel;
         show(devSmokeBtn, true);
       }
     };

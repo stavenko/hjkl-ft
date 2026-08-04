@@ -72,6 +72,14 @@ const { context, page } = await openSeeded(b, {
   uid: `iron-shot-${Math.floor(Math.random() * 1e6)}`,
   seed: seed({ ironOpenDaysAgo: 2 }),
 });
+// Край CDN может держать ПРЕДЫДУЩУЮ версию картинки: запрос без параметра
+// попадает в его кэш, и на снимке оказывается старое изображение. Дописываем
+// cache-buster к каждой картинке истории.
+await page.route("**/story-img/**", (route) => {
+  const u = new URL(route.request().url());
+  u.searchParams.set("cb", String(Date.now()));
+  return route.continue({ url: u.toString() });
+});
 await page.setViewportSize({ width: 430, height: 932 });
 await page.waitForTimeout(9000);
 

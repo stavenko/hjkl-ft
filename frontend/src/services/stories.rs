@@ -990,7 +990,7 @@ const S5: &[Frame] = &[
     // 2 — why iron matters
     Frame {
         bg: Bg::Dark,
-        media: Media::Cover(IRON_PH),
+        media: Media::Cover("iron-blood.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },
@@ -1038,7 +1038,7 @@ const S5: &[Frame] = &[
     // 6 — plant sources + the absorption gap (the reason iron carries a coefficient)
     Frame {
         bg: Bg::Dark,
-        media: Media::Cover(IRON_PH),
+        media: Media::Cover("iron-legumes.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },
@@ -1064,7 +1064,7 @@ const S5: &[Frame] = &[
     // 8 — calcium vs iron: the interaction you may ignore
     Frame {
         bg: Bg::Dark,
-        media: Media::Cover(IRON_PH),
+        media: Media::Cover("iron-ca-vs-fe.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },

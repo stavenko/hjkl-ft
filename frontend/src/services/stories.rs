@@ -968,9 +968,7 @@ const S4: &[Frame] = &[
 // (Appears::AfterIronWeek).
 //
 // The Russian copy is the user's own text, carried over verbatim (orthography and
-// typography only). Photos are still to be shot — every editorial frame points at
-// `iron-placeholder.svg` for now.
-const IRON_PH: &str = "iron-placeholder.svg";
+// typography only).
 
 const S5: &[Frame] = &[
     // 1 — congrats: the calcium week is done, the iron week begins.
@@ -1050,9 +1048,7 @@ const S5: &[Frame] = &[
     // 7 — the new WEEKLY indicator + gauge
     Frame {
         bg: Bg::Dark,
-        // TODO: заменить на подсвечивающую гифку нового недельного gauge, когда
-        // будет снята (как calcium-highlight.gif для кальция).
-        media: Media::Shot(IRON_PH),
+        media: Media::Shot("iron-highlight.gif"),
         accent: GREEN,
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },

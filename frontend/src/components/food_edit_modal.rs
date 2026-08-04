@@ -55,7 +55,10 @@ pub fn FoodEditModal(
     let f_egg = create_rw_signal(food.is_egg);
     let f_meat = create_rw_signal(food.is_red_meat);
 
-    let save = move |_| {
+    // Portal строит разметку повторно, значит всё внутри должно переживать
+    // повторный вызов. Обычное замыкание уехало бы в on:click при первом же
+    // построении — оборачиваем в Callback, он Copy.
+    let save = Callback::new(move |_: web_sys::MouseEvent| {
         let parse = |s: String| -> f64 { s.replace(',', ".").parse().unwrap_or(0.0) };
         let parse_opt = |s: String| -> Option<f64> {
             let s = s.trim().replace(',', ".");
@@ -96,7 +99,7 @@ pub fn FoodEditModal(
             on_saved.call(());
             on_close.call(());
         });
-    };
+    });
 
     let macro_row = |label: String, unit: String, sig: RwSignal<String>| {
         view! {
@@ -135,52 +138,95 @@ pub fn FoodEditModal(
         }
     };
 
-    view! {
-        <div class="modal is-active" style="z-index: 70;">
-            <div class="modal-background" on:click=move |_| on_close.call(())></div>
-            <div class="modal-card" style="max-width: 26rem;">
-                <header class="modal-card-head">
-                    <p class="modal-card-title is-size-6">{move || t("diary.edit_product")}</p>
-                </header>
-                <section class="modal-card-body">
-                    <input type="text"
-                        class="is-size-6"
-                        style="width: 100%; padding: 10px 12px; border: none; border-radius: 10px; background: var(--bulma-background); color: var(--bulma-text); outline: none; box-sizing: border-box; margin-bottom: 12px;"
-                        placeholder=t("food_editor.product_name")
-                        prop:value=move || name.get()
-                        on:input=move |ev| name.set(event_target_value(&ev))
-                    />
-                    {macro_row(nutrient_name("Calories").to_string(), unit_label("kcal").to_string(), kcal)}
-                    {macro_row(nutrient_name("Protein").to_string(), unit_label("g").to_string(), protein)}
-                    {macro_row(nutrient_name("Fat").to_string(), unit_label("g").to_string(), fat)}
-                    {macro_row(nutrient_name("Carbs").to_string(), unit_label("g").to_string(), carbs)}
+    // Portal принимает только `Fn`-замыкание, поэтому строки нутриентов собираем
+    // здесь, а не внутри разметки: иначе `custom` уехал бы из окружения и вью стало
+    // бы одноразовым.
+    let custom_rows = custom
+        .into_iter()
+        .map(|(k, sig)| {
+            let unit = crate::services::enrich::nutrient_unit(&k).to_string();
+            macro_row(k, unit, sig)
+        })
+        .collect_view();
 
-                    // ── Всё, что подобрал ИИ — в отдельной рамке ──
-                    <div attr:data-testid="ai-found-block"
-                        style="margin-top: 16px; border: 1px dashed var(--bulma-border); border-radius: 12px; \
-                               padding: 10px 12px; background: var(--bulma-scheme-main-bis);">
-                        <span class="is-size-7 has-text-weight-semibold">"Найдено автоматически"</span>
-                        <p class="is-size-7 has-text-grey" style="margin: 4px 0 6px; line-height: 1.35;">
-                            "Эти данные подобрал искусственный интеллект по названию продукта. Он ошибается — если знаете точное значение, исправьте."
-                        </p>
-                        {custom.into_iter().map(|(k, sig)| {
-                            let unit = crate::services::enrich::nutrient_unit(&k).to_string();
-                            macro_row(k, unit, sig)
-                        }).collect_view()}
-                        {macro_row("Железо".to_string(), "мг".to_string(), iron_mg)}
-                        {macro_row("Усвоение железа".to_string(), "%".to_string(), iron_abs)}
-                        {flag_row("Низкокалорийный перекус", f_snack)}
-                        {flag_row("Жидкие калории", f_liquid)}
-                        {flag_row("Овощ или фрукт", f_veg)}
-                        {flag_row("Яйца", f_egg)}
-                        {flag_row("Красное мясо", f_meat)}
-                    </div>
-                </section>
-                <footer class="modal-card-foot" style="justify-content: flex-end;">
-                    <button class="button" on:click=move |_| on_close.call(())>{move || t("weight.cancel")}</button>
-                    <button class="button is-link" on:click=save>{move || t("weight.save")}</button>
-                </footer>
+    view! {
+      // Portal в <body> — как у полноэкранного просмотра историй. Приложение живёт
+      // внутри оболочки с `position: fixed`, а она образует собственный контекст
+      // наложения: вложенный overlay не может закрасить нижнюю панель, какой бы
+      // z-index ему ни дать. Монтирование в корень документа это снимает.
+      <Portal>
+        // Полноэкранная СТРАНИЦА, а не модалка. Модалка не годилась: блок «найдено
+        // автоматически» вырос, карточка стала выше экрана, и её собственный подвал
+        // с кнопками уехал под нижнюю панель навигации — форму нельзя было ни
+        // сохранить, ни закрыть. Здесь шапка и подвал закреплены, прокручивается
+        // только середина.
+        <div attr:data-testid="food-edit-page"
+            style="position: fixed; inset: 0; z-index: 90; background: var(--bulma-scheme-main); \
+                   display: flex; flex-direction: column;">
+            // Шапка: назад + заголовок.
+            <div style="flex-shrink: 0; display: flex; align-items: center; gap: 10px; \
+                    padding: calc(env(safe-area-inset-top) + 10px) 14px 10px; \
+                    border-bottom: 0.5px solid var(--bulma-border-weak);">
+                <button attr:data-testid="food-edit-back"
+                    attr:aria-label="Назад"
+                    class="button is-ghost"
+                    style="width: 2.5rem; height: 2.5rem; padding: 0; text-decoration: none; flex-shrink: 0;"
+                    on:click=move |_| on_close.call(())>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/>
+                    </svg>
+                </button>
+                <span class="is-size-5 has-text-weight-semibold" style="flex: 1; min-width: 0;">
+                    {move || t("diary.edit_product")}
+                </span>
+            </div>
+
+            // Прокручиваемая середина.
+            <div style="flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; \
+                    padding: 14px;">
+                <input type="text"
+                    class="is-size-6"
+                    style="width: 100%; padding: 10px 12px; border: none; border-radius: 10px; background: var(--bulma-background); color: var(--bulma-text); outline: none; box-sizing: border-box; margin-bottom: 12px;"
+                    placeholder=t("food_editor.product_name")
+                    prop:value=move || name.get()
+                    on:input=move |ev| name.set(event_target_value(&ev))
+                />
+                {macro_row(nutrient_name("Calories").to_string(), unit_label("kcal").to_string(), kcal)}
+                {macro_row(nutrient_name("Protein").to_string(), unit_label("g").to_string(), protein)}
+                {macro_row(nutrient_name("Fat").to_string(), unit_label("g").to_string(), fat)}
+                {macro_row(nutrient_name("Carbs").to_string(), unit_label("g").to_string(), carbs)}
+
+                // ── Всё, что подобрал ИИ — в отдельной рамке ──
+                <div attr:data-testid="ai-found-block"
+                    style="margin-top: 16px; border: 1px dashed var(--bulma-border); border-radius: 12px; \
+                           padding: 10px 12px; background: var(--bulma-scheme-main-bis);">
+                    <span class="is-size-7 has-text-weight-semibold">"Найдено автоматически"</span>
+                    <p class="is-size-7 has-text-grey" style="margin: 4px 0 6px; line-height: 1.35;">
+                        "Эти данные подобрал искусственный интеллект по названию продукта. Он ошибается — если знаете точное значение, исправьте."
+                    </p>
+                    {custom_rows.clone()}
+                    {macro_row("Железо".to_string(), "мг".to_string(), iron_mg)}
+                    {macro_row("Усвоение железа".to_string(), "%".to_string(), iron_abs)}
+                    {flag_row("Низкокалорийный перекус", f_snack)}
+                    {flag_row("Жидкие калории", f_liquid)}
+                    {flag_row("Овощ или фрукт", f_veg)}
+                    {flag_row("Яйца", f_egg)}
+                    {flag_row("Красное мясо", f_meat)}
+                </div>
+            </div>
+
+            // Подвал: закреплён, поэтому «Сохранить» видно при любой длине формы.
+            <div style="flex-shrink: 0; display: flex; gap: 10px; padding: 10px 14px; \
+                    padding-bottom: calc(env(safe-area-inset-bottom) + 10px); \
+                    border-top: 0.5px solid var(--bulma-border-weak);">
+                <button class="button is-fullwidth" style="flex: 1;"
+                    on:click=move |_| on_close.call(())>{move || t("weight.cancel")}</button>
+                <button attr:data-testid="food-edit-save" class="button is-link is-fullwidth" style="flex: 1;"
+                    on:click=move |ev| save.call(ev)>{move || t("weight.save")}</button>
             </div>
         </div>
+      </Portal>
     }
 }

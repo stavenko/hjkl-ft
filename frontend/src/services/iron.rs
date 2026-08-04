@@ -123,7 +123,9 @@ pub async fn absorbed_on(date: &str) -> f64 {
         .sum()
 }
 
-/// Absorbed iron (mg) accumulated over `from..=to`, inclusive.
+/// Absorbed iron (mg) accumulated over `from..=to`, inclusive. Derived from the
+/// diary and the foods on every call — never stored — so a food that gets its iron
+/// filled in later changes every range it appears in, with nothing to invalidate.
 pub async fn absorbed_between(from: NaiveDate, to: NaiveDate) -> f64 {
     let mut total = 0.0;
     let mut d = from;
@@ -163,7 +165,7 @@ pub async fn weekly_progress() -> Option<WeeklyIron> {
 pub async fn indicator_state() -> super::indicators::IndicatorState {
     use super::indicators::IndicatorState;
     let today = local::today_date();
-    let (Some(open), Some((cur_start, _))) = (week_open_date(), week_bounds(today)) else {
+    let Some((cur_start, _)) = week_bounds(today) else {
         return IndicatorState::Unknown;
     };
     let target = weekly_target_mg();
@@ -171,18 +173,25 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
         return IndicatorState::Unknown;
     }
 
-    // Only COMPLETED iron weeks — [open, cur_start) in 7-day blocks — and only the
-    // most recent `WEEKLY_WINDOW` of them. The week in progress is never judged.
+    // The last `WEEKLY_WINDOW` COMPLETED iron weeks, walking BACKWARDS from the
+    // current one. The grid is anchored to the day the iron story opened (that is
+    // what makes day 1 of every week the same weekday), but the history is NOT cut
+    // off there: weeks before the story opened are ordinary weeks of the diary and
+    // are judged as soon as their iron is known.
+    //
+    // Every completed week is counted AS IS — including weeks whose food has not been
+    // through the iron pass yet. Nothing here is a stored verdict: the sum is derived
+    // from the diary and the foods on every read, so the moment the background pass
+    // fills a food in, the weeks that food appears in are judged anew. Freezing
+    // applies to what the USER entered, never to what the app can still find out.
     let mut history: Vec<bool> = Vec::new();
-    let mut s = open;
-    while s + Duration::days(6) < cur_start {
+    let mut s = cur_start;
+    for _ in 0..super::indicators::WEEKLY_WINDOW {
+        s -= Duration::days(7);
         let e = s + Duration::days(6);
         history.push(absorbed_between(s, e).await >= target);
-        s += Duration::days(7);
     }
-    if history.len() > super::indicators::WEEKLY_WINDOW {
-        history.drain(..history.len() - super::indicators::WEEKLY_WINDOW);
-    }
+    history.reverse();
 
     // Вердикт выносит ОБЩЕЕ недельное правило — то же, что у омега-3, яиц и
     // красного мяса. Своей копии этого правила у железа быть не должно.

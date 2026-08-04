@@ -207,6 +207,9 @@ async fn bootstrap_network() {
     // week after), recompute it from the last 7 days and post a "letter". Local-only;
     // self-limits via a stored anchor, so calling it every launch is safe.
     services::letters::maybe_recompute_weekly_planka().await;
+
+    // Same, for the steps planka — raised by the step indicator's own colour.
+    services::letters::maybe_recompute_weekly_steps_planka().await;
 }
 
 #[cfg(not(test))]
@@ -248,6 +251,7 @@ fn install_foreground_sync() {
                 // calorie planka, then check the weekly recompute (self-limits).
                 services::indicators::freeze_calories_recent().await;
                 services::letters::maybe_recompute_weekly_planka().await;
+                services::letters::maybe_recompute_weekly_steps_planka().await;
             });
         }
     });

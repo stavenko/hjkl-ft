@@ -1566,6 +1566,49 @@ pub fn steps_planka_for_avg(avg: f64) -> u32 {
     }
 }
 
+// ── Weekly step-up of the steps planka ───────────────────────────────────────
+// Unlike the calorie planka (a control loop around a measured weight trend), the
+// steps planka is a DISCIPLINE ladder: it only ever climbs, and only as fast as
+// the user actually carries it. The signal is the step indicator's own colour —
+// the very thing the user sees on the widget — so the target can never move for
+// a reason invisible on screen.
+
+/// The steps planka never climbs past this.
+pub const STEPS_PLANKA_MAX: u32 = 15_000;
+/// The two named rungs a green week climbs between.
+const STEPS_RUNG_LOW: u32 = 7_000;
+const STEPS_RUNG_HIGH: u32 = 10_000;
+/// Step above the named rungs, and the whole step for a partial (orange) week.
+const STEPS_PLANKA_STEP: u32 = 1_000;
+
+/// Next steps planka from the current one and the step indicator's colour over
+/// the last 7 completed days. Pure (no I/O) so it is unit-tested.
+///
+///   red     → hold (the week wasn't carried — don't pile more on)
+///   orange  → +1000 (partial week: a small nudge)
+///   green   → up the ladder: below 7000 → 7000 · below 10000 → 10000 ·
+///             from 10000 up → +1000
+///   unknown → hold (nothing to judge)
+///
+/// Never exceeds [`STEPS_PLANKA_MAX`] and never LOWERS an already-higher planka.
+pub fn next_steps_planka(current: u32, state: crate::services::indicators::IndicatorState) -> u32 {
+    use crate::services::indicators::IndicatorState;
+    let raised = match state {
+        IndicatorState::Red | IndicatorState::Unknown => current,
+        IndicatorState::Orange => current.saturating_add(STEPS_PLANKA_STEP),
+        IndicatorState::Green => {
+            if current < STEPS_RUNG_LOW {
+                STEPS_RUNG_LOW
+            } else if current < STEPS_RUNG_HIGH {
+                STEPS_RUNG_HIGH
+            } else {
+                current.saturating_add(STEPS_PLANKA_STEP)
+            }
+        }
+    };
+    raised.min(STEPS_PLANKA_MAX).max(current)
+}
+
 pub async fn get_steps_for_date(date: &str) -> Option<api_types::StepEntry> {
     let entries: Vec<api_types::StepEntry> = db::list_by_index("step_entries", "date", date).await;
     entries.into_iter().next()
@@ -1654,6 +1697,39 @@ mod tests {
         assert_eq!(steps_planka_for_avg(10001.0), 10100);
         assert_eq!(steps_planka_for_avg(12345.0), 12400);
         assert_eq!(steps_planka_for_avg(15000.0), 15000);
+    }
+
+    #[test]
+    fn steps_planka_weekly_ladder() {
+        use super::{next_steps_planka, STEPS_PLANKA_MAX};
+        use crate::services::indicators::IndicatorState::{Green, Orange, Red, Unknown};
+
+        // Красная неделя — планка не растёт, сколько бы её ни было.
+        assert_eq!(next_steps_planka(7000, Red), 7000);
+        assert_eq!(next_steps_planka(12000, Red), 12000);
+        // Нет данных — тоже держим.
+        assert_eq!(next_steps_planka(10000, Unknown), 10000);
+
+        // Жёлтая неделя — ровно +1000 на любой высоте.
+        assert_eq!(next_steps_planka(7000, Orange), 8000);
+        assert_eq!(next_steps_planka(10000, Orange), 11000);
+        assert_eq!(next_steps_planka(12300, Orange), 13300);
+
+        // Зелёная неделя — на следующую ступень лестницы.
+        assert_eq!(next_steps_planka(7000, Green), 10000);
+        assert_eq!(next_steps_planka(8000, Green), 10000); // промежуточная → на 10000
+        assert_eq!(next_steps_planka(9999, Green), 10000);
+        // От 10000 и выше — по тысяче.
+        assert_eq!(next_steps_planka(10000, Green), 11000);
+        assert_eq!(next_steps_planka(12300, Green), 13300);
+
+        // Потолок 15000: дошли — стоим, перешагнуть нельзя.
+        assert_eq!(next_steps_planka(14000, Green), STEPS_PLANKA_MAX);
+        assert_eq!(next_steps_planka(14500, Green), STEPS_PLANKA_MAX);
+        assert_eq!(next_steps_planka(15000, Green), STEPS_PLANKA_MAX);
+        assert_eq!(next_steps_planka(15000, Orange), STEPS_PLANKA_MAX);
+        // Планку выше потолка (из истории шагов) не ПОНИЖАЕМ.
+        assert_eq!(next_steps_planka(16200, Green), 16200);
     }
 
     #[test]

@@ -663,8 +663,10 @@ const GREEN_GATE_WINDOW: i64 = 8;
 const GATE_OPEN_KEY: &str = "ind_opened_at";
 
 /// App-flag holding the date the STEP gate (activity week) opened — its rolling
-/// window counts from here, so pre-planka days never count.
-const STEPS_GATE_OPEN_KEY: &str = "steps_gate_opened_at";
+/// window counts from here, so pre-planka days never count. Also the seed for the
+/// WEEKLY steps-planka recompute clock (see `letters::maybe_recompute_weekly_steps_planka`),
+/// so the first step-up lands one week after the planka was set.
+pub(crate) const STEPS_GATE_OPEN_KEY: &str = "steps_gate_opened_at";
 
 /// App-flag holding the date the CALCIUM gate opened — its rolling window counts
 /// from here, so days before the calcium goal existed never count.

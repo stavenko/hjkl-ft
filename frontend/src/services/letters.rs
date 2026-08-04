@@ -189,6 +189,81 @@ pub async fn maybe_recompute_weekly_planka() {
     });
 }
 
+// ── Weekly steps-planka step-up ──────────────────────────────────────────────
+
+/// Date (YYYY-MM-DD) of the last weekly STEPS-planka recompute. Seeded from the
+/// date the activity week opened, so the FIRST step-up lands one week after the
+/// steps planka was set.
+const STEPS_ANCHOR_KEY: &str = "steps_planka_weekly_anchor";
+
+/// One week after the steps planka was set (and weekly thereafter), raise it by
+/// the step indicator's own colour and post a letter. Safe to call on every
+/// launch/resume — it self-limits via the anchor.
+pub async fn maybe_recompute_weekly_steps_planka() {
+    use crate::services::indicators::{self, IndicatorState};
+    use crate::services::{local, profile};
+
+    // No planka yet → the activity week hasn't opened; nothing to raise.
+    let Some(current) = profile::get_steps_planka() else {
+        return;
+    };
+    let current = current.round() as u32;
+
+    let today = chrono::Local::now().date_naive();
+    let anchor = app_flags::get(STEPS_ANCHOR_KEY)
+        .or_else(|| app_flags::get(indicators::STEPS_GATE_OPEN_KEY))
+        .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
+        .unwrap_or(today);
+    if (today - anchor).num_days() < 7 {
+        return;
+    }
+
+    // The signal is the step indicator over the last 7 COMPLETED days — exactly
+    // what the widget shows the user.
+    let state = indicators::indicator_state("steps").await;
+    if state == IndicatorState::Unknown {
+        // Not judgeable (no step data in the window) — defer WITHOUT advancing the
+        // anchor, so the next launch tries again instead of silently skipping a week.
+        return;
+    }
+
+    let next = local::next_steps_planka(current, state);
+
+    // The week was assessed — restart the clock even when the planka HOLDS (red
+    // week / already at the ceiling), otherwise every launch would re-assess and
+    // a mid-week colour change would raise the planka off-schedule.
+    app_flags::set(STEPS_ANCHOR_KEY, &today.format("%Y-%m-%d").to_string());
+    if next == current {
+        return;
+    }
+
+    profile::set_steps_planka(next as f64);
+    crate::services::sync::push_background();
+
+    add(Letter {
+        id: format!("steps-planka-{}", today.format("%Y-%m-%d")),
+        created_at: chrono::Local::now().to_rfc3339(),
+        body: steps_letter_body(state, next),
+        read: false,
+    });
+}
+
+fn steps_letter_body(state: crate::services::indicators::IndicatorState, planka: u32) -> String {
+    use crate::services::indicators::IndicatorState;
+    let week = match state {
+        IndicatorState::Green => "вы держали планку всю неделю",
+        _ => "вы держали планку не каждый день",
+    };
+    format!(
+        "Прошла очередная неделя, и мы выдаём вам новую планку по шагам:\n\n\
+         Ваша активность: {week}\n\n\
+         Ваша новая планка по шагам: {planka} {word}\n\n\
+         Это письмо — это просто уведомление.",
+        planka = fmt_thousands(planka),
+        word = plural_steps(planka),
+    )
+}
+
 fn planka_letter_body(
     avg_steps: Option<u32>,
     trend: &crate::services::weight_trend::WeightTrend,

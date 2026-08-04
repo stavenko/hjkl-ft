@@ -1002,7 +1002,7 @@ const S5: &[Frame] = &[
     // 3 — red meat
     Frame {
         bg: Bg::Dark,
-        media: Media::Cover(IRON_PH),
+        media: Media::Cover("iron-meat.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },

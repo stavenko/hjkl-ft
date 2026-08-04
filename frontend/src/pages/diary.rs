@@ -350,7 +350,13 @@ pub fn DiaryPage() -> impl IntoView {
                     // The planka that applied on the selected day (past day → frozen).
                     let cal_target = cal_planka_res.get().flatten();
 
-                    gs.iter().filter(|g| g.amount > 0.0).map(|goal| {
+                    // Кальциевая цель — СИСТЕМНАЯ (её ставит неделя кальция ради
+                    // индикатора и ворот), а не то, что человек завёл сам. В шапке
+                    // дневника ей делать нечего: там нужна планка дня.
+                    gs.iter()
+                        .filter(|g| g.amount > 0.0)
+                        .filter(|g| g.nutrient != crate::services::indicators::N_CALCIUM)
+                        .map(|goal| {
                         let name = if is_standard_nutrient(&goal.nutrient) {
                             crate::services::i18n::nutrient_name(&goal.nutrient).to_string()
                         } else {

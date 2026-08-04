@@ -993,8 +993,8 @@ const S5: &[Frame] = &[
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "Iron is a very important element for our body. Most of it is in the blood. And there's also a lot of it in the muscles. When iron is low, we feel weak and tired.",
-            ru: "Железо — это очень важный элемент для нашего организма. Большая часть его находится в крови. Ну и вот также очень много и в мышцах. Если железа мало, мы чувствуем слабость и усталость.",
+            en: "Iron is a very important element for our body. Our blood and our muscles need it most of all. When iron is low, we feel tired and weak.",
+            ru: "Железо — это очень важный элемент для нашего организма. Больше всего он нужен нашей крови и мышцам. Если железа мало, мы чувствуем усталость и слабость.",
         },
     },
     // 3 — red meat
@@ -1005,8 +1005,8 @@ const S5: &[Frame] = &[
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "The best sources are red meat: beef, lamb, pork. A large amount of iron that comes together with a large amount of protein.",
-            ru: "Лучшие источники — это красное мясо: говядина, баранина, свинина. Большое количество железа, которое поступает вместе с большим количеством белка.",
+            en: "One of the best sources of iron is red meat: beef, lamb, pork. It also carries an enormous amount of protein. Eating it regularly closes the requirement very quickly.",
+            ru: "Один из лучших источников железа — это красное мясо: говядина, баранина, свинина. В них также есть огромное количество белка. Регулярное употребление очень быстро закрывает потребность.",
         },
     },
     // 4 — liver
@@ -1017,8 +1017,8 @@ const S5: &[Frame] = &[
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "One of the best sources is liver. It holds even more iron than meat. Chicken liver is better than beef liver. Few calories, a lot of iron and a good portion of protein.",
-            ru: "Один из лучших источников — это печень. Там железа даже больше, чем в мясе. Куриная печень лучше, чем говяжья. Мало калорий, много железа и хорошая порция белка.",
+            en: "Liver is also a very good source. Chicken liver, at that, is better than beef liver. This food is low in calories too. But you can't eat too much of it, because of the large amount of vitamin A.",
+            ru: "Печень — это тоже очень хороший источник. Причём куриная печень лучше говяжьей. В этой еде ещё и мало калорий. Но слишком много есть нельзя из-за большого количества витамина А.",
         },
     },
     // 5 — shellfish and roe
@@ -1029,8 +1029,8 @@ const S5: &[Frame] = &[
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "Mussels, oysters, red and black caviar — that's iron for the rich. If your finances allow it, this is the best way to build iron up.",
-            ru: "Мидии, устрицы, красная и чёрная икра — это железо для богатых. Если позволяет экономика — это лучший способ набирать железо.",
+            en: "Mussels, oysters, red and black caviar — this is iron for the rich. If your wallet allows it, eat plenty. And with pleasure. Enjoy your meal.",
+            ru: "Мидии, устрицы, красная и чёрная икра — это железо для богатых. Если вам позволяет кошелёк — ешьте много. И с удовольствием. Приятного аппетита.",
         },
     },
     // 6 — plant sources + the absorption gap (the reason iron carries a coefficient)
@@ -1041,8 +1041,8 @@ const S5: &[Frame] = &[
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "The best plant sources are legumes: beans, chickpeas, lentils. There's also a lot of it in all sorts of nuts and seeds: sesame, cashew. But you have to understand that the body takes only #2–20 %# of the iron from plants, against #15–35 %# from animal foods. You need to eat more plants.",
-            ru: "Лучшие растительные источники — это бобовые: фасоль, нут, чечевица. Также его много во всяких орешках: кунжут, кешью. Однако надо понимать, что организм берёт всего #2–20 %# железа из растений против #15–35 %# из животных. Растений надо есть больше.",
+            en: "If your conscience won't let you eat animals, try closing your iron with legumes: beans, chickpeas, lentils. You can also try nuts, but they carry too many calories: sesame or cashew, for instance. Plant sources are not the best ones, and the app will account for #bioavailability#.",
+            ru: "Если есть животных вам не позволяет совесть, попробуйте закрывать железо из бобовых: фасоли, нута, чечевицы. Можно ещё попробовать орехи, но в них слишком много калорий: например, кунжут или кешью. Растительные источники не самые лучшие, и программа будет учитывать #биологическую доступность#.",
         },
     },
     // 7 — the new WEEKLY indicator + gauge
@@ -1065,8 +1065,8 @@ const S5: &[Frame] = &[
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "Calcium and iron use the same transport. When we eat a lot of calcium, iron is absorbed worse. You can safely ignore this rule, though. Recommendations to separate iron and calcium exist only for medical preparations. And there your doctors will tell you everything.",
-            ru: "Кальций и железо используют один и тот же транспорт. Когда едим много кальция, железо усваивается хуже. Однако этим правилом вы можете спокойно пренебрегать. Рекомендации по разделению приёма железа и кальция существуют только для медицинских препаратов. Но там вам врачи всё расскажут.",
+            en: "Calcium and iron use the same transport. When we eat a lot of calcium, iron is absorbed worse. Most people need to do nothing and need not account for it. But if you do have trouble with iron, try splitting your meals like this: calcium in one meal, and iron in another.",
+            ru: "Кальций и железо используют один и тот же транспорт. Когда едим много кальция, железо усваивается хуже. Большинству людей не нужно ничего делать и не нужно это учитывать. Но если у вас проблемы с железом, попробуйте разделять приёмы пищи так: кальций в один приём, а железо в другой.",
         },
     },
 ];

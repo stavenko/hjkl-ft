@@ -45,6 +45,9 @@ struct DetailData {
     planka: Option<f64>,
     eaten: f64,
     gauges: Vec<indicators::DailyGauge>,
+    /// Недельное железо — в развёрнутом виде оно должно быть ровно так же, как в
+    /// свёрнутом виджете. `None`, пока неделя железа не открыта.
+    iron: Option<crate::services::iron::WeeklyIron>,
     series: Vec<indicators::IndicatorSeries>,
     calorie_hint: String,
     protein_hint: String,
@@ -110,6 +113,30 @@ async fn protein_hint_text() -> String {
         "Норму белка считаем от безжировой массы тела. По вашим данным (рост {h}, возраст \
          {age}, вес {w:.0} кг) безжировая масса ≈ {ffm:.0} кг, а планка — 1,6 г белка на кг.\n\n\
          Ваша планка по белку: {target} г."
+    )
+}
+
+/// Пояснение «?» для недельного железа: откуда взялась норма и почему она
+/// считается в УСВОЕННЫХ миллиграммах.
+fn iron_hint_text() -> String {
+    use crate::services::iron;
+    let sex = profile::get_sex();
+    let age = profile::get_age_years();
+    let rda = iron::rda_mg_per_day(sex, age);
+    let target = iron::weekly_absorbed_target_mg(sex, age);
+    let who = match sex {
+        Some(Sex::Female) => "женщинам",
+        Some(Sex::Male) => "мужчинам",
+        None => "людям",
+    };
+    let age_s = age.map(|a| format!(" в {a} лет")).unwrap_or_default();
+    format!(
+        "По таблице норм потребления {who}{age_s} нужно {rda:.0} мг железа в сутки.\n\n\
+         Из еды усваивается лишь часть железа: из мяса и печени — заметно больше, чем из \
+         растений. Поэтому мы считаем УСВОЕННОЕ железо, и недельная норма в этом счёте — \
+         {target:.1} мг.\n\n\
+         Точки на полосе делят неделю на семь дней: они показывают, где вы были бы, \
+         если бы набирали норму равномерно."
     )
 }
 
@@ -318,6 +345,7 @@ pub fn DashboardPage() -> impl IntoView {
                 planka,
                 eaten: local::kcal_on(&today).await,
                 gauges: indicators::daily_gauges().await,
+                iron: crate::services::iron::weekly_progress().await,
                 series: indicators::unlocked_indicator_series().await,
                 calorie_hint: calorie_hint_text(planka).await,
                 protein_hint: protein_hint_text().await,
@@ -429,6 +457,27 @@ pub fn DashboardPage() -> impl IntoView {
                                         value_color=val.map(String::from)/>
                                 }
                             }).collect_view();
+                            // Недельное железо — та же полоса с суточными точками и
+                            // обводкой темпа, что в свёрнутом виджете.
+                            let iron = d.iron.clone().map(|w| {
+                                let (bar, val) =
+                                    crate::components::gauge::at_least_colors(w.absorbed_mg, w.target_mg);
+                                let pace = crate::components::gauge::GaugePace {
+                                    segments: 7,
+                                    passed: w.day_of_week.saturating_sub(1),
+                                };
+                                view! {
+                                    <Gauge value=w.absorbed_mg target=w.target_mg
+                                        label="Железо/нед".to_string()
+                                        unit="мг".to_string()
+                                        color=bar.to_string()
+                                        height=12.0
+                                        decimals=1
+                                        pace=Some(pace)
+                                        hint=iron_hint_text()
+                                        value_color=val.map(String::from)/>
+                                }
+                            });
                             let detail = d.series.iter().map(|s| {
                                 let (paths, name) = progress_widget::icon_for(s.key);
                                 let (stroke, tint) = progress_widget::state_colors(s.state);
@@ -466,6 +515,7 @@ pub fn DashboardPage() -> impl IntoView {
                                         hint=d.calorie_hint.clone()
                                         value_color={(d.eaten > target).then(|| "#e0304f".to_string())}/>
                                     {daily}
+                                    {iron}
                                     <div>
                                         <div style="border-top: 0.5px solid var(--bulma-border-weak); margin-bottom: 14px;"></div>
                                         <div style="display: flex; flex-direction: column; gap: 12px;">

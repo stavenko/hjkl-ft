@@ -488,6 +488,10 @@ pub async fn lookup_nutrient(food_name: &str, nutrient: &str, unit: &str) -> Res
 /// absorbed. Kept apart from [`SingleNutrient`] on purpose — iron is the one
 /// nutrient whose milligrams are meaningless without the absorbed fraction, so it
 /// has its own request, its own schema and its own storage on `Food`.
+/// TWO plain numbers and nothing else. A free-text field used to live here; it was
+/// never read by anything, but it made the model produce a sentence — and a sentence
+/// is what got truncated («EOF while parsing») or degenerated into junk. The shorter
+/// the answer, the less there is to go wrong.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct IronDetail {
     /// Iron per 100 g, in milligrams (a plain number).
@@ -495,8 +499,6 @@ struct IronDetail {
     /// Fraction of that iron the body actually absorbs, 0…1 (e.g. 0.25 for liver,
     /// 0.05 for lentils).
     absorption: f64,
-    /// Short explanation, in the requested language.
-    comment: String,
 }
 
 /// Look up a food's IRON: the amount per 100 g and the fraction of it the body
@@ -522,29 +524,48 @@ pub async fn lookup_iron(food_name: &str) -> Result<(f64, f64), String> {
            Non-heme iron from legumes, seeds, nuts, greens, cereals, vegetables, fruit and dairy \
            is absorbed at about 0.02–0.20 (use ~0.05 for legumes and whole grains, ~0.08 when the \
            food is rich in vitamin C, ~0.03 when it is rich in phytates, tannins or calcium). \
-           A mixed dish takes a value in between, weighted by how much of its iron is heme.\n\
-         - comment: brief explanation in {lang}\n\n\
+           A mixed dish takes a value in between, weighted by how much of its iron is heme.\n\n\
          Base the answer only on the food name \"{food_name}\". Respond with ONLY a single \
-         minified JSON object and nothing else — no markdown, no prose."
+         minified JSON object holding exactly these two numbers and nothing else — no \
+         comment field, no markdown, no prose."
     );
 
-    const ATTEMPTS: usize = 3;
+    // Четыре попытки, а не три: сбои здесь наблюдались разного рода — обрыв ответа,
+    // мусор вместо JSON, упавший fetch, — и каждый из них транзиентный.
+    const ATTEMPTS: usize = 4;
     let mut last_err = String::new();
-    for _ in 0..ATTEMPTS {
+    for attempt in 0..ATTEMPTS {
         // Thinking OFF for the same reason as `lookup_nutrient` — short answers get
         // parked in the reasoning channel and the content comes back empty.
+        if attempt > 0 {
+            // Модель, только что выдавшая мусор, на мгновенный повтор часто выдаёт
+            // тот же мусор — даём ей передышку.
+            sleep_ms(800).await;
+        }
         let executor = build_executor_think(false)?;
-        let result = executor
-            .execute::<IronDetail>(prompt.clone())
-            .await
-            .map_err(|e| format!("LLM execute error: {e:?}"))?;
+        // Сбой ИСПОЛНЕНИЯ (оборванный fetch, недоступный воркер) — это повод
+        // ПОВТОРИТЬ, а не выйти из функции: раньше такая ошибка проскакивала мимо
+        // цикла попыток и уходила наверх с первого раза.
+        let result = match executor.execute::<IronDetail>(prompt.clone()).await {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = format!("LLM execute error: {e:?}");
+                continue;
+            }
+        };
 
         let mut thinking_stream = result.thinking_stream;
         wasm_bindgen_futures::spawn_local(async move { while thinking_stream.next().await.is_some() {} });
         let mut content_stream = result.content_stream;
         wasm_bindgen_futures::spawn_local(async move { while content_stream.next().await.is_some() {} });
 
-        let output = result.output.await.map_err(|e| format!("LLM output error: {e:?}"))?;
+        let output = match result.output.await {
+            Ok(o) => o,
+            Err(e) => {
+                last_err = format!("LLM output error: {e:?}");
+                continue;
+            }
+        };
         let raw = output.result.trim();
         if raw.is_empty() {
             last_err = "model returned an empty response".to_string();

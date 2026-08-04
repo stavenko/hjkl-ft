@@ -384,6 +384,9 @@ pub async fn cache_food_tags(verdicts: &[(String, crate::services::ai::FoodTags)
 /// Merge background-enriched nutrient values (name → per-100g amount, canonical
 /// unit) into a food and push. Written by the background enricher; overwrites the
 /// same keys idempotently.
+/// Сохранить найденные значения нутриентов. Ноль — полноценное значение: он
+/// означает «в этом продукте столько», а не «не нашли». Иначе фоновый проход
+/// запрашивал бы такой нутриент при каждом запуске приложения.
 pub async fn cache_food_nutrients(id: &str, values: BTreeMap<String, f64>) {
     if values.is_empty() {
         return;

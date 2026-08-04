@@ -165,39 +165,24 @@ fn needs_processing(food: &Food) -> bool {
         || (super::iron::unlocked() && super::iron::needs_iron(food))
 }
 
-/// Enqueue every food logged in the last two weeks that still needs tags or
-/// nutrient enrichment. Called on app activation (launch + foreground) so anything
-/// logged offline, before this feature existed, or on another device gets processed
-/// — the window covers the daily indicators' 7-day span with margin.
-pub async fn sweep_diary_unclassified() {
-    let today = crate::services::local::today_date();
-    let foods: std::collections::BTreeMap<String, Food> =
-        local::list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect();
-    let mut seen = std::collections::HashSet::new();
-    for i in 0..14 {
-        let d = (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();
-        for e in local::list_diary(&d).await {
-            if let Some(food) = foods.get(&e.food_id) {
-                if needs_processing(food) && seen.insert(food.id.clone()) {
-                    enqueue(food.id.clone());
-                }
-            }
-        }
-    }
-}
-
-/// Enqueue every not-yet-classified RECIPE INGREDIENT food, so a dish's egg /
-/// red-meat / veg-fruit content can be counted by composition. Called on activation
-/// (covers recipes built before the ingredients were classified).
-pub async fn sweep_recipe_ingredients() {
-    let foods: std::collections::BTreeMap<String, Food> =
-        local::list_foods().await.into_iter().map(|f| (f.id.clone(), f)).collect();
-    let mut seen = std::collections::HashSet::new();
-    for ing in local::list_recipe_ingredients().await {
-        if let Some(food) = foods.get(&ing.food_id) {
-            if needs_processing(food) && seen.insert(food.id.clone()) {
-                enqueue(food.id.clone());
-            }
+/// Enqueue EVERY product in the database that still lacks something — tags,
+/// nutrients or iron. Called on app activation (launch + foreground).
+///
+/// This used to walk the last two weeks of the DIARY instead. That window was cut
+/// for the daily indicators, whose verdict spans seven days; it is far too short for
+/// a weekly one — the iron indicator judges eight completed weeks, so six of them
+/// could never be filled and stayed empty forever. And when a NEW nutrient is added
+/// later, every product ever created is missing it, not just the recently eaten
+/// ones. So the sweep is over the whole `foods` store, and the answer to «is there
+/// anything to do» comes from the product itself.
+///
+/// It cannot loop: a product is enqueued only while something is genuinely absent,
+/// and every pass either fills a field or records an error. A value of ZERO counts
+/// as filled — «this food has no iron» is an answer, not a gap.
+pub async fn sweep_unprocessed() {
+    for food in local::list_foods().await {
+        if needs_processing(&food) {
+            enqueue(food.id.clone());
         }
     }
 }

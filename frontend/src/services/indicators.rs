@@ -300,7 +300,7 @@ pub async fn maybe_unlock_iron_week() {
     crate::services::app_flags::set_bool(iron::IRON_UNLOCKED_KEY, true);
     // Foods already in the diary have no iron yet — queue them now, otherwise the
     // first iron week would be measured against an empty set.
-    crate::services::classify::sweep_diary_unclassified().await;
+    crate::services::classify::sweep_unprocessed().await;
 }
 
 // ── Per-indicator per-day cache ──────────────────────────────────────────────

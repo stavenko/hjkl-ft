@@ -72,12 +72,13 @@ pub fn FoodEditModal(
         let pr = parse(protein.get_untracked());
         let ft = parse(fat.get_untracked());
         let cb = parse(carbs.get_untracked());
+        // Ноль СОХРАНЯЕТСЯ. Раньше нулевые значения выбрасывались, и фоновый проход
+        // считал нутриент незаполненным и запрашивал его снова — бесконечно, потому
+        // что модель честно отвечала «ноль». «В этом продукте нет клетчатки» — это
+        // ответ, а не пропуск.
         let mut nutrients = BTreeMap::new();
         for (k, sig) in custom_save.iter() {
-            let v = parse(sig.get_untracked());
-            if v != 0.0 {
-                nutrients.insert(k.clone(), v);
-            }
+            nutrients.insert(k.clone(), parse(sig.get_untracked()));
         }
         // Процент усвоения возвращаем в долю и держим в 0…1: значение вне диапазона
         // молча испортило бы весь недельный счёт железа.

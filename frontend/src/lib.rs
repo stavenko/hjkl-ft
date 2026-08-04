@@ -182,8 +182,7 @@ async fn bootstrap_network() {
         // on the merged dump, after the pull, so server entries get labelled too).
         services::local::migrate_meal_labels().await;
         // Classify any recent/untagged food now that the AI worker is reachable.
-        leptos::spawn_local(services::classify::sweep_diary_unclassified());
-        leptos::spawn_local(services::classify::sweep_recipe_ingredients());
+        leptos::spawn_local(services::classify::sweep_unprocessed());
         // Poll the support thread so a curator `set_planka` directive is applied by
         // the app even if the user never opens /chat (the poll applies it locally).
         leptos::spawn_local(async {
@@ -249,7 +248,7 @@ fn install_foreground_sync() {
                 // Daily subscription re-check (no-op unless a day has passed).
                 services::subscription::maybe_recheck().await;
                 // Classify any still-untagged recent food on resume too.
-                services::classify::sweep_diary_unclassified().await;
+                services::classify::sweep_unprocessed().await;
                 // A day may have rolled over while backgrounded — freeze recent days'
                 // calorie planka, then check the weekly recompute (self-limits).
                 services::indicators::freeze_calories_recent().await;

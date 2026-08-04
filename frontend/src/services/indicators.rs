@@ -355,6 +355,10 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
         "calories" => local::kcal_on(date).await,
         "calcium" => local::nutrient_grams_on(date, N_CALCIUM).await,
         "fiber" => local::nutrient_grams_on(date, N_FIBER).await,
+        // Железо считается в УСВОЕННЫХ миллиграммах — то же, что копит недельная
+        // полоса. Дневной ЦЕЛИ у него нет (`target_for` вернёт 0), поэтому столбик
+        // показывает количество, но день по нему не судится: недельная механика.
+        "iron" => crate::services::iron::absorbed_on(date).await,
         _ => 0.0,
     }
 }

@@ -294,73 +294,16 @@ async fn report_usage_inner(
     Ok(())
 }
 
-/// Read a TEE'd copy of the SSE byte stream fully, scan `data:` lines for the chunk
-/// carrying a top-level `usage`, and report it. If no usage chunk arrives (the
-/// platform may not support `include_usage`), log and report nothing — never guess.
-async fn report_stream_usage(
-    env: &Env,
-    user_id: String,
-    model: String,
-    branch: worker::web_sys::ReadableStream,
-) {
-    let bytes = match drain_stream(&branch).await {
-        Ok(b) => b,
-        Err(e) => {
-            console_error!("usage-report: draining tee'd stream failed (swallowed): {e:?}");
-            return;
-        }
-    };
-    let text = String::from_utf8_lossy(&bytes);
-    let mut found: Option<(i64, i64)> = None;
-    for line in text.lines() {
-        let data = match line.strip_prefix("data:") {
-            Some(d) => d.trim(),
-            None => continue,
-        };
-        if data.is_empty() || data == "[DONE]" {
-            continue;
-        }
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
-            if let Some(split) = usage_split(&val) {
-                found = Some(split);
-            }
-        }
+/// Scan ONE complete SSE line for the chunk carrying a top-level `usage`.
+/// `Some((prompt, completion))` when this line is that chunk.
+fn usage_from_sse_line(line: &str) -> Option<(i64, i64)> {
+    let data = line.strip_prefix("data:")?.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return None;
     }
-    match found {
-        Some((p, c)) => report_usage(env, &user_id, &model, p, c).await,
-        None => console_error!(
-            "usage-report: no usage chunk in stream (include_usage may be unsupported); reporting nothing"
-        ),
-    }
+    usage_split(&serde_json::from_str::<serde_json::Value>(data).ok()?)
 }
 
-/// Fully read a web_sys ReadableStream into bytes via its default reader.
-async fn drain_stream(stream: &worker::web_sys::ReadableStream) -> Result<Vec<u8>> {
-    use wasm_bindgen::JsValue;
-    use worker::wasm_bindgen_futures::JsFuture;
-    let reader = stream
-        .get_reader()
-        .dyn_into::<worker::web_sys::ReadableStreamDefaultReader>()
-        .map_err(|_| Error::RustError("stream reader is not a default reader".into()))?;
-    let mut out = Vec::new();
-    loop {
-        let result = JsFuture::from(reader.read())
-            .await
-            .map_err(|e| Error::RustError(format!("stream read: {e:?}")))?;
-        let done = js_sys::Reflect::get(&result, &JsValue::from_str("done"))
-            .ok()
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
-        if done {
-            break;
-        }
-        let value = js_sys::Reflect::get(&result, &JsValue::from_str("value"))
-            .map_err(|e| Error::RustError(format!("stream chunk value: {e:?}")))?;
-        let chunk = js_sys::Uint8Array::new(&value);
-        out.extend_from_slice(&chunk.to_vec());
-    }
-    Ok(out)
-}
 
 // ── Chat completions request massaging ────────────────────────────────────────
 
@@ -551,20 +494,78 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
         return Response::from_json(&out_val);
     }
 
-    // Raw passthrough of the Workers AI SSE byte stream — no re-parsing. `stream:true`
-    // resolves to a ReadableStream. TEE it: branch 0 → the client byte-for-byte;
-    // branch 1 → drained inside ctx.wait_until to extract the usage chunk (if any).
+    // Raw passthrough of the Workers AI SSE byte stream — no re-parsing, no copying.
+    //
+    // This used to `tee()` the stream: branch 0 to the client, branch 1 drained at
+    // full speed inside `ctx.wait_until` to pick out the `usage` chunk. Two consumers
+    // of one source means the split has to buffer for whichever reads slower, and the
+    // client — reading over the network — is always the slower one. Measured on dev:
+    // answers longer than ~55 SSE frames died mid-token in roughly half the requests,
+    // with no `[DONE]` and no `finish_reason` — the body simply ended. Short answers
+    // (calcium, ~53 frames) finished before that point and looked fine, which is why
+    // this stayed hidden until the iron lookup made answers longer.
+    //
+    // Now there is ONE consumer. The bytes go to the client untouched and are merely
+    // WATCHED on the way past: complete SSE lines are scanned for the usage chunk, and
+    // the finding is handed to `ctx.wait_until` through a channel. Nothing is
+    // duplicated, so nothing has to be buffered for a second reader.
     let stream = worker::web_sys::ReadableStream::unchecked_from_js(out);
-    let tee = stream.tee();
-    let client_branch = worker::web_sys::ReadableStream::unchecked_from_js(tee.get(0));
-    let usage_branch = worker::web_sys::ReadableStream::unchecked_from_js(tee.get(1));
+
+    // Workers AI puts a `usage` field on EVERY chunk, not just the last one: the first
+    // carries (prompt, 0), the middle ones (0, 1) — one completion token each — and
+    // only the FINAL chunk carries the totals (prompt, completion). So the LAST usage
+    // line is the answer; stopping at the first one records a zero completion count.
+    // Hence an mpsc channel rather than a oneshot: every sighting is sent, and the
+    // reporter keeps the last one it received before the stream ended.
+    let (tx, mut rx) = futures_channel::mpsc::unbounded::<(i64, i64)>();
     {
         let env = env.clone();
         let user_id = user_id.to_string();
         let model = model.clone();
-        ctx.wait_until(async move { report_stream_usage(&env, user_id, model, usage_branch).await });
+        ctx.wait_until(async move {
+            let mut last: Option<(i64, i64)> = None;
+            while let Some(u) = futures_util::StreamExt::next(&mut rx).await {
+                last = Some(u);
+            }
+            match last {
+                Some((p, c)) => report_usage(&env, &user_id, &model, p, c).await,
+                // The sender dropped without a single sighting: the stream ended (or the
+                // client left) with no usage chunk. Report nothing — never guess.
+                None => console_error!(
+                    "usage-report: no usage chunk in stream (include_usage may be unsupported); reporting nothing"
+                ),
+            }
+        });
     }
-    let resp = Response::from_stream(worker::ByteStream::from(client_branch))?;
+
+    let mut carry: Vec<u8> = Vec::new();
+    let watched = futures_util::StreamExt::map(
+        worker::ByteStream::from(stream),
+        move |chunk: Result<Vec<u8>>| {
+            if let Ok(bytes) = &chunk {
+                carry.extend_from_slice(bytes);
+                // Only COMPLETE lines can be parsed; the tail waits for the next chunk.
+                let mut consumed = 0usize;
+                for line in carry.split_inclusive(|b| *b == b'\n') {
+                    if !line.ends_with(b"\n") {
+                        break;
+                    }
+                    consumed += line.len();
+                    if let Some(u) = usage_from_sse_line(&String::from_utf8_lossy(line)) {
+                        let _ = tx.unbounded_send(u);
+                    }
+                }
+                carry.drain(..consumed);
+                // A single SSE line is small; anything longer than this is not a line
+                // we are waiting for, and the buffer must not grow without bound.
+                if carry.len() > 64 * 1024 {
+                    carry.clear();
+                }
+            }
+            chunk
+        },
+    );
+    let resp = Response::from_stream(watched)?;
     let headers = resp.headers();
     headers.set("Content-Type", "text/event-stream")?;
     headers.set("Cache-Control", "no-cache")?;

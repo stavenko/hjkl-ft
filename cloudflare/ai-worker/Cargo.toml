@@ -20,4 +20,7 @@ hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
 js-sys = "0.3"
+# Однопроходное наблюдение за SSE вместо tee: map по потоку + канал к wait_until.
+futures-util = { version = "0.3", default-features = false }
+futures-channel = { version = "0.3", default-features = false }
 wasm-bindgen = "0.2"

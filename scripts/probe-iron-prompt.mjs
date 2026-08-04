@@ -137,12 +137,44 @@ const promptD = (f) =>
   `Base the answer only on the food name "${f}". All values are per 100 g in мг — bare numbers, ` +
   `no unit text. Respond with ONLY a single minified JSON object and nothing else — no markdown, no prose.`;
 
+// E — новая форма железа: вилка на количество И на усвоение.
+const promptE = (f) =>
+  `You are a nutritional database. For the food item "${f}", report its IRON.\n\n${RAW_CLAUSE}\n\n` +
+  `Report TWO SEPARATE quantities. For EACH of them give a lowest / highest / most-likely triple ` +
+  `- first bracket the plausible range, then commit to the most likely value inside that range.\n\n` +
+  `(1) IRON CONTENT - total iron per 100 grams, in MILLIGRAMS:\n` +
+  `- min_value_iron: lowest reasonable amount (number, mg)\n` +
+  `- max_value_iron: highest reasonable amount (number, mg)\n` +
+  `- recommended_iron: the most likely amount (number, mg)\n\n` +
+  `(2) ABSORPTION - the FRACTION of that iron a human actually absorbs, a number BETWEEN 0 AND 1 ` +
+  `(not a percentage):\n` +
+  `- min_value_iron_absorption: lowest reasonable fraction\n` +
+  `- max_value_iron_absorption: highest reasonable fraction\n` +
+  `- recommended_iron_absorption: the most likely fraction\n` +
+  `Guidance for (2): heme iron from red meat, liver, offal, shellfish and fish is absorbed at ` +
+  `about 0.15-0.35 (use ~0.25 for liver and red meat, ~0.20 for poultry and fish). Non-heme iron ` +
+  `from legumes, seeds, nuts, greens, cereals, vegetables, fruit and dairy is absorbed at about ` +
+  `0.02-0.20 (use ~0.05 for legumes and whole grains, ~0.08 when the food is rich in vitamin C, ` +
+  `~0.03 when it is rich in phytates, tannins or calcium).\n\n` +
+  `Do not mix the two groups up: the three *_iron numbers are milligrams per 100 g and are ` +
+  `normally between 0 and 30; the three *_iron_absorption numbers are fractions and are always ` +
+  `between 0 and 1. In each group min <= recommended <= max.\n\n` +
+  `Base the answer only on the food name "${f}". Respond with ONLY a single minified JSON object ` +
+  `holding exactly these six numbers and nothing else.`;
+const schemaE = { type: "object", properties: {
+    min_value_iron: num, max_value_iron: num, recommended_iron: num,
+    min_value_iron_absorption: num, max_value_iron_absorption: num, recommended_iron_absorption: num },
+  required: ["min_value_iron","max_value_iron","recommended_iron",
+             "min_value_iron_absorption","max_value_iron_absorption","recommended_iron_absorption"],
+  additionalProperties: false };
+
 console.log(`продукт: «${FOOD}», по ${N} прогонов на вариант\n`);
 for (const [name, prompt, schema, pick] of [
   ["A — как сейчас (одно число)", promptA, schemaA, (o) => o.iron_mg],
   ["B — как кальций (вилка + comment)", promptB, schemaB, (o) => o.recommended],
   ["C — вилка без comment", promptC, schemaC, (o) => o.recommended],
   ["D — действующий промпт КАЛЬЦИЯ (на кальции)", promptD, schemaB, (o) => o.recommended],
+  ["E — НОВАЯ форма железа (вилка на обе величины)", promptE, schemaE, (o) => o.recommended_iron],
 ]) {
   const vals = [];
   const errs = [];
@@ -151,6 +183,13 @@ for (const [name, prompt, schema, pick] of [
     if (r.err) { errs.push(`${r.err}${r.raw ? ` | ${r.raw}` : ""}`); continue; }
     const v = pick(r.obj);
     vals.push(v);
+    if (r.obj.min_value_iron !== undefined) {
+      const o = r.obj;
+      const span = o.max_value_iron - o.min_value_iron;
+      const pos = span > 0 ? `${((o.recommended_iron - o.min_value_iron) / span * 100).toFixed(0)}%` : "-";
+      console.log(`    вилка ${o.min_value_iron} -> ${o.recommended_iron} -> ${o.max_value_iron} (на ${pos}), ` +
+        `усвоение ${o.min_value_iron_absorption} -> ${o.recommended_iron_absorption} -> ${o.max_value_iron_absorption}`);
+    }
   }
   console.log(`${name}`);
   console.log(`  значения: ${vals.join(", ") || "—"}`);

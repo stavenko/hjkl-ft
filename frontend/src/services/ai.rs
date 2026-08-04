@@ -484,21 +484,29 @@ pub async fn lookup_nutrient(food_name: &str, nutrient: &str, unit: &str) -> Res
     Err(last_err)
 }
 
-/// Iron verdict for one food: how much iron it holds AND how well that iron is
-/// absorbed. Kept apart from [`SingleNutrient`] on purpose — iron is the one
-/// nutrient whose milligrams are meaningless without the absorbed fraction, so it
-/// has its own request, its own schema and its own storage on `Food`.
-/// TWO plain numbers and nothing else. A free-text field used to live here; it was
-/// never read by anything, but it made the model produce a sentence — and a sentence
-/// is what got truncated («EOF while parsing») or degenerated into junk. The shorter
-/// the answer, the less there is to go wrong.
+// Iron needs TWO quantities where every other nutrient needs one, so it can't ride
+// `SingleNutrient`. It keeps the SAME shape though — each quantity is asked as a
+// min / max / most-likely triple, exactly like the per-nutrient lookup.
+//
+// NB: `///` doc comments on this struct and its fields are turned into the JSON
+// schema's `description` strings by `schemars`, and the ai-worker pastes that schema
+// into the prompt verbatim. Everything written with `///` here is therefore READ BY
+// THE MODEL — keep it addressed to the model, and put developer rationale in `//`
+// comments like this one.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct IronDetail {
-    /// Iron per 100 g, in milligrams (a plain number).
-    iron_mg: f64,
-    /// Fraction of that iron the body actually absorbs, 0…1 (e.g. 0.25 for liver,
-    /// 0.05 for lentils).
-    absorption: f64,
+    /// Lowest reasonable IRON CONTENT per 100 g, in milligrams.
+    min_value_iron: f64,
+    /// Highest reasonable IRON CONTENT per 100 g, in milligrams.
+    max_value_iron: f64,
+    /// Most likely IRON CONTENT per 100 g, in milligrams.
+    recommended_iron: f64,
+    /// Lowest reasonable ABSORBED FRACTION of that iron, between 0 and 1.
+    min_value_iron_absorption: f64,
+    /// Highest reasonable ABSORBED FRACTION of that iron, between 0 and 1.
+    max_value_iron_absorption: f64,
+    /// Most likely ABSORBED FRACTION of that iron, between 0 and 1.
+    recommended_iron_absorption: f64,
 }
 
 /// Look up a food's IRON: the amount per 100 g and the fraction of it the body
@@ -516,18 +524,30 @@ pub async fn lookup_iron(food_name: &str) -> Result<(f64, f64), String> {
         "You are a nutritional database. For the food item \"{food_name}\", report its IRON.\n\n\
          For raw/dry as-sold products (grains, rice, pasta, flour, meat, fish, legumes) use the \
          RAW value unless the name says cooked/boiled/fried/steamed.\n\n\
-         Provide:\n\
-         - iron_mg: total iron per 100 grams, in milligrams (a plain number)\n\
-         - absorption: the FRACTION of that iron a human actually absorbs, between 0 and 1.\n\
-           Guidance: heme iron from red meat, liver, offal, shellfish and fish is absorbed at \
-           about 0.15–0.35 (use ~0.25 for liver and red meat, ~0.20 for poultry and fish). \
-           Non-heme iron from legumes, seeds, nuts, greens, cereals, vegetables, fruit and dairy \
-           is absorbed at about 0.02–0.20 (use ~0.05 for legumes and whole grains, ~0.08 when the \
-           food is rich in vitamin C, ~0.03 when it is rich in phytates, tannins or calcium). \
-           A mixed dish takes a value in between, weighted by how much of its iron is heme.\n\n\
+         Report TWO SEPARATE quantities. For EACH of them give a lowest / highest / most-likely \
+         triple — first bracket the plausible range, then commit to the most likely value inside \
+         that range.\n\n\
+         (1) IRON CONTENT — total iron per 100 grams, in MILLIGRAMS:\n\
+         - min_value_iron: lowest reasonable amount (number, mg)\n\
+         - max_value_iron: highest reasonable amount (number, mg)\n\
+         - recommended_iron: the most likely amount (number, mg)\n\n\
+         (2) ABSORPTION — the FRACTION of that iron a human actually absorbs, a number BETWEEN 0 \
+         AND 1 (not a percentage):\n\
+         - min_value_iron_absorption: lowest reasonable fraction\n\
+         - max_value_iron_absorption: highest reasonable fraction\n\
+         - recommended_iron_absorption: the most likely fraction\n\
+         Guidance for (2): heme iron from red meat, liver, offal, shellfish and fish is absorbed \
+         at about 0.15–0.35 (use ~0.25 for liver and red meat, ~0.20 for poultry and fish). \
+         Non-heme iron from legumes, seeds, nuts, greens, cereals, vegetables, fruit and dairy is \
+         absorbed at about 0.02–0.20 (use ~0.05 for legumes and whole grains, ~0.08 when the food \
+         is rich in vitamin C, ~0.03 when it is rich in phytates, tannins or calcium). A mixed \
+         dish takes a value in between, weighted by how much of its iron is heme.\n\n\
+         Do not mix the two groups up: the three *_iron numbers are milligrams per 100 g and are \
+         normally between 0 and 30; the three *_iron_absorption numbers are fractions and are \
+         always between 0 and 1. In each group min ≤ recommended ≤ max.\n\n\
          Base the answer only on the food name \"{food_name}\". Respond with ONLY a single \
-         minified JSON object holding exactly these two numbers and nothing else — no \
-         comment field, no markdown, no prose."
+         minified JSON object holding exactly these six numbers and nothing else — no markdown, \
+         no prose."
     );
 
     // Четыре попытки, а не три: сбои здесь наблюдались разного рода — обрыв ответа,
@@ -576,13 +596,26 @@ pub async fn lookup_iron(food_name: &str) -> Result<(f64, f64), String> {
             .or_else(|_| serde_json::from_str::<IronDetail>(unwrap_schema_envelope(json_str)))
         {
             Ok(v) => {
-                // A nonsense absorption fraction would silently corrupt every later
-                // sum, so reject it instead of clamping it into something plausible.
-                if !(0.0..=1.0).contains(&v.absorption) || v.iron_mg < 0.0 {
-                    last_err = format!("iron out of range: {} мг, усвоение {}", v.iron_mg, v.absorption);
+                // The bracket is not decoration: a model that puts its own
+                // «most likely» OUTSIDE its own min…max has contradicted itself, and
+                // that answer is thrown away rather than stored. Same for a nonsense
+                // fraction — it would silently corrupt every later sum.
+                let iron_ok = v.min_value_iron <= v.recommended_iron
+                    && v.recommended_iron <= v.max_value_iron
+                    && v.min_value_iron >= 0.0;
+                let abs_ok = v.min_value_iron_absorption <= v.recommended_iron_absorption
+                    && v.recommended_iron_absorption <= v.max_value_iron_absorption
+                    && (0.0..=1.0).contains(&v.recommended_iron_absorption);
+                if !iron_ok || !abs_ok {
+                    last_err = format!(
+                        "iron out of range: {}…{}…{} мг, усвоение {}…{}…{}",
+                        v.min_value_iron, v.recommended_iron, v.max_value_iron,
+                        v.min_value_iron_absorption, v.recommended_iron_absorption,
+                        v.max_value_iron_absorption,
+                    );
                     continue;
                 }
-                return Ok((v.iron_mg, v.absorption));
+                return Ok((v.recommended_iron, v.recommended_iron_absorption));
             }
             Err(e) => last_err = format!("parse error: {e}, raw: {raw}"),
         }
@@ -2272,3 +2305,4 @@ mod tests {
         assert_eq!(out, "Your weight is trending down.");
     }
 }
+

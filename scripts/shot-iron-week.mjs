@@ -3,6 +3,9 @@
 import { chromium } from "playwright";
 import { openSeeded, DEFAULT_URL } from "./harness.mjs";
 
+// Край CDN держит предыдущую сборку ощутимо дольше, чем распространяется деплой,
+// поэтому сразу после выкатки снимать надо с ПРЯМОГО адреса деплоя
+// (FE=https://<id>.renorma-fit-dev.pages.dev) — там кэша нет.
 const BASE = process.env.FE || DEFAULT_URL;
 const OUT = process.env.OUT || "/private/tmp/claude-501/-Users-vasilijstavenko-projects-hjkl-ft/56df53af-a1ed-4117-8e82-8a1f8aad90e8/scratchpad/iron";
 

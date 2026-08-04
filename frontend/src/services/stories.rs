@@ -1014,7 +1014,7 @@ const S5: &[Frame] = &[
     // 4 — liver
     Frame {
         bg: Bg::Dark,
-        media: Media::Cover(IRON_PH),
+        media: Media::Cover("iron-liver.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },

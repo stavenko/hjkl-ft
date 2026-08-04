@@ -198,6 +198,39 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
     super::indicators::weekly_state(&history)
 }
 
+/// Недельные столбики для гистограммы: последние 8 ЗАВЕРШЁННЫХ недель железа,
+/// от старой к свежей, подписанные «−8 … −1» — сколько недель назад. Значение —
+/// усвоенные мг за неделю, доля — к недельной норме, поэтому закрытая неделя
+/// красится зелёным по общему правилу столбиков.
+pub async fn weekly_series() -> super::indicators::IndicatorSeries {
+    let today = local::today_date();
+    let target = weekly_target_mg();
+    let mut points = Vec::new();
+    let mut labels = Vec::new();
+    let mut met = Vec::new();
+    if let Some((cur_start, _)) = week_bounds(today) {
+        let window = super::indicators::WEEKLY_WINDOW as i64;
+        for back in (1..=window).rev() {
+            let s = cur_start - Duration::days(7 * back);
+            let e = s + Duration::days(6);
+            let sum = absorbed_between(s, e).await;
+            let ratio = (target > 0.0).then(|| sum / target);
+            points.push((s.format("%Y-%m-%d").to_string(), sum, ratio));
+            labels.push(format!("−{back}"));
+            met.push(ratio.map(|r| r >= 1.0));
+        }
+    }
+    let missed = met.iter().filter(|m| **m == Some(false)).count() as u32;
+    super::indicators::IndicatorSeries {
+        key: "iron",
+        state: indicator_state().await,
+        days: points,
+        met_days: met,
+        missed,
+        labels,
+    }
+}
+
 // ── The dedicated enrichment pass ────────────────────────────────────────────
 
 /// True while this food's iron is still unknown.

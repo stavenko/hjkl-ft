@@ -501,8 +501,14 @@ pub fn DashboardPage() -> impl IntoView {
                                             <InfoHint text=reason/>
                                         </div>
                                         <DayBars series=Signal::derive(move || days.clone())
-                                            unit={if s.key == "calories" { "ккал" } else { "г" }.to_string()}
+                                            unit={match s.key {
+                                                "calories" => "ккал",
+                                                "iron" => "мг",
+                                                "steps" => "",
+                                                _ => "г",
+                                            }.to_string()}
                                             miss_color=stroke.to_string()
+                                            labels=s.labels.clone()
                                             met=s.met_days.clone()/>
                                     </div>
                                 }

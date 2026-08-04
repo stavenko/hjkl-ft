@@ -62,6 +62,9 @@ pub fn DayBars(
     /// Some(false) missed · None unevaluable. When absent, falls back to the
     /// generic ratio ≥ 1.0 rule.
     #[prop(optional)] met: Option<Vec<Option<bool>>>,
+    /// Подписи под столбиками. Пусто — берётся день недели из даты. Недельным
+    /// индикаторам день недели не подходит: у них столбик — это целая неделя.
+    #[prop(optional)] labels: Option<Vec<String>>,
 ) -> impl IntoView {
     let active = create_rw_signal(None::<usize>);
     let svg_ref = create_node_ref::<leptos::svg::Svg>();
@@ -136,7 +139,11 @@ pub fn DayBars(
                             <g>
                                 <rect x=cx - bar_w / 2.0 y=y width=bar_w height=h rx="1.5" fill=fill/>
                                 <text x=cx y=VH - 6.0 text-anchor="middle" font-size="14"
-                                    fill="var(--bulma-text)">{weekday_ru(date)}</text>
+                                    fill="var(--bulma-text)">{
+                                        labels.as_ref()
+                                            .and_then(|l| l.get(i).cloned())
+                                            .unwrap_or_else(|| weekday_ru(date).to_string())
+                                    }</text>
                             </g>
                         }
                     }).collect_view();
@@ -146,7 +153,13 @@ pub fn DayBars(
                         let (date, v, _) = &data[i];
                         let cx = PL + (i as f64 + 0.5) * bw;
                         let tip_x = cx.clamp(PL + 52.0, PR - 52.0);
-                        let label = format!("{} · {:.0} {}", short_date(date), v, unit);
+                        // У недельных столбиков в подсказке нужна их подпись, а не дата:
+                        // дата начала недели ничего не говорит.
+                        let head = labels
+                            .as_ref()
+                            .and_then(|l| l.get(i).cloned())
+                            .unwrap_or_else(|| short_date(date));
+                        let label = format!("{head} · {v:.1} {unit}");
                         view! {
                             <g>
                                 <line x1=cx y1=PT - 4.0 x2=cx y2=PB stroke=BAR_ACTIVE stroke-width="1"/>

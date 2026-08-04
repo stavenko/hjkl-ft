@@ -830,6 +830,9 @@ pub struct IndicatorSeries {
     /// Some(true) met · Some(false) missed · None unevaluable (no target).
     pub met_days: Vec<Option<bool>>,
     pub missed: u32,
+    /// Подписи под столбиками. Пусто — подпись берётся из даты (день недели).
+    /// У недельных индикаторов дни недели бессмысленны, там свои подписи.
+    pub labels: Vec<String>,
 }
 
 /// Per-day series for every unlocked indicator (cached), for the histograms.
@@ -839,6 +842,13 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
     let dates: Vec<NaiveDate> = (1..=7).rev().map(|i| today - Duration::days(i)).collect();
     let mut out = Vec::new();
     for key in displayed_indicators() {
+        // Железо судится НЕДЕЛЯМИ, поэтому и столбики у него недельные: восемь
+        // завершённых недель, подписанные «−8 … −1» — сколько недель назад.
+        // Дни недели под ними ничего не значат.
+        if key == "iron" {
+            out.push(crate::services::iron::weekly_series().await);
+            continue;
+        }
         let mut days = Vec::with_capacity(dates.len());
         for d in &dates {
             let (value, ratio) = day_cached(key, &fmt(*d)).await;
@@ -858,6 +868,7 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
             days,
             met_days,
             missed,
+            labels: Vec::new(),
         });
     }
     out

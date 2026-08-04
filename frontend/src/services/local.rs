@@ -820,6 +820,20 @@ pub async fn duplicate_diary_entry(entry_id: &str, meal_label: Option<String>) -
 /// place; if it's shared (any other non-deleted diary entry, or any recipe
 /// ingredient), create a copy with the edits and repoint just this entry — so
 /// other usages keep the original values.
+/// Всё, что о продукте нашёл ИИ и что человек может поправить руками в форме
+/// редактирования: нутриенты, железо (количество + усвоение) и категорийные флаги.
+#[derive(Clone, Default)]
+pub struct AiFoodData {
+    pub nutrients: BTreeMap<String, f64>,
+    pub iron_mg: Option<f64>,
+    pub iron_absorption: Option<f64>,
+    pub is_snack: Option<bool>,
+    pub is_liquid_cal: Option<bool>,
+    pub is_veg_fruit: Option<bool>,
+    pub is_egg: Option<bool>,
+    pub is_red_meat: Option<bool>,
+}
+
 pub async fn edit_food_for_entry(
     entry_id: &str,
     name: String,
@@ -827,25 +841,34 @@ pub async fn edit_food_for_entry(
     protein: f64,
     fat: f64,
     carbs: f64,
-    nutrients: BTreeMap<String, f64>,
+    ai: AiFoodData,
 ) -> Option<()> {
     let mut entry: DiaryEntry = db::get("diary", entry_id).await?;
     let food: Food = db::get("foods", &entry.food_id).await?;
 
-    // Our category tags AND the enriched nutrients (calcium/iron/omega-3/fiber) are
-    // bound to the product NAME. When the name changes they're stale, so clear them
-    // and let the background queue re-classify + re-enrich under the new name. When
-    // the name is unchanged we keep whatever was already computed.
+    // Everything the AI derived is bound to the product NAME: the category tags, the
+    // enriched nutrients and the iron pair. When the name changes they're stale, so
+    // clear them and let the background queue re-derive them under the new name.
+    // Unchanged name → keep whatever the form holds (including manual corrections).
     let renamed = name != food.name;
-    let mut nutrients = nutrients;
-    let (is_snack, is_liquid_cal, is_veg_fruit, is_egg, is_red_meat) = if renamed {
-        for key in crate::services::enrich::nutrient_names() {
-            nutrients.remove(key);
-        }
-        (None, None, None, None, None)
-    } else {
-        (food.is_snack, food.is_liquid_cal, food.is_veg_fruit, food.is_egg, food.is_red_meat)
-    };
+    let mut nutrients = ai.nutrients;
+    let (is_snack, is_liquid_cal, is_veg_fruit, is_egg, is_red_meat, iron_mg, iron_absorption) =
+        if renamed {
+            for key in crate::services::enrich::nutrient_names() {
+                nutrients.remove(key);
+            }
+            (None, None, None, None, None, None, None)
+        } else {
+            (
+                ai.is_snack,
+                ai.is_liquid_cal,
+                ai.is_veg_fruit,
+                ai.is_egg,
+                ai.is_red_meat,
+                ai.iron_mg,
+                ai.iron_absorption,
+            )
+        };
 
     let all_diary: Vec<DiaryEntry> = db::list_all("diary").await;
     let other_diary = all_diary
@@ -860,6 +883,7 @@ pub async fn edit_food_for_entry(
             id: new_id(),
             name, kcal, protein, fat, carbs, nutrients,
             is_snack, is_liquid_cal, is_veg_fruit, is_egg, is_red_meat,
+            iron_mg, iron_absorption,
             created_at: now(),
             updated_at: now(),
             ..food.clone()
@@ -873,6 +897,7 @@ pub async fn edit_food_for_entry(
         let updated = Food {
             name, kcal, protein, fat, carbs, nutrients,
             is_snack, is_liquid_cal, is_veg_fruit, is_egg, is_red_meat,
+            iron_mg, iron_absorption,
             updated_at: now(),
             ..food.clone()
         };

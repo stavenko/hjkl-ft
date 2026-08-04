@@ -68,7 +68,8 @@ function seed({ ironOpenDaysAgo }) {
 
 const b = await chromium.launch({ headless: true });
 const { context, page } = await openSeeded(b, {
-  baseUrl: BASE, uid: `iron-shot-${Math.floor(Math.random() * 1e6)}`,
+  baseUrl: BASE, context: { serviceWorkers: "block" },
+  uid: `iron-shot-${Math.floor(Math.random() * 1e6)}`,
   seed: seed({ ironOpenDaysAgo: 2 }),
 });
 await page.setViewportSize({ width: 430, height: 932 });
@@ -83,6 +84,12 @@ await page.locator('[data-testid="progress-widget"]').screenshot({ path: `${OUT}
 await page.locator('[data-story-id="week5"]').click();
 await page.waitForTimeout(1500);
 for (let i = 1; i <= 8; i++) {
+  // Ждём, пока картинка кадра реально ДОГРУЗИТСЯ, иначе на снимке пустой фон.
+  await page.waitForFunction(
+    () => [...document.querySelectorAll("img")].every((im) => im.complete && im.naturalWidth > 0),
+    null, { timeout: 15000 },
+  ).catch(() => {});
+  await page.waitForTimeout(400);
   await page.screenshot({ path: `${OUT}/story-${i}.png` });
   // Тап в правую часть экрана — следующий кадр.
   await page.mouse.click(380, 500);

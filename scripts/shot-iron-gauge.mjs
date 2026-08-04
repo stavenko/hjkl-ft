@@ -71,7 +71,8 @@ const b = await chromium.launch({ headless: true });
 
 async function shoot(name, opts) {
   const { context, page } = await openSeeded(b, {
-    baseUrl: BASE, uid: `iron-g-${name}-${Math.floor(Math.random() * 1e6)}`,
+    baseUrl: BASE, context: { serviceWorkers: "block" },
+    uid: `iron-g-${name}-${Math.floor(Math.random() * 1e6)}`,
     seed: seed(opts),
   });
   await page.setViewportSize({ width: 430, height: 932 });

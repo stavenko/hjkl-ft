@@ -249,7 +249,13 @@ export async function openSeeded(browser, opts = {}) {
   const sex = opts.sex ?? "male";
   const landing = opts.landing ?? "/";
 
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  // `opts.context` домешивается в настройки контекста — например
+  // `{ serviceWorkers: "block" }`, чтобы скриншоты снимались со СВЕЖЕЙ сборки, а
+  // не из кэша service worker'а.
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    ...(opts.context ?? {}),
+  });
   const page = await context.newPage();
 
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });

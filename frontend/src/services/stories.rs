@@ -1026,7 +1026,7 @@ const S5: &[Frame] = &[
     // 5 — shellfish and roe
     Frame {
         bg: Bg::Dark,
-        media: Media::Cover(IRON_PH),
+        media: Media::Cover("iron-seafood.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },

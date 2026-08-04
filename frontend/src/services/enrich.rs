@@ -1,7 +1,7 @@
 //! Background nutrient enrichment.
 //!
-//! The seven indicators need four extra nutrients on each food — calcium, iron,
-//! omega-3, fiber — that the normal add-food flow doesn't collect. Rather than ask
+//! The indicators need extra nutrients on each food — calcium, omega-3, fiber —
+//! that the normal add-food flow doesn't collect. Rather than ask
 //! for them at request time (which would overload the on-demand lookup), we fill
 //! them in the BACKGROUND, one food at a time, reusing the EXISTING lookup format:
 //! the model returns min / max / a recommended middle value + a comment per
@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use api_types::Food;
 
-use super::indicators::{N_CALCIUM, N_FIBER, N_IRON, N_OMEGA3};
+use super::indicators::{N_CALCIUM, N_FIBER, N_OMEGA3};
 use super::{ai, local};
 
 #[derive(Clone, Copy)]
@@ -36,12 +36,24 @@ impl Unit {
 
 /// The nutrients we enrich, with the canonical unit their stored value is in.
 /// Keep these in sync with the indicator targets (`services::indicators`).
+///
+/// IRON IS NOT HERE ON PURPOSE. Its milligrams mean nothing without the absorbed
+/// fraction, so it has its own pass, its own fields on `Food` and its own weekly
+/// mechanics — see `services::iron`. Putting it back in this map would also
+/// resurface it in every nutrient form and badge, which it must never appear in.
 const TARGETS: &[(&str, Unit)] = &[
     (N_CALCIUM, Unit::Mg),
-    (N_IRON, Unit::Mg),
     (N_OMEGA3, Unit::Mg),
     (N_FIBER, Unit::G),
 ];
+
+/// Nutrient keys that must NEVER be rendered in nutrient lists / forms / badges.
+/// `Железо` was written into `Food.nutrients` by earlier builds; those legacy
+/// values stay in the data (harmless) but are filtered out of every UI listing —
+/// iron is surfaced only by its own weekly gauge and indicator.
+pub fn is_hidden_nutrient(name: &str) -> bool {
+    name == super::indicators::N_IRON
+}
 
 /// True if `food` is missing any of the enriched nutrients yet.
 pub fn needs_enrichment(food: &Food) -> bool {
@@ -54,7 +66,7 @@ pub fn nutrient_unit(name: &str) -> &'static str {
     TARGETS.iter().find(|(n, _)| *n == name).map(|(_, u)| u.label()).unwrap_or("")
 }
 
-/// The display names of the enriched nutrients (calcium/iron/omega-3/fiber).
+/// The display names of the enriched nutrients (calcium/omega-3/fiber).
 pub fn nutrient_names() -> impl Iterator<Item = &'static str> {
     TARGETS.iter().map(|(n, _)| *n)
 }

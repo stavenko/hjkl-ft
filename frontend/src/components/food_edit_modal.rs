@@ -25,9 +25,12 @@ pub fn FoodEditModal(
     let fat = create_rw_signal(fmt(food.fat));
     let carbs = create_rw_signal(fmt(food.carbs));
     // Existing custom nutrients: (name, value-string signal).
+    // Железо в форму не попадает: оно живёт в собственных полях продукта и своей
+    // недельной механике, а не в карте нутриентов (старые сборки его туда писали).
     let custom: Vec<(String, RwSignal<String>)> = food
         .nutrients
         .iter()
+        .filter(|(k, _)| !crate::services::enrich::is_hidden_nutrient(k))
         .map(|(k, v)| (k.clone(), create_rw_signal(fmt(*v))))
         .collect();
     let custom_save = custom.clone();

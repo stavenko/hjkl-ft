@@ -401,6 +401,20 @@ pub async fn cache_food_nutrients(id: &str, values: BTreeMap<String, f64>) {
     }
 }
 
+/// Store a food's IRON verdict (mg per 100 g + absorbed fraction) from the
+/// dedicated iron pass. Deliberately separate from [`cache_food_nutrients`]:
+/// iron lives in its own fields, never in the `nutrients` map that forms and
+/// badges render.
+pub async fn cache_food_iron(id: &str, iron_mg: f64, absorption: f64) {
+    if let Some(mut food) = db::get::<Food>("foods", id).await {
+        food.iron_mg = Some(iron_mg);
+        food.iron_absorption = Some(absorption);
+        food.updated_at = now();
+        db::put("foods", &food).await;
+        crate::services::sync::push_background();
+    }
+}
+
 /// True if `food` is a drink by name.
 pub fn is_drink_food(food: &Food) -> bool {
     name_matches(&food.name, DRINK_SUBSTRINGS)
@@ -426,7 +440,7 @@ pub fn is_zero_cal_drink(food: &Food) -> bool {
 /// slice, never the whole `foods` table. Missing ids are skipped. Every per-day
 /// aggregate loads just the handful of foods its own diary slice references, so
 /// cost scales with what was eaten that day, not with the size of the foods table.
-async fn foods_by_ids(ids: impl IntoIterator<Item = String>) -> BTreeMap<String, Food> {
+pub(crate) async fn foods_by_ids(ids: impl IntoIterator<Item = String>) -> BTreeMap<String, Food> {
     let unique: std::collections::HashSet<String> = ids.into_iter().collect();
     let mut map = BTreeMap::new();
     for id in unique {
@@ -976,6 +990,7 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
             is_snack: None,
             is_liquid_cal: None,
             is_veg_fruit: None, is_egg: None, is_red_meat: None,
+            iron_mg: None, iron_absorption: None,
             created_at: now(),
             updated_at: now(),
         };
@@ -1056,6 +1071,8 @@ pub async fn add_detected_foods_to_diary(items: &[ResolvedFood]) -> Vec<DiaryEnt
             is_veg_fruit: None,
             is_egg: None,
             is_red_meat: None,
+            iron_mg: None,
+            iron_absorption: None,
             created_at: now(),
             updated_at: now(),
         };
@@ -1255,6 +1272,8 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         is_veg_fruit: None,
         is_egg: None,
         is_red_meat: None,
+        iron_mg: None,
+        iron_absorption: None,
         created_at: now(),
         updated_at: now(),
     };

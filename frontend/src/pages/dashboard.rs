@@ -56,7 +56,6 @@ fn gauge_label(key: &str) -> &'static str {
         "protein" => "Белок",
         "veg_fruit" => "Фр/овощи",
         "calcium" => "Кальций",
-        "iron" => "Железо",
         _ => "Клетчатка",
     }
 }

@@ -279,6 +279,8 @@ pub fn FoodEditor(
             is_veg_fruit: None,
             is_egg: None,
             is_red_meat: None,
+            iron_mg: None,
+            iron_absorption: None,
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
         }

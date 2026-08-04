@@ -252,6 +252,12 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                     total_fat += f.fat * factor;
                                     total_carbs += f.carbs * factor;
                                     for (k, v) in &f.nutrients {
+                                        // Железо не показываем: у него своя механика
+                                        // (services::iron), а старые значения могли
+                                        // остаться в карте от прежних сборок.
+                                        if crate::services::enrich::is_hidden_nutrient(k) {
+                                            continue;
+                                        }
                                         *custom_totals.entry(k.clone()).or_default() += v * factor;
                                     }
                                 }

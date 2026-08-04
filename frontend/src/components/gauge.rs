@@ -39,6 +39,11 @@ pub fn Gauge(
     /// calorie planka is exceeded, green when an "at least" goal is met. The target
     /// (`/ NNN`) always keeps its usual grey.
     #[prop(default = None)] value_color: Option<String>,
+    /// Digits after the decimal point in the value/target numbers. Default 0 —
+    /// calories and grams read best whole. Iron is the exception: its numbers are
+    /// single-digit milligrams, where rounding to a whole number would hide a whole
+    /// day's worth of progress.
+    #[prop(default = 0)] decimals: usize,
 ) -> impl IntoView {
     let value_style = value_color
         .map(|c| format!("color: {c};"))
@@ -96,8 +101,8 @@ pub fn Gauge(
                     {hint_btn}
                 </span>
                 <span class="is-size-7" style="white-space: nowrap;">
-                    <span class="has-text-weight-bold" style=value_style>{format!("{value:.0}")}</span>
-                    <span class="has-text-grey">{format!(" / {target:.0} {unit}")}</span>
+                    <span class="has-text-weight-bold" style=value_style>{format!("{value:.*}", decimals)}</span>
+                    <span class="has-text-grey">{format!(" / {:.*} {unit}", decimals, target)}</span>
                 </span>
             </div>
             <div style=format!("height: {height}px; border-radius: {radius}px; background: var(--bulma-border-weak); overflow: hidden;")>

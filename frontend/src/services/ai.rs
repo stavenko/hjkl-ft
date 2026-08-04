@@ -484,6 +484,91 @@ pub async fn lookup_nutrient(food_name: &str, nutrient: &str, unit: &str) -> Res
     Err(last_err)
 }
 
+/// Iron verdict for one food: how much iron it holds AND how well that iron is
+/// absorbed. Kept apart from [`SingleNutrient`] on purpose — iron is the one
+/// nutrient whose milligrams are meaningless without the absorbed fraction, so it
+/// has its own request, its own schema and its own storage on `Food`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct IronDetail {
+    /// Iron per 100 g, in milligrams (a plain number).
+    iron_mg: f64,
+    /// Fraction of that iron the body actually absorbs, 0…1 (e.g. 0.25 for liver,
+    /// 0.05 for lentils).
+    absorption: f64,
+    /// Short explanation, in the requested language.
+    comment: String,
+}
+
+/// Look up a food's IRON: the amount per 100 g and the fraction of it the body
+/// takes up. Heme iron (red meat, liver, shellfish) absorbs at roughly 15–35 %,
+/// non-heme iron (legumes, seeds, greens, cereals) at roughly 2–20 %, so the model
+/// is asked for both numbers together — one judgement, one call.
+///
+/// Returns `(mg per 100 g, absorbed fraction)`. FAILS LOUDLY after 3 attempts.
+pub async fn lookup_iron(food_name: &str) -> Result<(f64, f64), String> {
+    let lang = match crate::services::i18n::get_lang() {
+        crate::services::i18n::Lang::Ru => "Russian",
+        crate::services::i18n::Lang::En => "English",
+    };
+    let prompt = format!(
+        "You are a nutritional database. For the food item \"{food_name}\", report its IRON.\n\n\
+         For raw/dry as-sold products (grains, rice, pasta, flour, meat, fish, legumes) use the \
+         RAW value unless the name says cooked/boiled/fried/steamed.\n\n\
+         Provide:\n\
+         - iron_mg: total iron per 100 grams, in milligrams (a plain number)\n\
+         - absorption: the FRACTION of that iron a human actually absorbs, between 0 and 1.\n\
+           Guidance: heme iron from red meat, liver, offal, shellfish and fish is absorbed at \
+           about 0.15–0.35 (use ~0.25 for liver and red meat, ~0.20 for poultry and fish). \
+           Non-heme iron from legumes, seeds, nuts, greens, cereals, vegetables, fruit and dairy \
+           is absorbed at about 0.02–0.20 (use ~0.05 for legumes and whole grains, ~0.08 when the \
+           food is rich in vitamin C, ~0.03 when it is rich in phytates, tannins or calcium). \
+           A mixed dish takes a value in between, weighted by how much of its iron is heme.\n\
+         - comment: brief explanation in {lang}\n\n\
+         Base the answer only on the food name \"{food_name}\". Respond with ONLY a single \
+         minified JSON object and nothing else — no markdown, no prose."
+    );
+
+    const ATTEMPTS: usize = 3;
+    let mut last_err = String::new();
+    for _ in 0..ATTEMPTS {
+        // Thinking OFF for the same reason as `lookup_nutrient` — short answers get
+        // parked in the reasoning channel and the content comes back empty.
+        let executor = build_executor_think(false)?;
+        let result = executor
+            .execute::<IronDetail>(prompt.clone())
+            .await
+            .map_err(|e| format!("LLM execute error: {e:?}"))?;
+
+        let mut thinking_stream = result.thinking_stream;
+        wasm_bindgen_futures::spawn_local(async move { while thinking_stream.next().await.is_some() {} });
+        let mut content_stream = result.content_stream;
+        wasm_bindgen_futures::spawn_local(async move { while content_stream.next().await.is_some() {} });
+
+        let output = result.output.await.map_err(|e| format!("LLM output error: {e:?}"))?;
+        let raw = output.result.trim();
+        if raw.is_empty() {
+            last_err = "model returned an empty response".to_string();
+            continue;
+        }
+        let json_str = strip_code_fences(raw);
+        match serde_json::from_str::<IronDetail>(json_str)
+            .or_else(|_| serde_json::from_str::<IronDetail>(unwrap_schema_envelope(json_str)))
+        {
+            Ok(v) => {
+                // A nonsense absorption fraction would silently corrupt every later
+                // sum, so reject it instead of clamping it into something plausible.
+                if !(0.0..=1.0).contains(&v.absorption) || v.iron_mg < 0.0 {
+                    last_err = format!("iron out of range: {} мг, усвоение {}", v.iron_mg, v.absorption);
+                    continue;
+                }
+                return Ok((v.iron_mg, v.absorption));
+            }
+            Err(e) => last_err = format!("parse error: {e}, raw: {raw}"),
+        }
+    }
+    Err(last_err)
+}
+
 /// Per-food category verdict. All three tags are independent booleans (a raw
 /// fruit can be BOTH `snack` and `veg_fruit`).
 #[derive(Debug, Clone, Copy)]

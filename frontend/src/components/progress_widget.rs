@@ -112,7 +112,6 @@ fn gauge_label(key: &str) -> &'static str {
         "veg_fruit" => "Фр/овощи",
         "steps" => "Шаги",
         "calcium" => "Кальций",
-        "iron" => "Железо",
         "fiber" => "Клетчатка",
         _ => panic!("gauge_label: no label for gauge key {key:?}"),
     }
@@ -137,6 +136,29 @@ fn daily_gauges_grid(gauges: Vec<indicators::DailyGauge>) -> impl IntoView {
                         value_color=val.map(String::from)/>
                 }
             }).collect_view()}
+        </div>
+    }
+}
+
+/// Недельный gauge по железу: усвоенные миллиграммы за ТЕКУЩУЮ неделю железа
+/// против недельной нормы. Неделя начинается в день открытия истории железа, а не
+/// в понедельник, поэтому под полосой подписан день недели (1…7) — иначе «мало
+/// набрано» на второй день читалось бы как провал.
+fn weekly_iron_gauge(w: crate::services::iron::WeeklyIron) -> impl IntoView {
+    let (bar, val) = crate::components::gauge::at_least_colors(w.absorbed_mg, w.target_mg);
+    let day = w.day_of_week;
+    view! {
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+            <crate::components::gauge::Gauge
+                value=w.absorbed_mg target=w.target_mg
+                label="Железо за неделю".to_string()
+                unit="мг".to_string()
+                color=bar.to_string()
+                decimals=1
+                value_color=val.map(String::from)/>
+            <span class="is-size-7 has-text-grey" style="font-size: 0.6rem;">
+                {format!("День {day} из 7")}
+            </span>
         </div>
     }
 }
@@ -212,6 +234,14 @@ pub fn ProgressWidget() -> impl IntoView {
         |_| async { indicators::steps_gate_progress().await },
     );
     let steps_gate_s = move || sticky(&STEPS_GATE_CACHE, steps_gate.get());
+
+    // Недельное железо (усвоенные мг за текущую неделю железа против нормы).
+    // Зависит от дневника и продуктов — коэффициент усвоения приезжает фоновым
+    // проходом по железу.
+    let iron_week = create_local_resource(
+        move || (food_ver.get(), foods_ver.get()),
+        |_| async { crate::services::iron::weekly_progress().await },
+    );
 
     // The calcium-week gate: GREEN calcium-days accrued toward its own week. Depends
     // on food/nutrient data (calcium comes from enriched foods) and the goals store.
@@ -350,6 +380,10 @@ pub fn ProgressWidget() -> impl IntoView {
                                 {calorie}
                                 // Daily-nutrient bars below the calorie one.
                                 {move || gauges_s().map(daily_gauges_grid)}
+                                // Недельный железный gauge — отдельной строкой под
+                                // дневными: у него другая единица времени (неделя,
+                                // отсчитываемая от дня открытия истории железа).
+                                {move || iron_week.get().flatten().map(weekly_iron_gauge)}
                             }.into_view()
                         },
                         // Before the first food entry: explain how to add food + «?».

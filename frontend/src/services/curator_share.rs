@@ -215,7 +215,6 @@ fn indicator_label(key: &str) -> &'static str {
         "protein" => "Белок",
         "veg_fruit" => "Овощи и фрукты",
         "calcium" => "Кальций",
-        "iron" => "Железо",
         "omega3" => "Омега-3",
         "fiber" => "Клетчатка",
         "eggs" => "Яйца",

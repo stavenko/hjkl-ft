@@ -148,6 +148,8 @@ pub enum Appears {
     AfterActivityWeek,
     /// Visible once the calcium week (calcium goal + indicator) has been unlocked.
     AfterCalciumWeek,
+    /// Visible once the iron week (weekly iron gauge + indicator) has been unlocked.
+    AfterIronWeek,
 }
 
 pub struct Story {
@@ -265,7 +267,12 @@ pub fn unviewed_count(story: &Story) -> usize {
 
 /// The stories currently eligible to show, in order. `planka_set` = the weekly
 /// calorie planka has been calculated (gates the second-week story).
-pub fn visible(planka_set: bool, activity_unlocked: bool, calcium_unlocked: bool) -> Vec<&'static Story> {
+pub fn visible(
+    planka_set: bool,
+    activity_unlocked: bool,
+    calcium_unlocked: bool,
+    iron_unlocked: bool,
+) -> Vec<&'static Story> {
     STORIES
         .iter()
         .filter(|s| match s.appears {
@@ -273,6 +280,7 @@ pub fn visible(planka_set: bool, activity_unlocked: bool, calcium_unlocked: bool
             Appears::AfterCaloriePlanka => planka_set,
             Appears::AfterActivityWeek => activity_unlocked,
             Appears::AfterCalciumWeek => calcium_unlocked,
+            Appears::AfterIronWeek => iron_unlocked,
         })
         .collect()
 }
@@ -956,6 +964,117 @@ const S4: &[Frame] = &[
     },
 ];
 
+// --- Story 5 «Неделя железа» — unlocked once the calcium gate is cleared
+// (Appears::AfterIronWeek).
+//
+// The Russian copy is the user's own text, carried over verbatim (orthography and
+// typography only). Photos are still to be shot — every editorial frame points at
+// `iron-placeholder.svg` for now.
+const IRON_PH: &str = "iron-placeholder.svg";
+
+const S5: &[Frame] = &[
+    // 1 — congrats: the calcium week is done, the iron week begins.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Emoji("🎉"),
+        accent: GREEN,
+        kicker: Loc { en: "Iron", ru: "Железо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Congratulations, the calcium week is over. You kept the indicator green for a whole week. Keep holding that indicator green from here on.\n\n\
+                 And we go further — the ^iron^ week begins.",
+            ru: "Поздравляем, неделя кальция закончилась. Вы держали индикатор зелёным целую неделю. Продолжайте и дальше держать этот индикатор зелёным.\n\n\
+                 А мы идём дальше и начинаем ^неделю железа^.",
+        },
+    },
+    // 2 — why iron matters
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Cover(IRON_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Iron", ru: "Железо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Iron is a very important element for our body. Most of it is in the blood. And there's also a lot of it in the muscles. When iron is low, we feel weak and tired.",
+            ru: "Железо — это очень важный элемент для нашего организма. Большая часть его находится в крови. Ну и вот также очень много и в мышцах. Если железа мало, мы чувствуем слабость и усталость.",
+        },
+    },
+    // 3 — red meat
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Cover(IRON_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Iron", ru: "Железо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "The best sources are red meat: beef, lamb, pork. A large amount of iron that comes together with a large amount of protein.",
+            ru: "Лучшие источники — это красное мясо: говядина, баранина, свинина. Большое количество железа, которое поступает вместе с большим количеством белка.",
+        },
+    },
+    // 4 — liver
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Cover(IRON_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Iron", ru: "Железо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "One of the best sources is liver. It holds even more iron than meat. Chicken liver is better than beef liver. Few calories, a lot of iron and a good portion of protein.",
+            ru: "Один из лучших источников — это печень. Там железа даже больше, чем в мясе. Куриная печень лучше, чем говяжья. Мало калорий, много железа и хорошая порция белка.",
+        },
+    },
+    // 5 — shellfish and roe
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Cover(IRON_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Iron", ru: "Железо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Mussels, oysters, red and black caviar — that's iron for the rich. If your finances allow it, this is the best way to build iron up.",
+            ru: "Мидии, устрицы, красная и чёрная икра — это железо для богатых. Если позволяет экономика — это лучший способ набирать железо.",
+        },
+    },
+    // 6 — plant sources + the absorption gap (the reason iron carries a coefficient)
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Cover(IRON_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Iron", ru: "Железо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "The best plant sources are legumes: beans, chickpeas, lentils. There's also a lot of it in all sorts of nuts and seeds: sesame, cashew. But you have to understand that the body takes only ^2–20 %^ of the iron from plants, against ^15–35 %^ from animal foods. You need to eat more plants.",
+            ru: "Лучшие растительные источники — это бобовые: фасоль, нут, чечевица. Также его много во всяких орешках: кунжут, кешью. Однако надо понимать, что организм берёт всего ^2–20 %^ железа из растений против ^15–35 %^ из животных. Растений надо есть больше.",
+        },
+    },
+    // 7 — the new WEEKLY indicator + gauge
+    Frame {
+        bg: Bg::Dark,
+        // TODO: заменить на подсвечивающую гифку нового недельного gauge, когда
+        // будет снята (как calcium-highlight.gif для кальция).
+        media: Media::Shot(IRON_PH),
+        accent: GREEN,
+        kicker: Loc { en: "Iron", ru: "Железо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Your new iron indicator will be WEEKLY. Over the coming week, eat your iron norm. Your norm depends on your sex and your age.",
+            ru: "Ваш новый индикатор по железу будет недельным. За ближайшую неделю съешьте норму вашего железа. Ваша норма будет зависеть от вашего пола и возраста.",
+        },
+    },
+    // 8 — calcium vs iron: the interaction you may ignore
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Cover(IRON_PH),
+        accent: AMBER,
+        kicker: Loc { en: "Iron", ru: "Железо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Calcium and iron use the same transport. When we eat a lot of calcium, iron is absorbed worse. You can safely ignore this rule, though. Recommendations to separate iron and calcium exist only for medical preparations. And there your doctors will tell you everything.",
+            ru: "Кальций и железо используют один и тот же транспорт. Когда едим много кальция, железо усваивается хуже. Однако этим правилом вы можете спокойно пренебрегать. Рекомендации по разделению приёма железа и кальция существуют только для медицинских препаратов. Но там вам врачи всё расскажут.",
+        },
+    },
+];
+
 static STORIES: &[Story] = &[
     Story {
         id: "welcome",
@@ -986,5 +1105,11 @@ static STORIES: &[Story] = &[
         appears: Appears::AfterCalciumWeek,
         badge: Loc { en: "4", ru: "4" },
         frames: S4,
+    },
+    Story {
+        id: "week5",
+        appears: Appears::AfterIronWeek,
+        badge: Loc { en: "5", ru: "5" },
+        frames: S5,
     },
 ];

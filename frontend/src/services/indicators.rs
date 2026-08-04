@@ -3,7 +3,7 @@
 //!
 //! Two families (per the product spec):
 //!
-//! * **Daily-goal** (calcium, iron, fiber, veg/fruit): over the LAST 7 DAYS, count
+//! * **Daily-goal** (calcium, fiber, veg/fruit): over the LAST 7 DAYS, count
 //!   the days the per-day target was missed.
 //!     0 misses → green · 1–3 → orange · ≥4 → red.
 //!
@@ -48,22 +48,13 @@ fn veg_fruit_per_day_g() -> f64 {
     }
 }
 
-/// Iron target (mg/day): premenopausal women 18, everyone else 8 (WHO/RDA). Unknown
-/// sex is treated as the higher (18) — conservative; the row only shows once the
-/// persona (incl. sex) is set anyway.
-fn iron_per_day_mg() -> f64 {
-    match (profile::get_sex(), profile::get_age_years()) {
-        (Some(Sex::Female), Some(age)) if age < 51 => 18.0,
-        (Some(Sex::Female), None) => 18.0,
-        (None, _) => 18.0,
-        _ => 8.0,
-    }
-}
-
 // Nutrient display names. `Food.nutrients` is keyed by the display name (same as
 // `goal.nutrient`), so these are used directly as the map keys. The background
 // enricher writes under the exact same names.
 pub const N_CALCIUM: &str = "Кальций";
+/// Legacy key: earlier builds wrote iron into `Food.nutrients`. Nothing computes
+/// from it any more (iron moved to its own fields + `services::iron`); the name is
+/// kept solely so those old values can be FILTERED OUT of nutrient listings.
 pub const N_IRON: &str = "Железо";
 pub const N_OMEGA3: &str = "Омега-3";
 pub const N_FIBER: &str = "Клетчатка";
@@ -153,7 +144,6 @@ pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
     let eggs = gather_egg(&window).await;
     let meat = gather_meat(&window).await;
     let cal = gather_nutrient(&window, N_CALCIUM).await;
-    let iron = gather_nutrient(&window, N_IRON).await;
     let fib = gather_nutrient(&window, N_FIBER).await;
     let omega = gather_nutrient(&window, N_OMEGA3).await;
 
@@ -163,7 +153,6 @@ pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
         ("calcium", daily_nutrient(&cal, &last7, CALCIUM_PER_DAY_MG)),
         ("omega3", weekly(&omega, &diary_days, today, OMEGA3_PER_WEEK_MG, false, true)),
         ("eggs", weekly(&eggs, &diary_days, today, EGG_PER_WEEK_G, false, false)),
-        ("iron", daily_nutrient(&iron, &last7, iron_per_day_mg())),
         ("red_meat", weekly(&meat, &diary_days, today, RED_MEAT_LIMIT_PER_WEEK_G, true, false)),
         ("veg_fruit", daily_classifier(&veg, &last7, veg_fruit_per_day_g())),
         ("fiber", daily_nutrient(&fib, &last7, FIBER_PER_DAY_G)),
@@ -211,6 +200,10 @@ pub fn displayed_indicators() -> Vec<&'static str> {
     }
     if calcium_unlocked() {
         v.push("calcium");
+    }
+    // Iron is WEEKLY (see `services::iron`) but shares the indicator row.
+    if crate::services::iron::unlocked() {
+        v.push("iron");
     }
     v
 }
@@ -269,6 +262,30 @@ pub async fn maybe_unlock_calcium_week() {
     crate::services::app_flags::set_bool(CALCIUM_UNLOCKED_KEY, true);
 }
 
+/// Unlock the IRON week once the calcium gate is cleared: stamp the week's opening
+/// day (day 1 of every iron week rolls from here — the gauge and the indicator both
+/// count from it) and flip the flag so the weekly gauge + indicator appear and the
+/// dedicated iron enrichment pass starts filling foods. Idempotent (guarded by the
+/// flag). Call on launch, after the calcium week is (re)checked.
+pub async fn maybe_unlock_iron_week() {
+    use crate::services::iron;
+    if iron::unlocked() {
+        return;
+    }
+    if !calcium_unlocked() {
+        return; // the calcium week must open (and be gated) first
+    }
+    if calcium_gate_progress().await < GREEN_GATE_DAYS {
+        return; // calcium gate not cleared yet
+    }
+    let today = crate::services::local::today_date();
+    crate::services::app_flags::set(iron::IRON_WEEK_OPEN_KEY, &fmt(today));
+    crate::services::app_flags::set_bool(iron::IRON_UNLOCKED_KEY, true);
+    // Foods already in the diary have no iron yet — queue them now, otherwise the
+    // first iron week would be measured against an empty set.
+    crate::services::classify::sweep_diary_unclassified().await;
+}
+
 // ── Per-indicator per-day cache ──────────────────────────────────────────────
 // Each cacheable indicator has its OWN store (`ind_<key>`), keyed by date, holding
 // the completed-day aggregate so it isn't recomputed on every render. Today is
@@ -320,7 +337,6 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
         "steps" => local::steps_on(date).await,
         "calories" => local::kcal_on(date).await,
         "calcium" => local::nutrient_grams_on(date, N_CALCIUM).await,
-        "iron" => local::nutrient_grams_on(date, N_IRON).await,
         "fiber" => local::nutrient_grams_on(date, N_FIBER).await,
         _ => 0.0,
     }
@@ -544,7 +560,6 @@ async fn target_for(key: &str) -> f64 {
         "steps" => crate::services::profile::get_steps_planka().unwrap_or(0.0),
         "calories" => local::calorie_goal_amount().await.unwrap_or(0.0),
         "calcium" => CALCIUM_PER_DAY_MG,
-        "iron" => iron_per_day_mg(),
         "fiber" => FIBER_PER_DAY_G,
         _ => 0.0,
     }
@@ -561,6 +576,11 @@ fn is_classifier(key: &str) -> bool {
 /// through the per-day cache. Unknown (grey) when the target is unset or a nutrient
 /// metric has no data yet.
 pub async fn indicator_state(key: &str) -> IndicatorState {
+    // Iron has its OWN weekly mechanics and its own week anchor — it never goes
+    // through the 7-completed-days path below.
+    if key == "iron" {
+        return crate::services::iron::indicator_state().await;
+    }
     // Not evaluable yet (e.g. protein before the profile/weight is set).
     if target_for(key).await <= 0.0 {
         return IndicatorState::Unknown;
@@ -635,7 +655,7 @@ pub async fn share_states() -> Vec<(&'static str, IndicatorState)> {
     // Calorie-planka adherence (also last 7 COMPLETED days).
     out.push(("calories", calorie_adherence_state().await));
     // Daily indicators — same method + window as the widget.
-    for key in ["protein", "veg_fruit", "calcium", "iron", "fiber", "steps"] {
+    for key in ["protein", "veg_fruit", "calcium", "fiber", "steps"] {
         out.push((key, indicator_state(key).await));
     }
     // Weekly indicators (rolling-7-day sum vs a weekly target) — only `compute()`
@@ -835,7 +855,7 @@ pub struct DailyGauge {
 
 fn unit_for(key: &str) -> &'static str {
     match key {
-        "calcium" | "iron" => "мг",
+        "calcium" => "мг",
         _ => "г",
     }
 }

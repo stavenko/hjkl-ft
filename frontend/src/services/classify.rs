@@ -146,12 +146,23 @@ async fn run_worker() {
             let f = food.clone();
             with_retries(move || { let f = f.clone(); async move { super::enrich::enrich_food(&f).await } }, &ctx).await;
         }
+
+        // Iron is its OWN pass: it needs the absorbed fraction alongside the
+        // amount, so it can't ride the generic nutrient request (see `iron.rs`).
+        // Runs only once the iron week is open — before that nothing reads it.
+        if super::iron::unlocked() && super::iron::needs_iron(&food) {
+            let ctx = format!("Железо: {}", food.name);
+            let f = food.clone();
+            with_retries(move || { let f = f.clone(); async move { super::iron::enrich_iron(&f).await } }, &ctx).await;
+        }
     }
 }
 
-/// True if a food still needs any background AI processing (tags or nutrients).
+/// True if a food still needs any background AI processing (tags, nutrients, iron).
 fn needs_processing(food: &Food) -> bool {
-    needs_classification(food) || super::enrich::needs_enrichment(food)
+    needs_classification(food)
+        || super::enrich::needs_enrichment(food)
+        || (super::iron::unlocked() && super::iron::needs_iron(food))
 }
 
 /// Enqueue every food logged in the last two weeks that still needs tags or

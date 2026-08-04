@@ -32,7 +32,8 @@ pub fn StoryTray() -> impl IntoView {
                     let planka_set = planka.get().flatten().is_some();
                     let activity = crate::services::indicators::activity_unlocked();
                     let calcium = crate::services::indicators::calcium_unlocked();
-                    let mut list = stories::visible(planka_set, activity, calcium);
+                    let iron = crate::services::iron::unlocked();
+                    let mut list = stories::visible(planka_set, activity, calcium, iron);
                     // Stories with UNREAD frames shift left to draw attention; fully-read
                     // ones follow. Stable sort → each group keeps its natural appearance
                     // order. `unviewed_count` tracks the seen-version signal, so the tray

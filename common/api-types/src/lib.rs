@@ -84,8 +84,32 @@ pub struct Food {
     /// ingredients too, so a dish's red-meat content can be counted by composition.
     #[serde(default)]
     pub is_red_meat: Option<bool>,
+    /// Iron in mg per 100 g. Filled by the DEDICATED iron pass, not by the general
+    /// nutrient enricher — iron is judged together with how well it is absorbed, so
+    /// it deliberately does NOT live in `nutrients` (which is a plain amount map
+    /// rendered in forms and badges). `None` = not looked up yet.
+    #[serde(default)]
+    pub iron_mg: Option<f64>,
+    /// The FRACTION of this food's iron the body actually takes up (0…1). Heme iron
+    /// (red meat, liver, shellfish) absorbs several times better than non-heme iron
+    /// (legumes, seeds, greens), so the same milligrams are worth very different
+    /// amounts depending on the source. Filled together with `iron_mg` by the same
+    /// pass. `None` = not looked up yet.
+    #[serde(default)]
+    pub iron_absorption: Option<f64>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl Food {
+    /// Iron this food actually delivers, in mg per 100 g: amount × absorption.
+    /// `None` until the dedicated iron pass has filled BOTH fields.
+    pub fn absorbed_iron_mg_per_100g(&self) -> Option<f64> {
+        match (self.iron_mg, self.iron_absorption) {
+            (Some(mg), Some(a)) if mg >= 0.0 && (0.0..=1.0).contains(&a) => Some(mg * a),
+            _ => None,
+        }
+    }
 }
 
 impl Food {
@@ -181,6 +205,8 @@ impl FoodDraft {
             is_veg_fruit: None,
             is_egg: None,
             is_red_meat: None,
+            iron_mg: None,
+            iron_absorption: None,
             created_at: self.created_at.clone(),
             updated_at: String::new(),
         }

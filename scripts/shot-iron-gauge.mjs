@@ -77,7 +77,7 @@ async function shoot(name, opts) {
   });
   await page.setViewportSize({ width: 430, height: 932 });
   await page.waitForTimeout(9000);
-  const gauge = page.locator('[data-gauge="Железо за неделю"]');
+  const gauge = page.locator('[data-gauge="Железо/нед"]');
   await gauge.screenshot({ path: `${OUT}/gauge-${name}.png` });
   const lit = await page.locator('[data-pace-dot="lit"]').count();
   const dim = await page.locator('[data-pace-dot="dim"]').count();

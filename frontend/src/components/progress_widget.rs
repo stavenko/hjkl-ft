@@ -121,7 +121,10 @@ fn gauge_label(key: &str) -> &'static str {
 /// per row so they fit vertically (calories stay full-width above). Each fills
 /// toward its per-day target; the bar is the indicator's colour, or grey while
 /// the metric has no data yet.
-fn daily_gauges_grid(gauges: Vec<indicators::DailyGauge>) -> impl IntoView {
+fn daily_gauges_grid(
+    gauges: Vec<indicators::DailyGauge>,
+    iron: Option<crate::services::iron::WeeklyIron>,
+) -> impl IntoView {
     view! {
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 14px;">
             {gauges.into_iter().map(|g| {
@@ -136,36 +139,35 @@ fn daily_gauges_grid(gauges: Vec<indicators::DailyGauge>) -> impl IntoView {
                         value_color=val.map(String::from)/>
                 }
             }).collect_view()}
+            // Недельное железо — последней ячейкой, чтобы встать напротив кальция.
+            {iron.map(weekly_iron_gauge)}
         </div>
     }
 }
 
-/// Недельный gauge по железу: усвоенные миллиграммы за ТЕКУЩУЮ неделю железа
-/// против недельной нормы. Неделя начинается в день открытия истории железа, а не
-/// в понедельник, поэтому под полосой подписан день недели (1…7) — иначе «мало
-/// набрано» на второй день читалось бы как провал.
+/// Недельный gauge по железу — ЯЧЕЙКА той же сетки, что и дневные полосы, поэтому
+/// он встаёт напротив кальция и занимает ровно половину ширины.
+///
+/// Шесть точек делят полосу на семь суточных отрезков; горят те, чьи дни уже
+/// прошли. День 3 → два дня позади → две горящие точки, и норма «на сейчас» —
+/// 2/7 недельной. На первом дне не горит ничего: должок ещё не набежал. Номер дня
+/// отдельной подписью не выводим — его показывают сами точки.
 fn weekly_iron_gauge(w: crate::services::iron::WeeklyIron) -> impl IntoView {
     let (bar, val) = crate::components::gauge::at_least_colors(w.absorbed_mg, w.target_mg);
-    let day = w.day_of_week;
-    // Шесть точек делят полосу на семь суточных отрезков; горят те, чьи дни уже
-    // прошли. День 3 → два дня позади → две горящие точки, и норма «на сейчас» —
-    // 2/7 недельной. На первом дне не горит ничего: должок ещё не набежал.
-    let pace = crate::components::gauge::GaugePace { segments: 7, passed: day.saturating_sub(1) };
+    let pace = crate::components::gauge::GaugePace {
+        segments: 7,
+        passed: w.day_of_week.saturating_sub(1),
+    };
     view! {
-        <div style="display: flex; flex-direction: column; gap: 4px;">
-            <crate::components::gauge::Gauge
-                value=w.absorbed_mg target=w.target_mg
-                label="Железо за неделю".to_string()
-                unit="мг".to_string()
-                color=bar.to_string()
-                height=14.0
-                decimals=1
-                pace=Some(pace)
-                value_color=val.map(String::from)/>
-            <span class="is-size-7 has-text-grey" style="font-size: 0.6rem;">
-                {format!("День {day} из 7")}
-            </span>
-        </div>
+        <crate::components::gauge::Gauge
+            value=w.absorbed_mg target=w.target_mg
+            label="Железо/нед".to_string()
+            unit="мг".to_string()
+            color=bar.to_string()
+            height=12.0
+            decimals=1
+            pace=Some(pace)
+            value_color=val.map(String::from)/>
     }
 }
 
@@ -385,11 +387,7 @@ pub fn ProgressWidget() -> impl IntoView {
                             view! {
                                 {calorie}
                                 // Daily-nutrient bars below the calorie one.
-                                {move || gauges_s().map(daily_gauges_grid)}
-                                // Недельный железный gauge — отдельной строкой под
-                                // дневными: у него другая единица времени (неделя,
-                                // отсчитываемая от дня открытия истории железа).
-                                {move || iron_week.get().flatten().map(weekly_iron_gauge)}
+                                {move || gauges_s().map(|g| daily_gauges_grid(g, iron_week.get().flatten()))}
                             }.into_view()
                         },
                         // Before the first food entry: explain how to add food + «?».

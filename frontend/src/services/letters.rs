@@ -172,8 +172,6 @@ pub async fn maybe_recompute_weekly_planka() {
     let trend = weight_trend::weight_trend(&entries, DEFAULT_WINDOW_DAYS);
     let new_planka = local::calorie_planka(goal.amount, &trend, weight_kg);
 
-    let avg_steps = local::avg_steps_last_days(7).await;
-
     // Apply the new planka (syncs like any goal edit). `set_calorie_goal` also
     // advances the weekly anchor to today via `mark_planka_recomputed`, so the next
     // letter is a full week out — no separate anchor write needed here.
@@ -184,7 +182,7 @@ pub async fn maybe_recompute_weekly_planka() {
     add(Letter {
         id: format!("planka-{}", today.format("%Y-%m-%d")),
         created_at: chrono::Local::now().to_rfc3339(),
-        body: planka_letter_body(avg_steps, &trend, new_planka),
+        body: planka_letter_body(&trend, weight_kg, goal.amount, new_planka),
         read: false,
     });
 }
@@ -240,78 +238,166 @@ pub async fn maybe_recompute_weekly_steps_planka() {
     profile::set_steps_planka(next as f64);
     crate::services::sync::push_background();
 
+    // Цифры для письма: сколько пройдено всего и как изменилась активность
+    // против ПЕРВЫХ двух недель наблюдения.
+    let total = local::total_steps().await;
+    let baseline = local::avg_steps_first_days(14).await;
+    let recent = local::avg_steps_last_days(7).await;
+
     add(Letter {
         id: format!("steps-planka-{}", today.format("%Y-%m-%d")),
         created_at: chrono::Local::now().to_rfc3339(),
-        body: steps_letter_body(state, next),
+        body: steps_letter_body(next, total, baseline, recent),
         read: false,
     });
 }
 
-fn steps_letter_body(state: crate::services::indicators::IndicatorState, planka: u32) -> String {
-    use crate::services::indicators::IndicatorState;
-    let week = match state {
-        IndicatorState::Green => "вы держали планку всю неделю",
-        _ => "вы держали планку не каждый день",
-    };
-    format!(
-        "Прошла очередная неделя, и мы выдаём вам новую планку по шагам:\n\n\
-         Ваша активность: {week}\n\n\
-         Ваша новая планка по шагам: {planka} {word}\n\n\
-         Это письмо — это просто уведомление.",
-        planka = fmt_thousands(planka),
-        word = plural_steps(planka),
-    )
+/// Текст недельного письма о планке по шагам.
+///
+/// Строка о динамике появляется ТОЛЬКО когда есть обе величины — базовая линия
+/// (первые 14 записанных дней) и среднее за последнюю неделю. Нет одной из них —
+/// сравнивать не с чем, и выдумывать сравнение нельзя.
+fn steps_letter_body(
+    planka: u32,
+    total: u64,
+    baseline: Option<u32>,
+    recent: Option<u32>,
+) -> String {
+    let mut out = String::from("Недельное обновление планки по шагам.\n\n");
+    out.push_str(&format!(
+        "Новая планка: {} {}.\n",
+        fmt_thousands(planka),
+        plural_steps(planka)
+    ));
+    out.push_str(&format!(
+        "За время использования вы прошли {} {}.\n",
+        fmt_thousands_u64(total),
+        plural_steps_u64(total)
+    ));
+    if let (Some(was), Some(now)) = (baseline, recent) {
+        let dir = if now >= was { "выше" } else { "ниже" };
+        out.push_str(&format!(
+            "Ваша активность стала {dir}: была {}, а стала {}.\n",
+            fmt_thousands(was),
+            fmt_thousands(now)
+        ));
+    }
+    out.push_str("\nВскоре это отразится на вашем весе и на вашей планке по калориям.");
+    out
 }
 
+/// Текст недельного письма о планке по калориям.
+///
+/// Сначала — что происходит с весом: направление (стоит / снижается / растёт),
+/// насколько мы в этом уверены и, для уверенного снижения, темп относительно
+/// комфортной полосы. Потом — куда двинулась планка и почему. И, в зависимости
+/// от направления сдвига, короткая подсказка, чем этот сдвиг закрывать.
 fn planka_letter_body(
-    avg_steps: Option<u32>,
     trend: &crate::services::weight_trend::WeightTrend,
+    weight_kg: f64,
+    old_planka: f64,
     planka: f64,
 ) -> String {
-    let steps = match avg_steps {
-        Some(n) => format!("{} {}", fmt_thousands(n), plural_steps(n)),
-        None => "нет данных".to_string(),
-    };
-    let trend_s = weight_trend_phrase(trend);
-    format!(
-        "Прошла очередная неделя, и мы выдаём вам новую планку по калориям:\n\n\
-         Ваша активность: {steps}\n\
-         Ваша динамика веса: {trend_s}\n\n\
-         Ваша новая планка по калориям: {planka} ккал\n\n\
-         Это письмо — это просто уведомление.",
-        planka = planka as i64,
-    )
+    let mut out = String::from("Недельное обновление планки\n\n");
+    out.push_str(&weight_verdict(trend, weight_kg));
+    out.push_str("\n\n");
+
+    let planka_i = planka as i64;
+    if planka > old_planka + 0.5 {
+        out.push_str(&format!(
+            "А поэтому вам необходимо начать питаться чуть более калорийно. \
+             На ближайшую неделю ваша планка {planka_i} калорий.\n\n\
+             Если не знаете, чем заполнить внезапное увеличение, попробуйте небольшие \
+             конфетки, орешки."
+        ));
+    } else if planka < old_planka - 0.5 {
+        out.push_str(&format!(
+            "А поэтому вам необходимо начать питаться чуть менее калорийно. \
+             На ближайшую неделю ваша планка {planka_i} калорий.\n\n\
+             Напоминаем, что необходимо использовать еду с низкой калорийной плотностью. \
+             Больше белка, больше растительности, меньше ультрапереработанных продуктов."
+        ));
+    } else {
+        // Планка не сдвинулась — ни звать есть больше, ни меньше нельзя.
+        out.push_str(&format!(
+            "А поэтому менять питание не нужно. На ближайшую неделю ваша планка \
+             остаётся прежней — {planka_i} калорий."
+        ));
+    }
+    out
 }
 
-/// A short Russian phrase for the detected weight trend.
-fn weight_trend_phrase(t: &crate::services::weight_trend::WeightTrend) -> &'static str {
+/// Что происходит с весом, одним предложением: направление + уверенность, а для
+/// уверенного снижения ещё и темп относительно комфортной полосы (0.3–0.7 %
+/// массы тела в неделю — та же полоса, по которой двигается планка).
+fn weight_verdict(t: &crate::services::weight_trend::WeightTrend, weight_kg: f64) -> String {
     use crate::services::weight_trend::{Direction, WeightTrend, CONFIDENT, WEAK};
+    // Темп в долях массы тела за неделю; границы — из `local::planka_factor`.
+    const COMFORT_MIN: f64 = 0.003;
+    const COMFORT_MAX: f64 = 0.007;
+    let pace = |slope_wk: f64| -> Option<&'static str> {
+        if weight_kg <= 0.0 {
+            return None;
+        }
+        let rate = slope_wk.abs() / weight_kg;
+        if rate > COMFORT_MAX {
+            Some("и делает это слишком быстро")
+        } else if rate < COMFORT_MIN {
+            Some("но слишком медленно")
+        } else {
+            Some("и делает это в комфортном темпе")
+        }
+    };
     match *t {
-        WeightTrend::Insufficient { .. } => "недостаточно данных",
+        WeightTrend::Insufficient { .. } => {
+            "Взвешиваний пока слишком мало, чтобы понять, что происходит с вашим весом.".to_string()
+        }
         WeightTrend::Tentative { direction, .. } => match direction {
-            Direction::Down => "скорее снижается",
-            Direction::Up => "скорее растёт",
+            Direction::Down => "Кажется, ваш вес снижается, но данных пока мало, чтобы утверждать это уверенно.".to_string(),
+            Direction::Up => "Кажется, ваш вес растёт, но данных пока мало, чтобы утверждать это уверенно.".to_string(),
         },
-        WeightTrend::Estimated { direction, confidence, .. } => {
+        WeightTrend::Estimated { direction, confidence, slope_kg_per_week, .. } => {
             if confidence >= CONFIDENT {
                 match direction {
-                    Direction::Down => "снижается",
-                    Direction::Up => "растёт",
+                    Direction::Down => match pace(slope_kg_per_week) {
+                        Some(p) => format!("Ваш вес уверенно снижается — {p}."),
+                        None => "Ваш вес уверенно снижается.".to_string(),
+                    },
+                    Direction::Up => "Ваш вес уверенно растёт.".to_string(),
                 }
             } else if confidence >= WEAK {
                 match direction {
-                    Direction::Down => "скорее снижается",
-                    Direction::Up => "скорее растёт",
+                    Direction::Down => "Кажется, ваш вес снижается, но пока неуверенно.".to_string(),
+                    Direction::Up => "Кажется, ваш вес растёт, но пока неуверенно.".to_string(),
                 }
             } else {
-                "стабилен"
+                "Ваш вес стоит на месте.".to_string()
             }
         }
     }
 }
 
 /// Group thousands with a thin space: 8200 → "8 200".
+/// Как [`fmt_thousands`], но для больших сумм (все шаги за всё время).
+fn fmt_thousands_u64(n: u64) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::new();
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (bytes.len() - i) % 3 == 0 {
+            out.push('\u{202f}'); // narrow no-break space
+        }
+        out.push(*b as char);
+    }
+    out
+}
+
+/// Русское склонение «шаг/шага/шагов» для большого числа: правило смотрит только
+/// на две последние цифры.
+fn plural_steps_u64(n: u64) -> &'static str {
+    plural_steps((n % 100) as u32)
+}
+
 fn fmt_thousands(n: u32) -> String {
     let s = n.to_string();
     let bytes = s.as_bytes();
@@ -350,6 +436,78 @@ mod tests {
         assert_eq!(fmt_thousands(200), "200");
         assert_eq!(fmt_thousands(8200), "8\u{202f}200");
         assert_eq!(fmt_thousands(12345), "12\u{202f}345");
+    }
+
+    use crate::services::weight_trend::{Direction, WeightTrend};
+
+    fn est(dir: Direction, slope_wk: f64, conf: f64) -> WeightTrend {
+        WeightTrend::Estimated { direction: dir, slope_kg_per_week: slope_wk, confidence: conf, days: 14 }
+    }
+
+    #[test]
+    fn calorie_letter_states_the_weight_verdict() {
+        // 90 кг: комфортная полоса 0.27…0.63 кг/нед.
+        let fast = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0);
+        assert!(fast.starts_with("Недельное обновление планки"), "{fast}");
+        assert!(fast.contains("уверенно снижается — и делает это слишком быстро"), "{fast}");
+
+        let slow = planka_letter_body(&est(Direction::Down, -0.1, 0.99), 90.0, 2500.0, 2400.0);
+        assert!(slow.contains("уверенно снижается — но слишком медленно"), "{slow}");
+
+        let comfy = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0);
+        assert!(comfy.contains("в комфортном темпе"), "{comfy}");
+
+        let flat = planka_letter_body(&est(Direction::Down, -0.05, 0.5), 90.0, 2500.0, 2400.0);
+        assert!(flat.contains("Ваш вес стоит на месте."), "{flat}");
+
+        let unsure = planka_letter_body(&est(Direction::Down, -0.3, 0.7), 90.0, 2500.0, 2500.0);
+        assert!(unsure.contains("Кажется, ваш вес снижается, но пока неуверенно."), "{unsure}");
+
+        let few = planka_letter_body(&WeightTrend::Insufficient { days: 1 }, 90.0, 2500.0, 2500.0);
+        assert!(few.contains("Взвешиваний пока слишком мало"), "{few}");
+    }
+
+    #[test]
+    fn calorie_letter_advice_follows_the_direction() {
+        // Планка выросла — зовём есть БОЛЬШЕ и подсказываем, чем добрать.
+        let up = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0);
+        assert!(up.contains("чуть более калорийно"), "{up}");
+        assert!(up.contains("ваша планка 2650 калорий"), "{up}");
+        assert!(up.contains("конфетки, орешки"), "{up}");
+        assert!(!up.contains("калорийной плотностью"), "{up}");
+
+        // Планка упала — зовём есть МЕНЬШЕ и напоминаем про плотность.
+        let down = planka_letter_body(&est(Direction::Up, 0.4, 0.99), 90.0, 2500.0, 2400.0);
+        assert!(down.contains("чуть менее калорийно"), "{down}");
+        assert!(down.contains("ваша планка 2400 калорий"), "{down}");
+        assert!(down.contains("низкой калорийной плотностью"), "{down}");
+        assert!(!down.contains("конфетки"), "{down}");
+
+        // Планка не изменилась — не зовём ни туда, ни сюда.
+        let hold = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0);
+        assert!(hold.contains("менять питание не нужно"), "{hold}");
+        assert!(hold.contains("остаётся прежней — 2500 калорий"), "{hold}");
+        assert!(!hold.contains("калорийно."), "{hold}");
+    }
+
+    #[test]
+    fn steps_letter_omits_the_comparison_without_a_baseline() {
+        // Есть обе величины — строка про динамику появляется.
+        let both = steps_letter_body(11_000, 254_300, Some(7_200), Some(9_800));
+        assert!(both.starts_with("Недельное обновление планки по шагам."), "{both}");
+        assert!(both.contains("Новая планка: 11\u{202f}000 шагов."), "{both}");
+        assert!(both.contains("вы прошли 254\u{202f}300 шагов."), "{both}");
+        assert!(both.contains("стала выше: была 7\u{202f}200, а стала 9\u{202f}800."), "{both}");
+        assert!(both.ends_with("Вскоре это отразится на вашем весе и на вашей планке по калориям."), "{both}");
+
+        // Активность упала — «ниже».
+        let worse = steps_letter_body(11_000, 254_300, Some(9_800), Some(7_200));
+        assert!(worse.contains("стала ниже: была 9\u{202f}800, а стала 7\u{202f}200."), "{worse}");
+
+        // Базовой линии нет — сравнивать не с чем, строки быть не должно.
+        let none = steps_letter_body(11_000, 254_300, None, Some(9_800));
+        assert!(!none.contains("Ваша активность"), "{none}");
+        assert!(none.contains("вы прошли 254\u{202f}300 шагов."), "{none}");
     }
 
     #[test]

@@ -126,8 +126,15 @@ async function scenario(name, seed, expect) {
   check(`${name}: письмо ${expect.letter ? "есть" : "не приходило"}`, !!letter === expect.letter,
     letter ? letter.body.replace(/\s+/g, " ").slice(0, 70) : "письма нет");
   if (expect.letter && letter) {
-    check(`${name}: в письме новая планка`, letter.body.includes(String(expect.planka).replace(/\B(?=(\d{3})+(?!\d))/g, " ")),
-      letter.body.replace(/\s+/g, " ").slice(0, 90));
+    const body = letter.body.replace(/\s+/g, " ");
+    check(`${name}: в письме новая планка`,
+      body.includes(String(expect.planka).replace(/\B(?=(\d{3})+(?!\d))/g, " ")), body.slice(0, 90));
+    check(`${name}: заголовок письма`,
+      body.startsWith("Недельное обновление планки по шагам."), body.slice(0, 60));
+    check(`${name}: есть сумма пройденного`,
+      /За время использования вы прошли [\d\s\u202f]+ шаг/.test(body), body.slice(0, 200));
+    check(`${name}: есть строка про вес и калории`,
+      body.includes("Вскоре это отразится на вашем весе и на вашей планке по калориям."), body.slice(-90));
   }
   check(`${name}: якорь ${expect.anchorMoved ? "сдвинут на сегодня" : "не сдвинут"}`,
     (st.anchor === today) === expect.anchorMoved, `якорь ${st.anchor}`);

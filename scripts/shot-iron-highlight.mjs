@@ -105,7 +105,7 @@ const { context, page } = await openSeeded(b, {
 await page.setViewportSize({ width: 440, height: 1100 });
 await page.waitForTimeout(3000); // дать полосам доиграть анимацию заполнения
 
-const gauge = page.locator('[data-gauge="Железо за неделю"]');
+const gauge = page.locator('[data-gauge="Железо/нед"]');
 console.log("gauge:", (await gauge.innerText()).replace(/\s+/g, " "));
 console.log("точек горит:", await page.locator('[data-pace-dot="lit"]').count(),
             "погашено:", await page.locator('[data-pace-dot="dim"]').count());
@@ -115,7 +115,7 @@ await page.locator('[data-testid="progress-widget"]').screenshot({
   path: process.env.SHOT || "/private/tmp/claude-501/-Users-vasilijstavenko-projects-hjkl-ft/56df53af-a1ed-4117-8e82-8a1f8aad90e8/scratchpad/iron/highlight-widget.png",
 });
 
-await makeWidgetGif(page, ['[data-ind="Железо"] > div', '[data-gauge="Железо за неделю"]'], OUT);
+await makeWidgetGif(page, ['[data-ind="Железо"] > div', '[data-gauge="Железо/нед"]'], OUT);
 
 await context.close();
 await b.close();

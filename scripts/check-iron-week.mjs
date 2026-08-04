@@ -154,8 +154,19 @@ const today = new Date().toISOString().slice(0, 10);
   });
   await page.waitForTimeout(9000);
   const body = (await page.locator('[data-testid="progress-widget"]').innerText().catch(() => "")).replace(/\s+/g, " ");
-  check("виджет показывает недельный gauge по железу", body.includes("Железо за неделю"), body.slice(0, 160));
-  check("подписан день недели", /День 3 из 7/.test(body), body.slice(0, 200));
+  check("виджет показывает недельный gauge по железу", body.includes("Железо/нед"), body.slice(0, 160));
+  // Железо стоит В ТОЙ ЖЕ сетке, что дневные полосы, — напротив кальция.
+  const sameRow = await page.evaluate(() => {
+    const ca = document.querySelector('[data-gauge="Кальций"]');
+    const fe = document.querySelector('[data-gauge="Железо/нед"]');
+    if (!ca || !fe) return null;
+    return { sameParent: ca.parentElement === fe.parentElement,
+             dy: Math.abs(ca.getBoundingClientRect().top - fe.getBoundingClientRect().top) };
+  });
+  check("железо в одной сетке с кальцием", !!sameRow && sameRow.sameParent, JSON.stringify(sameRow));
+  check("железо на одной высоте с кальцием (напротив)", !!sameRow && sameRow.dy < 2,
+    sameRow ? `сдвиг ${sameRow.dy.toFixed(1)} px` : "нет элементов");
+  check("подписи «День N из 7» больше нет", !/День \d+ из 7/.test(body), body.slice(0, 200));
   // 3 дня × 4.5 мг = 13.5 усвоенного; норма мужчины 45 лет — 10.08 мг.
   check("gauge считает УСВОЕННОЕ железо (13.5 мг за 3 дня)", /13[.,]5/.test(body), body.slice(0, 200));
   check("норма недели — 10 мг усвоенного (мужчина 45)", /10[.,]1|10 мг/.test(body), body.slice(0, 200));
@@ -210,7 +221,7 @@ async function paceCase(name, { ironOpenDaysAgo, gramsPerDay }, want) {
     seed: seed({ ironOpenDaysAgo, gramsPerDay }),
   });
   await page.waitForTimeout(9000);
-  const gauge = page.locator('[data-gauge="Железо за неделю"]');
+  const gauge = page.locator('[data-gauge="Железо/нед"]');
   const lit = await page.locator('[data-pace-dot="lit"]').count();
   const dim = await page.locator('[data-pace-dot="dim"]').count();
   check(`${name}: точек ровно 6 (семь отрезков)`, lit + dim === 6, `горит ${lit}, погашено ${dim}`);

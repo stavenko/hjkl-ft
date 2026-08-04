@@ -1660,6 +1660,27 @@ pub async fn avg_steps_last_days(days: i64) -> Option<u32> {
     Some((sum as f64 / vals.len() as f64).round() as u32)
 }
 
+/// Every step ever logged, summed. The «за время использования вы прошли …»
+/// figure in the weekly steps letter.
+pub async fn total_steps() -> u64 {
+    list_step_entries().await.iter().map(|e| e.steps as u64).sum()
+}
+
+/// Average daily steps over the FIRST `days` logged days — the baseline the
+/// current week is compared against in the weekly letter. `None` until there are
+/// that many logged days: comparing against a half-filled first fortnight would
+/// make any later week look like a leap.
+pub async fn avg_steps_first_days(days: usize) -> Option<u32> {
+    // `list_step_entries` is sorted by date ascending, so the first `days`
+    // entries ARE the earliest days (one entry per day).
+    let entries = list_step_entries().await;
+    if entries.len() < days || days == 0 {
+        return None;
+    }
+    let sum: u64 = entries.iter().take(days).map(|e| e.steps as u64).sum();
+    Some((sum as f64 / days as f64).round() as u32)
+}
+
 // --- Progress photos (client-only: front / side / back, for tracking) ---
 
 /// One of the three required poses.

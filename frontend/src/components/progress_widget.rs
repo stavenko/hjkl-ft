@@ -147,6 +147,10 @@ fn daily_gauges_grid(gauges: Vec<indicators::DailyGauge>) -> impl IntoView {
 fn weekly_iron_gauge(w: crate::services::iron::WeeklyIron) -> impl IntoView {
     let (bar, val) = crate::components::gauge::at_least_colors(w.absorbed_mg, w.target_mg);
     let day = w.day_of_week;
+    // Шесть точек делят полосу на семь суточных отрезков; горят те, чьи дни уже
+    // прошли. День 3 → два дня позади → две горящие точки, и норма «на сейчас» —
+    // 2/7 недельной. На первом дне не горит ничего: должок ещё не набежал.
+    let pace = crate::components::gauge::GaugePace { segments: 7, passed: day.saturating_sub(1) };
     view! {
         <div style="display: flex; flex-direction: column; gap: 4px;">
             <crate::components::gauge::Gauge
@@ -154,7 +158,9 @@ fn weekly_iron_gauge(w: crate::services::iron::WeeklyIron) -> impl IntoView {
                 label="Железо за неделю".to_string()
                 unit="мг".to_string()
                 color=bar.to_string()
+                height=14.0
                 decimals=1
+                pace=Some(pace)
                 value_color=val.map(String::from)/>
             <span class="is-size-7 has-text-grey" style="font-size: 0.6rem;">
                 {format!("День {day} из 7")}

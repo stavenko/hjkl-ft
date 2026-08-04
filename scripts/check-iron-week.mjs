@@ -16,10 +16,10 @@ const check = (name, ok, extra = "") => { console.log(`${ok ? "OK " : "FAIL"} ${
 // Сеем состояние: календарная планка есть, недели активности/кальция пройдены,
 // кальциевые ворота закрыты (7 зелёных дней), так что запуск ОБЯЗАН открыть
 // неделю железа. Плюс еда с уже проставленным железом — чтобы gauge был не нулевой.
-function seed({ ironOpenDaysAgo, calciumGateDaysAgo = 9, withIronFood = true, legacyIronNutrient = true }) {
+function seed({ ironOpenDaysAgo, calciumGateDaysAgo = 9, withIronFood = true, legacyIronNutrient = true, gramsPerDay = 200 }) {
   return async (page, uid) => {
     await page.evaluate(
-      async ({ uid, ironOpenDaysAgo, calciumGateDaysAgo, withIronFood, legacyIronNutrient }) => {
+      async ({ uid, ironOpenDaysAgo, calciumGateDaysAgo, withIronFood, legacyIronNutrient, gramsPerDay }) => {
         const db = await new Promise((res, rej) => {
           const r = indexedDB.open(`hjkl-ft-${uid}`);
           r.onsuccess = () => res(r.result);
@@ -83,7 +83,7 @@ function seed({ ironOpenDaysAgo, calciumGateDaysAgo = 9, withIronFood = true, le
         const diary = [];
         for (let i = 0; i < 10; i++) {
           diary.push({
-            id: `d-${i}`, food_id: "f-liver", date: ymd(i), time: null, grams: 200,
+            id: `d-${i}`, food_id: "f-liver", date: ymd(i), time: null, grams: gramsPerDay,
             waste_grams: 0, meal_label: null, deleted: false, created_at: nowIso, updated_at: nowIso,
           });
         }
@@ -106,7 +106,7 @@ function seed({ ironOpenDaysAgo, calciumGateDaysAgo = 9, withIronFood = true, le
         }
         db.close();
       },
-      { uid, ironOpenDaysAgo, calciumGateDaysAgo, withIronFood, legacyIronNutrient },
+      { uid, ironOpenDaysAgo, calciumGateDaysAgo, withIronFood, legacyIronNutrient, gramsPerDay },
     );
   };
 }
@@ -199,6 +199,37 @@ const today = new Date().toISOString().slice(0, 10);
     story.includes("неделя кальция закончилась"), story.slice(0, 140));
   await context.close();
 }
+
+// ── 5. Точки суточного темпа и обводка «успеваем / отстаём» ──
+// Шесть точек делят полосу на семь суточных отрезков. Горят те, чьи дни прошли:
+// на N-м дне недели — N−1 точка. Обводка зелёная, пока набор обгоняет эти точки,
+// и оранжевая, когда отстаёт.
+async function paceCase(name, { ironOpenDaysAgo, gramsPerDay }, want) {
+  const { context, page } = await openSeeded(b, {
+    baseUrl: BASE, uid: `iron-pace-${Math.floor(Math.random() * 1e6)}`,
+    seed: seed({ ironOpenDaysAgo, gramsPerDay }),
+  });
+  await page.waitForTimeout(9000);
+  const gauge = page.locator('[data-gauge="Железо за неделю"]');
+  const lit = await page.locator('[data-pace-dot="lit"]').count();
+  const dim = await page.locator('[data-pace-dot="dim"]').count();
+  check(`${name}: точек ровно 6 (семь отрезков)`, lit + dim === 6, `горит ${lit}, погашено ${dim}`);
+  check(`${name}: горит ${want.lit} (день ${want.day})`, lit === want.lit, `горит ${lit}`);
+  // Тень берём с самой полосы — это второй потомок обёртки gauge.
+  const shadow = await gauge.locator("div").nth(1).evaluate((el) => getComputedStyle(el).boxShadow);
+  const green = shadow.includes("31, 164, 99");
+  const orange = shadow.includes("232, 133, 13");
+  check(`${name}: обводка ${want.glow}`,
+    want.glow === "зелёная" ? green && !orange : orange && !green, shadow.slice(0, 70));
+  await context.close();
+}
+
+// День 5, ест помногу → обгоняет темп.
+await paceCase("обгоняем", { ironOpenDaysAgo: 4, gramsPerDay: 200 }, { day: 5, lit: 4, glow: "зелёная" });
+// День 5, ест мало → отстаёт.
+await paceCase("отстаём", { ironOpenDaysAgo: 4, gramsPerDay: 15 }, { day: 5, lit: 4, glow: "оранжевая" });
+// Первый день: должок ещё не набежал — отставания быть не может.
+await paceCase("первый день", { ironOpenDaysAgo: 0, gramsPerDay: 15 }, { day: 1, lit: 0, glow: "зелёная" });
 
 console.log(fail === 0 ? "\n=== ALL OK ===" : `\n=== FAILURES: ${fail} ===`);
 await b.close();

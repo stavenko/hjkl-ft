@@ -982,9 +982,9 @@ const S5: &[Frame] = &[
         title: Loc { en: "", ru: "" },
         body: Loc {
             en: "Congratulations, the calcium week is over. You kept the indicator green for a whole week. Keep holding that indicator green from here on.\n\n\
-                 And we go further — the ^iron^ week begins.",
+                 And we go further — the #iron# week begins.",
             ru: "Поздравляем, неделя кальция закончилась. Вы держали индикатор зелёным целую неделю. Продолжайте и дальше держать этот индикатор зелёным.\n\n\
-                 А мы идём дальше и начинаем ^неделю железа^.",
+                 А мы идём дальше и начинаем #неделю железа#.",
         },
     },
     // 2 — why iron matters
@@ -1043,8 +1043,8 @@ const S5: &[Frame] = &[
         kicker: Loc { en: "Iron", ru: "Железо" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "The best plant sources are legumes: beans, chickpeas, lentils. There's also a lot of it in all sorts of nuts and seeds: sesame, cashew. But you have to understand that the body takes only ^2–20 %^ of the iron from plants, against ^15–35 %^ from animal foods. You need to eat more plants.",
-            ru: "Лучшие растительные источники — это бобовые: фасоль, нут, чечевица. Также его много во всяких орешках: кунжут, кешью. Однако надо понимать, что организм берёт всего ^2–20 %^ железа из растений против ^15–35 %^ из животных. Растений надо есть больше.",
+            en: "The best plant sources are legumes: beans, chickpeas, lentils. There's also a lot of it in all sorts of nuts and seeds: sesame, cashew. But you have to understand that the body takes only #2–20 %# of the iron from plants, against #15–35 %# from animal foods. You need to eat more plants.",
+            ru: "Лучшие растительные источники — это бобовые: фасоль, нут, чечевица. Также его много во всяких орешках: кунжут, кешью. Однако надо понимать, что организм берёт всего #2–20 %# железа из растений против #15–35 %# из животных. Растений надо есть больше.",
         },
     },
     // 7 — the new WEEKLY indicator + gauge

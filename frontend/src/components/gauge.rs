@@ -17,6 +17,34 @@ pub fn at_least_colors(value: f64, target: f64) -> (&'static str, Option<&'stati
     }
 }
 
+/// Pace markers for a gauge that fills over a PERIOD rather than in one day.
+///
+/// The track is divided into `segments` equal parts by `segments - 1` dots (a
+/// week → 7 parts, 6 dots). Each dot marks where the amount would stand if the
+/// period's target were eaten evenly, day by day. Dots for days already behind us
+/// are lit, so the last lit dot is "where you should be about now".
+///
+/// From that same expectation the gauge takes its outline: an ORANGE glow while
+/// the value trails the lit dots, a GREEN one once it runs ahead of them.
+#[derive(Clone, Copy, PartialEq)]
+pub struct GaugePace {
+    /// Parts the period is divided into (7 for a week).
+    pub segments: u32,
+    /// Parts already COMPLETED (day 3 of 7 → 2). `0` on the first day: nothing is
+    /// owed yet, so the gauge can't be behind.
+    pub passed: u32,
+}
+
+impl GaugePace {
+    /// The amount expected by now: the completed fraction of the period's target.
+    fn expected(&self, target: f64) -> f64 {
+        if self.segments == 0 {
+            return 0.0;
+        }
+        target * self.passed as f64 / self.segments as f64
+    }
+}
+
 /// A full-width bar. `value`/`target` in the same unit; the fill spans
 /// `min(value/target, 1)` of the track. `color` is the fill (the metric's
 /// colour); the track is grey. The header line shows `label` on the left and
@@ -44,6 +72,9 @@ pub fn Gauge(
     /// single-digit milligrams, where rounding to a whole number would hide a whole
     /// day's worth of progress.
     #[prop(default = 0)] decimals: usize,
+    /// Pace markers for a period gauge (see [`GaugePace`]). `None` → a plain bar,
+    /// exactly as before.
+    #[prop(default = None)] pace: Option<GaugePace>,
 ) -> impl IntoView {
     let value_style = value_color
         .map(|c| format!("color: {c};"))
@@ -93,6 +124,48 @@ pub fn Gauge(
         }
     });
 
+    // Pace markers + the outline that says whether we're keeping up. Both are
+    // empty for an ordinary (single-day) gauge.
+    let ahead = pace.map(|p| value >= p.expected(target));
+    let track_glow = match ahead {
+        // Ahead of the daily pace → green outline; behind → orange. Ring + soft
+        // glow so it reads on both light and dark schemes.
+        Some(true) => "box-shadow: 0 0 0 1.5px #1fa463, 0 0 8px rgba(31,164,99,0.45);".to_string(),
+        Some(false) => "box-shadow: 0 0 0 1.5px #e8850d, 0 0 8px rgba(232,133,13,0.45);".to_string(),
+        None => String::new(),
+    };
+    let dot = height * 0.45;
+    let pace_dots = pace.map(|p| {
+        (1..p.segments)
+            .map(|i| {
+                let left = i as f64 * 100.0 / p.segments as f64;
+                // A dot is LIT once its day is behind us — the last lit one marks
+                // where an even, day-by-day intake would have put the value by now.
+                let lit = i <= p.passed;
+                // Contrast is taken from what lies UNDER the dot: white over the
+                // coloured fill, dark over the pale track. A single colour would
+                // vanish on one of the two (a white dot on the grey track reads as
+                // an empty hole, a dark one on the fill reads as a gap).
+                let on_fill = left <= pct;
+                let fill_color = match (on_fill, lit) {
+                    (true, true) => "#ffffff",
+                    (true, false) => "rgba(255,255,255,0.42)",
+                    (false, true) => "rgba(0,0,0,0.55)",
+                    (false, false) => "rgba(0,0,0,0.14)",
+                };
+                view! {
+                    <div attr:data-pace-dot=if lit { "lit" } else { "dim" }
+                        style=format!(
+                            "position: absolute; top: 50%; left: {left:.4}%; width: {dot:.1}px; \
+                             height: {dot:.1}px; margin-left: {half:.1}px; margin-top: {half:.1}px; \
+                             border-radius: 50%; background: {fill_color};",
+                            half = -dot / 2.0,
+                        )></div>
+                }
+            })
+            .collect_view()
+    });
+
     view! {
         <div attr:data-gauge=label.clone() style="position: relative; display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0;">
             <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;">
@@ -105,8 +178,10 @@ pub fn Gauge(
                     <span class="has-text-grey">{format!(" / {:.*} {unit}", decimals, target)}</span>
                 </span>
             </div>
-            <div style=format!("height: {height}px; border-radius: {radius}px; background: var(--bulma-border-weak); overflow: hidden;")>
+            <div style=format!("height: {height}px; border-radius: {radius}px; background: var(--bulma-border-weak); \
+                    overflow: hidden; position: relative; {track_glow}")>
                 <div style=format!("height: 100%; width: {pct:.1}%; background: {color}; border-radius: {radius}px; transition: width 0.4s;")></div>
+                {pace_dots}
             </div>
             {hint_popup}
         </div>

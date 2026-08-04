@@ -231,10 +231,11 @@ fn text_with_icons(s: &str) -> View {
 
 /// Render story text with inline emphasis markers:
 ///  * `^…^` → a BOLD WHITE→YELLOW gradient span (the «strong bones» highlight),
+///  * `#…#` → a BOLD WHITE→RED gradient span (the iron/blood highlight),
 ///  * `~…~` → a BOLD YELLOW→ORANGE→RED gradient span,
-/// both the same font-size as the surrounding text; the rest still passes through
-/// `text_with_icons` for the «⇄» repeat icon. `^` is the outer split so a phrase is
-/// either white-yellow or warm, never nested.
+/// all the same font-size as the surrounding text; the rest still passes through
+/// `text_with_icons` for the «⇄» repeat icon. The markers are split outermost-first,
+/// so a phrase carries exactly one of them, never nested.
 fn text_rich(s: &str) -> View {
     let mut out: Vec<View> = Vec::new();
     for (i, part) in s.split('^').enumerate() {
@@ -251,13 +252,38 @@ fn text_rich(s: &str) -> View {
                 .into_view(),
             );
         } else {
+            out.push(text_rich_red(part));
+        }
+    }
+    out.collect_view().into_view()
+}
+
+/// The RED (`#…#`) gradient pass — iron is blood, so its highlight runs white into
+/// deep red, the counterpart of the bone-white→yellow one. Applied to the non-`^`
+/// segments, then handing what's left to the warm pass.
+fn text_rich_red(s: &str) -> View {
+    let mut out: Vec<View> = Vec::new();
+    for (i, part) in s.split('#').enumerate() {
+        if i % 2 == 1 {
+            out.push(
+                view! {
+                    <span style="font-weight: 800; \
+                        background: linear-gradient(115deg, #ffffff 0%, #fca5a5 38%, #e0304f 100%); \
+                        -webkit-background-clip: text; background-clip: text; \
+                        -webkit-text-fill-color: transparent; color: transparent;">
+                        {part.to_string()}
+                    </span>
+                }
+                .into_view(),
+            );
+        } else {
             out.push(text_rich_warm(part));
         }
     }
     out.collect_view().into_view()
 }
 
-/// The warm (`~…~`) gradient + repeat-icon pass, applied to the non-`^` segments.
+/// The warm (`~…~`) gradient + repeat-icon pass, applied to the remaining segments.
 fn text_rich_warm(s: &str) -> View {
     let mut out: Vec<View> = Vec::new();
     for (i, part) in s.split('~').enumerate() {

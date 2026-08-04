@@ -156,12 +156,10 @@ pub async fn weekly_progress() -> Option<WeeklyIron> {
 
 // ── The weekly indicator ─────────────────────────────────────────────────────
 
-/// Iron indicator colour, on WEEKLY mechanics:
-///   • the current (in-progress) week counts as met once it reaches the target;
-///   • every COMPLETED iron week since the week opened is judged met/missed;
-///   • missing more than half of the completed weeks is chronic → red;
-///   • otherwise green when this week is already met, orange while it isn't.
-/// Grey until the iron week opens or while nothing has been measured at all.
+/// Iron indicator colour. Iron only MEASURES differently (absorbed mg, weeks cut
+/// from the day its story opened rather than Mon–Sun); the verdict itself comes from
+/// the shared weekly rule [`super::indicators::weekly_state`], over the last 8
+/// COMPLETED iron weeks. Grey until the first iron week has finished.
 pub async fn indicator_state() -> super::indicators::IndicatorState {
     use super::indicators::IndicatorState;
     let today = local::today_date();
@@ -173,9 +171,8 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
         return IndicatorState::Unknown;
     }
 
-    let current = absorbed_between(cur_start, today).await;
-
-    // Completed weeks: [open, cur_start) in 7-day blocks, newest-independent order.
+    // Only COMPLETED iron weeks — [open, cur_start) in 7-day blocks — and only the
+    // most recent `WEEKLY_WINDOW` of them. The week in progress is never judged.
     let mut history: Vec<bool> = Vec::new();
     let mut s = open;
     while s + Duration::days(6) < cur_start {
@@ -183,21 +180,13 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
         history.push(absorbed_between(s, e).await >= target);
         s += Duration::days(7);
     }
-
-    // Nothing eaten at all and no completed week yet → nothing to judge.
-    if history.is_empty() && current <= 0.0 {
-        return IndicatorState::Unknown;
+    if history.len() > super::indicators::WEEKLY_WINDOW {
+        history.drain(..history.len() - super::indicators::WEEKLY_WINDOW);
     }
 
-    let missed = history.iter().filter(|m| !**m).count();
-    if !history.is_empty() && missed * 2 > history.len() {
-        return IndicatorState::Red;
-    }
-    if current >= target {
-        IndicatorState::Green
-    } else {
-        IndicatorState::Orange
-    }
+    // Вердикт выносит ОБЩЕЕ недельное правило — то же, что у омега-3, яиц и
+    // красного мяса. Своей копии этого правила у железа быть не должно.
+    super::indicators::weekly_state(&history)
 }
 
 // ── The dedicated enrichment pass ────────────────────────────────────────────

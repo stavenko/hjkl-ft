@@ -7,11 +7,10 @@
 //!   the days the per-day target was missed.
 //!     0 misses → green · 1–3 → orange · ≥4 → red.
 //!
-//! * **Weekly-goal** (omega-3, eggs, red/processed meat): the rolling last-7-days
-//!   sum vs a weekly target decides orange/green for THIS week; the history of
-//!   complete Mon–Sun weeks (up to the last 8 = ~2 months, only weeks that have any
-//!   diary data) decides red: if the goal was MISSED in > 50 % of those weeks it's a
-//!   chronic problem → red. Red takes precedence over orange.
+//! * **Weekly-goal** (omega-3, eggs, red/processed meat, iron): judged over the last
+//!   8 COMPLETED weeks — the week in progress is never judged, so «not yet reached»
+//!   can't read as a failure.
+//!     every week closed → green · half or more unclosed → red · otherwise orange.
 //!   "Missed" for a LIMIT goal (red meat) means the amount went OVER the limit.
 //!
 //! `Unknown` (grey) is used when a nutrient has no data at all yet (e.g. calcium is
@@ -100,18 +99,36 @@ fn day_missed(key: &str, value: f64, ratio: Option<f64>) -> bool {
     }
 }
 
-/// Weekly-goal colour. `current_met` = this rolling week hit the goal;
-/// `history_met` = per complete-week whether the goal was met (only weeks with data).
-fn weekly_state(current_met: bool, history_met: &[bool]) -> IndicatorState {
-    if !history_met.is_empty() {
-        let missed = history_met.iter().filter(|m| !**m).count();
-        // Chronic: missed in MORE THAN 50 % of the assessed weeks.
-        if missed * 2 > history_met.len() {
-            return IndicatorState::Red;
-        }
+/// Number of COMPLETED weeks every weekly indicator is judged over — the same
+/// window for orange and for red.
+pub const WEEKLY_WINDOW: usize = 8;
+
+/// Weekly-goal colour from the last [`WEEKLY_WINDOW`] COMPLETED weeks, newest last.
+/// `history_met[i]` = that week's goal was met.
+///
+/// The week IN PROGRESS is deliberately NOT here. Judging it would paint every
+/// indicator orange each Monday morning — «not yet reached» is not a failure, and a
+/// user who closed eight weeks in a row must stay green while the ninth is running.
+///
+///   всё закрыто            → green
+///   половина и более не закрыта → red
+///   иначе хотя бы одна не закрыта → orange
+///
+/// Empty history → `Unknown`: no completed week means nothing to judge yet.
+///
+/// Shared by every weekly indicator — omega-3, eggs, red meat and iron (whose weeks
+/// are cut from the day its story opened rather than Mon–Sun). One rule, one place.
+pub(crate) fn weekly_state(history_met: &[bool]) -> IndicatorState {
+    if history_met.is_empty() {
+        return IndicatorState::Unknown;
     }
-    if current_met {
-        IndicatorState::Green
+    let missed = history_met.iter().filter(|m| !**m).count();
+    if missed == 0 {
+        return IndicatorState::Green;
+    }
+    // Chronic: half of the assessed weeks or more went unclosed.
+    if missed * 2 >= history_met.len() {
+        IndicatorState::Red
     } else {
         IndicatorState::Orange
     }
@@ -910,13 +927,11 @@ fn weekly(
     let val = |d: NaiveDate| values.get(&fmt(d)).copied().unwrap_or(0.0);
     let met = |sum: f64| if is_limit { sum <= target } else { sum >= target };
 
-    // Rolling current week.
-    let cur_sum: f64 = (0..7).map(|i| val(today - Duration::days(i))).sum();
-
-    // Complete Mon–Sun weeks before this week, most recent 8, only with data.
+    // Only COMPLETED Mon–Sun weeks, the most recent `WEEKLY_WINDOW`, and only those
+    // with any logging. The week in progress is NOT judged — see `weekly_state`.
     let this_monday = today - Duration::days(today.weekday().num_days_from_monday() as i64);
     let mut history_met = Vec::new();
-    for k in 1..=8i64 {
+    for k in (1..=WEEKLY_WINDOW as i64).rev() {
         let mon = this_monday - Duration::days(7 * k);
         let dates: Vec<NaiveDate> = (0..7).map(|j| mon + Duration::days(j)).collect();
         if !dates.iter().any(|d| diary_days.contains(&fmt(*d))) {
@@ -931,7 +946,7 @@ fn weekly(
         return IndicatorState::Unknown;
     }
 
-    weekly_state(met(cur_sum), &history_met)
+    weekly_state(&history_met)
 }
 
 async fn gather_veg(window: &[NaiveDate]) -> HashMap<String, f64> {
@@ -1004,24 +1019,40 @@ mod tests {
     }
 
     #[test]
-    fn weekly_current_only() {
-        assert_eq!(weekly_state(true, &[]), IndicatorState::Green);
-        assert_eq!(weekly_state(false, &[]), IndicatorState::Orange);
+    fn weekly_needs_a_completed_week() {
+        // Идёт первая неделя — судить не по чему.
+        assert_eq!(weekly_state(&[]), IndicatorState::Unknown);
     }
 
     #[test]
-    fn weekly_chronic_red_over_half() {
-        // 2 of 3 weeks missed → >50% → red, regardless of the current week.
-        assert_eq!(weekly_state(true, &[false, false, true]), IndicatorState::Red);
-        assert_eq!(weekly_state(false, &[false, false, true]), IndicatorState::Red);
+    fn weekly_all_closed_is_green() {
+        assert_eq!(weekly_state(&[true]), IndicatorState::Green);
+        assert_eq!(weekly_state(&[true; 8]), IndicatorState::Green);
     }
 
     #[test]
-    fn weekly_not_chronic() {
-        // 1 of 3 missed → not >50% → current week decides.
-        assert_eq!(weekly_state(true, &[true, true, false]), IndicatorState::Green);
-        assert_eq!(weekly_state(false, &[true, true, false]), IndicatorState::Orange);
-        // exactly 50% (2 of 4) is NOT > 50% → not chronic.
-        assert_eq!(weekly_state(true, &[false, false, true, true]), IndicatorState::Green);
+    fn weekly_one_miss_is_orange() {
+        // Хотя бы одна незакрытая неделя — оранжевый, пока их меньше половины.
+        assert_eq!(weekly_state(&[true, true, true, false]), IndicatorState::Orange);
+        assert_eq!(weekly_state(&[true, true, true, true, true, true, true, false]), IndicatorState::Orange);
+        assert_eq!(weekly_state(&[false, true, true]), IndicatorState::Orange);
+    }
+
+    #[test]
+    fn weekly_half_unclosed_is_red() {
+        // РОВНО половина — уже красный.
+        assert_eq!(weekly_state(&[true, false]), IndicatorState::Red);
+        assert_eq!(weekly_state(&[true, true, false, false]), IndicatorState::Red);
+        assert_eq!(weekly_state(&[true, true, true, true, false, false, false, false]), IndicatorState::Red);
+        // Больше половины — тем более.
+        assert_eq!(weekly_state(&[false, false, true]), IndicatorState::Red);
+        assert_eq!(weekly_state(&[false]), IndicatorState::Red);
+    }
+
+    #[test]
+    fn weekly_ignores_the_week_in_progress() {
+        // Восемь закрытых недель подряд — зелёный, что бы ни творилось на текущей:
+        // она в историю не попадает вовсе.
+        assert_eq!(weekly_state(&[true; 8]), IndicatorState::Green);
     }
 }

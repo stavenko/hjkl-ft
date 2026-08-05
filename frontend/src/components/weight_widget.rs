@@ -1,7 +1,6 @@
 use leptos::*;
 use api_types::WeightEntry;
 
-use crate::components::mini_chart::chart_block;
 use crate::services::i18n::{t, weight_unit_signal, WeightUnit};
 use crate::services::weight_trend::{weight_trend, BalanceState, DEFAULT_WINDOW_DAYS};
 

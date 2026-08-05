@@ -257,7 +257,7 @@ pub fn needs_iron(food: &Food) -> bool {
 /// Fill a food's iron (amount + absorbed fraction) with ONE focused AI request.
 /// FAILS LOUDLY — the caller's retry/error-log wrapper decides what to do.
 pub async fn enrich_iron(food: &Food) -> Result<(), String> {
-    let (mg, absorption) = ai::lookup_iron(&food.name).await?;
+    let (mg, absorption) = super::iron_pipeline::lookup_iron(&food.name).await?;
     local::cache_food_iron(&food.id, mg, absorption).await;
     Ok(())
 }

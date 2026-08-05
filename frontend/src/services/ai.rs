@@ -53,7 +53,7 @@ impl NutrientDetail {
     }
 }
 
-fn strip_code_fences(s: &str) -> &str {
+pub(crate) fn strip_code_fences(s: &str) -> &str {
     let s = s.trim();
     if let Some(rest) = s.strip_prefix("```") {
         let rest = rest.trim_start_matches(|c: char| c.is_alphanumeric());
@@ -80,7 +80,7 @@ fn build_executor() -> Result<Qwen, String> {
 /// short answer into the reasoning channel and nothing into content (empty response);
 /// OFF makes it answer in content reliably. The ai-worker maps this `think` flag to
 /// `chat_template_kwargs.enable_thinking`.
-fn build_executor_think(think: bool) -> Result<Qwen, String> {
+pub(crate) fn build_executor_think(think: bool) -> Result<Qwen, String> {
     let cfg = config::get();
     let token = auth::get_token().ok_or_else(|| "not authenticated".to_string())?;
     let executor = Qwen::builder()
@@ -436,7 +436,7 @@ struct CalciumCategory {
     mg_min: f64,
     mg_max: f64,
     /// Russian examples — the input names are Russian, so they match better.
-    examples: &'static str,
+    pub(crate) examples: &'static str,
 }
 
 const CALCIUM_CATEGORIES: &[CalciumCategory] = &[
@@ -607,84 +607,115 @@ pub async fn lookup_calcium(food_name: &str) -> Result<f64, String> {
 // picture — heme iron 15–35 %, non-heme 2–20 %, pushed down by phytates (legumes,
 // whole grains, seeds), by calcium (dairy) and by tannins (tea, coffee), pushed up
 // by vitamin C and by meat eaten alongside.
-struct IronCategory {
+pub(crate) struct IronCategory {
     /// Stable key the model must echo back in `category`.
-    key: &'static str,
+    pub(crate) key: &'static str,
     /// Доля усвоения — НАША величина, модель её не называет. Раньше спрашивали и её,
     /// но числа усвоения были единственными числами в промпте, и модель списывала их
     /// в поле миллиграммов: печень выходила 0.25 мг вместо ~9, чечевица 0.05 вместо
     /// ~7.5. Модель выбирает строку, доля берётся отсюда.
-    absorption: f64,
+    pub(crate) absorption: f64,
     /// Правдоподобное СОДЕРЖАНИЕ железа, мг на 100 г. Границы намеренно широкие —
     /// внутри строки лежат очень разные продукты (в dairy и молоко 0.03, и сыр 0.7),
     /// поэтому диапазон отсекает грубую ошибку, а не уточняет значение.
-    mg_min: f64,
-    mg_max: f64,
+    pub(crate) mg_min: f64,
+    pub(crate) mg_max: f64,
     /// Russian examples — the input names are Russian, so they match better.
-    examples: &'static str,
+    pub(crate) examples: &'static str,
 }
 
-const IRON_CATEGORIES: &[IronCategory] = &[
+// ГРАНИЦЫ УЗКИЕ, И НИЖНЯЯ — РАБОЧЕЕ ЗНАЧЕНИЕ.
+//
+// Модель, которую жёстко инструктируют, свободы не проявляет: она исполняет правило
+// буквально. Пока промпт запрещал отвечать границами, она брала середину; когда
+// правилом стало «не знаешь — бери низ», низ пошёл и на знакомые продукты — куриная
+// печень получила 3 мг вместо 9, говядина 0.8 вместо 2.6. Значит число задаём МЫ,
+// а строка должна быть такой, чтобы её нижняя граница была настоящим значением
+// типичного представителя, а не самого бедного продукта в куче.
+//
+// Границы — справочные значения на 100 г съедобной части (USDA / стандартные
+// таблицы), сырой продукт: низ = самый бедный из ТИПИЧНЫХ представителей строки,
+// верх = самый богатый.
+pub(crate) const IRON_CATEGORIES: &[IronCategory] = &[
     // ── Гем: усваивается лучше всего ──
-    IronCategory { key: "liver_offal", absorption: 0.25, mg_min: 3.0, mg_max: 20.0,
-        examples: "печень куриная, печень говяжья, печень свиная, сердце, почки, язык" },
-    IronCategory { key: "shellfish", absorption: 0.25, mg_min: 1.0, mg_max: 28.0,
+    // Печень говяжья 6.5 · куриная 9 · свиная 18; сердце 4.3, почки 4.6.
+    IronCategory { key: "liver_offal", absorption: 0.25, mg_min: 5.0, mg_max: 18.0,
+        examples: "печень куриная, печень говяжья, печень свиная, сердце, почки" },
+    // Кальмар 0.7 · креветки 1.8 · мидии 6.7 · устрицы до 28 (крайность отброшена).
+    IronCategory { key: "shellfish", absorption: 0.25, mg_min: 1.5, mg_max: 8.0,
         examples: "мидии, устрицы, гребешки, кальмар, креветки" },
-    IronCategory { key: "roe", absorption: 0.20, mg_min: 1.0, mg_max: 12.0,
+    // Икра красная 1.8 · чёрная 2.4.
+    IronCategory { key: "roe", absorption: 0.20, mg_min: 1.5, mg_max: 3.0,
         examples: "икра красная, икра чёрная" },
-    IronCategory { key: "meat_red", absorption: 0.20, mg_min: 0.8, mg_max: 4.0,
+    // Свинина 0.9 · кролик 1.3 · баранина 1.9 · говядина 2.6 · телятина 1.1.
+    IronCategory { key: "meat_red", absorption: 0.20, mg_min: 1.2, mg_max: 3.0,
         examples: "говядина, телятина, баранина, свинина, кролик" },
-    IronCategory { key: "meat_poultry", absorption: 0.15, mg_min: 0.4, mg_max: 3.0,
+    // Куриная грудка 0.7 · бедро 1.3 · индейка 1.4 · утка 2.7.
+    IronCategory { key: "meat_poultry", absorption: 0.15, mg_min: 0.7, mg_max: 2.5,
         examples: "курица, индейка, утка, куриная грудка" },
-    IronCategory { key: "fish", absorption: 0.15, mg_min: 0.2, mg_max: 2.5,
-        examples: "лосось, треска, тунец, скумбрия, сельдь" },
-    IronCategory { key: "meat_processed", absorption: 0.15, mg_min: 0.4, mg_max: 6.0,
+    // Треска 0.4 · лосось 0.8 · тунец 1.0 · сельдь 1.1 · скумбрия 1.6.
+    // Примеров нарочно много и разных: «голец» модель отнесла к говядине с
+    // обоснованием «Голец — это говядина», и рыба получила усвоение красного мяса.
+    IronCategory { key: "fish", absorption: 0.15, mg_min: 0.4, mg_max: 1.8,
+        examples: "лосось, треска, тунец, скумбрия, сельдь, голец, форель, горбуша, кета, \
+                   минтай, судак, щука, палтус, камбала — ЛЮБАЯ рыба" },
+    // Колбаса/ветчина/сосиски ~1.0 · бекон 1.4 · паштет ближе к печени.
+    IronCategory { key: "meat_processed", absorption: 0.15, mg_min: 0.9, mg_max: 2.5,
         examples: "колбаса, сосиски, ветчина, бекон, паштет" },
-    IronCategory { key: "dish_with_meat", absorption: 0.12, mg_min: 0.4, mg_max: 4.0,
+    IronCategory { key: "dish_with_meat", absorption: 0.12, mg_min: 0.8, mg_max: 2.5,
         examples: "плов с мясом, борщ с говядиной, паста болоньезе, пельмени" },
     // ── Негем: усваивается хуже, тем сильнее чем больше фитатов/кальция/танинов ──
-    IronCategory { key: "fruit_berries", absorption: 0.10, mg_min: 0.05, mg_max: 4.0,
-        examples: "яблоко, апельсин, клубника, киви, сухофрукты" },
-    IronCategory { key: "vegetables_greens", absorption: 0.08, mg_min: 0.2, mg_max: 6.5,
-        examples: "брокколи, руккола, петрушка, болгарский перец, помидор" },
-    IronCategory { key: "grains_refined", absorption: 0.08, mg_min: 0.3, mg_max: 4.0,
+    // Апельсин 0.1 · яблоко 0.12 · арбуз 0.24 · банан 0.26 · черешня 0.36 · клубника 0.4.
+    IronCategory { key: "fruit_fresh", absorption: 0.10, mg_min: 0.1, mg_max: 0.5,
+        examples: "яблоко, апельсин, клубника, киви, черешня, арбуз, банан, виноград" },
+    // Чернослив 0.9 · финики 1.0 · изюм 1.9 · инжир 2.0 · курага 2.7.
+    IronCategory { key: "fruit_dried", absorption: 0.10, mg_min: 0.9, mg_max: 2.8,
+        examples: "курага, изюм, чернослив, инжир сушёный, финики" },
+    // Лук 0.2 · помидор/огурец/морковь 0.3 · перец 0.4 · капуста 0.5 · брокколи 0.7 ·
+    // картофель 0.8.
+    IronCategory { key: "vegetables", absorption: 0.08, mg_min: 0.2, mg_max: 0.9,
+        examples: "болгарский перец, помидор, огурец, брокколи, капуста, морковь, кабачок, \
+                   лук, картофель" },
+    // Зелёный лук 1.0 · руккола 1.5 · кинза 1.8 · базилик 3.2 · петрушка 6.2 · укроп 6.6.
+    IronCategory { key: "greens_herbs", absorption: 0.08, mg_min: 1.0, mg_max: 6.5,
+        examples: "петрушка, укроп, руккола, базилик, кинза, зелёный лук" },
+    // Белый рис 0.8 · манка 1.0 · макароны 1.3 · белый хлеб до 2.
+    IronCategory { key: "grains_refined", absorption: 0.08, mg_min: 0.8, mg_max: 2.0,
         examples: "белый хлеб, белый рис, макароны, манка" },
-    IronCategory { key: "fortified", absorption: 0.05, mg_min: 3.0, mg_max: 25.0,
+    IronCategory { key: "fortified", absorption: 0.05, mg_min: 3.0, mg_max: 20.0,
         examples: "хлопья с добавленным железом, каши быстрого приготовления, детские смеси" },
-    IronCategory { key: "dish_meatless", absorption: 0.05, mg_min: 0.2, mg_max: 3.0,
+    IronCategory { key: "dish_meatless", absorption: 0.05, mg_min: 0.3, mg_max: 1.5,
         examples: "овощное рагу, вегетарианский суп, каша на воде" },
-    IronCategory { key: "legumes", absorption: 0.05, mg_min: 1.5, mg_max: 9.0,
-        examples: "фасоль, нут, чечевица, горох, маш" },
-    IronCategory { key: "grains_whole", absorption: 0.04, mg_min: 1.0, mg_max: 8.0,
+    // СУХИЕ: фасоль 5.9 · нут 6.2 · маш 6.7 · горох 6.8 · чечевица 7.5.
+    IronCategory { key: "legumes", absorption: 0.05, mg_min: 5.0, mg_max: 8.0,
+        examples: "фасоль, нут, чечевица, горох, маш (в сухом виде)" },
+    // Бурый рис 1.5 · гречка 2.2 · булгур 2.5 · овсянка 4.7.
+    IronCategory { key: "grains_whole", absorption: 0.04, mg_min: 1.5, mg_max: 5.0,
         examples: "гречка, овсянка, бурый рис, цельнозерновой хлеб, булгур" },
-    IronCategory { key: "nuts_seeds", absorption: 0.04, mg_min: 1.5, mg_max: 16.0,
+    // Миндаль 3.7 · фундук 4.7 · кешью 6.7 · тыквенные семечки 8.8 · кунжут 14.6.
+    IronCategory { key: "nuts_seeds", absorption: 0.04, mg_min: 3.5, mg_max: 15.0,
         examples: "кунжут, кешью, миндаль, тыквенные семечки, фундук" },
-    IronCategory { key: "eggs", absorption: 0.04, mg_min: 0.8, mg_max: 2.5,
+    // Яйцо целиком 1.75.
+    IronCategory { key: "eggs", absorption: 0.04, mg_min: 1.2, mg_max: 2.0,
         examples: "яйцо куриное, омлет, яичница" },
-    IronCategory { key: "soy", absorption: 0.03, mg_min: 1.0, mg_max: 16.0,
+    // Соевое молоко 0.4 · тофу 2.7 · соевое мясо ~5.
+    IronCategory { key: "soy", absorption: 0.03, mg_min: 0.4, mg_max: 5.0,
         examples: "тофу, соевое молоко, соевое мясо, эдамаме" },
-    IronCategory { key: "spinach_oxalate", absorption: 0.02, mg_min: 0.7, mg_max: 4.0,
+    // Ревень 0.2 · свёкла 0.8 · щавель 2.4 · шпинат 2.7.
+    IronCategory { key: "spinach_oxalate", absorption: 0.02, mg_min: 0.8, mg_max: 3.0,
         examples: "шпинат, щавель, свёкла, ревень" },
-    IronCategory { key: "dairy", absorption: 0.02, mg_min: 0.02, mg_max: 1.0,
-        examples: "молоко, творог, сыр, йогурт, кефир, сливки" },
-    IronCategory { key: "tea_coffee_cocoa", absorption: 0.02, mg_min: 0.01, mg_max: 15.0,
+    // Молоко 0.03 · кефир/йогурт 0.1 · сыр 0.2–0.7 · творог 0.4.
+    IronCategory { key: "dairy", absorption: 0.02, mg_min: 0.05, mg_max: 0.7,
+        examples: "молоко, творог, сыр, йогурт, кефир, ряженка, ацидофилин, сливки" },
+    // Отдельная строка для напитков: «пиво безалкогольное» уходило в dairy — просто
+    // потому, что подходящей строки не было, а выбрать модель обязана.
+    IronCategory { key: "drinks", absorption: 0.02, mg_min: 0.0, mg_max: 0.1,
+        examples: "вода, сок, морс, лимонад, пиво, безалкогольное пиво, вино, компот, квас" },
+    // Заваренный чай/кофе ~0.02 · шоколад 2.4 · какао-порошок 13.9 (сухой, редко ест
+    // 100 г — верх намеренно ниже).
+    IronCategory { key: "tea_coffee_cocoa", absorption: 0.02, mg_min: 0.05, mg_max: 3.0,
         examples: "чай, кофе, какао, шоколад" },
 ];
-
-/// The category table as prompt text, generated from [`IRON_CATEGORIES`] so the
-/// rows the model sees and the rows we validate against can never drift apart.
-fn iron_category_table() -> String {
-    IRON_CATEGORIES
-        .iter()
-        .map(|c| {
-            format!(
-                "  {key:<18} {min}–{max} мг — {ex}",
-                key = c.key, min = c.mg_min, max = c.mg_max, ex = c.examples
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
 
 // Модель отвечает ТОЛЬКО про содержание железа: min / max / most-likely — тот же
 // бракет, что у любого другого нутриента. Доля усвоения у неё не спрашивается: она
@@ -697,102 +728,37 @@ fn iron_category_table() -> String {
 // into the prompt verbatim. Everything written with `///` here is therefore READ BY
 // THE MODEL — keep it addressed to the model, and put developer rationale in `//`
 // comments like this one.
+// ШАГ 1 — только КЛАССИФИКАЦИЯ. Ни одного числа: этому промпту таблица показывается
+// без диапазонов, поэтому списать оттуда нечего, и вся его работа — узнать продукт.
+// Совмещённый промпт (категория + величина разом) путался: арбуз получал усвоение
+// 0.15 — долю мясной строки, — а голец объявлялся говядиной.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct IronDetail {
-    /// The category key from the table, copied EXACTLY as written there.
-    category: String,
+pub(crate) struct IronCategoryPick {
+    /// The category key from the list, copied EXACTLY as written there.
+    pub(crate) category: String,
     /// What this product actually is, in two or three words.
-    food_type: String,
+    pub(crate) food_type: String,
+    /// One short sentence: why this category. Keep it under 15 words.
+    pub(crate) reason: String,
+}
+
+// ШАГ 2 — только ВЕЛИЧИНА. Категория уже выбрана и передана готовой; здесь называется
+// одно количество внутри её диапазона, и выбирать больше нечего.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct IronAmount {
     /// Lowest reasonable IRON CONTENT per 100 g, in milligrams.
-    min_value_iron: f64,
+    pub(crate) min_value_iron: f64,
     /// Highest reasonable IRON CONTENT per 100 g, in milligrams.
-    max_value_iron: f64,
+    pub(crate) max_value_iron: f64,
     /// Most likely IRON CONTENT per 100 g, in milligrams.
-    recommended_iron: f64,
-    /// One short sentence: why this category and these numbers. Keep it under 20 words.
-    reason: String,
+    pub(crate) recommended_iron: f64,
+    /// How sure you are of `recommended_iron`, from 0.0 to 1.0. Be honest: 1.0 means you
+    /// know THIS food's iron content; 0.0 means you are guessing from the category alone.
+    pub(crate) iron_confidence: f64,
+    /// One short sentence: why this amount. Keep it under 15 words.
+    pub(crate) reason: String,
 }
 
-/// Look up a food's IRON: the amount per 100 g and the fraction of it the body
-/// takes up. Heme iron (red meat, liver, shellfish) absorbs at roughly 15–35 %,
-/// non-heme iron (legumes, seeds, greens, cereals) at roughly 2–20 %, so the model
-/// is asked for both numbers together — one judgement, one call.
-///
-/// Returns `(mg per 100 g, absorbed fraction)`. FAILS LOUDLY after 4 attempts.
-pub async fn lookup_iron(food_name: &str) -> Result<(f64, f64), String> {
-    let lang = match crate::services::i18n::get_lang() {
-        crate::services::i18n::Lang::Ru => "Russian",
-        crate::services::i18n::Lang::En => "English",
-    };
-    let prompt = format!(
-        "You are a nutritional database. For the food item \"{food_name}\", report how much \
-         IRON it contains per 100 grams, in MILLIGRAMS.\n\n\
-         For raw/dry as-sold products (grains, rice, pasta, flour, meat, fish, legumes) use the \
-         RAW value unless the name says cooked/boiled/fried/steamed.\n\n\
-         First bracket the plausible range, then commit to the most likely value inside it:\n\
-         - min_value_iron: lowest reasonable amount (number, mg)\n\
-         - max_value_iron: highest reasonable amount (number, mg)\n\
-         - recommended_iron: the most likely amount (number, mg)\n\n\
-         Place the food in ONE row of this table and stay inside that row's milligram range:\n\n\
-         {table}\n\n\
-         Then report which row you used:\n\
-         - category: the row key, copied EXACTLY as written above\n\
-         - food_type: what this product is, in two or three words, in {lang}\n\
-         - reason: ONE short sentence (under 20 words) in {lang} — why this row and this amount\n\n\
-         If the food fits several rows, pick the one that dominates its iron. A cooked dish goes \
-         to dish_with_meat when it contains meat, otherwise to dish_meatless.\n\n\
-         All three numbers are MILLIGRAMS per 100 g, and min ≤ recommended ≤ max.\n\n\
-         Base the answer only on the food name \"{food_name}\". Respond with ONLY a single \
-         minified JSON object and nothing else — no markdown, no prose.",
-        table = iron_category_table(),
-        lang = lang,
-    );
-
-    // Четыре попытки, а не три: сбои здесь наблюдались разного рода — обрыв ответа,
-    // мусор вместо JSON, упавший fetch, — и каждый из них транзиентный.
-    let v: IronDetail = generate_validated(prompt, |_| {}, 4, |v: &IronDetail| {
-        // The bracket is not decoration: a model that puts its own «most likely»
-        // OUTSIDE its own min…max has contradicted itself.
-        if !(v.min_value_iron <= v.recommended_iron
-            && v.recommended_iron <= v.max_value_iron
-            && v.min_value_iron >= 0.0)
-        {
-            return Err(format!(
-                "iron content contradicts itself: {}…{}…{} мг",
-                v.min_value_iron, v.recommended_iron, v.max_value_iron
-            ));
-        }
-        // Строка таблицы — НАША, и она обязывает. Неизвестный ключ или количество
-        // вне диапазона строки означают, что ответ выведен не из таблицы: именно так
-        // выглядело списывание долей усвоения в миллиграммы — печень 0.25 мг при
-        // строке 3–20.
-        let key = v.category.trim().to_ascii_lowercase();
-        let Some(cat) = IRON_CATEGORIES.iter().find(|c| c.key == key) else {
-            return Err(format!("unknown iron category «{}» for «{food_name}»", v.category));
-        };
-        let mg = v.recommended_iron;
-        if !(cat.mg_min - 1e-9..=cat.mg_max + 1e-9).contains(&mg) {
-            return Err(format!(
-                "iron {mg} мг outside «{}» ({}–{} мг) for «{food_name}»",
-                cat.key, cat.mg_min, cat.mg_max
-            ));
-        }
-        Ok(())
-    })
-    .await?;
-    // Долю усвоения даёт таблица по выбранной строке — у модели она не спрашивается.
-    let key = v.category.trim().to_ascii_lowercase();
-    let absorption = IRON_CATEGORIES
-        .iter()
-        .find(|c| c.key == key)
-        .map(|c| c.absorption)
-        .expect("категория уже проверена валидатором");
-    leptos::logging::log!(
-        "iron «{food_name}»: {} мг · {} · усвоение {absorption} — {} ({})",
-        v.recommended_iron, v.category, v.food_type, v.reason
-    );
-    Ok((v.recommended_iron, absorption))
-}
 
 /// Per-food category verdict. All three tags are independent booleans (a raw
 /// fruit can be BOTH `snack` and `veg_fruit`).

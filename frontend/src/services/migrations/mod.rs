@@ -48,6 +48,7 @@ mod m000_init;
 mod m001_reset_calcium_iron;
 mod m002_drop_bootstrap_db;
 mod m003_seed_planka_history;
+mod m004_reset_iron;
 
 #[cfg(test)]
 mod tests;
@@ -89,6 +90,11 @@ const ALL: &[Migration] = &[
         version: m003_seed_planka_history::VERSION,
         description: m003_seed_planka_history::DESCRIPTION,
         script: || Box::pin(m003_seed_planka_history::script()),
+    },
+    Migration {
+        version: m004_reset_iron::VERSION,
+        description: m004_reset_iron::DESCRIPTION,
+        script: || Box::pin(m004_reset_iron::script()),
     },
 ];
 

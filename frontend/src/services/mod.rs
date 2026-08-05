@@ -14,6 +14,7 @@ pub mod diag;
 pub mod i18n;
 pub mod indicators;
 pub mod iron;
+pub mod iron_pipeline;
 pub mod letters;
 pub mod local;
 pub mod meal_split;

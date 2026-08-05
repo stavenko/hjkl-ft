@@ -484,18 +484,26 @@ pub fn ProgressWidget() -> impl IntoView {
                         let green = gate_s().unwrap_or(0);
                         let steps_green = steps_gate_s().unwrap_or(0);
                         let calcium_green = calcium_gate_s().unwrap_or(0);
-                        // The week-2 caption shows only while the activity week is
-                        // still locked: retro-widening the gate set (calories joined
-                        // it) must not resurface the caption for users who already
-                        // cleared it and moved on to the steps/calcium gates.
+                        // Подпись показывает гейт ТЕКУЩЕЙ главы — той, что ещё не
+                        // открыта. Каждый гейт держится ровно до момента, когда
+                        // открылась следующая глава, и после этого не возвращается,
+                        // даже если его счётчик зелёных дней потом упал.
+                        //
+                        // Иначе выходило так: неделя железа давно открыта, а подпись
+                        // зовёт «держите индикатор планки по шагам зелёным 7 дней» —
+                        // шаговый гейт своё отработал, но индикатор шагов позеленел в
+                        // оранжевый, счётчик сбросился, и гейт вылез заново. Гейты
+                        // монотонны: пройденное не отменяется.
                         let active_gate: Option<(&'static str, u32)> =
                             if !indicators::activity_unlocked() && green < indicators::GREEN_GATE_DAYS {
                                 Some(("dashboard.progress.gate_title", green))
                             } else if indicators::activity_unlocked()
+                                && !indicators::calcium_unlocked()
                                 && steps_green < indicators::GREEN_GATE_DAYS
                             {
                                 Some(("dashboard.progress.steps_gate_title", steps_green))
                             } else if indicators::calcium_unlocked()
+                                && !crate::services::iron::unlocked()
                                 && calcium_green < indicators::GREEN_GATE_DAYS
                             {
                                 Some(("dashboard.progress.calcium_gate_title", calcium_green))

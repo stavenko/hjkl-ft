@@ -208,8 +208,10 @@ fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>]) -> String 
             let Some(v) = p else { started = false; continue };
             let x = if n > 1 { (i as f64 / (n - 1) as f64) * w } else { w / 2.0 };
             // Нулевой размах (планка не менялась) → середина поля.
+            // Держим линию в средних 70 % высоты: растянутая на всё поле, она упирается
+            // в верхний и нижний края и выглядит обрезанной.
             let norm = if prange > f64::EPSILON { (v - pmin) / prange } else { 0.5 };
-            let y = h - norm * h;
+            let y = h - (0.15 + norm * 0.7) * h;
             d.push_str(&format!(
                 "{}{:.1},{:.1} ",
                 if started { "L" } else { "M" },
@@ -220,13 +222,39 @@ fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>]) -> String 
         }
         // Разделитель `r##`, а не `r#`: внутри есть `"#1fa463"`, и последовательность
         // `"#` закрыла бы обычную raw-строку прямо на цвете.
-        format!(
-            r##"<path d="{}" fill="none" stroke="#1fa463" stroke-width="1.5" stroke-dasharray="4 3" stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity="0.85"/>"##,
-            d.trim()
+        // Подписана КАЖДАЯ ступень на своём уровне. Линия нормирована, высота сама по
+        // себе ничего не говорит — без чисел видно только, что планка менялась.
+        let mut labels = String::new();
+        let mut seen: Option<f64> = None;
+        for (i, p) in planka.iter().enumerate().take(n) {
+            let Some(v) = p else { continue };
+            if seen.map_or(true, |s| (s - *v).abs() > f64::EPSILON) {
+                let x = if n > 1 { (i as f64 / (n - 1) as f64) * w } else { w / 2.0 };
+                let norm = if prange > f64::EPSILON { (v - pmin) / prange } else { 0.5 };
+                let y = h - (0.15 + norm * 0.7) * h;
+                // У правого края подпись уводим влево, иначе она уедет за поле.
+                let (anchor, tx) = if x > w * 0.8 { ("end", x - 2.0) } else { ("start", x + 2.0) };
+                // Обводка фоном: подпись ложится поверх линии веса и без неё сливается.
+                labels.push_str(&format!(
+                    r##"<text x="{tx:.1}" y="{:.1}" text-anchor="{anchor}" fill="#1fa463" font-size="7.5" font-weight="700" stroke="var(--bulma-scheme-main)" stroke-width="2.5" paint-order="stroke" stroke-linejoin="round">{v:.0}</text>"##,
+                    y - 3.0
+                ));
+                seen = Some(*v);
+            }
+        }
+        (
+            format!(
+                r##"<path d="{}" fill="none" stroke="#1fa463" stroke-width="1.5" stroke-dasharray="4 3" stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity="0.85"/>"##,
+                d.trim()
+            ),
+            labels,
         )
     } else {
-        String::new()
+        (String::new(), String::new())
     };
+    // Подписи идут ПОСЛЕДНИМИ: линия веса и её точки рисуются поверх всего, что
+    // раньше, и накрывали цифры.
+    let (planka_path, planka_labels) = planka_path;
 
     format!(
         r#"<svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">
@@ -235,6 +263,7 @@ fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>]) -> String 
   {planka_path}
   <path d="{path}" fill="none" stroke="var(--bulma-link)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
   {dots}
+  {planka_labels}
 </svg>"#
     )
 }

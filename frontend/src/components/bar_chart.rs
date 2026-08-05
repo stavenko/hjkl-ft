@@ -191,13 +191,40 @@ pub fn BarChart(
                             }
                             prev = Some(*v);
                         }
-                        // Подпись — у последнего известного значения.
-                        let last = planka_by_day.iter().flatten().last().copied();
+                        // Подписана КАЖДАЯ ступень, а не только последняя: график
+                        // показывает, как планка росла, и без чисел у прежних ступеней
+                        // видна лишь форма. Подпись ставится на уровне своей ступени, в
+                        // её начале; у последней — полная, с единицей.
+                        let mut steps: Vec<(usize, f64)> = Vec::new();
+                        let mut seen: Option<f64> = None;
+                        for (i, p) in planka_by_day.iter().enumerate() {
+                            let Some(v) = p else { continue };
+                            if seen.map_or(true, |s| (s - *v).abs() > f64::EPSILON) {
+                                steps.push((i, *v));
+                                seen = Some(*v);
+                            }
+                        }
+                        let last_val = steps.last().map(|(_, v)| *v);
+                        let labels = steps
+                            .iter()
+                            .filter(|(_, v)| Some(*v) != last_val)
+                            .map(|(i, v)| {
+                                let x = PL + *i as f64 * bw + 2.0;
+                                view! {
+                                    <text x=x y=mapy(*v) - 3.0 text-anchor="start"
+                                        fill=PLANKA_LINE font-size="9.5" font-weight="600"
+                                        opacity="0.75">
+                                        {format!("{v:.0}")}
+                                    </text>
+                                }
+                            })
+                            .collect_view();
                         view! {
                             <g>
                                 <path d=d.trim().to_string() fill="none"
                                     stroke=PLANKA_LINE stroke-width="1.4" stroke-dasharray="4 3"/>
-                                {last.map(|lv| view! {
+                                {labels}
+                                {last_val.map(|lv| view! {
                                     <text x=PR y=mapy(lv) - 3.0 text-anchor="end"
                                         fill=PLANKA_LINE font-size="10.5" font-weight="600">
                                         {format!("{} {:.0} {}", t("chart.planka"), lv, planka_unit)}

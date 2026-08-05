@@ -296,6 +296,10 @@ pub async fn calorie_goal_amount() -> Option<f64> {
 /// Виды планок, у которых есть история.
 pub const PLANKA_CALORIES: &str = "calories";
 pub const PLANKA_STEPS: &str = "steps";
+/// Норма белка. Выводится из профиля, но зависит от ВЕСА — а он меняется, и вместе
+/// с ним норма. День, закрытый по норме 120 г, не должен становиться недобором,
+/// когда после похудения норма стала 115.
+pub const PLANKA_PROTEIN: &str = "protein";
 
 /// Записать установку планки, действующую С СЕГОДНЯШНЕГО дня.
 ///
@@ -1633,6 +1637,12 @@ pub async fn save_weight(weight_kg: f64, no_water: bool, no_food: bool, no_wash:
         updated_at: now(),
     };
     db::put("weight_entries", &entry).await;
+    // Норма белка считается от ВЕСА, значит новый вес — это новая норма. Пишем её в
+    // историю здесь: иначе прошлые дни пересуживались бы по сегодняшней норме.
+    let protein = crate::services::profile::protein_target_from_profile(weight_kg);
+    if protein > 0 {
+        record_planka(PLANKA_PROTEIN, protein as f64).await;
+    }
     entry
 }
 

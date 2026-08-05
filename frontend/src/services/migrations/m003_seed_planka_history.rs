@@ -42,5 +42,15 @@ pub async fn script() -> Result<(), String> {
         local::seed_planka_at(local::PLANKA_STEPS, &from, planka).await;
     }
 
+    // ── Белок: норма от ПЕРВОГО веса, с даты той записи ──
+    // Норма считается от веса, а он меняется; исторические значения восстановить
+    // нельзя, но отправная точка — первое взвешивание — известна.
+    if let Some(first) = local::list_weight_entries().await.into_iter().next() {
+        let target = profile::protein_target_from_profile(first.weight_kg);
+        if target > 0 {
+            local::seed_planka_at(local::PLANKA_PROTEIN, &first.date, target as f64).await;
+        }
+    }
+
     Ok(())
 }

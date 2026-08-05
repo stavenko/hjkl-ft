@@ -440,6 +440,8 @@ async fn ratio_for(key: &str, date: &str, value: f64) -> (Option<f64>, Option<f6
     let kind = match key {
         "calories" => Some(local::PLANKA_CALORIES),
         "steps" => Some(local::PLANKA_STEPS),
+        // Белок считается от веса, а вес меняется — значит меняется и норма.
+        "protein" => Some(local::PLANKA_PROTEIN),
         _ => None,
     };
     let target = match kind {

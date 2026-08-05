@@ -2,7 +2,7 @@ use leptos::*;
 use leptos_router::*;
 use api_types::WeightEntry;
 
-use crate::components::weight_widget::chart_svg;
+use crate::components::weight_widget::chart_svg_with_planka;
 use crate::components::mini_chart::short_date;
 use crate::services::i18n::{t, weight_unit_signal, WeightUnit};
 use crate::services::profile::{self, Sex};
@@ -21,6 +21,28 @@ pub fn WeightPanel(
 ) -> impl IntoView {
     let navigate = use_navigate();
     let unit = weight_unit_signal();
+
+    // История КАЛОРИЙНОЙ планки по дням графика — по одному значению на точку веса,
+    // `None` там, где планки на тот день ещё не было.
+    let planka_ver = crate::services::db::version("planka_history");
+    let cal_planka = create_local_resource(
+        move || (planka_ver.get(), entries.get().len()),
+        move |_| async move {
+            let mut es = entries.get_untracked();
+            es.sort_by(|a, b| a.date.cmp(&b.date));
+            let mut out = Vec::with_capacity(es.len());
+            for e in es {
+                out.push(
+                    crate::services::local::planka_on(
+                        crate::services::local::PLANKA_CALORIES,
+                        &e.date,
+                    )
+                    .await,
+                );
+            }
+            out
+        },
+    );
 
     // "Today" in local time — the add button resets at local midnight because
     // this is recomputed each time the panel opens.
@@ -134,7 +156,16 @@ pub fn WeightPanel(
         <div style="display: flex; flex-direction: column; gap: 14px; padding: 4px 2px;">
             // Chart + trend + cycle + add button.
             <div>
-                <div inner_html=move || chart_svg(&entries.get(), unit.get())></div>
+                // Поверх веса — история КАЛОРИЙНОЙ планки, нормированная: величины
+                // несопоставимы (ккал против килограммов), и читается форма — когда
+                // планка менялась и как на это ответил вес.
+                <div inner_html=move || {
+                    chart_svg_with_planka(
+                        &entries.get(),
+                        unit.get(),
+                        &cal_planka.get().unwrap_or_default(),
+                    )
+                }></div>
                 <p style="margin-top: 10px; text-align: center;">
                     <span class="is-size-7 has-text-grey">{move || format!("{}: ", t("weight.trend.title"))}</span>
                     <span class="is-size-7 has-text-weight-semibold" style:color=trend_color>{trend_text}</span>

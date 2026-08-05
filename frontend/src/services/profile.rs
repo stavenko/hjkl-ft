@@ -135,6 +135,15 @@ pub fn get_steps_planka() -> Option<f64> {
 /// Store the steps planka. A non-positive value clears it.
 pub fn set_steps_planka(planka: f64) {
     write(|r| r.steps_planka = if planka > 0.0 { Some(planka) } else { None });
+    // Установка попадает в ИСТОРИЮ: индикатор судит день по планке, действовавшей
+    // именно в тот день. Профиль хранит только текущее значение, и по нему прошлое
+    // не восстановить.
+    if planka > 0.0 {
+        leptos::spawn_local(async move {
+            crate::services::local::record_planka(crate::services::local::PLANKA_STEPS, planka)
+                .await;
+        });
+    }
 }
 
 /// The user's height in centimetres, if set (and a positive number).

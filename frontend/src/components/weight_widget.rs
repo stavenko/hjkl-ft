@@ -75,9 +75,20 @@ pub fn EmptyPrompt(text_key: &'static str) -> impl IntoView {
 
 /// Chart block (placeholder or real chart) for an unsorted set of weight entries.
 pub fn chart_svg(entries: &[WeightEntry], unit: WeightUnit) -> String {
+    chart_svg_with_planka(entries, unit, &[])
+}
+
+/// То же, плюс история КАЛОРИЙНОЙ планки поверх — по одному значению на точку веса
+/// (в том же порядке, что и отсортированные записи). Планка нормируется: величины
+/// несопоставимы, читается форма изменения — см. `mini_chart::chart_block_with_planka`.
+pub fn chart_svg_with_planka(
+    entries: &[WeightEntry],
+    unit: WeightUnit,
+    planka: &[Option<f64>],
+) -> String {
     let mut es = entries.to_vec();
     es.sort_by(|a, b| a.date.cmp(&b.date));
     let dates: Vec<&str> = es.iter().map(|e| e.date.as_str()).collect();
     let values: Vec<f64> = es.iter().map(|e| unit.from_kg(e.weight_kg)).collect();
-    chart_block(&dates, &values)
+    crate::components::mini_chart::chart_block_with_planka(&dates, &values, planka)
 }

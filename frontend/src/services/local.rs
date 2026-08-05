@@ -281,6 +281,99 @@ pub async fn calorie_goal_amount() -> Option<f64> {
         .map(|g| g.amount)
 }
 
+// ── История планок ───────────────────────────────────────────────────────────
+//
+// Планка движется: калорийную раз в неделю пересчитывает тренд веса, шаговую
+// поднимает цвет индикатора. Пока хранилось только текущее значение, вопрос «какая
+// планка была во вторник» оставался без ответа, и день, засчитанный тогда,
+// приходилось либо замораживать, либо пересуживать по сегодняшней — то есть
+// переписывать прошлое. Живой случай: планка шагов выросла с 10800 до 11800, и
+// пятница с 11500 шагами из выполненной стала недобором.
+//
+// Хранятся только планки, НЕ зависящие от личности, — калории и шаги. Нормы белка,
+// овощей, кальция выводятся из профиля и истории не требуют.
+
+/// Виды планок, у которых есть история.
+pub const PLANKA_CALORIES: &str = "calories";
+pub const PLANKA_STEPS: &str = "steps";
+
+/// Записать установку планки, действующую С СЕГОДНЯШНЕГО дня.
+///
+/// Одна запись на вид и день: повторная установка в тот же день перезаписывает её,
+/// а не плодит вторую. Ничего не делает, если значение совпадает с уже действующим —
+/// история хранит ИЗМЕНЕНИЯ, а не каждое касание.
+pub async fn record_planka(kind: &str, amount: f64) {
+    if amount <= 0.0 {
+        return;
+    }
+    let date = today_date().format("%Y-%m-%d").to_string();
+    if planka_on(kind, &date).await == Some(amount) {
+        return;
+    }
+    let id = format!("{kind}:{date}");
+    let created_at = db::get::<PlankaEntry>("planka_history", &id)
+        .await
+        .map(|e| e.created_at)
+        .unwrap_or_else(now);
+    db::put(
+        "planka_history",
+        &PlankaEntry {
+            id,
+            kind: kind.to_string(),
+            date,
+            amount,
+            created_at,
+            updated_at: now(),
+        },
+    )
+    .await;
+}
+
+/// Записать установку планки ЗАДНИМ ЧИСЛОМ, с указанной даты. Только для миграции,
+/// заводящей историю из уже существующих значений: обычная установка всегда
+/// датируется сегодняшним днём ([`record_planka`]).
+pub async fn seed_planka_at(kind: &str, date: &str, amount: f64) {
+    if amount <= 0.0 || date.len() < 10 {
+        return;
+    }
+    let id = format!("{kind}:{date}");
+    if db::get::<PlankaEntry>("planka_history", &id).await.is_some() {
+        return;
+    }
+    db::put(
+        "planka_history",
+        &PlankaEntry {
+            id,
+            kind: kind.to_string(),
+            date: date.to_string(),
+            amount,
+            created_at: now(),
+            updated_at: now(),
+        },
+    )
+    .await;
+}
+
+/// Вся история планок этого вида, по возрастанию даты.
+pub async fn planka_history(kind: &str) -> Vec<PlankaEntry> {
+    let mut all: Vec<PlankaEntry> = db::list_by_index("planka_history", "kind", kind).await;
+    all.sort_by(|a, b| a.date.cmp(&b.date));
+    all
+}
+
+/// Планка, ДЕЙСТВОВАВШАЯ на `date` — последняя установка не позже этого дня.
+///
+/// `None`, если на тот день планки ещё не было: день до первой установки судить
+/// нечем, и это не провал, а отсутствие правила.
+pub async fn planka_on(kind: &str, date: &str) -> Option<f64> {
+    planka_history(kind)
+        .await
+        .into_iter()
+        .take_while(|e| e.date.as_str() <= date)
+        .last()
+        .map(|e| e.amount)
+}
+
 /// Progress toward the "one week of observations" the planka needs: for each of
 /// food / weight / steps, how many distinct days have an entry, capped at 7.
 ///
@@ -1432,6 +1525,9 @@ pub async fn set_calorie_goal(amount: f64) {
             .await;
         }
     }
+    // Установка попадает в ИСТОРИЮ: индикатор судит день по планке, действовавшей
+    // именно в тот день, а не по сегодняшней.
+    record_planka(PLANKA_CALORIES, amount).await;
     // The planka now matches the current goal/trend again.
     set_planka_stale(false);
     // Restart the weekly-recompute clock: the planka was just (re)computed, so the

@@ -36,11 +36,16 @@ const PLANKA_LINE: &str = "#1fa463";
 
 /// Optional target line the chart draws INSTEAD of the average (green planka vs pink
 /// average). `None` → the average line. Bars are always neutral either way.
+///
+/// `planka_series` — ИСТОРИЯ планки по тем же дням, что и `series`: значение на
+/// каждый день. Планка движется, и одна горизонтальная линия врала бы про прошлое —
+/// день, выполненный по старой планке, оказывался бы ниже сегодняшней. Ступенчатая
+/// линия показывает ровно то, по чему день судился. Пусто → рисуется среднее.
 #[component]
 pub fn BarChart(
     series: Signal<Vec<(String, f64)>>,
     unit: String,
-    #[prop(optional, into)] planka: MaybeSignal<Option<f64>>,
+    #[prop(optional, into)] planka_series: MaybeSignal<Vec<(String, f64)>>,
 ) -> impl IntoView {
     let active = create_rw_signal(None::<usize>);
     let svg_ref = create_node_ref::<leptos::svg::Svg>();
@@ -116,15 +121,21 @@ pub fn BarChart(
                     let avg = (!logged_past.is_empty())
                         .then(|| logged_past.iter().sum::<f64>() / logged_past.len() as f64);
 
-                    // Reference line: the applied planka once it's set, otherwise the
-                    // running average. Included in the scale so it always fits.
-                    let planka_val = planka.get();
-                    let line_val = planka_val.or(avg);
+                    // Планка по дням, выровненная с барами: для каждого дня серии
+                    // берётся значение из истории. Пусто → показываем среднее.
+                    let ph = planka_series.get();
+                    let planka_by_day: Vec<Option<f64>> = data
+                        .iter()
+                        .map(|(d, _)| ph.iter().find(|(pd, _)| pd == d).map(|(_, v)| *v))
+                        .collect();
+                    let has_planka = planka_by_day.iter().any(|p| p.is_some());
+                    let line_val = if has_planka { None } else { avg };
                     let max = data
                         .iter()
                         .map(|(_, k)| *k)
                         .fold(0.0_f64, f64::max)
                         .max(line_val.unwrap_or(0.0))
+                        .max(planka_by_day.iter().flatten().copied().fold(0.0_f64, f64::max))
                         .max(1.0);
                     let mapy = move |k: f64| PB - (k / max) * (PB - PT);
                     let bw = (PR - PL) / n as f64;
@@ -143,23 +154,55 @@ pub fn BarChart(
                         }
                     }).collect_view();
 
-                    // The reference line + label: green «планка» once set, else pink «среднее».
-                    let (line_color, line_key) = if planka_val.is_some() {
-                        (PLANKA_LINE, "chart.planka")
-                    } else {
-                        (AVG, "chart.average")
-                    };
+                    // Среднее — только когда планки нет вовсе.
                     let line_unit = unit.clone();
                     let avg_line = line_val.map(|lv| {
                         let ly = mapy(lv);
                         view! {
                             <g>
                                 <line x1=PL y1=ly x2=PR y2=ly
-                                    stroke=line_color stroke-width="1.2" stroke-dasharray="4 3"/>
+                                    stroke=AVG stroke-width="1.2" stroke-dasharray="4 3"/>
                                 <text x=PR y=ly - 3.0 text-anchor="end"
-                                    fill=line_color font-size="10.5" font-weight="600">
-                                    {format!("{} {:.0} {}", t(line_key), lv, line_unit)}
+                                    fill=AVG font-size="10.5" font-weight="600">
+                                    {format!("{} {:.0} {}", t("chart.average"), lv, line_unit)}
                                 </text>
+                            </g>
+                        }
+                    });
+
+                    // СТУПЕНЧАТАЯ линия планки: горизонтальный отрезок на ширину дня,
+                    // вертикальный — в день смены. Так видно и величину, и когда она
+                    // менялась; прямая через весь график врала бы про прошлое.
+                    let planka_unit = unit.clone();
+                    let planka_line = has_planka.then(|| {
+                        let mut d = String::new();
+                        let mut prev: Option<f64> = None;
+                        for (i, p) in planka_by_day.iter().enumerate() {
+                            let Some(v) = p else { prev = None; continue };
+                            let (x0, x1) = (PL + i as f64 * bw, PL + (i as f64 + 1.0) * bw);
+                            let y = mapy(*v);
+                            match prev {
+                                // Планка сменилась — соединяем вертикалью.
+                                Some(pv) if (pv - *v).abs() > f64::EPSILON => {
+                                    d.push_str(&format!(" L {x0:.1} {y:.1} L {x1:.1} {y:.1}"));
+                                }
+                                Some(_) => d.push_str(&format!(" L {x1:.1} {y:.1}")),
+                                None => d.push_str(&format!(" M {x0:.1} {y:.1} L {x1:.1} {y:.1}")),
+                            }
+                            prev = Some(*v);
+                        }
+                        // Подпись — у последнего известного значения.
+                        let last = planka_by_day.iter().flatten().last().copied();
+                        view! {
+                            <g>
+                                <path d=d.trim().to_string() fill="none"
+                                    stroke=PLANKA_LINE stroke-width="1.4" stroke-dasharray="4 3"/>
+                                {last.map(|lv| view! {
+                                    <text x=PR y=mapy(lv) - 3.0 text-anchor="end"
+                                        fill=PLANKA_LINE font-size="10.5" font-weight="600">
+                                        {format!("{} {:.0} {}", t("chart.planka"), lv, planka_unit)}
+                                    </text>
+                                })}
                             </g>
                         }
                     });
@@ -195,6 +238,7 @@ pub fn BarChart(
                         <g>
                             {bars}
                             {avg_line}
+                            {planka_line}
                             {axis}
                             {cursor}
                         </g>

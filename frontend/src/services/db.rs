@@ -54,7 +54,7 @@ fn bump(store_name: &str) {
     });
 }
 
-const DB_VERSION: u32 = 18;
+const DB_VERSION: u32 = 19;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -64,7 +64,7 @@ const ALL_STORES: &[&str] = &[
     "foods", "diary", "recipes", "recipe_ingredients",
     "goals", "food_drafts", "weight_entries", "step_entries",
     "progress_photos", "summaries", "chat", "profile", "deletions", "_sync_meta",
-    "app_flags",
+    "app_flags", "planka_history",
     "support_messages", "support_outbox", "support_meta",
 ];
 
@@ -157,6 +157,14 @@ fn builder(name: &str) -> rexie::RexieBuilder {
         .add_object_store(ObjectStore::new("support_messages").key_path("seq"))
         .add_object_store(ObjectStore::new("support_outbox").key_path("client_id"))
         .add_object_store(ObjectStore::new("support_meta").key_path("key"))
+        // История планок: одна строка на «вид × день установки». Синкается — планка
+        // принадлежит человеку, а не устройству.
+        .add_object_store(
+            ObjectStore::new("planka_history")
+                .key_path("id")
+                .add_index(rexie::Index::new("kind", "kind"))
+                .add_index(rexie::Index::new("date", "date")),
+        )
         // Per-indicator per-day aggregate cache (one store per indicator, keyed by
         // date). Derived, per-device, NOT synced — recomputed on demand from the
         // diary/foods when a day is missing (see `services::indicators` cache).
@@ -341,7 +349,7 @@ fn key_field(store: &str) -> &'static str {
 fn outbox_target(store: &str, local_key: &str) -> Option<(String, String)> {
     match store {
         "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "profile"
-        | "weight_entries" | "step_entries" | "deletions" => {
+        | "weight_entries" | "step_entries" | "deletions" | "planka_history" => {
             Some((store.to_string(), local_key.to_string()))
         }
         "app_flags" => (!crate::services::app_flags::is_device_local(local_key))

@@ -5,7 +5,7 @@ use api_types::StepEntry;
 use crate::components::bar_chart::BarChart;
 use crate::components::mini_chart::short_date;
 use crate::services::i18n::t;
-use crate::services::{db, profile};
+use crate::services::db;
 
 /// Steps widget in its EXPANDED form — content only, to sit inside the shared
 /// full-screen editor overlay (`EDITOR` + `EditorHead`), same as every other new
@@ -17,13 +17,31 @@ pub fn StepsPanel(
 ) -> impl IntoView {
     let navigate = use_navigate();
 
-    // The applied steps planka (a system-set profile value), reactive to `profile`
-    // so the chart flips from the average line to the planka the moment it's set.
-    let profile_ver = db::version("profile");
-    let planka = move || {
-        profile_ver.get();
-        profile::get_steps_planka()
-    };
+    // ИСТОРИЯ шаговой планки по дням графика. Планка движется — её поднимает цвет
+    // индикатора, — и одна горизонтальная линия соврала бы про прошлое: день,
+    // выполненный по 10800, оказался бы недобором под сегодняшними 11800.
+    let planka_ver = db::version("planka_history");
+    let planka_hist = create_local_resource(
+        move || (planka_ver.get(), entries.get().len()),
+        move |_| async move {
+            let days: Vec<String> = steps_series(&entries.get_untracked())
+                .into_iter()
+                .map(|(d, _)| d)
+                .collect();
+            let mut out = Vec::with_capacity(days.len());
+            for d in days {
+                if let Some(v) = crate::services::local::planka_on(
+                    crate::services::local::PLANKA_STEPS,
+                    &d,
+                )
+                .await
+                {
+                    out.push((d, v));
+                }
+            }
+            out
+        },
+    );
 
     // "Today" in local time — the record button resets at local midnight.
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -38,7 +56,7 @@ pub fn StepsPanel(
             <div>
                 <BarChart series=Signal::derive(move || steps_series(&entries.get()))
                     unit=t("common.unit.steps").to_string()
-                    planka=Signal::derive(planka)/>
+                    planka_series=Signal::derive(move || planka_hist.get().unwrap_or_default())/>
                 <button
                     class="button is-link is-fullwidth"
                     style="margin-top: 16px;"

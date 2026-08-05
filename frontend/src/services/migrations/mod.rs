@@ -47,6 +47,7 @@ use super::{app_flags, db, errors};
 mod m000_init;
 mod m001_reset_calcium_iron;
 mod m002_drop_bootstrap_db;
+mod m003_seed_planka_history;
 
 #[cfg(test)]
 mod tests;
@@ -83,6 +84,11 @@ const ALL: &[Migration] = &[
         version: m002_drop_bootstrap_db::VERSION,
         description: m002_drop_bootstrap_db::DESCRIPTION,
         script: || Box::pin(m002_drop_bootstrap_db::script()),
+    },
+    Migration {
+        version: m003_seed_planka_history::VERSION,
+        description: m003_seed_planka_history::DESCRIPTION,
+        script: || Box::pin(m003_seed_planka_history::script()),
     },
 ];
 

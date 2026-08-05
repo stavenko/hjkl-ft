@@ -22,12 +22,23 @@ pub fn short_date(date_str: &str) -> String {
 /// A self-contained chart block (SVG line + HTML date labels). Shows the empty
 /// axes placeholder only when there's no data at all; one point already draws.
 pub fn chart_block(dates: &[&str], values: &[f64]) -> String {
+    chart_block_with_planka(dates, values, &[])
+}
+
+/// То же, плюс ИСТОРИЯ планки поверх — по одному значению на точку графика.
+///
+/// Единицы не совпадают: планка калорий измеряется тысячами ккал, вес — десятками
+/// килограммов, и в одной шкале линия планки ушла бы за поле. Поэтому она
+/// НОРМИРУЕТСЯ: собственный диапазон планки растягивается на ту же высоту, что и
+/// график. Видна не величина, а форма — когда планка росла, когда падала и как это
+/// легло на вес. Постоянная планка рисуется посередине.
+pub fn chart_block_with_planka(dates: &[&str], values: &[f64], planka: &[Option<f64>]) -> String {
     if values.is_empty() {
         return format!(
             r#"<div><svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">{AXES}</svg><div style="{LABEL_ROW}"><span></span><span></span></div></div>"#
         );
     }
-    let svg = line_chart_svg(values);
+    let svg = line_chart_svg_with_planka(values, planka);
     let first = short_date(dates.first().copied().unwrap_or(""));
     let last = if dates.len() > 1 {
         short_date(dates.last().copied().unwrap_or(""))
@@ -137,7 +148,7 @@ fn steps_bar_svg(values: &[f64], planka: Option<f64>) -> String {
     )
 }
 
-fn line_chart_svg(values: &[f64]) -> String {
+fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>]) -> String {
     let min_val = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max_val = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let range = (max_val - min_val).max(0.5);
@@ -182,10 +193,46 @@ fn line_chart_svg(values: &[f64]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
+    // Линия планки — НОРМИРОВАННАЯ: её собственный размах растягивается на ту же
+    // высоту, что и график. Величины несопоставимы (ккал против килограммов), и в
+    // общей шкале линия ушла бы за поле; здесь читается форма — когда планка росла и
+    // как на это ответил вес. Постоянная планка ложится посередине.
+    let known: Vec<f64> = planka.iter().flatten().copied().collect();
+    let planka_path = if known.len() >= 2 || (known.len() == 1 && n >= 1) {
+        let pmin = known.iter().copied().fold(f64::INFINITY, f64::min);
+        let pmax = known.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let prange = pmax - pmin;
+        let mut d = String::new();
+        let mut started = false;
+        for (i, p) in planka.iter().enumerate().take(n) {
+            let Some(v) = p else { started = false; continue };
+            let x = if n > 1 { (i as f64 / (n - 1) as f64) * w } else { w / 2.0 };
+            // Нулевой размах (планка не менялась) → середина поля.
+            let norm = if prange > f64::EPSILON { (v - pmin) / prange } else { 0.5 };
+            let y = h - norm * h;
+            d.push_str(&format!(
+                "{}{:.1},{:.1} ",
+                if started { "L" } else { "M" },
+                x,
+                y
+            ));
+            started = true;
+        }
+        // Разделитель `r##`, а не `r#`: внутри есть `"#1fa463"`, и последовательность
+        // `"#` закрыла бы обычную raw-строку прямо на цвете.
+        format!(
+            r##"<path d="{}" fill="none" stroke="#1fa463" stroke-width="1.5" stroke-dasharray="4 3" stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity="0.85"/>"##,
+            d.trim()
+        )
+    } else {
+        String::new()
+    };
+
     format!(
         r#"<svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">
   {AXES}
   {fill}
+  {planka_path}
   <path d="{path}" fill="none" stroke="var(--bulma-link)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
   {dots}
 </svg>"#

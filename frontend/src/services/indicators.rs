@@ -394,14 +394,14 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
 async fn day_cached(key: &str, date: &str) -> (f64, Option<f64>) {
     let Some(store) = cache_store(key) else {
         let value = compute_day_value(key, date).await;
-        return (value, ratio_now(key, value).await.0);
+        return (value, ratio_for(key, date, value).await.0);
     };
     if let Some(rec) = crate::services::db::get::<IndDay>(store, date).await {
         if rec.ratio.is_some() {
             return (rec.value, rec.ratio);
         }
         // Legacy / not-yet-frozen record → freeze now (if the target is known) and store.
-        let (ratio, target) = ratio_now(key, rec.value).await;
+        let (ratio, target) = ratio_for(key, date, rec.value).await;
         if ratio.is_some() {
             crate::services::db::put(
                 store,
@@ -418,7 +418,7 @@ async fn day_cached(key: &str, date: &str) -> (f64, Option<f64>) {
         return (rec.value, ratio);
     }
     let value = compute_day_value(key, date).await;
-    let (ratio, target) = ratio_now(key, value).await;
+    let (ratio, target) = ratio_for(key, date, value).await;
     crate::services::db::put(
         store,
         &IndDay { date: date.to_string(), value, ratio, target, computed_at: now_stamp() },
@@ -427,11 +427,30 @@ async fn day_cached(key: &str, date: &str) -> (f64, Option<f64>) {
     (value, ratio)
 }
 
-/// `(value / target, target)` при ТЕКУЩЕЙ планке; `(None, None)`, если планка ещё
-/// не известна. Планка возвращается вместе с долей и кладётся в запись: доля без неё
-/// не читается — по 0.97 не видно, промах это по 11800 или попадание по 10800.
-async fn ratio_now(key: &str, value: f64) -> (Option<f64>, Option<f64>) {
-    let target = target_for(key).await;
+/// `(value / target, target)` по планке, ДЕЙСТВОВАВШЕЙ на `date`; `(None, None)`,
+/// если планки на тот день ещё не было.
+///
+/// Планка возвращается вместе с долей и кладётся в запись: доля без неё не читается —
+/// по 0.97 не видно, промах это по 11800 или попадание по 10800.
+///
+/// Калории и шаги берутся из ИСТОРИИ планок: они движутся, и день обязан судиться по
+/// той величине, что действовала тогда. Остальные (белок, овощи) выводятся из
+/// профиля и в истории не нуждаются — для них берётся текущая норма.
+async fn ratio_for(key: &str, date: &str, value: f64) -> (Option<f64>, Option<f64>) {
+    let kind = match key {
+        "calories" => Some(local::PLANKA_CALORIES),
+        "steps" => Some(local::PLANKA_STEPS),
+        _ => None,
+    };
+    let target = match kind {
+        // История пуста только до самой первой установки (или у баз, заведённых
+        // раньше, чем история появилась) — тогда падаем на текущую планку.
+        Some(k) => match local::planka_on(k, date).await {
+            Some(t) => t,
+            None => target_for(key).await,
+        },
+        None => target_for(key).await,
+    };
     if target > 0.0 {
         (Some(value / target), Some(target))
     } else {
@@ -465,7 +484,7 @@ pub async fn clear_cache() {
 /// (planka not set yet) is stored but never counts as a miss.
 pub async fn record_steps(date: &str) {
     let value = local::steps_on(date).await;
-    let (ratio, target) = ratio_now("steps", value).await;
+    let (ratio, target) = ratio_for("steps", date, value).await;
     crate::services::db::put(
         "ind_steps",
         &IndDay { date: date.to_string(), value, ratio, target, computed_at: now_stamp() },

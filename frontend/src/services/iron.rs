@@ -225,12 +225,22 @@ pub async fn weekly_series() -> super::indicators::IndicatorSeries {
     let mut labels = Vec::new();
     let mut met = Vec::new();
     if let Some((cur_start, _)) = week_bounds(today) {
+        // Неделя, в которую человек ещё не вёл дневник, не судится — её просто не
+        // было. Тот же признак, что и у самого индикатора: записи в дневнике, а не
+        // наличие железа. Без этого столбик рисовался нулевым и считался незакрытой
+        // неделей, а подсказка сообщала «четыре недели не закрыты» про недели, в
+        // которые приложением ещё не пользовались.
+        let diary_days: std::collections::HashSet<String> =
+            local::list_diary_dates().await.into_iter().collect();
         let window = super::indicators::WEEKLY_WINDOW as i64;
         for back in (1..=window).rev() {
             let s = cur_start - Duration::days(7 * back);
             let e = s + Duration::days(6);
+            let logged = (0..7).any(|d| {
+                diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
+            });
             let sum = absorbed_between(s, e).await;
-            let ratio = (target > 0.0).then(|| sum / target);
+            let ratio = (target > 0.0 && logged).then(|| sum / target);
             points.push((s.format("%Y-%m-%d").to_string(), sum, ratio));
             labels.push(format!("−{back}"));
             met.push(ratio.map(|r| r >= 1.0));

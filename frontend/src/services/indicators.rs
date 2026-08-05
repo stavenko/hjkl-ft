@@ -344,6 +344,17 @@ fn now_stamp() -> String {
 /// object stores in `db::builder` and with [`invalidate_day`]/[`clear_cache`].
 const CACHED_STORES: &[&str] = &["ind_protein", "ind_veg_fruit", "ind_steps", "ind_calories"];
 
+/// Из них — те, что считаются ПО ЕДЕ. Правка дневника или продукта сбрасывает
+/// только их.
+///
+/// `ind_steps` сюда НЕ входит: шаги от еды не зависят ни на грамм. Пока сброс шёл по
+/// всем хранилищам разом, любое изменение продукта сносило замороженные дни шагов, и
+/// они пересчитывались уже по ТЕКУЩЕЙ планке. Живой случай: миграция стирания
+/// кальция и железа прошлась по всем продуктам, снесла заморозку шагов за каждый
+/// день, где что-то ели, и дни пересчитались по новой планке 11800 — пятница с 11500
+/// шагами из выполненной стала недобором, зелёный индикатор стал оранжевым.
+const FOOD_CACHED_STORES: &[&str] = &["ind_protein", "ind_veg_fruit", "ind_calories"];
+
 /// The cache store for `key`, or None if the indicator isn't cached.
 fn cache_store(key: &str) -> Option<&'static str> {
     match key {
@@ -428,10 +439,12 @@ async fn ratio_now(key: &str, value: f64) -> (Option<f64>, Option<f64>) {
     }
 }
 
-/// Drop cached values for `date` across every indicator cache — call when the
-/// diary for that day changes.
+/// Сбросить кэш за `date` у индикаторов, считающихся ПО ЕДЕ — вызывается при
+/// изменении дневника за этот день. Шаги не трогаются: они от еды не зависят, а их
+/// сброшенный день пересчитался бы по текущей планке и переписал уже вынесенный
+/// вердикт.
 pub async fn invalidate_day(date: &str) {
-    for store in CACHED_STORES {
+    for store in FOOD_CACHED_STORES {
         crate::services::db::delete(store, date).await;
     }
 }

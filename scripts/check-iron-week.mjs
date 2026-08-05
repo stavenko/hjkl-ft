@@ -36,7 +36,10 @@ function seed({ ironOpenDaysAgo, calciumGateDaysAgo = 9, withIronFood = true, le
           { key: "push_onboarding_dismissed", value: "true" },
           { key: "activity_week_unlocked", value: "true" },
           { key: "steps_gate_opened_at", value: ymd(30) },
-          { key: "calcium_week_unlocked", value: "true" },
+          // Версия заведомо выше любой миграции: этот тест НЕ про них, а миграция 1
+      // стёрла бы посеянный кальций — и неделя железа не открылась бы вовсе.
+      { key: "db_schema_version", value: "999" },
+      { key: "calcium_week_unlocked", value: "true" },
           { key: "calcium_gate_opened_at", value: ymd(calciumGateDaysAgo) },
           { key: "ind_opened_at", value: ymd(40) },
           // Без активной подписки поверх приложения висит экран проверки, который

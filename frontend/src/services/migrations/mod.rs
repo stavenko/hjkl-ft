@@ -46,6 +46,7 @@ use super::{app_flags, db, errors};
 
 mod m000_init;
 mod m001_reset_calcium_iron;
+mod m002_drop_bootstrap_db;
 
 #[cfg(test)]
 mod tests;
@@ -77,6 +78,11 @@ const ALL: &[Migration] = &[
         version: m001_reset_calcium_iron::VERSION,
         description: m001_reset_calcium_iron::DESCRIPTION,
         script: || Box::pin(m001_reset_calcium_iron::script()),
+    },
+    Migration {
+        version: m002_drop_bootstrap_db::VERSION,
+        description: m002_drop_bootstrap_db::DESCRIPTION,
+        script: || Box::pin(m002_drop_bootstrap_db::script()),
     },
 ];
 

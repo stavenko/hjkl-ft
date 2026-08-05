@@ -60,26 +60,25 @@ pub fn session_valid_here() -> bool {
     true
 }
 
-/// Finalize a sign-in / registration / pairing: record the identity, switch to
-/// this user's per-user database, then reconcile with the server so the device
-/// pulls the account's existing data without waiting for a relaunch.
+/// Finalize a sign-in / registration / pairing: record the identity, open this
+/// user's database, then reconcile with the server so the device pulls the
+/// account's existing data without waiting for a relaunch.
 ///
-/// The per-user DB switch happens BEFORE the sync (and with no bootstrap
-/// migration) so a freshly-signed-in account never pushes the previous user's
-/// leftover local data up under its token.
+/// До этого момента базы нет вообще: она принадлежит пользователю, и открыть её
+/// раньше, чем он известен, не по чему. Поэтому свежий аккаунт физически не может
+/// унаследовать чужие локальные данные — наследовать не от чего.
 async fn establish_session(user_id: &str, token: Option<&str>) {
     set_user(user_id);
-    if let Err(e) = crate::services::db::activate_for_user(user_id, false).await {
+    if let Err(e) = crate::services::db::activate_for_user(user_id).await {
         leptos::logging::error!("activate_for_user on login failed: {e}");
     }
     crate::services::app_flags::activate().await;
     if let Some(token) = token {
         set_token(token);
     }
-    // База сменилась на пользовательскую, и её надо мигрировать отдельно: версия из
-    // гостевой сюда не переезжает (`migrate_bootstrap = false` выше). Ждать эффекта
-    // в `app.rs` нельзя — состояние могло быть `Ready` и до входа (так работает
-    // онбординг), тогда эффект не перезапустится и база останется немигрированной.
+    // База только что открылась — здесь она и мигрируется. Ждать эффекта в `app.rs`
+    // нельзя: состояние могло быть `Ready` и до входа (так работает онбординг),
+    // тогда он не перезапустится и база останется немигрированной.
     leptos::spawn_local(async {
         if crate::services::migrations::run_for_current_db().await > 0 {
             crate::services::classify::sweep_unprocessed().await;

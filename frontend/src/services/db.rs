@@ -54,9 +54,6 @@ fn bump(store_name: &str) {
     });
 }
 
-/// The legacy, device-global database. Used before login (no user identity yet)
-/// and as the one-time migration source for users created before per-user scoping.
-const BOOTSTRAP_DB: &str = "hjkl-ft";
 const DB_VERSION: u32 = 18;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
@@ -214,110 +211,44 @@ async fn sleep_ms(ms: u32) {
     let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }
 
-/// Open the bootstrap database and create the reactive version signals. The
-/// active database is switched to the per-user one by [`activate_for_user`] once
-/// the signed-in user is known (at launch, and on login / pairing).
-pub async fn init() -> Result<(), String> {
-    let rexie = open(BOOTSTRAP_DB).await?;
-    DB.with(|cell| cell.replace(Some(rexie)));
-    DB_NAME.with(|c| c.replace(Some(BOOTSTRAP_DB.to_string())));
-
+/// Создать реактивные сигналы версий сторов. БАЗУ НЕ ОТКРЫВАЕТ.
+///
+/// Базы у приложения нет, пока не известен пользователь: данных вне базы
+/// пользователя не существует. Раньше здесь открывалась device-global `hjkl-ft` —
+/// «бутстрап», — и до входа активной была она. Хранить в ней было нечего (персону
+/// спрашивают виджеты уже после входа, а устройство живёт в localStorage), зато
+/// туда оседали служебные записи: версия миграций, отметки о выполненных
+/// backfill'ах, штампы `updated_at`. Всё это относится к базе пользователя, а не к
+/// устройству, и в отдельной базе только путало.
+///
+/// Сигналы нужны раньше базы: на них подписаны ресурсы виджетов, а те строятся до
+/// того, как станет ясно, есть ли вообще сессия.
+pub fn init_signals() {
     STORE_VERSIONS.with(|cell| {
         let mut map = cell.borrow_mut();
         for &name in ALL_STORES {
             map.entry(name).or_insert_with(|| create_rw_signal(0u32));
         }
     });
-
-    // Hydrate the profile cache off the bootstrap DB for the signed-out path
-    // (`activate_for_user` re-hydrates once a user's database is swapped in).
-    crate::services::profile::migrate_from_local_storage().await;
-    crate::services::profile::hydrate().await;
-    Ok(())
 }
 
-/// Switch the active database to this user's per-user IndexedDB.
+/// Открыть базу пользователя и сделать её активной.
 ///
-/// When `migrate_bootstrap` is set and the user's database is still empty, the
-/// legacy shared `hjkl-ft` database is copied in and then cleared — a one-time
-/// migration for accounts created before per-user scoping (it also rescues
-/// local-only stores like `progress_photos`, which sync never carries). Pass
-/// `migrate_bootstrap=true` ONLY for the already-signed-in user at launch, where
-/// the bootstrap data is attributable to them; on an explicit login it MUST be
-/// false so a new account never inherits the previous user's leftover data.
-pub async fn activate_for_user(user_id: &str, migrate_bootstrap: bool) -> Result<(), String> {
+/// Единственный способ получить базу вообще. До входа её нет — обращения к
+/// хранилищу в это время возвращают пустоту (чтения) или громко ругаются (записи),
+/// см. [`with_db_opt`].
+pub async fn activate_for_user(user_id: &str) -> Result<(), String> {
     let target = open(&user_db_name(user_id)).await?;
-
-    if migrate_bootstrap && is_data_empty(&target).await {
-        let bootstrap = open(BOOTSTRAP_DB).await?;
-        if !is_data_empty(&bootstrap).await {
-            copy_all(&bootstrap, &target).await;
-            clear_db(&bootstrap).await;
-        }
-    }
 
     DB.with(|cell| cell.replace(Some(target)));
     DB_NAME.with(|c| c.replace(Some(user_db_name(user_id))));
 
-    // One-time backfill of the legacy localStorage profile into the synced
-    // `profile` store (no-op if a row already exists), then hydrate the in-memory
-    // cache so synchronous profile getters read the active user's profile.
-    crate::services::profile::migrate_from_local_storage().await;
+    // Гидратация кэша профиля, чтобы синхронные геттеры читали профиль АКТИВНОГО
+    // пользователя.
     crate::services::profile::hydrate().await;
 
     bump_all();
     Ok(())
-}
-
-/// True when no data store holds any row (`_sync_meta` is ignored — cursors are
-/// not user data).
-async fn is_data_empty(db: &Rexie) -> bool {
-    for &store in ALL_STORES {
-        if store == "_sync_meta" {
-            continue;
-        }
-        let tx = db
-            .transaction(&[store], TransactionMode::ReadOnly)
-            .expect("failed to create transaction");
-        let count = tx.store(store).expect("store not found").count(None).await.expect("count failed");
-        if count > 0 {
-            return false;
-        }
-    }
-    true
-}
-
-/// Copy every row of every store from `src` into `dst` (raw values, by key path).
-async fn copy_all(src: &Rexie, dst: &Rexie) {
-    for &store in ALL_STORES {
-        let rtx = src
-            .transaction(&[store], TransactionMode::ReadOnly)
-            .expect("failed to create transaction");
-        let rows = rtx.store(store).expect("store not found").get_all(None, None).await.expect("get_all failed");
-        if rows.is_empty() {
-            continue;
-        }
-        let wtx = dst
-            .transaction(&[store], TransactionMode::ReadWrite)
-            .expect("failed to create transaction");
-        let wstore = wtx.store(store).expect("store not found");
-        for val in &rows {
-            wstore.put(val, None).await.expect("put failed");
-        }
-        wtx.done().await.expect("transaction failed");
-    }
-}
-
-/// Clear every store of a database (used to wipe the bootstrap DB after its data
-/// has been migrated into a per-user database).
-async fn clear_db(db: &Rexie) {
-    for &store in ALL_STORES {
-        let tx = db
-            .transaction(&[store], TransactionMode::ReadWrite)
-            .expect("failed to create transaction");
-        tx.store(store).expect("store not found").clear().await.expect("clear failed");
-        tx.done().await.expect("transaction failed");
-    }
 }
 
 /// Bump every store's version signal — call after swapping the active database so
@@ -330,15 +261,33 @@ fn bump_all() {
     });
 }
 
-fn with_db<F, R>(f: F) -> R
+/// Доступ к активной базе, если она есть.
+///
+/// Базы нет до входа: она принадлежит пользователю, а он ещё не известен. Раньше
+/// вместо неё открывалась device-global «бутстрап», и обращение всегда во что-то
+/// попадало; теперь его может не быть, и это НОРМАЛЬНОЕ состояние, а не сбой —
+/// панику здесь ставить нельзя.
+fn with_db_opt<F, R>(f: F) -> Option<R>
 where
     F: FnOnce(&Rexie) -> R,
 {
-    DB.with(|cell| {
-        let borrow = cell.borrow();
-        let db = borrow.as_ref().expect("DB not initialized");
-        f(db)
-    })
+    DB.with(|cell| cell.borrow().as_ref().map(f))
+}
+
+/// Сообщить, что обращение к хранилищу случилось до входа.
+///
+/// ЧТЕНИЕ до входа законно: виджеты строятся раньше, чем выясняется, есть ли
+/// сессия, и пустой ответ для них — правда. А вот ЗАПИСЬ означает, что данные
+/// пытаются положить туда, где их некому хранить: молчать об этом нельзя.
+fn no_db(op: &str, store_name: &str) {
+    if op == "read" {
+        return;
+    }
+    crate::services::errors::record(
+        "Хранилище",
+        &format!("{op} в «{store_name}» до входа: базы пользователя ещё нет, запись потеряна"),
+    );
+    leptos::logging::error!("db::{op}({store_name}) без активной базы — запись потеряна");
 }
 
 // ── Sync v2 outbox: EVERY local mutation of a synced store is journaled ──────
@@ -460,10 +409,13 @@ pub async fn put<T: Serialize>(store_name: &str, value: &T) {
 /// json-compatible serializer: the default serde_wasm_bindgen turns JSON maps
 /// into JS `Map` objects, whose IndexedDB keyPath evaluation fails.
 pub async fn put_json_untracked(store_name: &str, value: &serde_json::Value) {
-    let tx = with_db(|db| {
+    let Some(tx) = with_db_opt(|db| {
         db.transaction(&[store_name], TransactionMode::ReadWrite)
             .expect("failed to create transaction")
-    });
+    }) else {
+        no_db("write", store_name);
+        return;
+    };
     let store = tx.store(store_name).expect("store not found");
     let ser = serde_wasm_bindgen::Serializer::json_compatible();
     let js_val = value.serialize(&ser).expect("serialize failed");
@@ -482,10 +434,13 @@ pub async fn put_json_untracked(store_name: &str, value: &serde_json::Value) {
 /// снаружи `Object.keys()` у `Map` даёт ноль, и на этом легко заключить, что данных
 /// нет вовсе.
 pub async fn put_untracked<T: Serialize>(store_name: &str, value: &T) {
-    let tx = with_db(|db| {
+    let Some(tx) = with_db_opt(|db| {
         db.transaction(&[store_name], TransactionMode::ReadWrite)
             .expect("failed to create transaction")
-    });
+    }) else {
+        no_db("write", store_name);
+        return;
+    };
     let store = tx.store(store_name).expect("store not found");
     let ser = serde_wasm_bindgen::Serializer::json_compatible();
     let js_val = value.serialize(&ser).expect("serialize failed");
@@ -495,10 +450,13 @@ pub async fn put_untracked<T: Serialize>(store_name: &str, value: &T) {
 }
 
 pub async fn get<T: DeserializeOwned>(store_name: &str, id: &str) -> Option<T> {
-    let tx = with_db(|db| {
+    let Some(tx) = with_db_opt(|db| {
         db.transaction(&[store_name], TransactionMode::ReadOnly)
             .expect("failed to create transaction")
-    });
+    }) else {
+        no_db("read", store_name);
+        return None;
+    };
     let store = tx.store(store_name).expect("store not found");
     let key = JsValue::from_str(id);
     let result = store.get(key).await.expect("get failed");
@@ -515,10 +473,13 @@ pub async fn delete(store_name: &str, id: &str) {
 
 /// Untracked delete — ONLY for sync-apply paths.
 pub async fn delete_untracked(store_name: &str, id: &str) {
-    let tx = with_db(|db| {
+    let Some(tx) = with_db_opt(|db| {
         db.transaction(&[store_name], TransactionMode::ReadWrite)
             .expect("failed to create transaction")
-    });
+    }) else {
+        no_db("delete", store_name);
+        return;
+    };
     let store = tx.store(store_name).expect("store not found");
     let key = JsValue::from_str(id);
     store.delete(key).await.expect("delete failed");
@@ -551,10 +512,13 @@ fn decode_row<T: DeserializeOwned>(store_name: &str, val: JsValue) -> Option<T> 
 }
 
 pub async fn list_all<T: DeserializeOwned>(store_name: &str) -> Vec<T> {
-    let tx = with_db(|db| {
+    let Some(tx) = with_db_opt(|db| {
         db.transaction(&[store_name], TransactionMode::ReadOnly)
             .expect("failed to create transaction")
-    });
+    }) else {
+        no_db("read", store_name);
+        return Vec::new();
+    };
     let store = tx.store(store_name).expect("store not found");
     let entries = store.get_all(None, None).await.expect("get_all failed");
     entries
@@ -568,10 +532,13 @@ pub async fn list_by_index<T: DeserializeOwned>(
     index_name: &str,
     value: &str,
 ) -> Vec<T> {
-    let tx = with_db(|db| {
+    let Some(tx) = with_db_opt(|db| {
         db.transaction(&[store_name], TransactionMode::ReadOnly)
             .expect("failed to create transaction")
-    });
+    }) else {
+        no_db("read", store_name);
+        return Vec::new();
+    };
     let store = tx.store(store_name).expect("store not found");
     let index = store.index(index_name).expect("index not found");
     let key = JsValue::from_str(value);
@@ -587,10 +554,13 @@ pub async fn list_by_index<T: DeserializeOwned>(
 }
 
 pub async fn count(store_name: &str) -> u32 {
-    let tx = with_db(|db| {
+    let Some(tx) = with_db_opt(|db| {
         db.transaction(&[store_name], TransactionMode::ReadOnly)
             .expect("failed to create transaction")
-    });
+    }) else {
+        no_db("read", store_name);
+        return 0;
+    };
     let store = tx.store(store_name).expect("store not found");
     store.count(None).await.expect("count failed")
 }
@@ -603,10 +573,13 @@ pub async fn wipe_all() {
 }
 
 pub async fn clear(store_name: &str) {
-    let tx = with_db(|db| {
+    let Some(tx) = with_db_opt(|db| {
         db.transaction(&[store_name], TransactionMode::ReadWrite)
             .expect("failed to create transaction")
-    });
+    }) else {
+        no_db("clear", store_name);
+        return;
+    };
     let store = tx.store(store_name).expect("store not found");
     store.clear().await.expect("clear failed");
     tx.done().await.expect("transaction failed");

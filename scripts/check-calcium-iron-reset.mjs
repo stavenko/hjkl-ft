@@ -125,12 +125,12 @@ let st = {};
 const t0 = Date.now();
 while (Date.now() - t0 < WAIT_MS) {
   st = await read();
-  if (st.flag === "1" && st.ca != null && st.ca !== 999 && st.mg != null && st.mg !== 0.25) break;
+  if (/^[1-9][0-9]*$/.test(String(st.flag)) && st.ca != null && st.ca !== 999 && st.mg != null && st.mg !== 0.25) break;
   await page.waitForTimeout(3000);
 }
 console.log(`после миграции: кальций ${st.ca}, железо ${st.mg} мг, усвоение ${st.abs}, флаг ${st.flag}`);
 
-check("версия базы поднята до 1", st.flag === "1", String(st.flag));
+check("версия базы поднята", /^[1-9][0-9]*$/.test(String(st.flag)), String(st.flag));
 check("испорченный кальций 999 заменён", st.ca !== 999, `${st.ca}`);
 check("legacy-ключ «Железо» убран из карты", st.legacyFe === undefined, String(st.legacyFe));
 check("испорченное железо 0.25 заменено", st.mg !== 0.25 && st.mg != null, `${st.mg} мг`);

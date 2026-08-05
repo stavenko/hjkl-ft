@@ -19,8 +19,6 @@ use crate::services::{db, sync};
 const PROFILE_KEY: &str = "profile";
 
 /// Legacy device-global localStorage keys, migrated once into the synced row.
-const KEY_SEX: &str = "profile_sex";
-const KEY_HEIGHT: &str = "profile_height_cm";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sex {
@@ -259,46 +257,6 @@ pub fn protein_target_from_profile(weight_kg: f64) -> u32 {
         (Some(h), Some(age), Some(sex)) => protein_target_g(weight_kg, h, age, sex).unwrap_or(0),
         _ => 0,
     }
-}
-
-/// One-time migration of the legacy device-global localStorage profile (sex +
-/// height) into the synced `profile` row.
-///
-/// No-op when a synced row already exists — this guards the login path so a
-/// device's leftover localStorage never clobbers a newer account profile.
-/// Otherwise, if either legacy key is present, build a row stamped with the
-/// real now (so a genuinely-newer remote profile wins on the next pull), persist
-/// it, and remove the legacy localStorage keys.
-pub async fn migrate_from_local_storage() {
-    if db::get::<ProfileRow>("profile", PROFILE_KEY).await.is_some() {
-        return;
-    }
-    let Some(ls) = local_storage() else { return };
-    let sex = ls.get_item(KEY_SEX).ok().flatten().filter(|v| v == "male" || v == "female");
-    let height_cm = ls
-        .get_item(KEY_HEIGHT)
-        .ok()
-        .flatten()
-        .and_then(|v| v.parse::<f64>().ok())
-        .filter(|h| *h > 0.0);
-
-    if sex.is_none() && height_cm.is_none() {
-        return;
-    }
-
-    let row = ProfileRow {
-        key: PROFILE_KEY.to_string(),
-        sex,
-        height_cm,
-        birth_year: None,
-        goal: None,
-        cycle_start: None,
-        steps_planka: None,
-        updated_at: chrono::Utc::now().to_rfc3339(),
-    };
-    db::put("profile", &row).await;
-    let _ = ls.remove_item(KEY_SEX);
-    let _ = ls.remove_item(KEY_HEIGHT);
 }
 
 #[cfg(test)]

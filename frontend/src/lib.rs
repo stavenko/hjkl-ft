@@ -25,42 +25,30 @@ pub fn main() {
         // Profile reactivity BEFORE db::init (which hydrates the profile cache).
         services::profile::init();
 
-        // Opening/upgrading IndexedDB is the one critical-path step that can BLOCK
-        // (a schema upgrade held up by a not-yet-closed previous session on a PWA
-        // update). It's bounded by a timeout and returns an error instead of hanging
-        // the splash forever — surface it on the update-error screen.
-        if let Err(e) = services::db::init().await {
-            show_critical_error(&e);
-            return;
-        }
-        services::app_flags::reload().await;
-        // Switch to the signed-in user's per-user database before any sync. The
-        // bootstrap (`hjkl-ft`) database belongs to this user — they were the last
-        // signed-in account on the device — so migrate it in (one-time, rescues
-        // local-only stores like progress photos), then keep using the per-user DB.
+        // Сигналы версий сторов нужны раньше самой базы: на них подписаны ресурсы
+        // виджетов, а те строятся до того, как выяснится, есть ли сессия.
+        services::db::init_signals();
+
+        // База принадлежит ПОЛЬЗОВАТЕЛЮ и открывается, только когда он известен.
+        // Данных вне его базы не существует: устройство живёт в localStorage, а
+        // персону спрашивают виджеты уже внутри приложения. Открытие/апгрейд
+        // IndexedDB — единственный шаг критического пути, который может ЗАБЛОКИРОВАТЬ
+        // (апгрейд схемы, придержанный не закрытой сессией при обновлении PWA);
+        // он ограничен таймаутом и возвращает ошибку вместо вечного сплэша.
         if let Some(uid) = services::auth::get_user_id() {
-            // This runs UNDER the splash (part of "teal-izing the DB"). The one-time
-            // bootstrap→per-user migration copies stores, which can grow on a large
-            // history — measure it, so a slow migration surfaces instead of hiding
-            // behind a blank splash. If it regularly exceeds this, move its progress
-            // into the splash rather than the critical path.
-            let t0 = js_sys::Date::now();
-            if let Err(e) = services::db::activate_for_user(&uid, true).await {
+            if let Err(e) = services::db::activate_for_user(&uid).await {
                 show_critical_error(&e);
                 return;
             }
-            let dt = js_sys::Date::now() - t0;
-            if dt > 500.0 {
-                leptos::logging::warn!("db::activate_for_user took {dt:.0}ms under the splash");
-            }
             services::app_flags::activate().await;
-        }
-        // One-time: move the legacy steps planka out of the `goals` store (where every
-        // nutrient-iterating food UI wrongly picked it up) into its own profile field.
-        // Runs BEFORE the first paint so `goals` is clean when any food UI renders.
-        if !services::app_flags::get_bool("steps_planka_migrated_v1") {
-            services::local::migrate_steps_goal_to_planka().await;
-            services::app_flags::set_bool("steps_planka_migrated_v1", true);
+            // Разовый перенос планки шагов из `goals` в поле профиля. Только здесь:
+            // без базы читать нечего, а флаг о выполнении принадлежит пользователю.
+            // Выполняется ДО первой отрисовки, чтобы `goals` были чисты к моменту,
+            // когда любой продуктовый экран начнёт их перебирать.
+            if !services::app_flags::get_bool("steps_planka_migrated_v1") {
+                services::local::migrate_steps_goal_to_planka().await;
+                services::app_flags::set_bool("steps_planka_migrated_v1", true);
+            }
         }
         services::i18n::init_lang();
         services::i18n::init_weight_unit();

@@ -266,6 +266,9 @@ export async function openSeeded(browser, opts = {}) {
           const req = indexedDB.deleteDatabase(n);
           req.onsuccess = req.onerror = req.onblocked = () => r();
         });
+      // Device-global «hjkl-ft» больше не заводится приложением (база принадлежит
+      // пользователю и открывается только для него), но у прогонов на старых
+      // профилях она могла остаться — чистим.
       await del("hjkl-ft");
       await del(`hjkl-ft-${uid}`);
       localStorage.clear();

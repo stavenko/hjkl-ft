@@ -1,10 +1,10 @@
-// Отметка о прогоне миграций привязана к ИМЕНИ БАЗЫ, а не к сессии.
+// База принадлежит ПОЛЬЗОВАТЕЛЮ и открывается только для него.
 //
-// Приложение стартует на гостевой базе `hjkl-ft`, а при входе переключается на
-// `hjkl-ft-<user_id>`. Гостевая при этом НЕ копируется, значит версия из неё не
-// переезжает — и базу пользователя надо мигрировать отдельно. Проверяем, что версия
-// появляется в ОБЕИХ базах: иначе общая защёлка «один раз за сессию» оставила бы
-// пользовательскую немигрированной, а именно она и содержит данные.
+// Device-global «hjkl-ft» больше нет: до входа базы не существует вовсе, а миграции
+// идут в базе пользователя. Проверяем три вещи на одной вкладке:
+//   1. без сессии база не заводится ни под каким именем;
+//   2. после входа база пользователя появляется и мигрируется;
+//   3. миграция 2 удаляет старую «hjkl-ft», если та осталась с прежних сборок.
 import { chromium } from "playwright";
 
 const BASE = process.env.FE || "https://renorma-fit-dev.pages.dev";
@@ -32,8 +32,8 @@ const b = await chromium.launch({ headless: true });
 const ctx = await b.newContext({ viewport: { width: 430, height: 932 }, serviceWorkers: "block" });
 const page = await ctx.newPage();
 
-// Версия базы по ИМЕНИ базы. Открываем существующую: несуществующую indexedDB.open
-// создал бы пустой, и «версии нет» было бы неотличимо от «базы нет».
+const listDbs = () => page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name));
+
 const versionOf = (dbName) => page.evaluate(async (name) => {
   const dbs = await indexedDB.databases();
   if (!dbs.some((d) => d.name === name)) return "базы нет";
@@ -50,7 +50,7 @@ const versionOf = (dbName) => page.evaluate(async (name) => {
   return rows.find((r) => r.key === "db_schema_version")?.value ?? "нет версии";
 }, dbName);
 
-const waitVersion = async (dbName, ms = 60000) => {
+const waitVersion = async (dbName, ms = 90000) => {
   const t0 = Date.now();
   let v = "";
   while (Date.now() - t0 < ms) {
@@ -61,21 +61,28 @@ const waitVersion = async (dbName, ms = 60000) => {
   return v;
 };
 
-// 1. ОНБОРДИНГ на гостевой базе. Сессии нет, но `initial_state` выдаёт входу на
-//    /onboard состояние Ready — значит миграции здесь пройдут. Запрета на это нет:
-//    важно лишь, что они отрабатывают вхолостую и не мешают. (Просто «/» без сессии
-//    даёт Auth, а не Ready, и туда миграции не заходят вовсе.)
+// 1. БЕЗ СЕССИИ. Заходим на онбординг — состояние там Ready, то есть все условия
+//    запуска миграций выполнены. Базы всё равно не должно появиться: открывать
+//    нечего, пользователь неизвестен.
 await page.goto(BASE, { waitUntil: "domcontentloaded" });
 await page.evaluate(() => { localStorage.clear(); localStorage.setItem("pwa_dismissed", "true"); });
+// Заводим «hjkl-ft» руками — как она осталась бы от прежних сборок. Миграция 2
+// обязана её убрать после входа.
+await page.evaluate(() => new Promise((res) => {
+  const q = indexedDB.open("hjkl-ft", 1);
+  q.onupgradeneeded = () => q.result.createObjectStore("legacy", { keyPath: "id" });
+  q.onsuccess = () => { q.result.close(); res(); };
+  q.onerror = () => res();
+}));
 await page.goto(`${BASE}/onboard`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector("#splash", { state: "detached", timeout: 20000 }).catch(() => {});
-const guest = await waitVersion("hjkl-ft");
-console.log(`гостевая база hjkl-ft: версия ${guest}`);
-check("на онбординге миграции проходят вхолостую и не падают",
-  /^\d+$/.test(String(guest)), String(guest));
+await page.waitForTimeout(12000);
+const before = await listDbs();
+console.log(`без сессии базы: ${JSON.stringify(before)}`);
+check("без сессии база пользователя не заводится",
+  !before.some((n) => String(n).startsWith("hjkl-ft-")), JSON.stringify(before));
 
-// 2. База пользователя: та же вкладка, сессия появилась. Версия обязана появиться и
-//    здесь — своим прогоном, а не унаследованной из гостевой.
+// 2. ПОСЛЕ ВХОДА. База пользователя появляется и мигрируется.
 await page.evaluate(({ uid, token }) => {
   localStorage.setItem("user_id", uid);
   localStorage.setItem("auth_token", token);
@@ -87,8 +94,12 @@ await page.goto(BASE, { waitUntil: "domcontentloaded" });
 await page.waitForSelector("#splash", { state: "detached", timeout: 20000 }).catch(() => {});
 const own = await waitVersion(`hjkl-ft-${uid}`);
 console.log(`база пользователя hjkl-ft-${uid}: версия ${own}`);
-check("база пользователя мигрирована отдельно", /^\d+$/.test(String(own)), String(own));
-check("версии сошлись", String(guest) === String(own), `гостевая ${guest}, своя ${own}`);
+check("база пользователя создана и мигрирована", /^\d+$/.test(String(own)), String(own));
+
+// 3. Миграция 2 убрала старую device-global базу.
+const after = await listDbs();
+console.log(`после входа базы: ${JSON.stringify(after)}`);
+check("старая база hjkl-ft удалена", !after.includes("hjkl-ft"), JSON.stringify(after));
 
 console.log(fail === 0 ? "\n=== ALL OK ===" : `\n=== FAILURES: ${fail} ===`);
 await b.close();

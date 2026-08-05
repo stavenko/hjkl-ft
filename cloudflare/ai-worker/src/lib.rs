@@ -304,6 +304,36 @@ fn usage_from_sse_line(line: &str) -> Option<(i64, i64)> {
     usage_split(&serde_json::from_str::<serde_json::Value>(data).ok()?)
 }
 
+/// The answer text carried by ONE complete SSE line, if it carries any.
+fn content_from_sse_line(line: &str) -> Option<String> {
+    let data = line.strip_prefix("data:")?.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(data).ok()?;
+    let c = v.get("choices")?.get(0)?.get("delta")?.get("content")?.as_str()?;
+    (!c.is_empty()).then(|| c.to_string())
+}
+
+/// Сколько подряд идущих `!` считать срывом генерации.
+const RUNAWAY_BANGS: usize = 10;
+
+/// Аварийный хвост потока: клиенту говорится, что ответ не состоялся, и поток
+/// закрывается. Ответ обрывается НАМЕРЕННО — дальше модель всё равно выдаёт мусор,
+/// а платим мы за каждый выданный токен.
+fn runaway_sse_tail() -> Vec<u8> {
+    let payload = serde_json::json!({
+        "error": {
+            "type": "runaway_generation",
+            "message": format!(
+                "поток оборван: модель выдала {RUNAWAY_BANGS} восклицательных знаков подряд"
+            ),
+        },
+        "choices": [{ "index": 0, "delta": {}, "finish_reason": "runaway" }],
+    });
+    format!("data: {payload}\n\ndata: [DONE]\n\n").into_bytes()
+}
+
 
 // ── Chat completions request massaging ────────────────────────────────────────
 
@@ -538,31 +568,73 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
         });
     }
 
-    let mut carry: Vec<u8> = Vec::new();
-    let watched = futures_util::StreamExt::map(
+    // Состояние наблюдателя: недособранный хвост строки, счётчик подряд идущих `!`
+    // и признак того, что поток уже оборван предохранителем.
+    struct Watch {
+        carry: Vec<u8>,
+        bangs: usize,
+        aborted: bool,
+    }
+    let watch = Watch { carry: Vec::new(), bangs: 0, aborted: false };
+
+    // ПРЕДОХРАНИТЕЛЬ. Модель изредка срывается и молотит один символ до самого
+    // потолка — наблюдалось 6774 знака `!` подряд на запрос омега-3. Разобрать это
+    // нельзя, попытка всё равно пропадёт, но токены тарифицируются все. Поэтому
+    // поток обрывается на месте: клиент получает явную ошибку, а генерация
+    // прекращается — мы перестаём читать тело, и запрос к Workers AI отменяется.
+    let watched = futures_util::StreamExt::scan(
         worker::ByteStream::from(stream),
-        move |chunk: Result<Vec<u8>>| {
+        watch,
+        move |st, chunk: Result<Vec<u8>>| {
+            // Хвост уже отправлен — поток закончен.
+            if st.aborted {
+                return futures_util::future::ready(None);
+            }
             if let Ok(bytes) = &chunk {
-                carry.extend_from_slice(bytes);
+                st.carry.extend_from_slice(bytes);
                 // Only COMPLETE lines can be parsed; the tail waits for the next chunk.
                 let mut consumed = 0usize;
-                for line in carry.split_inclusive(|b| *b == b'\n') {
+                let mut runaway = false;
+                for line in st.carry.split_inclusive(|b| *b == b'\n') {
                     if !line.ends_with(b"\n") {
                         break;
                     }
                     consumed += line.len();
-                    if let Some(u) = usage_from_sse_line(&String::from_utf8_lossy(line)) {
+                    let text = String::from_utf8_lossy(line);
+                    if let Some(u) = usage_from_sse_line(&text) {
                         let _ = tx.unbounded_send(u);
                     }
+                    // Счётчик ведётся по СКЛЕЕННОМУ ответу, а не по сырым байтам:
+                    // при срыве каждый знак приезжает отдельным чанком, и подряд в
+                    // одном чанке они никогда не встретятся.
+                    if let Some(c) = content_from_sse_line(&text) {
+                        for ch in c.chars() {
+                            st.bangs = if ch == '!' { st.bangs + 1 } else { 0 };
+                            if st.bangs >= RUNAWAY_BANGS {
+                                runaway = true;
+                                break;
+                            }
+                        }
+                    }
+                    if runaway {
+                        break;
+                    }
                 }
-                carry.drain(..consumed);
+                st.carry.drain(..consumed.min(st.carry.len()));
                 // A single SSE line is small; anything longer than this is not a line
                 // we are waiting for, and the buffer must not grow without bound.
-                if carry.len() > 64 * 1024 {
-                    carry.clear();
+                if st.carry.len() > 64 * 1024 {
+                    st.carry.clear();
+                }
+                if runaway {
+                    st.aborted = true;
+                    console_error!(
+                        "runaway generation: {RUNAWAY_BANGS} consecutive '!' — stream aborted"
+                    );
+                    return futures_util::future::ready(Some(Ok(runaway_sse_tail())));
                 }
             }
-            chunk
+            futures_util::future::ready(Some(chunk))
         },
     );
     let resp = Response::from_stream(watched)?;

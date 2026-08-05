@@ -131,9 +131,16 @@ const readFoods = () => page.evaluate(async (uid) => {
     rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
   });
   db.close();
+  // ВНИМАНИЕ: `nutrients` лежит в базе в ДВУХ формах. Локальная запись идёт через
+  // дефолтный serde_wasm_bindgen, который кладёт BTreeMap как JS `Map`; строка,
+  // приехавшая синком, пишется json-совместимым сериализатором и лежит обычным
+  // объектом. `Object.keys()` у Map всегда даёт 0 — прочитав так, легко решить, что
+  // нутриенты не пишутся вовсе. Считаем обе формы.
+  const size = (n) => (n instanceof Map ? n.size : Object.keys(n || {}).length);
+  const dump = (n) => JSON.stringify(n instanceof Map ? Object.fromEntries(n) : n || {});
   return all.map((f) => ({ id: f.id, name: f.name, mg: f.iron_mg, abs: f.iron_absorption,
     tagged: f.is_snack !== null && f.is_snack !== undefined,
-    nutrients: Object.keys(f.nutrients || {}).length }));
+    values: dump(f.nutrients), nutrients: size(f.nutrients) }));
 }, uid);
 
 const t0 = Date.now();
@@ -145,10 +152,10 @@ while (Date.now() - t0 < WAIT_MS) {
   await page.waitForTimeout(3000);
 }
 
-for (const r of rows) console.log(`  ${r.name.padEnd(10)} железо ${String(r.mg).padEnd(6)} усвоение ${String(r.abs).padEnd(6)} теги ${r.tagged} нутриентов ${r.nutrients}`);
+for (const r of rows) console.log(`  ${r.name.padEnd(10)} железо ${String(r.mg).padEnd(6)} усвоение ${String(r.abs).padEnd(6)} теги ${r.tagged} нутриенты ${r.values}`);
 const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
-check("продукт, съеденный ГОД назад, разобран", byId.old?.mg != null && byId.old?.tagged, JSON.stringify(byId.old));
-check("продукт, которого НЕТ в дневнике, разобран", byId.never?.mg != null && byId.never?.tagged, JSON.stringify(byId.never));
+check("продукт, съеденный ГОД назад, разобран", byId.old?.mg != null && byId.old?.tagged && byId.old?.nutrients === 3, JSON.stringify(byId.old));
+check("продукт, которого НЕТ в дневнике, разобран", byId.never?.mg != null && byId.never?.tagged && byId.never?.nutrients === 3, JSON.stringify(byId.never));
 check("уже заполненный (с нулями) не изменился", byId.done?.mg === 0 && byId.done?.abs === 0.05, JSON.stringify(byId.done));
 // Заполненный продукт не должен породить НИ ОДНОГО запроса — ни про нутриенты,
 // ни про железо, ни про теги.

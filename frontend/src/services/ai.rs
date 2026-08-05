@@ -64,35 +64,6 @@ fn strip_code_fences(s: &str) -> &str {
     }
 }
 
-fn unwrap_schema_envelope(s: &str) -> &str {
-    const PREFIX: &str = r#""properties":"#;
-    if let Some(idx) = s.find(PREFIX) {
-        let start = idx + PREFIX.len();
-        if let Some(obj_start) = s[start..].find('{') {
-            let inner_start = start + obj_start;
-            let mut depth = 0i32;
-            let mut end = inner_start;
-            for (i, c) in s[inner_start..].char_indices() {
-                match c {
-                    '{' => depth += 1,
-                    '}' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            end = inner_start + i + 1;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            if depth == 0 {
-                return &s[inner_start..end];
-            }
-        }
-    }
-    s
-}
-
 /// Which stream a token belongs to, reported to the caller as lookup progresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiPhase {
@@ -244,107 +215,40 @@ pub async fn lookup(
         .map(|s| (s.key.clone(), s.name.clone()))
         .collect();
 
-    // Use `execute::<T>` so the ai-worker injects the JSON schema as an
-    // instruction — that reliably keeps the model in JSON mode (without it the
-    // model often replies in Markdown). The earlier "schema corrupts output" and
-    // "stochastic garbage" theories were both wrong: the real bug was in the
-    // ai-worker's SSE relay dropping numeric tokens (now fixed). We deliberately
-    // omit a numeric example from the prompt: concrete sample values anchored the
-    // model (it kept returning cooked-rice 155 kcal for «рис»); the schema carries
-    // the shape.
-    //
-    // qwen3 still occasionally returns an EMPTY content stream or malformed JSON
-    // (observed live: `recommended` as a bare number instead of {value,unit}).
-    // That's transient, so retry a couple of times before surfacing the error —
-    // same policy as `generate`. FAIL LOUDLY only after the retries are spent.
-    const ATTEMPTS: usize = 3;
-    let mut last_err = String::new();
-    for attempt in 0..ATTEMPTS {
-        if attempt > 0 {
-            leptos::logging::warn!("lookup retry #{attempt}: {last_err}");
-        }
-        // Thinking OFF: with it ON qwen3 parks a short answer (e.g. «семечки») in
-        // the reasoning channel and returns empty content — the exact failure that
-        // surfaced live. Off makes it answer in content reliably, is faster (no
-        // wasted reasoning tokens) and needs no fallback. Same as the enrichment
-        // path (`lookup_nutrient`). The by-name tab just won't show a 🧠 phase.
-        let executor = build_executor_think(false)?;
-        let result = executor
-            .execute::<NutritionResponse>(prompt.clone())
-            .await
-            .map_err(|e| format!("LLM execute error: {e:?}"))?;
+    // The schema-injected JSON mode reliably keeps the model in JSON (without it it
+    // often replies in Markdown). No numeric example in the prompt on purpose:
+    // concrete sample values anchored the model (it kept returning cooked-rice
+    // 155 kcal for «рис»); the schema carries the shape.
+    let response: NutritionResponse = generate(prompt, on_token).await?;
 
-        let mut thinking_stream = result.thinking_stream;
-        let on_think = on_token.clone();
-        wasm_bindgen_futures::spawn_local(async move {
-            while let Some(token) = thinking_stream.next().await {
-                if let Ok(t) = token {
-                    leptos::logging::log!("[think] {}", t.content);
-                    on_think(AiPhase::Thinking);
-                }
-            }
-        });
+    let nutrients: BTreeMap<String, AiNutrientDetail> = response
+        .custom_nutrients
+        .into_iter()
+        .filter_map(|(ai_key, v)| {
+            let display_name = key_to_name.get(&ai_key)?;
+            Some((display_name.clone(), v.into_api()))
+        })
+        .collect();
 
-        let mut content_stream = result.content_stream;
-        let on_answer = on_token.clone();
-        wasm_bindgen_futures::spawn_local(async move {
-            while let Some(token) = content_stream.next().await {
-                if let Ok(t) = token {
-                    leptos::logging::log!("[content] {}", t.content);
-                    on_answer(AiPhase::Answer);
-                }
-            }
-        });
-
-        let output = result.output.await.map_err(|e| format!("LLM output error: {e:?}"))?;
-
-        let raw = output.result.trim();
-        if raw.is_empty() {
-            last_err = "model returned an empty response".to_string();
-            continue;
-        }
-        let json_str = strip_code_fences(raw);
-        let response: NutritionResponse = match serde_json::from_str(json_str)
-            .or_else(|_| serde_json::from_str(unwrap_schema_envelope(json_str)))
-        {
-            Ok(r) => r,
-            Err(e) => {
-                // Malformed/partial JSON — a fresh attempt usually parses cleanly.
-                last_err = format!("parse error: {e}, raw: {raw}");
-                continue;
-            }
-        };
-
-        let nutrients: BTreeMap<String, AiNutrientDetail> = response
-            .custom_nutrients
-            .into_iter()
-            .filter_map(|(ai_key, v)| {
-                let display_name = key_to_name.get(&ai_key)?;
-                Some((display_name.clone(), v.into_api()))
-            })
-            .collect();
-
-        let product_name = response.product_name.trim();
-        return Ok(AiLookupOutput {
-            // Fill the name from the model's summarised product name (a plain input
-            // comes back tidied; a description is condensed to a dish name).
-            name: (!product_name.is_empty()).then(|| product_name.to_string()),
-            kcal: response.kcal.into_api(),
-            protein: response.protein.into_api(),
-            fat: response.fat.into_api(),
-            carbs: response.carbs.into_api(),
-            nutrients,
-            package_weight: None,
-        });
-    }
-    Err(last_err)
+    let product_name = response.product_name.trim();
+    Ok(AiLookupOutput {
+        // Fill the name from the model's summarised product name (a plain input
+        // comes back tidied; a description is condensed to a dish name).
+        name: (!product_name.is_empty()).then(|| product_name.to_string()),
+        kcal: response.kcal.into_api(),
+        protein: response.protein.into_api(),
+        fat: response.fat.into_api(),
+        carbs: response.carbs.into_api(),
+        nutrients,
+        package_weight: None,
+    })
 }
 
-/// Stream a single JSON object of type `T` from the model. Same plumbing as
-/// `lookup` (schema-injected JSON mode, thinking/answer token streams reported
-/// via `on_token`), but generic over the response shape — used by the day
-/// assessment. Reports each streamed token through `on_token` so callers can
-/// drive the live "thinking/answer (N tok)" UI.
+/// Ask the model for a single JSON object of type `T`. THE one path every
+/// structured request takes — `lookup`, `lookup_nutrient`, `lookup_iron`,
+/// `classify_food`, `match_food`. The ai-worker turns `T`'s schema into a JSON-mode
+/// instruction; `on_token` reports thinking/answer tokens so a caller can drive the
+/// live "thinking/answer (N tok)" UI (pass `|_| {}` when there is no UI).
 pub async fn generate<T>(
     prompt: String,
     on_token: impl Fn(AiPhase) + Clone + 'static,
@@ -352,21 +256,43 @@ pub async fn generate<T>(
 where
     T: serde::de::DeserializeOwned + JsonSchema,
 {
-    // qwen3 occasionally returns an EMPTY content stream (all budget spent on
-    // reasoning, or a dropped relay) — that surfaced as a confusing
-    // "parse error: EOF ... raw:" and forced the user to retry by hand. Empty /
-    // unparseable output is transient, so retry a couple of times before giving
-    // up with a clear message.
-    const ATTEMPTS: usize = 3;
-    let mut last_err = String::new();
-    for _ in 0..ATTEMPTS {
-        // Thinking OFF — see `lookup`: avoids the qwen3 empty-content failure,
-        // faster, and no reasoning UI is needed here (callers pass a no-op cb).
+    generate_validated(prompt, on_token, 3, |_: &T| Ok(())).await
+}
+
+/// Same, plus a check the parsed answer must pass before the caller sees it. A
+/// rejected answer costs one attempt like any other failure — the model gets
+/// another go instead of the caller storing a number nobody stands behind.
+///
+/// EVERY failure mode is retryable here: a dropped fetch, an empty content stream,
+/// malformed JSON, a failed check. This used to be three hand-copied loops that
+/// disagreed with each other — in two of them an `execute` error escaped the loop
+/// through `?` and failed the whole call on the first hiccup.
+pub async fn generate_validated<T>(
+    prompt: String,
+    on_token: impl Fn(AiPhase) + Clone + 'static,
+    attempts: usize,
+    validate: impl Fn(&T) -> Result<(), String>,
+) -> Result<T, String>
+where
+    T: serde::de::DeserializeOwned + JsonSchema,
+{
+    let mut last_err = String::from("no attempts were made");
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            // Мгновенный повтор часто приносит тот же мусор — даём модели передышку.
+            leptos::logging::warn!("generate retry #{attempt}: {last_err}");
+            sleep_ms(800).await;
+        }
+        // Thinking OFF: with it ON qwen3 parks a short answer in the reasoning
+        // channel and returns empty content (observed ~⅔ of the time for some foods).
         let executor = build_executor_think(false)?;
-        let result = executor
-            .execute::<T>(prompt.clone())
-            .await
-            .map_err(|e| format!("LLM execute error: {e:?}"))?;
+        let result = match executor.execute::<T>(prompt.clone()).await {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = format!("LLM execute error: {e:?}");
+                continue;
+            }
+        };
 
         let mut thinking_stream = result.thinking_stream;
         let on_think = on_token.clone();
@@ -388,29 +314,45 @@ where
             }
         });
 
-        let output = result.output.await.map_err(|e| format!("LLM output error: {e:?}"))?;
+        let output = match result.output.await {
+            Ok(o) => o,
+            Err(e) => {
+                last_err = format!("LLM output error: {e:?}");
+                continue;
+            }
+        };
         let raw = output.result.trim();
         if raw.is_empty() {
             last_err = "model returned an empty response".to_string();
             continue;
         }
-        let json_str = strip_code_fences(raw);
-        match serde_json::from_str::<T>(json_str)
-            .or_else(|_| serde_json::from_str::<T>(unwrap_schema_envelope(json_str)))
-        {
-            Ok(v) => return Ok(v),
-            Err(e) => last_err = format!("parse error: {e}, raw: {raw}"),
+        let value: T = match serde_json::from_str(strip_code_fences(raw)) {
+            Ok(v) => v,
+            Err(e) => {
+                last_err = format!("parse error: {e}, raw: {raw}");
+                continue;
+            }
+        };
+        match validate(&value) {
+            Ok(()) => return Ok(value),
+            Err(e) => last_err = e,
         }
     }
     Err(last_err)
 }
 
-/// A focused, FLAT single-nutrient answer. Deliberately not the nested
-/// `NutrientDetail` (value+unit) shape: the batched `lookup` asks for kcal plus a
-/// `custom_nutrients` MAP of nested value/unit objects, and qwen3 reliably corrupts
-/// that deep structure (observed live: `,{"zhelezo"` instead of `,"zhelezo":`). One
-/// nutrient, three plain numbers + a comment keeps the model focused and the JSON
-/// trivially well-formed. Values are per 100 g, already in the requested unit.
+// A focused, FLAT single-nutrient answer. Deliberately not the nested
+// `NutrientDetail` (value+unit) shape: the batched `lookup` asks for kcal plus a
+// `custom_nutrients` MAP of nested value/unit objects, and qwen3 reliably corrupts
+// that deep structure (observed live: `,{"zhelezo"` instead of `,"zhelezo":`). One
+// nutrient, three plain numbers + a comment keeps the model focused and the JSON
+// trivially well-formed.
+//
+// NB: `///` here becomes the schema's `description`, and the ai-worker pastes the
+// schema into the prompt verbatim — so `///` text is READ BY THE MODEL. This block
+// is developer rationale, hence `//`. Written as `///` it made the model answer with
+// the schema document itself instead of a value, and the whole nutrient pass wrote
+// nothing to the database.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct SingleNutrient {
     /// Lowest reasonable amount per 100 g (a plain number in the requested unit).
@@ -449,39 +391,21 @@ pub async fn lookup_nutrient(food_name: &str, nutrient: &str, unit: &str) -> Res
          else — no markdown, no prose."
     );
 
-    const ATTEMPTS: usize = 3;
-    let mut last_err = String::new();
-    for _ in 0..ATTEMPTS {
-        // Thinking OFF: qwen3 with reasoning parks short answers in the reasoning
-        // channel (empty content ~⅔ of the time for some foods); off → content is
-        // filled reliably (verified 15/15 for «Сахар»).
-        let executor = build_executor_think(false)?;
-        let result = executor
-            .execute::<SingleNutrient>(prompt.clone())
-            .await
-            .map_err(|e| format!("LLM execute error: {e:?}"))?;
-
-        // Drain both streams so the pipeline runs to completion (no UI reporting).
-        let mut thinking_stream = result.thinking_stream;
-        wasm_bindgen_futures::spawn_local(async move { while thinking_stream.next().await.is_some() {} });
-        let mut content_stream = result.content_stream;
-        wasm_bindgen_futures::spawn_local(async move { while content_stream.next().await.is_some() {} });
-
-        let output = result.output.await.map_err(|e| format!("LLM output error: {e:?}"))?;
-        let raw = output.result.trim();
-        if raw.is_empty() {
-            last_err = "model returned an empty response".to_string();
-            continue;
+    // Тот же бракет, что у железа: сначала диапазон, потом значение внутри него.
+    // Модель, поставившая своё «наиболее вероятное» вне собственных min…max, себе
+    // противоречит — такой ответ выбрасывается, а не записывается в базу.
+    let v: SingleNutrient = generate_validated(prompt, |_| {}, 3, |v: &SingleNutrient| {
+        if v.min_value <= v.recommended && v.recommended <= v.max_value && v.min_value >= 0.0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "{nutrient} contradicts itself for «{food_name}»: {}…{}…{} {unit}",
+                v.min_value, v.recommended, v.max_value
+            ))
         }
-        let json_str = strip_code_fences(raw);
-        match serde_json::from_str::<SingleNutrient>(json_str)
-            .or_else(|_| serde_json::from_str::<SingleNutrient>(unwrap_schema_envelope(json_str)))
-        {
-            Ok(v) => return Ok(v.recommended),
-            Err(e) => last_err = format!("parse error: {e}, raw: {raw}"),
-        }
-    }
-    Err(last_err)
+    })
+    .await?;
+    Ok(v.recommended)
 }
 
 // ── How well iron is absorbed, by food category ──────────────────────────────
@@ -607,7 +531,7 @@ struct IronDetail {
 /// non-heme iron (legumes, seeds, greens, cereals) at roughly 2–20 %, so the model
 /// is asked for both numbers together — one judgement, one call.
 ///
-/// Returns `(mg per 100 g, absorbed fraction)`. FAILS LOUDLY after 3 attempts.
+/// Returns `(mg per 100 g, absorbed fraction)`. FAILS LOUDLY after 4 attempts.
 pub async fn lookup_iron(food_name: &str) -> Result<(f64, f64), String> {
     let lang = match crate::services::i18n::get_lang() {
         crate::services::i18n::Lang::Ru => "Russian",
@@ -634,8 +558,9 @@ pub async fn lookup_iron(food_name: &str) -> Result<(f64, f64), String> {
          {table}\n\n\
          Then report which row you used:\n\
          - category: the row key, copied EXACTLY as written above\n\
-         - food_type: what this product is, in two or three words\n\
-         - reason: ONE short sentence (under 20 words) — why this row and these numbers\n\n\
+         - food_type: what this product is, in two or three words, in {lang}\n\
+         - reason: ONE short sentence (under 20 words) in {lang} — why this row and these \
+         numbers\n\n\
          If the food fits several rows, pick the one that dominates its iron. A cooked dish goes \
          to dish_with_meat when it contains meat, otherwise to dish_meatless.\n\n\
          Do not mix the two groups up: the three *_iron numbers are milligrams per 100 g and are \
@@ -644,94 +569,45 @@ pub async fn lookup_iron(food_name: &str) -> Result<(f64, f64), String> {
          Base the answer only on the food name \"{food_name}\". Respond with ONLY a single \
          minified JSON object and nothing else — no markdown, no prose.",
         table = iron_category_table(),
+        lang = lang,
     );
 
     // Четыре попытки, а не три: сбои здесь наблюдались разного рода — обрыв ответа,
     // мусор вместо JSON, упавший fetch, — и каждый из них транзиентный.
-    const ATTEMPTS: usize = 4;
-    let mut last_err = String::new();
-    for attempt in 0..ATTEMPTS {
-        // Thinking OFF for the same reason as `lookup_nutrient` — short answers get
-        // parked in the reasoning channel and the content comes back empty.
-        if attempt > 0 {
-            // Модель, только что выдавшая мусор, на мгновенный повтор часто выдаёт
-            // тот же мусор — даём ей передышку.
-            sleep_ms(800).await;
-        }
-        let executor = build_executor_think(false)?;
-        // Сбой ИСПОЛНЕНИЯ (оборванный fetch, недоступный воркер) — это повод
-        // ПОВТОРИТЬ, а не выйти из функции: раньше такая ошибка проскакивала мимо
-        // цикла попыток и уходила наверх с первого раза.
-        let result = match executor.execute::<IronDetail>(prompt.clone()).await {
-            Ok(r) => r,
-            Err(e) => {
-                last_err = format!("LLM execute error: {e:?}");
-                continue;
-            }
-        };
-
-        let mut thinking_stream = result.thinking_stream;
-        wasm_bindgen_futures::spawn_local(async move { while thinking_stream.next().await.is_some() {} });
-        let mut content_stream = result.content_stream;
-        wasm_bindgen_futures::spawn_local(async move { while content_stream.next().await.is_some() {} });
-
-        let output = match result.output.await {
-            Ok(o) => o,
-            Err(e) => {
-                last_err = format!("LLM output error: {e:?}");
-                continue;
-            }
-        };
-        let raw = output.result.trim();
-        if raw.is_empty() {
-            last_err = "model returned an empty response".to_string();
-            continue;
-        }
-        let json_str = strip_code_fences(raw);
-        match serde_json::from_str::<IronDetail>(json_str)
-            .or_else(|_| serde_json::from_str::<IronDetail>(unwrap_schema_envelope(json_str)))
+    let v: IronDetail = generate_validated(prompt, |_| {}, 4, |v: &IronDetail| {
+        // The bracket is not decoration: a model that puts its own «most likely»
+        // OUTSIDE its own min…max has contradicted itself.
+        if !(v.min_value_iron <= v.recommended_iron
+            && v.recommended_iron <= v.max_value_iron
+            && v.min_value_iron >= 0.0)
         {
-            Ok(v) => {
-                // The bracket is not decoration: a model that puts its own
-                // «most likely» OUTSIDE its own min…max has contradicted itself, and
-                // that answer is thrown away rather than stored.
-                let iron_ok = v.min_value_iron <= v.recommended_iron
-                    && v.recommended_iron <= v.max_value_iron
-                    && v.min_value_iron >= 0.0;
-                if !iron_ok {
-                    last_err = format!(
-                        "iron content contradicts itself: {}…{}…{} мг",
-                        v.min_value_iron, v.recommended_iron, v.max_value_iron
-                    );
-                    continue;
-                }
-                // Absorption is OUR table, not the model's knowledge. The model only
-                // picks the row; the row's range is then binding. An unknown row or a
-                // value outside it means the answer wasn't derived from the table —
-                // reject it instead of storing a number nobody stands behind.
-                let key = v.category.trim().to_ascii_lowercase();
-                let Some(cat) = IRON_CATEGORIES.iter().find(|c| c.key == key) else {
-                    last_err = format!("unknown iron category «{}» for «{food_name}»", v.category);
-                    continue;
-                };
-                let a = v.recommended_iron_absorption;
-                if !(cat.min - 1e-9..=cat.max + 1e-9).contains(&a) {
-                    last_err = format!(
-                        "absorption {a} outside «{}» ({:.2}–{:.2}) for «{food_name}»",
-                        cat.key, cat.min, cat.max
-                    );
-                    continue;
-                }
-                leptos::logging::log!(
-                    "iron «{food_name}»: {} мг · {} · усвоение {a} — {} ({})",
-                    v.recommended_iron, cat.key, v.food_type, v.reason
-                );
-                return Ok((v.recommended_iron, a));
-            }
-            Err(e) => last_err = format!("parse error: {e}, raw: {raw}"),
+            return Err(format!(
+                "iron content contradicts itself: {}…{}…{} мг",
+                v.min_value_iron, v.recommended_iron, v.max_value_iron
+            ));
         }
-    }
-    Err(last_err)
+        // Absorption is OUR table, not the model's knowledge. The model only picks
+        // the row; the row's range is then binding. An unknown row or a value
+        // outside it means the answer wasn't derived from the table.
+        let key = v.category.trim().to_ascii_lowercase();
+        let Some(cat) = IRON_CATEGORIES.iter().find(|c| c.key == key) else {
+            return Err(format!("unknown iron category «{}» for «{food_name}»", v.category));
+        };
+        let a = v.recommended_iron_absorption;
+        if !(cat.min - 1e-9..=cat.max + 1e-9).contains(&a) {
+            return Err(format!(
+                "absorption {a} outside «{}» ({:.2}–{:.2}) for «{food_name}»",
+                cat.key, cat.min, cat.max
+            ));
+        }
+        Ok(())
+    })
+    .await?;
+    leptos::logging::log!(
+        "iron «{food_name}»: {} мг · {} · усвоение {} — {} ({})",
+        v.recommended_iron, v.category, v.recommended_iron_absorption, v.food_type, v.reason
+    );
+    Ok((v.recommended_iron, v.recommended_iron_absorption))
 }
 
 /// Per-food category verdict. All three tags are independent booleans (a raw
@@ -750,8 +626,9 @@ pub struct FoodTags {
     pub red_meat: bool,
 }
 
-/// Parallel boolean arrays, one entry per input food, in input order. The flat-array
-/// shape (no maps / nullable / $refs) is what the strict model server accepts.
+/// Parallel boolean arrays, one entry per input food, in input order.
+// The flat-array shape (no maps / nullable / $refs) is what the strict model server
+// accepts — developer rationale, kept out of the schema on purpose.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FoodVerdicts {
     snack: Vec<bool>,
@@ -2258,8 +2135,8 @@ pub async fn stream_food_items(
     Err("stream ended without result".to_string())
 }
 
-/// LLM verdict for `match_food`: the best-matching candidate id (or null) plus a
-/// 0..1 confidence and a short reason. Schema-injected JSON mode via `execute`.
+/// The best-matching candidate id (or null) plus a 0..1 confidence and a short reason.
+// Used by `match_food` through the schema-injected JSON mode of `execute`.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct MatchResult {
     /// The `id` of the best-matching candidate, or null if none is a real match.

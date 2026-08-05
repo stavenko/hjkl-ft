@@ -76,6 +76,15 @@ async fn establish_session(user_id: &str, token: Option<&str>) {
     if let Some(token) = token {
         set_token(token);
     }
+    // База сменилась на пользовательскую, и её надо мигрировать отдельно: версия из
+    // гостевой сюда не переезжает (`migrate_bootstrap = false` выше). Ждать эффекта
+    // в `app.rs` нельзя — состояние могло быть `Ready` и до входа (так работает
+    // онбординг), тогда эффект не перезапустится и база останется немигрированной.
+    leptos::spawn_local(async {
+        if crate::services::migrations::run_for_current_db().await > 0 {
+            crate::services::classify::sweep_unprocessed().await;
+        }
+    });
     crate::services::sync::sync_now_background();
 }
 

@@ -18,6 +18,13 @@ thread_local! {
 /// while it's backgrounded; the cached `Rexie` then wedges (transactions hang or
 /// error), so writes silently fail and reads return nothing until a full reload.
 /// Call this on resume (foreground) to get a live connection, then re-query.
+/// Имя активной базы, или `None`, пока ни одна не открыта. Нужно тем, кому важно
+/// не «сколько раз за сессию», а «для какой базы» — например миграциям: при входе
+/// приложение переключается на базу пользователя, и её надо мигрировать отдельно.
+pub fn current_name() -> Option<String> {
+    DB_NAME.with(|c| c.borrow().clone())
+}
+
 pub async fn reopen() {
     let Some(name) = DB_NAME.with(|c| c.borrow().clone()) else { return };
     // On failure/timeout keep the existing connection rather than hanging or

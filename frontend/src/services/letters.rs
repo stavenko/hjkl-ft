@@ -131,6 +131,7 @@ pub async fn maybe_recompute_weekly_planka() {
             && g.direction == api_types::GoalDirection::AtMost
             && g.amount > 0.0
     }) else {
+        leptos::logging::log!("планка калорий: пересчёта нет — планка ещё не поставлена");
         return;
     };
 
@@ -145,7 +146,11 @@ pub async fn maybe_recompute_weekly_planka() {
         })
         .unwrap_or(today);
 
-    if (today - anchor).num_days() < 7 {
+    let waited = (today - anchor).num_days();
+    if waited < 7 {
+        leptos::logging::log!(
+            "планка калорий: пересчёта нет — с {anchor} прошло {waited} дн., нужно 7"
+        );
         return;
     }
 
@@ -154,6 +159,16 @@ pub async fn maybe_recompute_weekly_planka() {
     // launch). We no longer use the average as the planka base, only as an
     // activity gate.
     if local::avg_daily_kcal(7).await.is_none() {
+        // Срок вышел, а пересчёта не будет. Молчать об этом нельзя: снаружи это
+        // выглядит как «планка просто не пересчиталась», и разобраться потом не по
+        // чему. В журнал ошибок — чтобы человек увидел это в приложении.
+        super::errors::record(
+            "Планка по калориям",
+            &format!(
+                "пересчёт отложен: срок вышел ({waited} дн. с {anchor}), но за последние 7 \
+                 завершённых дней в дневнике нет ни одной записи"
+            ),
+        );
         return;
     }
 
@@ -203,6 +218,7 @@ pub async fn maybe_recompute_weekly_steps_planka() {
 
     // No planka yet → the activity week hasn't opened; nothing to raise.
     let Some(current) = profile::get_steps_planka() else {
+        leptos::logging::log!("планка шагов: пересчёта нет — планка ещё не поставлена");
         return;
     };
     let current = current.round() as u32;
@@ -212,7 +228,11 @@ pub async fn maybe_recompute_weekly_steps_planka() {
         .or_else(|| app_flags::get(indicators::STEPS_GATE_OPEN_KEY))
         .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
         .unwrap_or(today);
-    if (today - anchor).num_days() < 7 {
+    let waited = (today - anchor).num_days();
+    if waited < 7 {
+        leptos::logging::log!(
+            "планка шагов: пересчёта нет — с {anchor} прошло {waited} дн., нужно 7"
+        );
         return;
     }
 
@@ -222,6 +242,14 @@ pub async fn maybe_recompute_weekly_steps_planka() {
     if state == IndicatorState::Unknown {
         // Not judgeable (no step data in the window) — defer WITHOUT advancing the
         // anchor, so the next launch tries again instead of silently skipping a week.
+        // Видимо в журнале ошибок: срок вышел, а планка не двинулась.
+        super::errors::record(
+            "Планка по шагам",
+            &format!(
+                "пересчёт отложен: срок вышел ({waited} дн. с {anchor}), но за последние 7 \
+                 завершённых дней нет данных о шагах"
+            ),
+        );
         return;
     }
 

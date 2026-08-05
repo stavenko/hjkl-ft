@@ -31,15 +31,27 @@ pub fn FoodEditModal(
     let fat = create_rw_signal(fmt(food.fat));
     let carbs = create_rw_signal(fmt(food.carbs));
 
-    // Existing custom nutrients: (name, value-string signal). The legacy «Железо»
-    // key that old builds wrote into this map stays hidden — iron now lives in its
-    // own fields below, and showing both would be two sources for one number.
-    let custom: Vec<(String, RwSignal<String>)> = food
-        .nutrients
-        .iter()
-        .filter(|(k, _)| !crate::services::enrich::is_hidden_nutrient(k))
-        .map(|(k, v)| (k.clone(), create_rw_signal(fmt(*v))))
+    // Нутриенты перечисляются по СПИСКУ, а не по тому, что уже лежит в продукте:
+    // строка обязана быть на месте и когда значения ещё нет. Пока форма рисовала
+    // только имеющиеся ключи, свежий продукт (и любой после инвалидации кальция)
+    // показывал форму БЕЗ кальция — и вписать его руками было негде.
+    //
+    // Ключи, которых нет в списке, но которые лежат в продукте от прежних сборок,
+    // дописываются следом, чтобы правка ничего не теряла. Legacy-ключ «Железо»
+    // скрыт: железо живёт в собственных полях ниже, два источника одного числа —
+    // это два разных числа.
+    let mut custom: Vec<(String, RwSignal<String>)> = crate::services::enrich::nutrient_names()
+        .map(|name| {
+            let v = food.nutrients.get(name).copied();
+            (name.to_string(), create_rw_signal(v.map(fmt).unwrap_or_default()))
+        })
         .collect();
+    for (k, v) in food.nutrients.iter() {
+        if crate::services::enrich::is_hidden_nutrient(k) || custom.iter().any(|(n, _)| n == k) {
+            continue;
+        }
+        custom.push((k.clone(), create_rw_signal(fmt(*v))));
+    }
     let custom_save = custom.clone();
 
     // Iron: amount in mg and the absorbed fraction, shown as a PERCENT (0…100) —
@@ -72,13 +84,21 @@ pub fn FoodEditModal(
         let pr = parse(protein.get_untracked());
         let ft = parse(fat.get_untracked());
         let cb = parse(carbs.get_untracked());
-        // Ноль СОХРАНЯЕТСЯ. Раньше нулевые значения выбрасывались, и фоновый проход
-        // считал нутриент незаполненным и запрашивал его снова — бесконечно, потому
-        // что модель честно отвечала «ноль». «В этом продукте нет клетчатки» — это
-        // ответ, а не пропуск.
+        // Введённый НОЛЬ сохраняется: «в этом продукте нет клетчатки» — это ответ, а
+        // не пропуск, и фоновый проход не должен спрашивать снова (раньше нули
+        // выбрасывались, ключ исчезал, и продукт переспрашивался бесконечно).
+        //
+        // А вот ПУСТОЕ поле — не ноль. Строка теперь рисуется даже когда значения
+        // ещё нет (продукт только что заведён или значение стёрла миграция), и
+        // записать её нулём значило бы соврать: проход решил бы, что нутриент
+        // выяснен, и никогда его не запросил.
         let mut nutrients = BTreeMap::new();
         for (k, sig) in custom_save.iter() {
-            nutrients.insert(k.clone(), parse(sig.get_untracked()));
+            let raw = sig.get_untracked();
+            if raw.trim().is_empty() {
+                continue;
+            }
+            nutrients.insert(k.clone(), parse(raw));
         }
         // Процент усвоения возвращаем в долю и держим в 0…1: значение вне диапазона
         // молча испортило бы весь недельный счёт железа.

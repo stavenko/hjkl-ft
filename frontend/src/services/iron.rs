@@ -184,11 +184,27 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
     // from the diary and the foods on every read, so the moment the background pass
     // fills a food in, the weeks that food appears in are judged anew. Freezing
     // applies to what the USER entered, never to what the app can still find out.
+    // Окно — восемь недель, но недоступные недели В НЕГО НЕ ВХОДЯТ: берём столько,
+    // сколько есть. Неделя, в которую человек ещё не вёл дневник, — не проваленная,
+    // её просто не было. Раньше цикл шёл на восемь шагов безусловно, и у человека с
+    // четырьмя неделями дневника четыре несуществующие недели считались незакрытыми:
+    // ровно половина окна — индикатор красный при всех закрытых неделях.
+    //
+    // Признак — записи в дневнике, а не наличие железа: неделя, в которую человек ел,
+    // но железа не набрал, судится как незакрытая (и это верно).
+    let diary_days: std::collections::HashSet<String> =
+        local::list_diary_dates().await.into_iter().collect();
     let mut history: Vec<bool> = Vec::new();
     let mut s = cur_start;
     for _ in 0..super::indicators::WEEKLY_WINDOW {
         s -= Duration::days(7);
         let e = s + Duration::days(6);
+        let logged = (0..7).any(|d| {
+            diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
+        });
+        if !logged {
+            continue;
+        }
         history.push(absorbed_between(s, e).await >= target);
     }
     history.reverse();

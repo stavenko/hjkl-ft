@@ -554,6 +554,23 @@ pub async fn freeze_calories_recent() {
     }
 }
 
+/// То же для ШАГОВ: заморозить последние две недели завершённых дней по ТЕКУЩЕЙ
+/// планке (уже замороженные не трогаются). Вызывается перед недельным пересчётом,
+/// иначе поднятая планка судит задним числом уже прошедшие дни.
+///
+/// Наблюдалось живьём: планка выросла с 10800 до 11800, а пятница с 11500 шагами
+/// замёрзла уже по новой — 11500/11800 = 0.97, недобор, индикатор оранжевый. День
+/// был выполнен по той планке, что тогда действовала, и обязан таким остаться.
+pub async fn freeze_steps_recent() {
+    if crate::services::profile::get_steps_planka().is_none() {
+        return;
+    }
+    let today = crate::services::local::today_date();
+    for i in 1..=14 {
+        let _ = day_cached("steps", &fmt(today - Duration::days(i))).await;
+    }
+}
+
 /// Invalidate cached days affected by a change to `food_id` — every distinct diary
 /// date that food appears on (via the diary `food_id` index). A change to a food
 /// only ever affects the days it was eaten, so classifying/​editing a food logged

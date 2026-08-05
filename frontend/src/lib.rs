@@ -195,6 +195,8 @@ async fn bootstrap_network() {
     // weekly recompute below might change the planka — so past-day diary gauges keep
     // the planka that actually applied. Independent of the recompute itself.
     services::indicators::freeze_calories_recent().await;
+    // То же для шагов — перед недельным пересчётом планки по шагам ниже.
+    services::indicators::freeze_steps_recent().await;
 
     // Weekly calorie-planka recompute: one week after the planka was set (and every
     // week after), recompute it from the last 7 days and post a "letter". Local-only;
@@ -243,6 +245,9 @@ fn install_foreground_sync() {
                 // A day may have rolled over while backgrounded — freeze recent days'
                 // calorie planka, then check the weekly recompute (self-limits).
                 services::indicators::freeze_calories_recent().await;
+                // То же для шагов: недельный пересчёт ниже может поднять планку, и
+                // незамороженные дни рассудились бы уже по новой.
+                services::indicators::freeze_steps_recent().await;
                 services::letters::maybe_recompute_weekly_planka().await;
                 services::letters::maybe_recompute_weekly_steps_planka().await;
             });

@@ -38,6 +38,9 @@ const seed = async (page, uid) => {
     ];
     const profile = [{ key: "profile", sex: "male", height_cm: 180, birth_year: 1985,
       goal: "lose", steps_planka: OLD_PLANKA, created_at: nowIso, updated_at: nowIso }];
+    // Без калорийной планки виджет не рисует строку индикаторов вовсе.
+    const goals = [{ id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
+      amount: 2600, unit: "Kcal", period: "Day", created_at: nowIso, updated_at: nowIso }];
     // Шестнадцать завершённых дней (окно заморозки — 14), каждый ВЫШЕ старой планки,
     // но НИЖЕ будущей (11800): ровно случай «выполнил тогда, не выполнил бы сейчас».
     const step_entries = [];
@@ -45,7 +48,7 @@ const seed = async (page, uid) => {
       step_entries.push({ id: "s" + i, date: ymd(i), steps: WALKED,
         created_at: nowIso, updated_at: nowIso });
     }
-    for (const [store, rows] of Object.entries({ app_flags, profile, step_entries })) {
+    for (const [store, rows] of Object.entries({ app_flags, profile, goals, step_entries })) {
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");
         for (const r of rows) tx.objectStore(store).put(r);
@@ -78,17 +81,20 @@ const state = await page.evaluate(async () => {
   db.close();
   return {
     planka: profile.find((p) => p.key === "profile")?.steps_planka,
-    days: days.map((d) => ({ date: d.date, value: d.value, ratio: d.ratio })).sort((a, b) => a.date.localeCompare(b.date)),
+    days: days.map((d) => ({ date: d.date, value: d.value, ratio: d.ratio, target: d.target })).sort((a, b) => a.date.localeCompare(b.date)),
   };
 });
 
 console.log(`планка: ${OLD_PLANKA} → ${state.planka}`);
-for (const d of state.days) console.log(`  ${d.date}: ${d.value} шагов, ratio ${d.ratio}`);
+for (const d of state.days) console.log(`  ${d.date}: ${d.value} шагов, планка ${d.target}, ratio ${d.ratio}`);
 
 check("планка поднялась (пересчёт сработал)", state.planka > OLD_PLANKA, `${state.planka}`);
 const judged = state.days.filter((d) => d.ratio != null);
 check("завершённые дни заморожены", judged.length > 0, `${judged.length} из ${state.days.length}`);
+// Планка теперь ЗАПИСАНА в дне, а не выводится делением: проверяем прямо её.
 const met = judged.filter((d) => d.ratio >= 1);
+check("в дне записана планка, по которой он засчитан",
+  judged.every((d) => d.target === OLD_PLANKA), judged.map((d) => d.target).join(", "));
 check("дни, выполненные по СТАРОЙ планке, остались выполненными",
   met.length === judged.length, `${met.length} из ${judged.length} с ratio ≥ 1`);
 

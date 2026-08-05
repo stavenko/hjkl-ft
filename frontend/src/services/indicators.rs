@@ -321,6 +321,15 @@ struct IndDay {
     /// summarized while the target was unknown).
     #[serde(default)]
     ratio: Option<f64>,
+    /// ПЛАНКА, по которой день был засчитан. Пишется прямо, а не выводится из
+    /// `value / ratio`: делением она восстанавливается, только пока ratio верен, а
+    /// если день замёрз по чужой планке — из него уже ничего не достать. Живой
+    /// случай: планка шагов выросла с 10800 до 11800, пятница с 11500 шагами замёрзла
+    /// по новой, и понять, что planka тогда была другой, стало не по чему.
+    ///
+    /// `None` — записи, сделанные до появления этого поля.
+    #[serde(default)]
+    target: Option<f64>,
     /// RFC3339 freeze moment — the sync conflict key (first computation wins).
     /// Empty on rows frozen before ind-day sync existed.
     #[serde(default)]
@@ -374,38 +383,49 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
 async fn day_cached(key: &str, date: &str) -> (f64, Option<f64>) {
     let Some(store) = cache_store(key) else {
         let value = compute_day_value(key, date).await;
-        return (value, ratio_now(key, value).await);
+        return (value, ratio_now(key, value).await.0);
     };
     if let Some(rec) = crate::services::db::get::<IndDay>(store, date).await {
         if rec.ratio.is_some() {
             return (rec.value, rec.ratio);
         }
         // Legacy / not-yet-frozen record → freeze now (if the target is known) and store.
-        let ratio = ratio_now(key, rec.value).await;
+        let (ratio, target) = ratio_now(key, rec.value).await;
         if ratio.is_some() {
             crate::services::db::put(
                 store,
-                &IndDay { date: date.to_string(), value: rec.value, ratio, computed_at: now_stamp() },
+                &IndDay {
+                    date: date.to_string(),
+                    value: rec.value,
+                    ratio,
+                    target,
+                    computed_at: now_stamp(),
+                },
             )
             .await;
         }
         return (rec.value, ratio);
     }
     let value = compute_day_value(key, date).await;
-    let ratio = ratio_now(key, value).await;
+    let (ratio, target) = ratio_now(key, value).await;
     crate::services::db::put(
         store,
-        &IndDay { date: date.to_string(), value, ratio, computed_at: now_stamp() },
+        &IndDay { date: date.to_string(), value, ratio, target, computed_at: now_stamp() },
     )
     .await;
     (value, ratio)
 }
 
-/// `value / target` at the CURRENT target — `None` when the target isn't known yet.
-/// Used only to freeze a day's ratio the first time it's summarized.
-async fn ratio_now(key: &str, value: f64) -> Option<f64> {
+/// `(value / target, target)` при ТЕКУЩЕЙ планке; `(None, None)`, если планка ещё
+/// не известна. Планка возвращается вместе с долей и кладётся в запись: доля без неё
+/// не читается — по 0.97 не видно, промах это по 11800 или попадание по 10800.
+async fn ratio_now(key: &str, value: f64) -> (Option<f64>, Option<f64>) {
     let target = target_for(key).await;
-    (target > 0.0).then(|| value / target)
+    if target > 0.0 {
+        (Some(value / target), Some(target))
+    } else {
+        (None, None)
+    }
 }
 
 /// Drop cached values for `date` across every indicator cache — call when the
@@ -432,10 +452,10 @@ pub async fn clear_cache() {
 /// (planka not set yet) is stored but never counts as a miss.
 pub async fn record_steps(date: &str) {
     let value = local::steps_on(date).await;
-    let ratio = ratio_now("steps", value).await;
+    let (ratio, target) = ratio_now("steps", value).await;
     crate::services::db::put(
         "ind_steps",
-        &IndDay { date: date.to_string(), value, ratio, computed_at: now_stamp() },
+        &IndDay { date: date.to_string(), value, ratio, target, computed_at: now_stamp() },
     )
     .await;
 }
@@ -498,6 +518,13 @@ pub async fn apply_ind_day(row: &serde_json::Value) {
         date: parsed.date.clone(),
         value: parsed.value,
         ratio: parsed.ratio,
+        // Планка по проводу не ездит: формат синка её не несёт. Восстанавливаем из
+        // доли — для приехавшего дня она посчитана там же, где и доля, так что
+        // деление здесь честное (в отличие от дня, замёрзшего по чужой планке).
+        target: match (parsed.ratio, parsed.value) {
+            (Some(r), v) if r > 0.0 => Some(v / r),
+            _ => None,
+        },
         computed_at: parsed.computed_at.clone(),
     };
     // Journal order is the truth (per-row conflicts, incl. the first-computation-

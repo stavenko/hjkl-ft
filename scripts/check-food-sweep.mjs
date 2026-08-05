@@ -91,7 +91,7 @@ await page.evaluate(async (uid) => {
     // иначе она сотрёт значения у «Воды», и проверка «заполненное не
     // переспрашивается» будет мерить не проход, а миграцию. Сама миграция
     // проверяется отдельно — check-calcium-iron-reset.mjs.
-    { key: "calcium_iron_invalidated_v1", value: "true" },
+    { key: "calcium_iron_migrated_v1", value: "true" },
   ];
   const profile = [{ key: "profile", sex: "male", height_cm: 180, birth_year: 1980,
     goal: "lose", steps_planka: 9000, created_at: nowIso, updated_at: nowIso }];

@@ -743,7 +743,11 @@ pub async fn migrate_meal_labels() {
 /// Заодно убирается legacy-ключ «Железо» из карты нутриентов: его писали ранние
 /// сборки, в интерфейсе он скрыт, а в данных только мешает.
 pub async fn migrate_reset_calcium_iron() {
-    const FLAG: &str = "calcium_iron_invalidated_v1";
+    // Суффикс `_migrated` не косметика: по нему `app_flags::is_device_local`
+    // исключает маркер из синка. Маркер миграции ОБЯЗАН оставаться на устройстве —
+    // иначе он уедет на второе, и оно решит, что уже мигрировало, хотя своих
+    // продуктов ещё не чистило.
+    const FLAG: &str = "calcium_iron_migrated_v1";
     if crate::services::app_flags::get_bool(FLAG) {
         return;
     }

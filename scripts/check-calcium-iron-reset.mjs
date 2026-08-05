@@ -111,7 +111,7 @@ const read = () => page.evaluate(async (u) => {
   const f = foods.find((x) => x.id === "spoiled");
   const n = f?.nutrients instanceof Map ? Object.fromEntries(f.nutrients) : (f?.nutrients || {});
   return { ca: n["Кальций"], legacyFe: n["Железо"], mg: f?.iron_mg, abs: f?.iron_absorption,
-    flag: flags.find((x) => x.key === "calcium_iron_invalidated_v1")?.value };
+    flag: flags.find((x) => x.key === "calcium_iron_migrated_v1")?.value };
 }, uid);
 
 await page.goto(BASE, { waitUntil: "domcontentloaded" });

@@ -11,6 +11,13 @@ N=${N:-10}
 
 SCHEMA='{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"SingleNutrient","type":"object","properties":{"min_value":{"description":"Lowest reasonable amount per 100 g (a plain number in the requested unit).","type":"number","format":"double"},"max_value":{"description":"Highest reasonable amount per 100 g (a plain number in the requested unit).","type":"number","format":"double"},"recommended":{"description":"Most likely amount per 100 g (a plain number in the requested unit).","type":"number","format":"double"},"comment":{"description":"Short explanation of the value, in the requested language.","type":"string"}},"required":["min_value","max_value","recommended","comment"]}'
 
+# Список можно подменить файлом (строки вида «продукт|справочное»), иначе берётся
+# встроенный: FOODS_FILE=… bash measure-calcium-consistency.sh
+if [ -n "${FOODS_FILE:-}" ]; then
+  # bash 3.2 в macOS не знает mapfile — читаем построчно.
+  FOODS=()
+  while IFS= read -r l; do [ -n "$l" ] && FOODS+=("$l"); done < "$FOODS_FILE"
+else
 # продукт|справочное значение, мг/100 г
 FOODS=(
   "Вкустаун Творог обезжиренный 0,5%|120"
@@ -24,6 +31,7 @@ FOODS=(
   "Зелёный Луг Рис белый шлифованный|10"
   "Доброфлот Сайра тихоокеанская натуральная|60"
 )
+fi
 
 printf '%-46s %7s %7s %7s %7s %7s %6s\n' "продукт" "справ." "медиана" "min" "max" "разброс" "ошибок"
 printf '%s\n' "--------------------------------------------------------------------------------------------"

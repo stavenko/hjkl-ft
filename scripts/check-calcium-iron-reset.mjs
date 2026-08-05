@@ -111,7 +111,8 @@ const read = () => page.evaluate(async (u) => {
   const f = foods.find((x) => x.id === "spoiled");
   const n = f?.nutrients instanceof Map ? Object.fromEntries(f.nutrients) : (f?.nutrients || {});
   return { ca: n["Кальций"], legacyFe: n["Железо"], mg: f?.iron_mg, abs: f?.iron_absorption,
-    flag: flags.find((x) => x.key === "calcium_iron_migrated_v1")?.value };
+    // Отметка о выполнении теперь одна на все миграции — версия базы.
+    flag: flags.find((x) => x.key === "db_schema_version")?.value };
 }, uid);
 
 await page.goto(BASE, { waitUntil: "domcontentloaded" });
@@ -124,12 +125,12 @@ let st = {};
 const t0 = Date.now();
 while (Date.now() - t0 < WAIT_MS) {
   st = await read();
-  if (st.flag === "true" && st.ca != null && st.ca !== 999 && st.mg != null && st.mg !== 0.25) break;
+  if (st.flag === "1" && st.ca != null && st.ca !== 999 && st.mg != null && st.mg !== 0.25) break;
   await page.waitForTimeout(3000);
 }
 console.log(`после миграции: кальций ${st.ca}, железо ${st.mg} мг, усвоение ${st.abs}, флаг ${st.flag}`);
 
-check("флаг миграции выставлен", st.flag === "true", String(st.flag));
+check("версия базы поднята до 1", st.flag === "1", String(st.flag));
 check("испорченный кальций 999 заменён", st.ca !== 999, `${st.ca}`);
 check("legacy-ключ «Железо» убран из карты", st.legacyFe === undefined, String(st.legacyFe));
 check("испорченное железо 0.25 заменено", st.mg !== 0.25 && st.mg != null, `${st.mg} мг`);

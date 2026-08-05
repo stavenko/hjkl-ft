@@ -99,6 +99,35 @@ pub fn App() -> impl IntoView {
         }
     };
 
+    // Миграции локальной базы. Запускаются РОВНО в работающем приложении: состояние
+    // Ready (онбординг пройден, подписка подтверждена) и обновление не ждёт.
+    //
+    // До обновления нельзя: старый код накатил бы старые преобразования на данные,
+    // которые новая сборка ждёт другими, а следом пришла бы она сама и застала бы
+    // базу в промежуточном виде. Во время онбординга нельзя: базы ещё нет, мигрировать
+    // нечего, а нулевая миграция записала бы версию во временное хранилище.
+    //
+    // Эффект перезапускается на каждое изменение обоих условий, поэтому держим
+    // защёлку: миграции идут один раз за сессию. Повторный вызов сам по себе
+    // безвреден (миграция ниже версии базы пропускается), но плодить проходы незачем.
+    let migrations_started = create_rw_signal(false);
+    create_effect(move |_| {
+        let ready = matches!(state.get(), AppState::Ready);
+        let update_pending = crate::services::update::available().get();
+        if !ready || update_pending || migrations_started.get_untracked() {
+            return;
+        }
+        migrations_started.set(true);
+        leptos::spawn_local(async move {
+            let done = crate::services::migrations::run_all().await;
+            if done > 0 {
+                // Стёртое надо запросить заново — проход идёт сразу после миграций,
+                // а не ждёт следующего запуска.
+                crate::services::classify::sweep_unprocessed().await;
+            }
+        });
+    });
+
     // React to a subscription-status change detected by the background daily
     // re-check (subscription::maybe_recheck rewrites the cache + gate). Only ever
     // moves between the two subscription-driven states — it never clobbers the

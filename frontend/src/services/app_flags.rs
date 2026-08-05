@@ -30,6 +30,10 @@ thread_local! {
 /// dismissals, and one-time local-DB migration markers. EVERY OTHER key syncs
 /// across devices (LWW by `updated_at`) — add new device-local keys HERE.
 const DEVICE_LOCAL_KEYS: &[&str] = &[
+    // Версия локальной базы. Миграции прогоняет КАЖДОЕ устройство у себя, поэтому
+    // версия обязана остаться здесь: уехав по синку, она убедила бы второе
+    // устройство, что оно уже мигрировало, хотя своих данных оно не трогало.
+    "db_schema_version",
     "push_subscribed",
     "push_onboarding_dismissed",
     "notif_received",
@@ -164,4 +168,20 @@ async fn put(key: &str, value: &str) {
         },
     )
     .await;
+}
+
+/// Записать флаг и ДОЖДАТЬСЯ, пока он окажется в базе. Обычный [`set`] кладёт в кэш
+/// сразу, а в базу — фоновой задачей; тому, кто должен убедиться в записи (нулевая
+/// миграция), этого мало.
+pub async fn set_awaited(key: &str, value: &str) {
+    CACHE.with(|c| {
+        c.borrow_mut().insert(key.to_string(), value.to_string());
+    });
+    put(key, value).await;
+}
+
+/// Прочитать флаг ИЗ БАЗЫ, мимо кэша. Нужно там, где кэш нельзя принимать за
+/// доказательство: он ответит собственной записью, даже если до базы она не дошла.
+pub async fn read_from_db(key: &str) -> Option<String> {
+    db::get::<FlagRow>("app_flags", key).await.map(|r| r.value)
 }

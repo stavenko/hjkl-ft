@@ -17,6 +17,7 @@ pub mod iron;
 pub mod letters;
 pub mod local;
 pub mod meal_split;
+pub mod migrations;
 pub mod net;
 pub mod platform;
 pub mod profile;

@@ -87,11 +87,11 @@ await page.evaluate(async (uid) => {
   const app_flags = [
     { key: "push_onboarding_dismissed", value: "true" }, { key: "welcome_shown", value: "true" },
     { key: "iron_week_unlocked", value: "true" }, { key: "iron_week_opened_at", value: ymd(3) },
-    // Одноразовая инвалидация кальция и железа здесь ДОЛЖНА считаться пройденной:
-    // иначе она сотрёт значения у «Воды», и проверка «заполненное не
+    // Миграции здесь ДОЛЖНЫ считаться пройденными (версия базы уже 1): иначе
+    // миграция 1 сотрёт значения у «Воды», и проверка «заполненное не
     // переспрашивается» будет мерить не проход, а миграцию. Сама миграция
     // проверяется отдельно — check-calcium-iron-reset.mjs.
-    { key: "calcium_iron_migrated_v1", value: "true" },
+    { key: "db_schema_version", value: "1" },
   ];
   const profile = [{ key: "profile", sex: "male", height_cm: 180, birth_year: 1980,
     goal: "lose", steps_planka: 9000, created_at: nowIso, updated_at: nowIso }];

@@ -487,7 +487,7 @@ pub async fn get<T: DeserializeOwned>(store_name: &str, id: &str) -> Option<T> {
     let store = tx.store(store_name).expect("store not found");
     let key = JsValue::from_str(id);
     let result = store.get(key).await.expect("get failed");
-    result.map(|js_val| serde_wasm_bindgen::from_value(js_val).expect("deserialize failed"))
+    result.and_then(|js_val| decode_row(store_name, js_val))
 }
 
 /// Tracked delete: removes the row AND journals the deletion into the outbox.
@@ -511,6 +511,30 @@ pub async fn delete_untracked(store_name: &str, id: &str) {
     bump(store_name);
 }
 
+/// Разобрать одну строку стора. Строка, которую текущая схема взять не может,
+/// больше НЕ роняет приложение — она пропускается, но громко: запись уходит в
+/// журнал ошибок, который человек видит на экране.
+///
+/// Раньше здесь стоял `.expect("deserialize failed")`, и одна такая строка валила
+/// WASM панкой посреди `bootstrap_network`. Всё, что шло в ней ниже — заморозка
+/// калорий, недельный пересчёт планки калорий, недельный пересчёт планки шагов —
+/// не выполнялось, а снаружи это выглядело как «планка почему-то не пересчиталась».
+/// Молчать об этом по-прежнему нельзя, но и отменять из-за одной строки всю
+/// недельную работу — тоже.
+fn decode_row<T: DeserializeOwned>(store_name: &str, val: JsValue) -> Option<T> {
+    match serde_wasm_bindgen::from_value(val) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            crate::services::errors::record(
+                &format!("Хранилище «{store_name}»"),
+                &format!("строка не разобрана и пропущена: {e}"),
+            );
+            leptos::logging::error!("db::{store_name}: строка не разобрана и пропущена: {e}");
+            None
+        }
+    }
+}
+
 pub async fn list_all<T: DeserializeOwned>(store_name: &str) -> Vec<T> {
     let tx = with_db(|db| {
         db.transaction(&[store_name], TransactionMode::ReadOnly)
@@ -520,7 +544,7 @@ pub async fn list_all<T: DeserializeOwned>(store_name: &str) -> Vec<T> {
     let entries = store.get_all(None, None).await.expect("get_all failed");
     entries
         .into_iter()
-        .map(|val| serde_wasm_bindgen::from_value(val).expect("deserialize failed"))
+        .filter_map(|val| decode_row(store_name, val))
         .collect()
 }
 
@@ -543,7 +567,7 @@ pub async fn list_by_index<T: DeserializeOwned>(
         .expect("index query failed");
     entries
         .into_iter()
-        .map(|val| serde_wasm_bindgen::from_value(val).expect("deserialize failed"))
+        .filter_map(|val| decode_row(store_name, val))
         .collect()
 }
 

@@ -50,6 +50,11 @@ const seed = async (page, uid) => {
         no_water: true, no_food: true, no_wash: true, used_toilet: true, morning: true,
         created_at: nowIso, updated_at: nowIso });
     }
+    // Одна СТРОКА СТАРОГО ФОРМАТА — без пяти булевых полей, добавленных в схему
+    // позже. Раньше она роняла WASM панкой посреди запуска, и до недельного
+    // пересчёта дело не доходило. Теперь её обязаны пропустить, а работу доделать.
+    weight_entries.push({ id: "w-legacy", date: ymd(30), weight_kg: 93,
+      created_at: nowIso, updated_at: nowIso });
     for (const [store, rows] of Object.entries({ app_flags, profile, goals, foods, diary, weight_entries })) {
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");
@@ -66,8 +71,13 @@ const { context, page } = await openSeeded(b, {
   baseUrl: BASE, context: { serviceWorkers: "block" },
   uid: `planka-${Math.floor(Math.random() * 1e6)}`, seed,
 });
-page.on("console", (m) => { const t = m.text(); if (!/integrity|Service Worker/.test(t)) console.log(`  [${m.type()}] ${t.slice(0, 200)}`); });
-page.on("pageerror", (e) => console.log(`  [pageerror] ${e.message}`));
+const panics = [];
+page.on("console", (m) => {
+  const t = m.text();
+  if (/panicked at/.test(t)) panics.push(t.slice(0, 200));
+  if (!/integrity|Service Worker/.test(t)) console.log(`  [${m.type()}] ${t.slice(0, 200)}`);
+});
+page.on("pageerror", (e) => { panics.push(e.message); console.log(`  [pageerror] ${e.message}`); });
 await page.reload({ waitUntil: "domcontentloaded" });
 await page.waitForTimeout(15000);
 
@@ -99,6 +109,8 @@ check("планка пересчиталась", state.planka !== OLD_PLANKA, `$
 check("якорь переставлен на сегодня", state.anchor === today, `${state.anchor} (сегодня ${today})`);
 check("письмо о новой планке пришло", letters.some((l) => l.id === `planka-${today}`),
   letters.map((l) => l.id).join(", ") || "писем нет");
+check("строка старого формата не уронила запуск", panics.length === 0,
+  panics[0] || "паник нет");
 
 console.log(fail === 0 ? "\n=== ALL OK ===" : `\n=== FAILURES: ${fail} ===`);
 await context.close();

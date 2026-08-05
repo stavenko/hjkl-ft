@@ -98,7 +98,8 @@ async fn set_client_version(v: u64) {
 fn local_target(store: &str, id: &str) -> Option<(String, String)> {
     match store {
         "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "profile"
-        | "weight_entries" | "step_entries" | "deletions" | "app_flags" => {
+        | "weight_entries" | "step_entries" | "deletions" | "app_flags"
+        | "planka_history" => {
             Some((store.to_string(), id.to_string()))
         }
         "ind_days" => {
@@ -276,7 +277,7 @@ async fn apply_upsert(store: &str, row: &serde_json::Value, ctx: &mut ApplyCtx) 
             }
         }
         "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "weight_entries"
-        | "step_entries" | "deletions" => {
+        | "step_entries" | "deletions" | "planka_history" => {
             let Some(id) = row.get("id").and_then(|v| v.as_str()) else {
                 leptos::logging::error!("sync v2: {store} row without id: {row}");
                 return;
@@ -422,7 +423,7 @@ async fn migration_days() -> std::collections::BTreeMap<String, Vec<serde_json::
     };
     for store in [
         "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries",
-        "step_entries", "profile",
+        "step_entries", "profile", "planka_history",
     ] {
         for row in db::list_all::<serde_json::Value>(store).await {
             if store == "diary"
@@ -529,8 +530,8 @@ async fn migrate_inner(
 /// device-local keys must survive).
 const ADOPT_WIPE_STORES: &[&str] = &[
     "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries",
-    "step_entries", "profile", "deletions", "ind_protein", "ind_veg_fruit", "ind_steps",
-    "ind_calories",
+    "step_entries", "profile", "deletions", "planka_history", "ind_protein", "ind_veg_fruit",
+    "ind_steps", "ind_calories",
 ];
 
 /// ADOPT: the store is initialized, so the source of truth has already been

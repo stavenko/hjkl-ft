@@ -90,11 +90,16 @@ fn build_executor_think(think: bool) -> Result<Qwen, String> {
         // Emit reasoning tokens to the thinking stream (for the "thinking" UI phase)
         // only when reasoning is enabled.
         .think(think)
-        // Workers AI defaults output to 2000 tokens; qwen3's reasoning alone can
-        // eat all of it and truncate the answer (empty content → parse error).
-        // Lift the ceiling so reasoning + answer always fit. (Needs the ai-worker
-        // to forward max_tokens, which it now does.)
-        .max_tokens(8000)
+        // Потолок ответа. С рассуждением он должен вмещать И рассуждение, И ответ —
+        // 8000, иначе qwen3 съедает лимит размышлением и возвращает пустой контент.
+        //
+        // БЕЗ рассуждения столько не нужно никогда: самый длинный ответ здесь —
+        // КБЖУ с пятью нутриентами и комментариями, около 2500 символов. Зато
+        // модель изредка срывается в генерацию мусора и молотит до самого потолка:
+        // наблюдалось 6774 символа «!!!!!!!!…» на запрос омега-3. Разобрать это всё
+        // равно нельзя — попытка пропадает, — но платим мы за все выданные токены.
+        // 2000 хватает любому здешнему ответу и вчетверо укорачивает срыв.
+        .max_tokens(if think { 8000 } else { 2000 })
         .build();
     Ok(executor)
 }

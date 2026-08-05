@@ -467,13 +467,21 @@ pub async fn put_json_untracked(store_name: &str, value: &serde_json::Value) {
 
 /// Untracked write — ONLY for sync-apply paths (remote data must not re-enter
 /// the outbox).
+///
+/// Пишет ТЕМ ЖЕ json-совместимым сериализатором, что и [`put_json_untracked`].
+/// Раньше здесь стоял дефолтный `to_value`, который кладёт `BTreeMap` как JS `Map`:
+/// одно и то же поле (`Food.nutrients`) лежало в сторе в двух видах — объектом у
+/// строк, приехавших синком, и `Map` у записанных на устройстве. Читаются оба, но
+/// снаружи `Object.keys()` у `Map` даёт ноль, и на этом легко заключить, что данных
+/// нет вовсе.
 pub async fn put_untracked<T: Serialize>(store_name: &str, value: &T) {
     let tx = with_db(|db| {
         db.transaction(&[store_name], TransactionMode::ReadWrite)
             .expect("failed to create transaction")
     });
     let store = tx.store(store_name).expect("store not found");
-    let js_val = serde_wasm_bindgen::to_value(value).expect("serialize failed");
+    let ser = serde_wasm_bindgen::Serializer::json_compatible();
+    let js_val = value.serialize(&ser).expect("serialize failed");
     store.put(&js_val, None).await.expect("put failed");
     tx.done().await.expect("transaction failed");
     bump(store_name);

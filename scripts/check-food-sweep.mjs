@@ -131,11 +131,8 @@ const readFoods = () => page.evaluate(async (uid) => {
     rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
   });
   db.close();
-  // ВНИМАНИЕ: `nutrients` лежит в базе в ДВУХ формах. Локальная запись идёт через
-  // дефолтный serde_wasm_bindgen, который кладёт BTreeMap как JS `Map`; строка,
-  // приехавшая синком, пишется json-совместимым сериализатором и лежит обычным
-  // объектом. `Object.keys()` у Map всегда даёт 0 — прочитав так, легко решить, что
-  // нутриенты не пишутся вовсе. Считаем обе формы.
+  // Новые записи кладутся обычным объектом, но в базах, заведённых до этого, поле
+  // ещё лежит как JS `Map` — у него `Object.keys()` всегда даёт 0. Считаем обе формы.
   const size = (n) => (n instanceof Map ? n.size : Object.keys(n || {}).length);
   const dump = (n) => JSON.stringify(n instanceof Map ? Object.fromEntries(n) : n || {});
   return all.map((f) => ({ id: f.id, name: f.name, mg: f.iron_mg, abs: f.iron_absorption,

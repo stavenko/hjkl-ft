@@ -728,6 +728,49 @@ pub async fn migrate_meal_labels() {
     }
 }
 
+/// Одноразовая ИНВАЛИДАЦИЯ кальция и железа у всех продуктов.
+///
+/// Значения, набранные до 2026-08-05, недостоверны: железо приходило равным доле
+/// усвоения (печень 0.25 мг вместо ~9), а кальций часть времени вообще не
+/// записывался — модель отвечала документом схемы вместо значения. Держать такие
+/// числа нельзя, а отличить испорченное от верного задним числом не по чему, поэтому
+/// стирается всё разом.
+///
+/// После стирания `enrich::needs_enrichment` и `iron::needs_iron` снова дают `true`,
+/// и ближайший фоновый проход (`classify::sweep_unprocessed`) запросит значения
+/// заново. Сами продукты, дневник и КБЖУ не трогаются.
+///
+/// Заодно убирается legacy-ключ «Железо» из карты нутриентов: его писали ранние
+/// сборки, в интерфейсе он скрыт, а в данных только мешает.
+pub async fn migrate_reset_calcium_iron() {
+    const FLAG: &str = "calcium_iron_invalidated_v1";
+    if crate::services::app_flags::get_bool(FLAG) {
+        return;
+    }
+    let mut cleared = 0usize;
+    for mut food in list_foods().await {
+        let had_ca = food.nutrients.remove(crate::services::indicators::N_CALCIUM).is_some();
+        let had_legacy = food.nutrients.remove(crate::services::indicators::N_IRON).is_some();
+        let had_fe = food.iron_mg.is_some() || food.iron_absorption.is_some();
+        if !had_ca && !had_legacy && !had_fe {
+            continue;
+        }
+        food.iron_mg = None;
+        food.iron_absorption = None;
+        food.updated_at = now();
+        db::put("foods", &food).await;
+        // День, в котором этот продукт ел, обязан пересчитаться — иначе виджет
+        // продолжит показывать кальций по стёртым значениям.
+        crate::services::indicators::invalidate_food(&food.id).await;
+        cleared += 1;
+    }
+    crate::services::app_flags::set_bool(FLAG, true);
+    leptos::logging::log!("инвалидация кальция и железа: очищено продуктов — {cleared}");
+    if cleared > 0 {
+        crate::services::sync::push_background();
+    }
+}
+
 /// Stores whose rows can be deleted via the deletion log (kind == store name).
 const DELETABLE_STORES: &[&str] = &[
     "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries", "step_entries",

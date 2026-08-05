@@ -181,6 +181,9 @@ async fn bootstrap_network() {
         // One-time backfill of explicit meal labels on pre-existing entries (runs
         // on the merged dump, after the pull, so server entries get labelled too).
         services::local::migrate_meal_labels().await;
+        // Одноразово стереть кальций и железо, набранные испорченными промптами.
+        // Строго ПЕРЕД проходом: он и запросит стёртое заново.
+        services::local::migrate_reset_calcium_iron().await;
         // Classify any recent/untagged food now that the AI worker is reachable.
         leptos::spawn_local(services::classify::sweep_unprocessed());
         // Poll the support thread so a curator `set_planka` directive is applied by

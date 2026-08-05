@@ -499,6 +499,14 @@ pub fn ProgressWidget() -> impl IntoView {
                                 && calcium_green < indicators::GREEN_GATE_DAYS
                             {
                                 Some(("dashboard.progress.calcium_gate_title", calcium_green))
+                            } else if let Some(w) = iron_week.get().flatten().filter(
+                                |w| w.absorbed_mg < w.target_mg,
+                            ) {
+                                // У недельной планки железа тоже есть срок, и он должен
+                                // быть назван. Считается так же, как у остальных гейтов:
+                                // «сделано» — прошедшие дни недели, «осталось» — остаток
+                                // до её конца. Подпись уходит, как только норма набрана.
+                                Some(("dashboard.progress.iron_gate_title", w.day_of_week - 1))
                             } else {
                                 None
                             };

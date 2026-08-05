@@ -413,6 +413,187 @@ pub async fn lookup_nutrient(food_name: &str, nutrient: &str, unit: &str) -> Res
     Ok(v.recommended)
 }
 
+// ── Сколько кальция в продукте, по категориям ─────────────────────────────────
+//
+// Измерено на 200 запросах (по десять на двадцать продуктов, `scripts/measure-
+// calcium-consistency.sh`): модель кальций НЕ знает. Десять медиан из двадцати
+// легли в узкий коридор 120–135 мг независимо от продукта — соевое молоко без
+// добавок 135 при реальных 25, брокколи 127.5 при 47, миндаль 125 при 269. Семена
+// занижаются кратно и устойчиво: кунжут 220 при 975, мак 22.5 при 1438. Слово
+// «обогащённое кальцием» в названии игнорируется полностью.
+//
+// Поэтому числа — НАШИ, как и у железа. Работа модели — узнать продукт и поместить
+// его в строку; величину задаёт строка. Таблица одна: промпт РЕНДЕРИТСЯ из этого
+// массива, ответ ПРОВЕРЯЕТСЯ по нему же, разойтись они не могут.
+//
+// Продукты, не попавшие ни в одну строку, получают НОЛЬ (`other_none`). Мясо, рыба
+// без костей, яйца, крупы, хлеб, макароны, овощи, фрукты, масла, сахар несут
+// десятки миллиграммов, но для недельной нормы это шум — считаем, что кальция там
+// нет, вместо того чтобы гадать.
+struct CalciumCategory {
+    /// Stable key the model must echo back in `category`.
+    key: &'static str,
+    mg_min: f64,
+    mg_max: f64,
+    /// Russian examples — the input names are Russian, so they match better.
+    examples: &'static str,
+}
+
+const CALCIUM_CATEGORIES: &[CalciumCategory] = &[
+    // ── Сыры: чем твёрже и суше, тем больше кальция ──
+    CalciumCategory { key: "cheese_hard", mg_min: 600.0, mg_max: 1300.0,
+        examples: "пармезан, грана падано, чеддер, гауда, эмменталь, российский, пекорино" },
+    CalciumCategory { key: "cheese_semi", mg_min: 350.0, mg_max: 700.0,
+        examples: "моцарелла, сулугуни, адыгейский, брынза, фета, эдам, косичка" },
+    CalciumCategory { key: "cheese_soft", mg_min: 80.0, mg_max: 400.0,
+        examples: "рикотта, камамбер, бри, маскарпоне, творожный сыр, филадельфия" },
+    CalciumCategory { key: "cheese_processed", mg_min: 200.0, mg_max: 900.0,
+        examples: "плавленый сыр, сырок плавленый, сыр в ванночке, хохланд, виола" },
+    // ── Остальная молочка ──
+    CalciumCategory { key: "milk_liquid", mg_min: 90.0, mg_max: 150.0,
+        examples: "молоко, кефир, ряженка, айран, простокваша, питьевой йогурт" },
+    CalciumCategory { key: "yogurt_sour_cream", mg_min: 80.0, mg_max: 180.0,
+        examples: "йогурт, греческий йогурт, сметана, сливочный сыр без соли" },
+    CalciumCategory { key: "cottage_cheese", mg_min: 80.0, mg_max: 200.0,
+        examples: "творог, зернёный творог, творожная масса, сырники" },
+    CalciumCategory { key: "milk_concentrated", mg_min: 250.0, mg_max: 1300.0,
+        examples: "сухое молоко, сгущённое молоко, молочная сыворотка сухая" },
+    CalciumCategory { key: "cream_whey", mg_min: 50.0, mg_max: 110.0,
+        examples: "сливки, сыворотка, мороженое пломбир" },
+    // ── Немолочные источники, где кальция действительно много ──
+    CalciumCategory { key: "seeds_high", mg_min: 500.0, mg_max: 1500.0,
+        examples: "мак, кунжут, семена чиа" },
+    CalciumCategory { key: "sesame_paste", mg_min: 250.0, mg_max: 550.0,
+        examples: "тахини, халва тахинная, кунжутная паста, козинак кунжутный" },
+    CalciumCategory { key: "fish_with_bones", mg_min: 120.0, mg_max: 450.0,
+        examples: "сардины в масле, шпроты, лосось консервированный с костями, килька" },
+    CalciumCategory { key: "tofu", mg_min: 100.0, mg_max: 700.0,
+        examples: "тофу, соевый творог" },
+    // Строки узкие НАМЕРЕННО: модель берёт середину диапазона, поэтому широкая
+    // строка даёт систематический промах. Замер: при `nuts` 50–300 миндаль получал
+    // 150 вместо 269, при `greens_low_oxalate` 40–250 брокколи — 150 вместо 47.
+    CalciumCategory { key: "nuts_high_calcium", mg_min: 200.0, mg_max: 300.0,
+        examples: "миндаль, бразильский орех" },
+    CalciumCategory { key: "nuts_other", mg_min: 40.0, mg_max: 150.0,
+        examples: "фундук, фисташки, кешью, грецкий орех, арахис, кедровый орех" },
+    CalciumCategory { key: "legumes_dry", mg_min: 60.0, mg_max: 300.0,
+        examples: "фасоль сухая, нут сухой, соевые бобы, маш" },
+    CalciumCategory { key: "greens_leafy", mg_min: 130.0, mg_max: 260.0,
+        examples: "петрушка, укроп, кале, руккола, базилик, кинза" },
+    CalciumCategory { key: "vegetables_other", mg_min: 25.0, mg_max: 90.0,
+        examples: "брокколи, цветная капуста, белокочанная капуста, пекинская капуста, \
+                   стручковая фасоль, репа" },
+    CalciumCategory { key: "greens_oxalate", mg_min: 40.0, mg_max: 120.0,
+        examples: "шпинат, щавель, ревень, свекольная ботва" },
+    CalciumCategory { key: "dried_fruit", mg_min: 30.0, mg_max: 180.0,
+        examples: "инжир сушёный, курага, урюк, финики" },
+    // ── Обогащение задаёт значение, и узнаётся оно ТОЛЬКО по названию ──
+    // Обогащают почти всегда «до уровня молока» — отсюда узкий диапазон.
+    CalciumCategory { key: "fortified", mg_min: 100.0, mg_max: 180.0,
+        examples: "обогащённое кальцием растительное молоко, сок с кальцием, хлопья с кальцием" },
+    CalciumCategory { key: "plant_milk_plain", mg_min: 5.0, mg_max: 40.0,
+        examples: "соевое молоко без добавок, овсяное молоко, миндальное молоко, кокосовое молоко" },
+    // ── Всё прочее — ноль ──
+    CalciumCategory { key: "other_none", mg_min: 0.0, mg_max: 0.0,
+        examples: "мясо, птица, рыба без костей, яйца, крупы, макароны, хлеб, овощи, фрукты, \
+                   масло, сахар, сладости, вода, чай, кофе, алкоголь — всё, чего нет выше" },
+];
+
+/// Таблица кальция как текст промпта — из того же массива, что и проверка.
+fn calcium_category_table() -> String {
+    CALCIUM_CATEGORIES
+        .iter()
+        .map(|c| {
+            format!(
+                "  {key:<20} {min}–{max} мг — {ex}",
+                key = c.key, min = c.mg_min, max = c.mg_max, ex = c.examples
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// Модель называет строку и величину внутри неё. `///` здесь читается моделью —
+// developer-пояснения держим в `//`, как и у железа.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct CalciumDetail {
+    /// The category key from the table, copied EXACTLY as written there.
+    category: String,
+    /// What this product actually is, in two or three words.
+    food_type: String,
+    /// Lowest reasonable CALCIUM CONTENT per 100 g, in milligrams.
+    min_value: f64,
+    /// Highest reasonable CALCIUM CONTENT per 100 g, in milligrams.
+    max_value: f64,
+    /// Most likely CALCIUM CONTENT per 100 g, in milligrams.
+    recommended: f64,
+    /// One short sentence: why this category and this amount. Keep it under 20 words.
+    reason: String,
+}
+
+/// Сколько кальция в продукте, мг на 100 г. Строку выбирает модель, величину
+/// ограничивает наша таблица; продукт, не попавший ни в одну строку, даёт 0.
+pub async fn lookup_calcium(food_name: &str) -> Result<f64, String> {
+    let lang = match crate::services::i18n::get_lang() {
+        crate::services::i18n::Lang::Ru => "Russian",
+        crate::services::i18n::Lang::En => "English",
+    };
+    let prompt = format!(
+        "You are a nutritional database. For the food item \"{food_name}\", report how much \
+         CALCIUM it contains per 100 grams, in MILLIGRAMS.\n\n\
+         For raw/dry as-sold products (grains, seeds, legumes, flour) use the RAW value unless \
+         the name says cooked/boiled/soaked.\n\n\
+         First place the food in ONE row of this table, then give a value INSIDE that row's \
+         range:\n\n\
+         {table}\n\n\
+         Report:\n\
+         - category: the row key, copied EXACTLY as written above\n\
+         - food_type: what this product is, in two or three words, in {lang}\n\
+         - min_value / max_value / recommended: milligrams per 100 g, min ≤ recommended ≤ max\n\
+         - reason: ONE short sentence (under 20 words) in {lang} — why this row and this amount\n\n\
+         Rules for choosing the row:\n\
+         - Cheese goes by HARDNESS: hard and dry → cheese_hard, semi-hard and brined → \
+           cheese_semi, soft and fresh → cheese_soft, melted/processed → cheese_processed.\n\
+         - A plant drink counts as fortified ONLY if the name says so («обогащённое», «с \
+           кальцием», «fortified»). Otherwise it is plant_milk_plain, which has very little.\n\
+         - Canned fish counts as fish_with_bones only when the bones are eaten (sardines, \
+           sprats, canned salmon). Fillet without bones is other_none.\n\
+         - Anything not covered by a row above is other_none, and its value is 0. Meat, fish \
+           fillet, eggs, cereals, bread, pasta, vegetables, fruit, oils, sweets and drinks all \
+           go there — they carry some calcium, but too little to count.\n\n\
+         Base the answer only on the food name \"{food_name}\". Respond with ONLY a single \
+         minified JSON object and nothing else — no markdown, no prose.",
+        table = calcium_category_table(),
+        lang = lang,
+    );
+
+    let v: CalciumDetail = generate_validated(prompt, |_| {}, 4, |v: &CalciumDetail| {
+        if !(v.min_value <= v.recommended && v.recommended <= v.max_value && v.min_value >= 0.0) {
+            return Err(format!(
+                "calcium contradicts itself: {}…{}…{} мг",
+                v.min_value, v.recommended, v.max_value
+            ));
+        }
+        let key = v.category.trim().to_ascii_lowercase();
+        let Some(cat) = CALCIUM_CATEGORIES.iter().find(|c| c.key == key) else {
+            return Err(format!("unknown calcium category «{}» for «{food_name}»", v.category));
+        };
+        if !(cat.mg_min - 1e-9..=cat.mg_max + 1e-9).contains(&v.recommended) {
+            return Err(format!(
+                "calcium {} мг outside «{}» ({}–{} мг) for «{food_name}»",
+                v.recommended, cat.key, cat.mg_min, cat.mg_max
+            ));
+        }
+        Ok(())
+    })
+    .await?;
+    leptos::logging::log!(
+        "calcium «{food_name}»: {} мг · {} — {} ({})",
+        v.recommended, v.category, v.food_type, v.reason
+    );
+    Ok(v.recommended)
+}
+
 // ── How well iron is absorbed, by food category ──────────────────────────────
 //
 // The model does NOT know these numbers. Measured directly: strip the figures from

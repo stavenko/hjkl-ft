@@ -85,7 +85,15 @@ pub async fn enrich_food(food: &Food) -> Result<(), String> {
         if food.nutrients.contains_key(*name) {
             continue; // already enriched (e.g. by a previous partial pass)
         }
-        let value = ai::lookup_nutrient(&food.name, name, unit.label()).await?;
+        // Кальций идёт СВОИМ запросом — по таблице категорий, как железо. Свободный
+        // вопрос «сколько кальция» модель не тянет: на 200 замеров половина ответов
+        // легла в коридор 120–135 мг независимо от продукта, семена занижались
+        // кратно, а слово «обогащённое» в названии не читалось вовсе.
+        let value = if *name == N_CALCIUM {
+            ai::lookup_calcium(&food.name).await?
+        } else {
+            ai::lookup_nutrient(&food.name, name, unit.label()).await?
+        };
         let mut one = BTreeMap::new();
         one.insert(name.to_string(), value);
         local::cache_food_nutrients(&food.id, one).await;

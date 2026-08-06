@@ -1,9 +1,9 @@
-// Экран «Персона»: что видит человек, пока профиль не заполнен.
+// Экран «Персона» при первом запуске.
 //
-// Проверяемое: негодное значение не выбрасывается молча, отсутствие кнопки
-// «Готово» объяснено списком незаполненного, а годное значение сохраняется
-// сразу по вводу — без ухода с поля (на телефоне из числовой клавиатуры можно
-// так и не «уйти»).
+// Проверяемое: человеку объяснено, что это за экран; кнопка «Готово» есть сразу;
+// нажатие на неё при незаполненной форме называет каждую беду словами и красит
+// виноватые поля; заполненная форма уводит с экрана, и второй раз он не
+// показывается.
 import { chromium } from "playwright";
 import { execSync } from "node:child_process";
 
@@ -62,34 +62,54 @@ const closeVisible = () =>
   page.getByRole("button", { name: "Готово" }).isVisible().catch(() => false);
 
 
-// 1. Пустой профиль: кнопки нет, и сказано, чего не хватает.
-check(!(await closeVisible()), "кнопки «Готово» нет, пока профиль не заполнен");
-check(/Чтобы продолжить, заполните/.test(await body()), "показано, чего не хватает");
+// 1. Первый запуск: объяснение и кнопка на месте.
+check(/приложение для похудения/.test(await body()), "объяснено, что это за экран");
+check(await page.getByTestId("persona-btn-done").isVisible(), "кнопка «Готово» есть сразу");
+check(
+  !(await page.getByTestId("persona-problems").isVisible().catch(() => false)),
+  "до нажатия ничего не красное",
+);
 
-const nums = page.locator('input[type="number"]');
-const height = nums.nth(0);
-const year = nums.nth(1);
-
-// 2. Негодный год: молчания быть не должно.
-await year.fill("90");
+// 2. Нажатие на пустой форме называет каждую беду.
+await page.getByTestId("persona-btn-done").click();
 await page.waitForTimeout(600);
-check(/Год целиком/.test(await body()), "негодный год объяснён, а не выброшен молча");
+const problems = await page.getByTestId("persona-problems").innerText();
+console.log("   разбор формы:", JSON.stringify(problems.replace(/\n/g, " / ")));
+check(/Укажите пол/.test(problems), "сказано про пол");
+check(/Добавьте свой рост/.test(problems), "сказано про рост");
+check(/Введите год рождения/.test(problems), "сказано про год рождения");
+const ring = async (id) =>
+  (await page.getByTestId(id).getAttribute("style")).includes("inset 0 0 0 2px");
+check(await ring("persona-sex"), "поле пола подсвечено");
+check(await ring("persona-height"), "поле роста подсвечено");
+check(await ring("persona-year"), "поле года подсвечено");
 
-// 3. Негодный рост — то же самое.
-await height.fill("16");
+// 3. Негодный год не считается заполненным.
+await page.getByTestId("persona-year").fill("90");
+await page.getByTestId("persona-btn-done").click();
 await page.waitForTimeout(600);
-check(/Рост в сантиметрах/.test(await body()), "негодный рост объяснён");
+check(
+  /Введите год рождения/.test(await page.getByTestId("persona-problems").innerText()),
+  "«90» не сходит за год рождения",
+);
 
-// 4. Годные значения сохраняются по вводу, без ухода с поля.
-await height.fill("178");
-await year.fill("1990");
-await page.selectOption("select", { index: 1 });
-await page.waitForTimeout(1200);
-check(!/Чтобы продолжить, заполните/.test(await body()), "список незаполненного пропал");
-// Заполненный профиль уводит с экрана персоны сам — жать «Готово» не нужно и
-// не приходится: кнопка нужна лишь когда экран открыт заново с дашборда.
+// 4. Заполненная форма уводит с экрана.
+await page.getByTestId("persona-height").fill("178");
+await page.getByTestId("persona-year").fill("1990");
+await page.getByTestId("persona-sex").selectOption("male");
+await page.getByTestId("persona-btn-done").click();
 await page.getByTestId("nav-diary").waitFor({ timeout: 20000 });
-check(!/Год рождения/.test(await body()), "экран персоны закрылся сам");
+check(!/приложение для похудения/.test(await body()), "экран персоны закрылся");
+
+// 5. Второй запуск того же аккаунта: экрана больше нет.
+const page2 = await ctx.newPage();
+await page2.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+await page2.getByTestId("nav-diary").waitFor({ timeout: 60000 });
+await page2.waitForTimeout(2000);
+check(
+  !/приложение для похудения/.test(await page2.innerText("body")),
+  "второй раз экран не показывается",
+);
 
 await page.screenshot({ path: "/tmp/persona-form.png", fullPage: true });
 await b.close();

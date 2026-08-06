@@ -35,7 +35,11 @@ use crate::services::profile::{self, CourseGoal, Sex};
 use crate::services::indicators::{self, IndicatorState};
 use crate::services::sticky::sticky;
 use crate::services::weight_trend;
-use crate::services::{db, local, net};
+use crate::services::{app_flags, db, local, net};
+
+/// Персона подтверждена кнопкой «Готово». Синкается: заполнив её на одном
+/// устройстве, человек не должен отвечать на те же вопросы на втором.
+const PERSONA_CONFIRMED: &str = "persona_confirmed";
 
 // ── Expanded-view helpers (gauge labels / colours + "?" explanations) ─────────
 
@@ -299,20 +303,33 @@ const EDITOR: &str = "display: flex; flex-direction: column; gap: 14px; min-heig
 pub fn DashboardPage() -> impl IntoView {
     // Profile reads are synchronous (cached); bump this to re-read after an edit.
     let bump = create_rw_signal(0u32);
-    // …and re-read when SYNC brings a profile from another device (the persona
-    // was filled there, so this device must leave the persona screen at once).
+    // …and re-read when SYNC brings a profile from another device.
     let profile_ver = profile::version_signal();
-    let persona_complete = move || {
+
+    // Уже заполненную персону не спрашивают заново. Сверка ОДНОРАЗОВАЯ, на входе,
+    // и намеренно не реактивная: иначе экран закрывался бы сам в тот момент, когда
+    // человек дозаполнил последнее поле, — то есть кнопка «Готово» никогда бы и не
+    // понадобилась. Сюда попадают те, кто заполнил персону до появления этой
+    // кнопки, и те, кому профиль приехал синком с другого устройства.
+    if !app_flags::get_bool(PERSONA_CONFIRMED)
+        && profile::get_height_cm().is_some()
+        && profile::get_birth_year().is_some()
+        && profile::get_sex().is_some()
+    {
+        app_flags::set_bool(PERSONA_CONFIRMED, true);
+    }
+
+    // Первый заход: человек ещё ни разу не подтвердил персону кнопкой «Готово».
+    // Отметка синкается — подтвердив на одном устройстве, на втором не спрашивают.
+    let persona_first_run = move || {
         bump.get();
         profile_ver.get();
-        profile::get_height_cm().is_some()
-            && profile::get_birth_year().is_some()
-            && profile::get_sex().is_some()
+        !app_flags::get_bool(PERSONA_CONFIRMED)
     };
 
     let overlay = create_rw_signal(Overlay::None);
-    // Persona takes over the whole screen while it's incomplete OR re-opened.
-    let persona_full = move || !persona_complete() || overlay.get() == Overlay::Persona;
+    // Persona takes over the whole screen on the first run OR when re-opened.
+    let persona_full = move || persona_first_run() || overlay.get() == Overlay::Persona;
     // The cycle widget is female-only.
     let is_female = move || {
         bump.get();
@@ -402,12 +419,18 @@ pub fn DashboardPage() -> impl IntoView {
     view! {
         {move || {
             if persona_full() {
+                // Первый заход объясняет, зачем спрашивают, и заканчивается
+                // кнопкой «Готово»: она разбирает форму и называет незаполненное.
+                // Открытый заново экран — прежний виджет: человек уже знает, что
+                // это, и уходит с него кнопкой в шапке.
+                let first = persona_first_run();
                 view! {
                     <div style=EDITOR>
                         <EditorHead title="dashboard.persona_title"
-                            show_done=Signal::derive(persona_complete)
+                            show_done=Signal::derive(move || !first)
                             on_done=move || overlay.set(Overlay::None)/>
-                        <PersonaEditor bump/>
+                        <PersonaEditor bump first_run=first
+                            on_done=Callback::new(move |_| overlay.set(Overlay::None))/>
                     </div>
                 }.into_view()
             } else if overlay.get() == Overlay::Notifications {
@@ -697,8 +720,17 @@ fn EditorHead(
 
 /// Persona editor: sex, height, birth year and course goal. Every control writes
 /// straight to the profile and bumps the dashboard so completeness re-evaluates.
+///
+/// `first_run` — экран, который человек видит сразу после установки. Тогда сверху
+/// объяснение, зачем это спрашивают, а снизу кнопка «Готово»: она разбирает форму,
+/// называет незаполненное и подсвечивает виноватые поля. Отсутствие такой кнопки
+/// раньше выглядело поломкой — заполнил, а дальше хода нет.
 #[component]
-fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
+fn PersonaEditor(
+    bump: RwSignal<u32>,
+    #[prop(optional)] first_run: bool,
+    #[prop(optional)] on_done: Option<Callback<()>>,
+) -> impl IntoView {
     // Initial values captured once. We deliberately DON'T reactively control the
     // <select> value: a reactive `prop:value` fought the native selection and
     // reverted the shown option even though the value was already saved. The editor
@@ -714,30 +746,59 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
         bump.update(|v| *v += 1);
     };
 
-    // Введённое, но негодное значение раньше выбрасывалось МОЛЧА: человек писал в
-    // год рождения «90», ничего не сохранялось, и кнопка «Готово» не появлялась —
-    // без единого слова о том, почему. Экран выглядел сломанным.
+    // Виноватые поля после разбора формы. До первого нажатия «Готово» ничего не
+    // красное: человек ещё не заявлял, что закончил, и ругать его не за что.
+    let sex_bad = create_rw_signal(false);
     let height_bad = create_rw_signal(false);
     let year_bad = create_rw_signal(false);
+    // Что именно не так — по одной строке на поле, словами.
+    let problems = create_rw_signal(Vec::<&'static str>::new());
 
-    // Чего не хватает до полного профиля. Кнопка «Готово» появляется только когда
-    // заполнено всё; без этого списка её отсутствие ничем не объяснено.
-    let missing = move || {
+    // Разобрать форму. Пустой список — можно уходить.
+    let check = move || {
         bump.get();
+        let no_sex = profile::get_sex().is_none();
+        let no_height = profile::get_height_cm().is_none();
+        let no_year = profile::get_birth_year().is_none();
+        sex_bad.set(no_sex);
+        height_bad.set(no_height);
+        year_bad.set(no_year);
         let mut out: Vec<&'static str> = Vec::new();
-        if profile::get_sex().is_none() {
-            out.push(t("dashboard.sex"));
+        if no_sex {
+            out.push(t("persona.need_sex"));
         }
-        if profile::get_height_cm().is_none() {
-            out.push(t("dashboard.height"));
+        if no_height {
+            out.push(t("persona.need_height"));
         }
-        if profile::get_birth_year().is_none() {
-            out.push(t("dashboard.birth_year"));
+        if no_year {
+            out.push(t("persona.need_year"));
         }
         out
     };
 
-    let hint = "margin: -2px 0 0; align-self: flex-end; max-width: 62%; text-align: right;";
+    let submit = move |_| {
+        let found = check();
+        let ok = found.is_empty();
+        problems.set(found);
+        if ok {
+            app_flags::set_bool(PERSONA_CONFIRMED, true);
+            bump.update(|v| *v += 1);
+            if let Some(cb) = on_done {
+                cb.call(());
+            }
+        }
+    };
+
+    // Красная рамка на поле, к которому есть вопрос.
+    let bad_ring = |bad: RwSignal<bool>| {
+        move || {
+            if bad.get() {
+                "box-shadow: inset 0 0 0 2px var(--bulma-danger);"
+            } else {
+                ""
+            }
+        }
+    };
 
     // Right-aligned number field on its row.
     let field = "background: var(--bulma-scheme-main); border: none; border-radius: 10px; \
@@ -751,15 +812,24 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
 
     view! {
         <div style="display: flex; flex-direction: column; gap: 8px;">
+            {first_run.then(|| view! {
+                <p class="has-text-grey" style="line-height: 1.55; margin: 2px 0 14px;">
+                    {move || t("persona.intro")}
+                </p>
+            })}
+
             <div style=row>
                 <span class="is-size-6" style=label>{move || t("dashboard.sex")}</span>
-                <select style=select
+                <select
+                    attr:data-testid="persona-sex"
+                    style=move || format!("{select}{}", bad_ring(sex_bad)())
                     on:change=move |ev| {
                         match event_target_value(&ev).as_str() {
                             "male" => pick_sex(Sex::Male),
                             "female" => pick_sex(Sex::Female),
                             _ => {}
                         }
+                        sex_bad.set(false);
                     }>
                     // Empty placeholder until a sex is chosen (keeps the profile incomplete).
                     <option value="" selected=sex0.is_none() disabled hidden></option>
@@ -773,41 +843,39 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                 // Сохраняем по вводу, а не по уходу с поля: на телефоне из
                 // числовой клавиатуры можно так и не «уйти», и заполненное поле
                 // осталось бы несохранённым.
-                <input type="number" inputmode="numeric" min="80" max="250" style=field
+                <input type="number" inputmode="numeric" min="80" max="250"
+                    attr:data-testid="persona-height"
+                    style=move || format!("{field}{}", bad_ring(height_bad)())
                     prop:value=move || { bump.get(); profile::get_height_cm().map(|h| (h as i64).to_string()).unwrap_or_default() }
                     on:input=move |ev| {
                         let raw = event_target_value(&ev);
                         let raw = raw.trim();
                         let ok = raw.parse::<f64>().ok().filter(|v| (80.0..=250.0).contains(v));
-                        height_bad.set(!raw.is_empty() && ok.is_none());
                         if let Some(v) = ok {
                             profile::set_height_cm(v);
+                            height_bad.set(false);
                             bump.update(|x| *x += 1);
                         }
                     }/>
             </div>
-            {move || height_bad.get().then(|| view! {
-                <p class="is-size-7 has-text-danger" style=hint>{move || t("dashboard.height_hint")}</p>
-            })}
 
             <div style=row>
                 <span class="is-size-6" style=label>{move || t("dashboard.birth_year")}</span>
-                <input type="number" inputmode="numeric" min="1900" max="2026" style=field
+                <input type="number" inputmode="numeric" min="1900" max="2026"
+                    attr:data-testid="persona-year"
+                    style=move || format!("{field}{}", bad_ring(year_bad)())
                     prop:value=move || { bump.get(); profile::get_birth_year().map(|y| y.to_string()).unwrap_or_default() }
                     on:input=move |ev| {
                         let raw = event_target_value(&ev);
                         let raw = raw.trim();
                         let ok = raw.parse::<i32>().ok().filter(|v| (1900..=2026).contains(v));
-                        year_bad.set(!raw.is_empty() && ok.is_none());
                         if let Some(v) = ok {
                             profile::set_birth_year(v);
+                            year_bad.set(false);
                             bump.update(|x| *x += 1);
                         }
                     }/>
             </div>
-            {move || year_bad.get().then(|| view! {
-                <p class="is-size-7 has-text-danger" style=hint>{move || t("dashboard.birth_year_hint")}</p>
-            })}
 
             <div style=row>
                 <span class="is-size-6" style=label>{move || t("dashboard.goal")}</span>
@@ -827,13 +895,27 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
             </div>
 
             {move || {
-                let m = missing();
-                (!m.is_empty()).then(|| view! {
-                    <p class="is-size-7 has-text-grey" style="margin-top: 10px;">
-                        {move || t("dashboard.persona_missing")} " " {m.join(", ")}
-                    </p>
+                let p = problems.get();
+                (!p.is_empty()).then(|| view! {
+                    <div attr:data-testid="persona-problems"
+                         class="has-text-danger is-size-7" style="margin-top: 10px;">
+                        {p.into_iter().map(|line| view! {
+                            <p style="margin: 0 0 2px;">{line}</p>
+                        }).collect_view()}
+                    </div>
                 })
             }}
+
+            {(first_run && on_done.is_some()).then(|| view! {
+                <button
+                    attr:data-testid="persona-btn-done"
+                    class="button is-link is-medium is-fullwidth has-text-weight-semibold"
+                    style="margin-top: 18px;"
+                    on:click=submit
+                >
+                    {move || t("dashboard.close")}
+                </button>
+            })}
         </div>
     }
 }

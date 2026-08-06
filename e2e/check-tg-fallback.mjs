@@ -8,8 +8,11 @@
 // Прогон: node check-tg-fallback.mjs
 import { chromium } from "playwright";
 
-const BASE = "https://renorma-fit-dev.pages.dev";
-const PAID = "pk-state-test"; // оплачен, в приложение не входил
+// BASE=https://fit.renorma.app — прогон против прода. Там оплаченного тестового
+// аккаунта нет и заводить его нельзя, поэтому первый блок пропускается: PAID
+// пуст, и остаётся только проверка «не оплачен».
+const BASE = process.env.BASE || "https://renorma-fit-dev.pages.dev";
+const PAID = process.env.PAID ?? "pk-state-test"; // оплачен, в приложение не входил
 const UNKNOWN = "11111111-2222-3333-4444-555555555555"; // не платил
 
 let failed = 0;
@@ -66,7 +69,7 @@ async function run() {
   const browser = await chromium.launch();
 
   // ── 1. Оплаченный аккаунт: отказ ключа → предложение Telegram → экран кода ──
-  {
+  if (PAID) {
     const { ctx, page } = await openAuth(browser, PAID);
     const msg = await failLogin(page);
     console.log("\n1. Оплачен, в приложение не входил");

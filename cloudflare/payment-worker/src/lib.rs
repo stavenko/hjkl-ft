@@ -839,6 +839,15 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         return relay(do_post(&claim, "/status", &serde_json::json!({ "claimId": claim_id })).await?).await;
     }
 
+    // ── Public account state (NO JWT) ──
+    // Установленный PWA знает свой user_id, но войти по ключу может не получиться.
+    // Чтобы решить, предлагать ли вход по коду или отправлять человека платить,
+    // нужно знать состояние аккаунта ДО входа. Отдаём два булевых значения и
+    // ничего больше: ни дат, ни почты, ни провайдера, ни суммы.
+    if method == Method::Post && path == "/account/state" {
+        return account_state(req, env).await;
+    }
+
     // ── TEST entitlement (PRODUCTION-IMPOSSIBLE; TEST_ENTITLEMENT-gated) ──
     if method == Method::Post && path == "/test/guest-checkout" {
         return test_guest_checkout(req, env).await;
@@ -1095,7 +1104,59 @@ async fn resolve_account(
 
 /// Ask auth-worker whether an account has any passkey. None on failure (treated as «unknown»,
 /// surfaced by the admin so it's not silently hidden).
+/// POST /account/state {userId} (ПУБЛИЧНО) → {active, entered}
+///
+/// Единственный вопрос, на который отвечает ручка: есть ли у этого аккаунта
+/// доступ и доходил ли человек до приложения. Больше о нём ничего не сообщается —
+/// user_id хоть и не секрет, но и подписка чужой человек по нему узнавать не должен.
+///
+/// `active` — тот же признак, по которому пускают ai-worker и ocr-queue
+/// (см. GATE CONTRACT в subscription_do.rs). Ошибка похода за `entered` НЕ глушится
+/// в `false`: это отдельное состояние, и врать про него нельзя — отвечаем 502.
+async fn account_state(mut req: Request, env: &Env) -> Result<Response> {
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let user_id = body
+        .get("userId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if user_id.is_empty() {
+        return Ok(error_response("missing userId", 400));
+    }
+
+    let stub = sub_stub(env, &user_id)?;
+    let mut r = do_get(&stub, "/subscription").await?;
+    let sub: serde_json::Value = r.json().await?;
+    let active = sub.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let entered = match auth_has_entered(env, &user_id).await {
+        Some(v) => v,
+        None => {
+            console_error!("account_state: auth-worker не ответил про entered для {user_id}");
+            return Ok(error_response("auth_unavailable", 502));
+        }
+    };
+
+    Response::from_json(&serde_json::json!({ "active": active, "entered": entered }))
+}
+
+/// Доходил ли пользователь до работающего приложения (открылась первая глава).
+/// `None` — auth-worker не ответил; отличать это от «не доходил» обязательно.
+async fn auth_has_entered(env: &Env, user_id: &str) -> Option<bool> {
+    let v = auth_internal(env, "has-entered", user_id).await?;
+    v.get("entered").and_then(|x| x.as_bool())
+}
+
 async fn auth_has_credentials(env: &Env, user_id: &str) -> Option<bool> {
+    let v = auth_internal(env, "has-credentials", user_id).await?;
+    v.get("hasCredentials").and_then(|x| x.as_bool())
+}
+
+/// Спросить auth-worker про user_id по внутренней ручке `/internal/<endpoint>`.
+/// `None` — не дозвонились или он ответил отказом; вызывающий обязан отличать это
+/// от отрицательного ответа.
+async fn auth_internal(env: &Env, endpoint: &str, user_id: &str) -> Option<serde_json::Value> {
     let key = token::secret_or_var(env, "INTERNAL_PUSH_KEY").await.ok()?;
     let payload = serde_json::json!({ "userId": user_id }).to_string();
     let headers = Headers::new();
@@ -1105,15 +1166,15 @@ async fn auth_has_credentials(env: &Env, user_id: &str) -> Option<bool> {
     init.with_method(Method::Post)
         .with_headers(headers)
         .with_body(Some(JsValue::from_str(&payload)));
-    let request =
-        Request::new_with_init("https://auth-worker/internal/has-credentials", &init).ok()?;
+    let url = format!("https://auth-worker/internal/{endpoint}");
+    let request = Request::new_with_init(&url, &init).ok()?;
     let auth = env.service("AUTH_WORKER").ok()?;
     let mut res = auth.fetch_request(request).await.ok()?;
     if !(200..300).contains(&res.status_code()) {
+        console_error!("auth_internal {endpoint}: HTTP {}", res.status_code());
         return None;
     }
-    let v: serde_json::Value = res.json().await.ok()?;
-    v.get("hasCredentials").and_then(|x| x.as_bool())
+    res.json().await.ok()
 }
 
 // ── Account teardown (test accounts): card + erase ───────────────────────────

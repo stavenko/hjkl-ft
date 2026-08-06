@@ -198,6 +198,29 @@ pub async fn refund_request() -> Result<Status, String> {
     Ok(s)
 }
 
+/// Состояние аккаунта, известное БЕЗ входа — по одному user_id.
+///
+/// Установленный PWA знает свой user_id (он в `start_url` манифеста), но войти
+/// по ключу может не получиться. Это единственный способ различить «оплатил, но
+/// не может войти» и «здесь платить ещё не начинали»: первому предлагаем вход по
+/// коду, второго отправляем в бота.
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub struct AccountState {
+    /// Тот же признак доступа, по которому пускают ai-worker и ocr-queue.
+    pub active: bool,
+    /// Доходил ли человек до работающего приложения.
+    pub entered: bool,
+}
+
+pub async fn account_state(user_id: &str) -> Result<AccountState, String> {
+    request_unauthed(
+        "POST",
+        "/account/state",
+        Some(serde_json::json!({ "userId": user_id })),
+    )
+    .await
+}
+
 async fn request<T: serde::de::DeserializeOwned>(
     method: &str,
     path: &str,

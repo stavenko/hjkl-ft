@@ -788,33 +788,75 @@ async fn webauthn_call(
         .map_err(|e| describe(op, &DomError::from_js(&e), clock.elapsed_ms(), timeout_ms))
 }
 
+/// Почему вход не состоялся.
+///
+/// Текст показываем как есть; вид нужен, чтобы решить, предлагать ли обходной
+/// путь. Вход по коду из Telegram помогает, когда беда с ключом, и бесполезен,
+/// когда до сервера просто не достучаться: код тоже идёт через сервер.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LoginFailure {
+    /// Запрос не ушёл или ответа не было.
+    Network,
+    /// Сервер ответил отказом.
+    Server,
+    /// Хранилище ключей отказало: отмена, нет ключа, нет биометрии и прочее.
+    Passkey,
+}
+
+pub struct LoginError {
+    pub message: String,
+    pub kind: LoginFailure,
+}
+
+impl LoginError {
+    fn passkey(message: String) -> Self {
+        LoginError { message, kind: LoginFailure::Passkey }
+    }
+    fn api(step: Step, e: AuthApiError) -> Self {
+        let kind = match e {
+            AuthApiError::Network(_) => LoginFailure::Network,
+            AuthApiError::Http { .. } => LoginFailure::Server,
+        };
+        LoginError { message: auth_api_message(step, e), kind }
+    }
+}
+
 /// Authenticate with existing PassKey (discoverable credential)
-pub async fn authenticate() -> Result<String, String> {
+pub async fn authenticate() -> Result<String, LoginError> {
     let fingerprint = generate_fingerprint();
     let begin_resp = post_json_typed("/authenticate/begin", &serde_json::json!({
         "fingerprint": fingerprint
     })).await
-        .map_err(|e| auth_api_message(Step::LoginBegin, e))?;
+        .map_err(|e| LoginError::api(Step::LoginBegin, e))?;
 
     let public_key = begin_resp.get("publicKey")
-        .ok_or("missing publicKey")?;
+        .ok_or_else(|| LoginError {
+            message: "сервер не прислал publicKey".to_string(),
+            kind: LoginFailure::Server,
+        })?;
 
-    let credential = webauthn_call(crate::services::webauthn_error::Op::Get, public_key).await?;
+    let credential = webauthn_call(crate::services::webauthn_error::Op::Get, public_key)
+        .await
+        .map_err(LoginError::passkey)?;
 
-    let credential_json = serialize_credential(&credential)?;
+    let credential_json = serialize_credential(&credential).map_err(LoginError::passkey)?;
 
     let finish_resp = post_json_typed("/authenticate/finish", &serde_json::json!({
         "credential": credential_json,
         "fingerprint": fingerprint
     })).await
-        .map_err(|e| auth_api_message(Step::LoginFinish, e))?;
+        .map_err(|e| LoginError::api(Step::LoginFinish, e))?;
 
+    let server = |what: &str| LoginError {
+        message: format!("сервер не прислал {what}"),
+        kind: LoginFailure::Server,
+    };
     let user_id = finish_resp.get("user_id")
         .and_then(|v| v.as_str())
-        .ok_or("missing user_id")?;
+        .ok_or_else(|| server("user_id"))?;
     let token = finish_resp.get("token")
         .and_then(|v| v.as_str())
-        .ok_or("missing token")?;
+        .ok_or_else(|| server("token"))?;
 
     establish_session(user_id, Some(token)).await;
     Ok(user_id.to_string())

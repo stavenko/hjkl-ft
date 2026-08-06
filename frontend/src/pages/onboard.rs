@@ -171,7 +171,7 @@ pub fn OnboardPage() -> impl IntoView {
             match auth::authenticate().await {
                 Ok(_) => step.set(Step::InstallPwa),
                 Err(e) => {
-                    error.set(Some(e));
+                    error.set(Some(e.message));
                     loading.set(false);
                     signing_in.set(false);
                 }

@@ -19,7 +19,12 @@ enum AuthStep {
     ShowQr { qr_url: String, pairing_id: String },
     Scanning,
     // No-passkey Android fallback: enter the one-time code delivered to Telegram.
-    TgCode,
+    // `auto` — код запрашивается сразу: сюда пришли осознанно, нажав «Войти через
+    // Telegram» после неудачи с ключом.
+    TgCode { auto: bool },
+    // Аккаунт без доступа: платить ещё не начинали (или подписка кончилась).
+    // Входить некуда — отправляем в бота.
+    NoAccount,
 }
 
 #[component]
@@ -44,11 +49,38 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
         create_effect(move |_| {
             spawn_local(async move {
                 if auth::passkey_unavailable().await && step.get_untracked() == AuthStep::Login {
-                    step.set(AuthStep::TgCode);
+                    step.set(AuthStep::TgCode { auto: false });
                 }
             });
         });
     }
+
+    // Вход по ключу не удался НЕ из-за сети — значит, сервер на месте и код по
+    // Telegram дойдёт. Предлагаем его отдельным блоком под сообщением об ошибке.
+    // При сетевой беде обходной путь не предлагаем: код идёт через тот же сервер.
+    let offer_tg = create_rw_signal(false);
+    // Пока выясняем состояние аккаунта, кнопка обходного пути занята.
+    let checking = create_rw_signal(false);
+    let uid_for_check = store_value(pwa_user_id.clone());
+    let on_tg_login = move |_| {
+        let Some(uid) = uid_for_check.get_value() else {
+            // Кнопка без user_id не рисуется; сюда попасть нельзя.
+            return;
+        };
+        checking.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match crate::services::subscription::account_state(&uid).await {
+                Ok(state) if state.active => step.set(AuthStep::TgCode { auto: true }),
+                Ok(_) => step.set(AuthStep::NoAccount),
+                Err(e) => {
+                    leptos::logging::error!("account_state: {e}");
+                    error.set(Some(t("auth.state_unknown").to_string()));
+                }
+            }
+            checking.set(false);
+        });
+    };
 
     // Username-less login with the backup phrase.
     let on_phrase_login = move |_| {
@@ -80,11 +112,13 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
     let on_try_passkey = move |_| {
         loading.set(true);
         error.set(None);
+        offer_tg.set(false);
         spawn_local(async move {
             match auth::authenticate().await {
                 Ok(_) => on_authenticated.call(()),
                 Err(e) => {
-                    error.set(Some(e));
+                    offer_tg.set(e.kind != auth::LoginFailure::Network);
+                    error.set(Some(e.message));
                     loading.set(false);
                 }
             }
@@ -202,6 +236,45 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
         })
     };
 
+    // Обходной путь предлагаем только тому, кому он доступен: код уходит на
+    // user_id, и без него отправлять некуда.
+    let has_uid = pwa_user_id.is_some();
+    let tg_offer_view = move || {
+        (offer_tg.get() && has_uid).then(|| view! {
+            <div
+                attr:data-testid="auth-tg-offer"
+                class="notification is-warning is-light mb-4"
+                style="text-align: left;"
+            >
+                <p class="mb-3">{move || t("auth.passkey_trouble")}</p>
+                <button
+                    attr:data-testid="auth-btn-tg-login"
+                    class="button is-link is-fullwidth has-text-weight-semibold"
+                    disabled=move || checking.get()
+                    on:click=on_tg_login
+                >
+                    {move || if checking.get() { t("auth.checking_account") } else { t("auth.tg_login") }}
+                </button>
+            </div>
+        })
+    };
+
+    // Ссылка на сайт внизу каждого экрана входа: единственный выход для того,
+    // кому здесь не удалось вообще ничего.
+    let footer = move || {
+        let url = crate::services::config::get().landing_url.clone();
+        view! {
+            <div style="margin-top: 2.25rem;">
+                <a
+                    attr:data-testid="auth-link-site"
+                    href=url
+                    class="has-text-grey is-size-7"
+                    style="text-decoration: underline; text-underline-offset: 3px;"
+                >"renorma.app"</a>
+            </div>
+        }
+    };
+
     view! {
         {move || match step.get() {
             AuthStep::ShowQr { ref qr_url, ref pairing_id } => {
@@ -263,6 +336,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                         <p class="has-text-grey mb-5">{move || t("auth.tagline")}</p>
 
                         {error_view}
+                        {tg_offer_view}
 
                         // Primary: the big login CTA (passkey).
                         <button
@@ -309,18 +383,19 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             // browsers (system-browser hop) has a known account
                             // (`?u=`) but no passkey HERE — the auto TgCode fallback
                             // fires only when passkeys are impossible on the device.
-                            {pwa_user_id.is_some().then(|| view! {
+                            {has_uid.then(|| view! {
                                 <button
                                     attr:data-testid="auth-btn-tg-code"
                                     class="button is-ghost has-text-link"
                                     style="text-decoration: underline; text-underline-offset: 3px;"
                                     disabled=move || loading.get()
-                                    on:click=move |_| { error.set(None); step.set(AuthStep::TgCode); }
+                                    on:click=move |_| { error.set(None); step.set(AuthStep::TgCode { auto: false }); }
                                 >
                                     "Войти по коду из Telegram"
                                 </button>
                             })}
                         </div>
+                        {footer}
                     </div>
                 </div>
             }.into_view(),
@@ -360,18 +435,19 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                         >
                             {move || t("auth.phrase_back")}
                         </button>
+                        {footer}
                     </div>
                 </div>
             }.into_view(),
 
-            AuthStep::TgCode => {
+            AuthStep::TgCode { auto } => {
                 let uid = pwa_user_id.clone().unwrap_or_default();
                 view! {
                     <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
                         <div style="max-width: 22rem; width: 100%;">
                             <img src="/icon-192.png" alt="re:Norma" style="width: 72px; height: 72px; border-radius: 16px; margin-bottom: 1.25rem;" />
                             <h1 class="title is-4" style="margin-bottom: 0.35rem;">"Вход по коду"</h1>
-                            <CodeAuth user_id=uid on_authenticated=on_authenticated />
+                            <CodeAuth user_id=uid on_authenticated=on_authenticated auto_send=auto />
                             <button
                                 class="button is-ghost has-text-grey is-fullwidth mt-4"
                                 style="text-decoration: underline;"
@@ -379,10 +455,38 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             >
                                 "Другой способ входа"
                             </button>
+                            {footer}
                         </div>
                     </div>
                 }.into_view()
             }
+
+            // Аккаунт есть, доступа нет. Вход не поможет ничем — здесь нечего
+            // открывать, поэтому и не предлагаем: единственное действие — оплатить.
+            AuthStep::NoAccount => view! {
+                <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
+                    <div style="max-width: 22rem; width: 100%;">
+                        <img src="/icon-192.png" alt="re:Norma" style="width: 72px; height: 72px; border-radius: 16px; margin-bottom: 1.25rem;" />
+                        <h1 class="title is-4" style="margin-bottom: 0.75rem;">{move || t("auth.no_access_title")}</h1>
+                        <p class="has-text-grey mb-5" style="line-height: 1.6;">{move || t("auth.no_access_body")}</p>
+                        <a
+                            attr:data-testid="auth-link-bot"
+                            class="button is-link is-medium is-fullwidth has-text-weight-semibold"
+                            href=move || crate::services::config::get().miniapp_pay_url.clone()
+                        >
+                            {move || t("auth.open_bot")}
+                        </a>
+                        <button
+                            class="button is-ghost has-text-grey is-fullwidth mt-4"
+                            style="text-decoration: underline;"
+                            on:click=move |_| { error.set(None); step.set(AuthStep::Login); }
+                        >
+                            {move || t("auth.back")}
+                        </button>
+                        {footer}
+                    </div>
+                </div>
+            }.into_view(),
         }}
     }
 }

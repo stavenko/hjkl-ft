@@ -752,6 +752,15 @@ fn en(key: &str) -> &'static str {
 
         "auth.error_key_unknown" => "We cannot find your key on the server. You will have to register.",
 
+        // --- Fallback when the key did not work ---
+        "auth.passkey_trouble" => "Something went wrong signing in with your key. To get into the app you can also use Telegram.",
+        "auth.tg_login" => "Sign in via Telegram",
+        "auth.checking_account" => "Checking the account…",
+        "auth.state_unknown" => "Could not check the account. Check your internet and try again.",
+        "auth.no_access_title" => "There is a problem with your account",
+        "auth.no_access_body" => "Go back to the Telegram bot to pay.",
+        "auth.open_bot" => "Open the Telegram bot",
+
         // --- PassKey failure reasons ---
         "pk.unsupported" => "This browser cannot work with PassKeys. Open the app in Safari or Chrome.",
         "pk.insecure" => "The page is not on a secure connection, so a PassKey cannot be created. This is on us — please contact support.",
@@ -1618,6 +1627,15 @@ fn ru(key: &str) -> &'static str {
         "qr.paste_link" => "Вставить ссылку",
 
         "auth.error_key_unknown" => "Мы не можем найти вашего ключа на сервере. Вам придётся зарегистрироваться.",
+
+        // --- Обходной путь, когда ключ не сработал ---
+        "auth.passkey_trouble" => "Возникла проблема со входом по вашему ключу. Чтобы получить доступ к приложению, можно ещё воспользоваться Telegram.",
+        "auth.tg_login" => "Войти через Telegram",
+        "auth.checking_account" => "Проверяем аккаунт…",
+        "auth.state_unknown" => "Не удалось проверить аккаунт. Проверьте интернет и попробуйте снова.",
+        "auth.no_access_title" => "Возникла ошибка с вашим аккаунтом",
+        "auth.no_access_body" => "Вернитесь в телеграм-бота, чтобы оплатить.",
+        "auth.open_bot" => "Открыть телеграм-бота",
 
         // --- PassKey: причина отказа ---
         // Состояние страницы и устройства

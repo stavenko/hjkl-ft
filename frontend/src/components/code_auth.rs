@@ -14,8 +14,16 @@ async fn sleep_ms(ms: u32) {
 /// requests a one-time code (delivered to their Telegram — our payment bot), then enters it.
 /// `user_id` is the non-secret account id carried in the URL / manifest. On success the
 /// session is established locally and `on_authenticated` fires.
+///
+/// `auto_send` — запросить код сразу при появлении, не дожидаясь нажатия. Так
+/// приходит человек, у которого только что не вышло войти по ключу: он уже выбрал
+/// «войти через Telegram», и второе нажатие с тем же смыслом ему не нужно.
 #[component]
-pub fn CodeAuth(user_id: String, on_authenticated: Callback<()>) -> impl IntoView {
+pub fn CodeAuth(
+    user_id: String,
+    on_authenticated: Callback<()>,
+    #[prop(optional)] auto_send: bool,
+) -> impl IntoView {
     let user_id = store_value(user_id);
     let code = create_rw_signal(String::new());
     let error = create_rw_signal(None::<String>);
@@ -38,7 +46,7 @@ pub fn CodeAuth(user_id: String, on_authenticated: Callback<()>) -> impl IntoVie
         });
     };
 
-    let on_send = move |_| {
+    let send_code = move || {
         if cooldown.get_untracked() > 0 || busy.get_untracked() {
             return;
         }
@@ -55,6 +63,13 @@ pub fn CodeAuth(user_id: String, on_authenticated: Callback<()>) -> impl IntoVie
                         // Already within cooldown on the server — reflect it.
                         sent_once.set(true);
                         arm_cooldown();
+                    } else if e.contains("409") {
+                        // У аккаунта нет канала доставки. «Попробуйте ещё раз» тут
+                        // враньё: сколько ни пробуй, отправлять некуда.
+                        error.set(Some(
+                            "К этому аккаунту не привязан Telegram — код отправить некуда."
+                                .into(),
+                        ));
                     } else {
                         error.set(Some("Не удалось отправить код. Попробуйте ещё раз.".into()));
                     }
@@ -63,6 +78,17 @@ pub fn CodeAuth(user_id: String, on_authenticated: Callback<()>) -> impl IntoVie
             busy.set(false);
         });
     };
+    let on_send = move |_| send_code();
+
+    if auto_send {
+        create_effect(move |ran: Option<()>| {
+            // Ровно один раз за жизнь компонента: эффект без чтения сигналов
+            // сам не перезапустится, но защёлка страхует от повторного монтирования.
+            if ran.is_none() {
+                send_code();
+            }
+        });
+    }
 
     // Verify the 6-digit code. Fired automatically once all six digits are in (below), and by
     // the explicit «Войти» button. No-ops until exactly 6 digits are present, or while busy.
@@ -98,7 +124,11 @@ pub fn CodeAuth(user_id: String, on_authenticated: Callback<()>) -> impl IntoVie
     view! {
         <div style="max-width: 22rem; width: 100%; margin: 0 auto;">
             <p class="has-text-grey mb-4" style="line-height: 1.6;">
-                "Чтобы войти, запросите одноразовый код — мы пришлём его в Telegram, в нашего бота оплаты. Скопируйте код из чата и введите здесь."
+                {move || if sent_once.get() {
+                    "Код отправлен в Telegram, в нашего бота оплаты. Скопируйте его из чата и введите здесь."
+                } else {
+                    "Чтобы войти, запросите одноразовый код — мы пришлём его в Telegram, в нашего бота оплаты. Скопируйте код из чата и введите здесь."
+                }}
             </p>
 
             {move || error.get().map(|e| view! {

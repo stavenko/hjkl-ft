@@ -110,6 +110,16 @@ pub fn App() -> impl IntoView {
     // не копируется, `migrate_bootstrap = false`), и миграции проходят там заново.
     // Отметку о прогоне держит `run_for_current_db` — она привязана к ИМЕНИ БАЗЫ, а
     // не к сессии, поэтому смена базы честно вызывает повторный проход.
+    // До приложения обновление применяется САМО. В Настройки — единственное место
+    // с кнопкой «Обновить» — с экрана установки или входа не попасть, поэтому
+    // застрявший на старой сборке иначе не обновится никогда.
+    create_effect(move |_| {
+        let before_app = matches!(state.get(), AppState::PwaPrompt | AppState::Auth);
+        if before_app && crate::services::update::available().get() {
+            crate::services::update::apply_before_app();
+        }
+    });
+
     create_effect(move |_| {
         let ready = matches!(state.get(), AppState::Ready);
         let update_pending = crate::services::update::available().get();

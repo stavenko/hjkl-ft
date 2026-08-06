@@ -23,6 +23,32 @@ pub fn ready_signal() -> RwSignal<bool> {
     READY.with(|c| c.borrow().expect("db::init_signals() must run before ready_signal()"))
 }
 
+/// Дождаться базы пользователя.
+///
+/// Для фоновой работы, которой без базы делать нечего. Именно ЖДАТЬ, а не
+/// пропускать: приложение запускается раньше входа, и пропустивший откладывал бы
+/// свою работу до следующего запуска. Вошедший в этой же сессии должен получить
+/// её сразу.
+///
+/// Если человек так и не вошёл, ожидание не кончится — и это правильно: работать
+/// не над чем, а держит оно только сам этот футур.
+pub async fn wait_ready() {
+    let sig = ready_signal();
+    if sig.get_untracked() {
+        return;
+    }
+    let (tx, rx) = futures::channel::oneshot::channel::<()>();
+    let tx = RefCell::new(Some(tx));
+    create_effect(move |_| {
+        if sig.get() {
+            if let Some(tx) = tx.borrow_mut().take() {
+                let _ = tx.send(());
+            }
+        }
+    });
+    let _ = rx.await;
+}
+
 /// Reopen the active database connection. iOS closes a PWA's IndexedDB connection
 /// while it's backgrounded; the cached `Rexie` then wedges (transactions hang or
 /// error), so writes silently fail and reads return nothing until a full reload.

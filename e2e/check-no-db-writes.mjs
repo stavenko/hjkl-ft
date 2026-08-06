@@ -33,8 +33,11 @@ async function run(session) {
   }, session);
   const page = await ctx.newPage();
   const hits = [];
+  const started = [];
   page.on("console", (m) => {
-    if (/без активной базы/.test(m.text())) hits.push(m.text());
+    const t = m.text();
+    if (/без активной базы/.test(t)) hits.push(t);
+    if (/обслуживание данных: база открыта/.test(t)) started.push(t);
   });
   await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
   await page
@@ -44,13 +47,14 @@ async function run(session) {
   const dismiss = page.getByTestId("pwa-btn-dismiss");
   if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
   await page.waitForTimeout(20000);
-  return { ctx, page, hits };
+  return { ctx, page, hits, started };
 }
 
 // ── 1. Без сессии: считать нечего, писать некуда ──
 {
-  const { ctx, page, hits } = await run(null);
+  const { ctx, page, hits, started } = await run(null);
   console.log("\n1. Запуск без сессии");
+  check(started.length === 0, "обслуживание данных не начиналось — ждёт базу");
   if (hits.length) console.log("   записи:", [...new Set(hits)].join(" | "));
   check(hits.length === 0, `в базу не пишут (попыток: ${hits.length})`);
   // Журнал приложения — для того, с чем человек может что-то сделать.
@@ -65,8 +69,9 @@ async function run(session) {
   const token = execSync(`node ../frontend/scripts/seed-test-subscription.mjs ${uid}`, {
     encoding: "utf8",
   }).match(/^token:\s+(\S+)$/m)[1];
-  const { ctx, page, hits } = await run([uid, token]);
+  const { ctx, page, hits, started } = await run([uid, token]);
   console.log("\n2. Запуск с сессией");
+  check(started.length === 1, `обслуживание данных отработало (${started.length})`);
   if (hits.length) console.log("   записи:", [...new Set(hits)].join(" | "));
   check(
     await page.getByTestId("nav-diary").isVisible().catch(() => false),

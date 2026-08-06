@@ -23,6 +23,11 @@ pub fn detect_platform() -> &'static str {
     // so without this it would fall through to the Chrome instructions.
     let is_yandex = ua.contains("yabrowser") || ua.contains("yasearchbrowser") || ua.contains("yaapp_android");
 
+    // Яндекс.Браузер на iPhone проверяется ПЕРВЫМ: его UA содержит и "safari", и
+    // "version/", поэтому иначе он уходил бы в ветку Safari — а там инструкция
+    // «Поделиться → На экран Домой», и пункта «На экран Домой» в его листе
+    // «Поделиться» нет. Ставится он иначе: ⋮ → «Добавить ярлык на телефон».
+    if is_ios && is_yandex { return "ios_yandex"; }
     if is_ios && is_safari { return "ios_safari"; }
     if is_ios && is_chrome { return "ios_chrome"; }
     if is_ios && is_firefox { return "ios_firefox"; }
@@ -75,6 +80,47 @@ fn render_steps(platform: &str) -> View {
                 <div class="step">
                     <span class="step-num">"3"</span>
                     <div class="step-body">{move || t("pwa.inst.ios_safari.3")}</div>
+                </div>
+            </div>
+        }.into_view(),
+
+        // Яндекс.Браузер на iPhone. Путь другой, чем в Safari: значок на домашний
+        // экран кладётся не из системного листа «Поделиться», а через собственное
+        // меню браузера, которое лишь потом открывает системный лист.
+        // Снимки живого интерфейса с мигающей подсказкой — scripts/shot-ios-yandex-gifs.mjs.
+        "ios_yandex" => view! {
+            <div class="steps">
+                <div class="step">
+                    <span class="step-num">"1"</span>
+                    <div class="step-body">
+                        {move || t("pwa.inst.ios_yandex.1")}
+                        <img src="/onboard-img/ios-ya-menu.gif" alt="" class="step-shot" />
+                    </div>
+                </div>
+                <div class="step">
+                    <span class="step-num">"2"</span>
+                    <div class="step-body">
+                        {move || t("pwa.inst.ios_yandex.2")}
+                        <img src="/onboard-img/ios-ya-shortcut.gif" alt="" class="step-shot" />
+                    </div>
+                </div>
+                <div class="step">
+                    <span class="step-num">"3"</span>
+                    <div class="step-body">
+                        {move || t("pwa.inst.ios_yandex.3")}
+                        <img src="/onboard-img/ios-ya-home.gif" alt="" class="step-shot" />
+                    </div>
+                </div>
+                <div class="step">
+                    <span class="step-num">"4"</span>
+                    <div class="step-body">
+                        {move || t("pwa.inst.ios_yandex.4")}
+                        <img src="/onboard-img/ios-ya-add.gif" alt="" class="step-shot" />
+                    </div>
+                </div>
+                <div class="step">
+                    <span class="step-num">"5"</span>
+                    <div class="step-body">{move || t("pwa.inst.ios_yandex.5")}</div>
                 </div>
             </div>
         }.into_view(),
@@ -350,8 +396,8 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
         "</style>
         <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main); overflow-y: auto;">
             <div style="max-width: 24rem;">
-                <img src="/icon-192.png" alt="Food Tracker" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
-                <h1 class="title is-3" style="margin-bottom: 0.5rem;">"Food Tracker"</h1>
+                <img src="/icon-192.png" alt="re:Norma" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
+                <h1 class="title is-3" style="margin-bottom: 0.5rem;">"re:Norma"</h1>
                 <p class="has-text-grey mb-5" style="font-size: 1.05rem; line-height: 1.6;">
                     {move || t("pwa.description")}
                 </p>

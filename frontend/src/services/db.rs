@@ -182,20 +182,38 @@ fn builder(name: &str) -> rexie::RexieBuilder {
 /// upgrade blocked by another still-open connection (a not-yet-closed previous
 /// session on a PWA update) makes `build()` hang FOREVER, so we cap it and surface
 /// an actionable error instead of an eternal splash.
-const DB_OPEN_TIMEOUT_MS: u32 = 10_000;
+const DB_OPEN_TIMEOUT_MS: u32 = 7_000;
+
+/// Сколько раз пробовать, прежде чем признать базу недоступной.
+///
+/// Апгрейд схемы держит открытое соединение из ДРУГОЙ вкладки, и держит обычно
+/// недолго: вкладка со старой сборкой выгружается сама, соединение освобождается.
+/// Одна попытка объявляла такую заминку катастрофой и показывала экран ошибки
+/// там, где достаточно было подождать.
+const DB_OPEN_ATTEMPTS: u32 = 3;
 
 /// Open a database. Returns Err (rather than hanging or panicking) on failure or on
 /// a blocked/stalled open, so the caller can show the update-error screen.
 async fn open(name: &str) -> Result<Rexie, String> {
-    match with_timeout(DB_OPEN_TIMEOUT_MS, builder(name).build()).await {
-        Some(Ok(rexie)) => Ok(rexie),
-        Some(Err(e)) => Err(format!("Не удалось открыть базу данных: {e:?}")),
-        None => Err(
-            "База данных не отвечает при обновлении. Вероятно, приложение открыто \
-             в другой вкладке или прошлая версия ещё не закрылась."
-                .to_string(),
-        ),
+    for attempt in 1..=DB_OPEN_ATTEMPTS {
+        match with_timeout(DB_OPEN_TIMEOUT_MS, builder(name).build()).await {
+            Some(Ok(rexie)) => {
+                if attempt > 1 {
+                    leptos::logging::log!("база открылась с попытки {attempt}");
+                }
+                return Ok(rexie);
+            }
+            // Настоящий отказ (несовместимая версия, запрет хранилища) повтором не
+            // лечится — не тянем время впустую.
+            Some(Err(e)) => return Err(format!("Не удалось открыть базу данных: {e:?}")),
+            None => leptos::logging::warn!(
+                "база не ответила за {DB_OPEN_TIMEOUT_MS} мс (попытка {attempt} из {DB_OPEN_ATTEMPTS})"
+            ),
+        }
     }
+    Err("База данных не отвечает при обновлении. Закройте остальные вкладки с \
+         приложением — старая версия держит базу и не даёт её обновить."
+        .to_string())
 }
 
 /// Resolve `future`, or `None` if `ms` elapses first (used to bound a blocked DB open).

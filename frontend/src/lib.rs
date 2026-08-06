@@ -76,15 +76,21 @@ pub fn main() {
 
         // Background listeners/timers: focus re-sync, notification receipts,
         // connectivity re-probe on online/offline + a periodic probe. The update
-        // check runs ONCE at start (in bootstrap_network below) — no polling; a
-        // manual "check for update" lives in Settings.
+        // check runs ONCE at start (in `prepare_network`) — no polling; a manual
+        // "check for update" lives in Settings.
         install_foreground_sync();
         install_notif_receipt_poll();
         install_connectivity_listeners();
         install_periodic_probe();
 
-        // ---- Background network bootstrap: prepare the connection, then use it. ----
-        leptos::spawn_local(bootstrap_network());
+        // Фоновый запуск. Три ЗАВИСИМЫХ шага, потому и подряд в одной задаче:
+        // без адресов воркеров не с кем синхронизироваться, а обслуживать данные
+        // до подтянутого дампа — значит обслуживать половину.
+        leptos::spawn_local(async {
+            prepare_network().await;
+            sync_at_launch().await;
+            maintain_user_data().await;
+        });
     });
 }
 
@@ -135,10 +141,12 @@ fn show_critical_error(msg: &str) {
     }
 }
 
-/// Prepare the network in the background and, once the server is reachable, start
-/// the network interactions. Never blocks the UI.
+/// Наладить связь: конфиг, доступность воркеров, обновление, подписка.
+///
+/// Ничего пользовательского: базы на этом шаге может не быть вовсе. Идёт первым,
+/// потому что без адресов воркеров не заработает даже вход. UI не блокирует.
 #[cfg(not(test))]
-async fn bootstrap_network() {
+async fn prepare_network() {
     // 1. Fetch the real config from the network and swap it in live (+cache for
     //    next launch). Until this lands the base URLs may be the cached/empty set.
     if let Some(cfg) = services::config::fetch_from_network().await {
@@ -154,31 +162,43 @@ async fn bootstrap_network() {
     // bundled and served locally, so this runs regardless of `online_now()`.
     services::stories::prefetch_images();
 
-    // 3. Server reachable → begin network interactions.
     if services::net::online_now() {
         // First update check right after establishing the connection.
         services::update::check().await;
         // Subscription: first-ever verify or the daily re-check (flips the gate).
         services::subscription::maybe_recheck().await;
-        // Reconcile with the server when signed in: push then pull the merged dump.
-        if services::auth::get_token().is_some() {
-            if let Err(e) = services::sync::sync_now().await {
-                leptos::logging::warn!("Launch sync failed: {e}");
-            }
-            // Разовая разметка приёмов пищи в старых записях. Место жёсткое:
-            // ПОСЛЕ подтянутого дампа, иначе отметка «уже размечено» встанет
-            // раньше, чем приедут серверные записи, и они останутся без метки
-            // навсегда. Поэтому здесь, а не в обслуживании ниже, которое может
-            // начаться и в момент входа — параллельно первому синку.
-            services::local::migrate_meal_labels().await;
-        }
     }
+}
 
-    // Дальше — обслуживание ДАННЫХ пользователя: разбор необработанной еды,
-    // открытие недель, заморозка дней, пересчёт планок. Без базы всему этому не
-    // над чем работать: считать не по чему, а результат некуда положить.
-    // Не пропускаем, а ЖДЁМ: приложение запускается раньше входа, и пропустивший
-    // отложил бы работу до следующего запуска.
+/// Свести данные с сервером при запуске — и сделать то, что обязано идти сразу
+/// за подтянутым дампом.
+///
+/// Без сессии или без связи не делает ничего.
+#[cfg(not(test))]
+async fn sync_at_launch() {
+    if !services::net::online_now() || services::auth::get_token().is_none() {
+        return;
+    }
+    // Reconcile with the server: push then pull the merged dump.
+    if let Err(e) = services::sync::sync_now().await {
+        leptos::logging::warn!("Launch sync failed: {e}");
+    }
+    // Разовая разметка приёмов пищи в старых записях. Место жёсткое: ПОСЛЕ
+    // подтянутого дампа. Отметка «уже размечено» ставится раз и навсегда — начнись
+    // разметка раньше, приехавшие с сервера записи остались бы без метки. Поэтому
+    // она здесь, а не в обслуживании: то ждёт лишь базу и может начаться в момент
+    // входа, параллельно первому синку.
+    services::local::migrate_meal_labels().await;
+}
+
+/// Обслужить ДАННЫЕ пользователя: разбор необработанной еды, открытие недель,
+/// заморозка прошедших дней, недельный пересчёт планок.
+///
+/// ЖДЁТ базу. Приложение запускается раньше входа, и без базы всему этому не над
+/// чем работать: считать не по чему, а результат некуда положить. Пропустить
+/// значило бы отложить работу до следующего запуска — поэтому именно ждём.
+#[cfg(not(test))]
+async fn maintain_user_data() {
     services::db::wait_ready().await;
     leptos::logging::log!("обслуживание данных: база открыта, начинаем");
 

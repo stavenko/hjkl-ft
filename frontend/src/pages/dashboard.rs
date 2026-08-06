@@ -714,6 +714,31 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
         bump.update(|v| *v += 1);
     };
 
+    // Введённое, но негодное значение раньше выбрасывалось МОЛЧА: человек писал в
+    // год рождения «90», ничего не сохранялось, и кнопка «Готово» не появлялась —
+    // без единого слова о том, почему. Экран выглядел сломанным.
+    let height_bad = create_rw_signal(false);
+    let year_bad = create_rw_signal(false);
+
+    // Чего не хватает до полного профиля. Кнопка «Готово» появляется только когда
+    // заполнено всё; без этого списка её отсутствие ничем не объяснено.
+    let missing = move || {
+        bump.get();
+        let mut out: Vec<&'static str> = Vec::new();
+        if profile::get_sex().is_none() {
+            out.push(t("dashboard.sex"));
+        }
+        if profile::get_height_cm().is_none() {
+            out.push(t("dashboard.height"));
+        }
+        if profile::get_birth_year().is_none() {
+            out.push(t("dashboard.birth_year"));
+        }
+        out
+    };
+
+    let hint = "margin: -2px 0 0; align-self: flex-end; max-width: 62%; text-align: right;";
+
     // Right-aligned number field on its row.
     let field = "background: var(--bulma-scheme-main); border: none; border-radius: 10px; \
                  padding: 10px 12px; width: 110px; text-align: right; color: var(--bulma-text); font: inherit;";
@@ -745,31 +770,44 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
 
             <div style=row>
                 <span class="is-size-6" style=label>{move || t("dashboard.height")}</span>
+                // Сохраняем по вводу, а не по уходу с поля: на телефоне из
+                // числовой клавиатуры можно так и не «уйти», и заполненное поле
+                // осталось бы несохранённым.
                 <input type="number" inputmode="numeric" min="80" max="250" style=field
                     prop:value=move || { bump.get(); profile::get_height_cm().map(|h| (h as i64).to_string()).unwrap_or_default() }
-                    on:change=move |ev| {
-                        if let Ok(v) = event_target_value(&ev).trim().parse::<f64>() {
-                            if v > 0.0 {
-                                profile::set_height_cm(v);
-                                bump.update(|x| *x += 1);
-                            }
+                    on:input=move |ev| {
+                        let raw = event_target_value(&ev);
+                        let raw = raw.trim();
+                        let ok = raw.parse::<f64>().ok().filter(|v| (80.0..=250.0).contains(v));
+                        height_bad.set(!raw.is_empty() && ok.is_none());
+                        if let Some(v) = ok {
+                            profile::set_height_cm(v);
+                            bump.update(|x| *x += 1);
                         }
                     }/>
             </div>
+            {move || height_bad.get().then(|| view! {
+                <p class="is-size-7 has-text-danger" style=hint>{move || t("dashboard.height_hint")}</p>
+            })}
 
             <div style=row>
                 <span class="is-size-6" style=label>{move || t("dashboard.birth_year")}</span>
-                <input type="number" inputmode="numeric" min="1900" max="2025" style=field
+                <input type="number" inputmode="numeric" min="1900" max="2026" style=field
                     prop:value=move || { bump.get(); profile::get_birth_year().map(|y| y.to_string()).unwrap_or_default() }
-                    on:change=move |ev| {
-                        if let Ok(v) = event_target_value(&ev).trim().parse::<i32>() {
-                            if (1900..=2026).contains(&v) {
-                                profile::set_birth_year(v);
-                                bump.update(|x| *x += 1);
-                            }
+                    on:input=move |ev| {
+                        let raw = event_target_value(&ev);
+                        let raw = raw.trim();
+                        let ok = raw.parse::<i32>().ok().filter(|v| (1900..=2026).contains(v));
+                        year_bad.set(!raw.is_empty() && ok.is_none());
+                        if let Some(v) = ok {
+                            profile::set_birth_year(v);
+                            bump.update(|x| *x += 1);
                         }
                     }/>
             </div>
+            {move || year_bad.get().then(|| view! {
+                <p class="is-size-7 has-text-danger" style=hint>{move || t("dashboard.birth_year_hint")}</p>
+            })}
 
             <div style=row>
                 <span class="is-size-6" style=label>{move || t("dashboard.goal")}</span>
@@ -787,6 +825,15 @@ fn PersonaEditor(bump: RwSignal<u32>) -> impl IntoView {
                     <option value="maintain" selected=goal0 == CourseGoal::Maintain>{move || t("dashboard.goal_maintain")}</option>
                 </select>
             </div>
+
+            {move || {
+                let m = missing();
+                (!m.is_empty()).then(|| view! {
+                    <p class="is-size-7 has-text-grey" style="margin-top: 10px;">
+                        {move || t("dashboard.persona_missing")} " " {m.join(", ")}
+                    </p>
+                })
+            }}
         </div>
     }
 }

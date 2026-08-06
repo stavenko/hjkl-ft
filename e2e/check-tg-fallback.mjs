@@ -87,10 +87,36 @@ async function run() {
       await page.getByTestId("auth-btn-tg-login").click();
       await page.getByTestId("codeauth-btn-send").waitFor({ timeout: 40000 });
       check(true, "перешли на экран кода");
+
+      // Сообщение в бота — действие человека, само оно не уходит.
       await page.waitForTimeout(3000);
-      const n = await codeRequestCount(page);
-      check(n === 1, `код запрошен сам, ровно один раз (запросов: ${n})`);
+      check(
+        (await codeRequestCount(page)) === 0,
+        "сам по себе код не запрашивается",
+      );
+
+      await page.getByTestId("codeauth-btn-send").click();
+      await page.waitForTimeout(3000);
+      check(
+        (await codeRequestCount(page)) === 1,
+        `по нажатию ушёл один запрос (всего: ${await codeRequestCount(page)})`,
+      );
       check(await page.getByTestId("auth-link-site").isVisible(), "внизу ссылка renorma.app");
+
+      // Повтор раньше минуты сервер не даёт (CODE_COOLDOWN_MS), и кнопка это
+      // показывает: обратный отсчёт вместо молчаливого отказа.
+      await page.getByTestId("codeauth-btn-send").click();
+      await page.waitForTimeout(3000);
+      if (!(await page.getByTestId("codeauth-btn-send").count())) {
+        console.log("   кнопки повтора нет. На экране:");
+        console.log("   ", (await page.innerText("body")).slice(0, 400).replace(/\n+/g, " | "));
+      }
+      const label = await page.getByTestId("codeauth-btn-send").innerText();
+      check(/через \d+ с/.test(label), `повтор ждёт минуту: ${JSON.stringify(label)}`);
+      check(
+        await page.getByTestId("codeauth-btn-send").isDisabled(),
+        "кнопка повтора заблокирована на время ожидания",
+      );
     }
     await ctx.close();
   }

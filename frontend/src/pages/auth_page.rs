@@ -19,9 +19,7 @@ enum AuthStep {
     ShowQr { qr_url: String, pairing_id: String },
     Scanning,
     // No-passkey Android fallback: enter the one-time code delivered to Telegram.
-    // `auto` — код запрашивается сразу: сюда пришли осознанно, нажав «Войти через
-    // Telegram» после неудачи с ключом.
-    TgCode { auto: bool },
+    TgCode,
     // Аккаунт без доступа: платить ещё не начинали (или подписка кончилась).
     // Входить некуда — отправляем в бота.
     NoAccount,
@@ -49,7 +47,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
         create_effect(move |_| {
             spawn_local(async move {
                 if auth::passkey_unavailable().await && step.get_untracked() == AuthStep::Login {
-                    step.set(AuthStep::TgCode { auto: false });
+                    step.set(AuthStep::TgCode);
                 }
             });
         });
@@ -71,7 +69,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
         error.set(None);
         spawn_local(async move {
             match crate::services::subscription::account_state(&uid).await {
-                Ok(state) if state.active => step.set(AuthStep::TgCode { auto: true }),
+                Ok(state) if state.active => step.set(AuthStep::TgCode),
                 Ok(_) => step.set(AuthStep::NoAccount),
                 Err(e) => {
                     leptos::logging::error!("account_state: {e}");
@@ -389,7 +387,7 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                                     class="button is-ghost has-text-link"
                                     style="text-decoration: underline; text-underline-offset: 3px;"
                                     disabled=move || loading.get()
-                                    on:click=move |_| { error.set(None); step.set(AuthStep::TgCode { auto: false }); }
+                                    on:click=move |_| { error.set(None); step.set(AuthStep::TgCode); }
                                 >
                                     "Войти по коду из Telegram"
                                 </button>
@@ -440,14 +438,14 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                 </div>
             }.into_view(),
 
-            AuthStep::TgCode { auto } => {
+            AuthStep::TgCode => {
                 let uid = pwa_user_id.clone().unwrap_or_default();
                 view! {
                     <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
                         <div style="max-width: 22rem; width: 100%;">
                             <img src="/icon-192.png" alt="re:Norma" style="width: 72px; height: 72px; border-radius: 16px; margin-bottom: 1.25rem;" />
                             <h1 class="title is-4" style="margin-bottom: 0.35rem;">"Вход по коду"</h1>
-                            <CodeAuth user_id=uid on_authenticated=on_authenticated auto_send=auto />
+                            <CodeAuth user_id=uid on_authenticated=on_authenticated />
                             <button
                                 class="button is-ghost has-text-grey is-fullwidth mt-4"
                                 style="text-decoration: underline;"

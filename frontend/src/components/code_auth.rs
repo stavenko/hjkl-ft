@@ -15,15 +15,11 @@ async fn sleep_ms(ms: u32) {
 /// `user_id` is the non-secret account id carried in the URL / manifest. On success the
 /// session is established locally and `on_authenticated` fires.
 ///
-/// `auto_send` — запросить код сразу при появлении, не дожидаясь нажатия. Так
-/// приходит человек, у которого только что не вышло войти по ключу: он уже выбрал
-/// «войти через Telegram», и второе нажатие с тем же смыслом ему не нужно.
+/// Код уходит ТОЛЬКО по нажатию: сообщение в Telegram — действие, которое человек
+/// совершает сам. Повторная отправка — не раньше чем через минуту (тот же порог
+/// держит и сервер: `CODE_COOLDOWN_MS` в auth_do).
 #[component]
-pub fn CodeAuth(
-    user_id: String,
-    on_authenticated: Callback<()>,
-    #[prop(optional)] auto_send: bool,
-) -> impl IntoView {
+pub fn CodeAuth(user_id: String, on_authenticated: Callback<()>) -> impl IntoView {
     let user_id = store_value(user_id);
     let code = create_rw_signal(String::new());
     let error = create_rw_signal(None::<String>);
@@ -46,7 +42,7 @@ pub fn CodeAuth(
         });
     };
 
-    let send_code = move || {
+    let on_send = move |_| {
         if cooldown.get_untracked() > 0 || busy.get_untracked() {
             return;
         }
@@ -78,17 +74,6 @@ pub fn CodeAuth(
             busy.set(false);
         });
     };
-    let on_send = move |_| send_code();
-
-    if auto_send {
-        create_effect(move |ran: Option<()>| {
-            // Ровно один раз за жизнь компонента: эффект без чтения сигналов
-            // сам не перезапустится, но защёлка страхует от повторного монтирования.
-            if ran.is_none() {
-                send_code();
-            }
-        });
-    }
 
     // Verify the 6-digit code. Fired automatically once all six digits are in (below), and by
     // the explicit «Войти» button. No-ops until exactly 6 digits are present, or while busy.

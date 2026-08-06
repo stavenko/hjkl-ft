@@ -166,6 +166,20 @@ async fn bootstrap_network() {
                 leptos::logging::warn!("Launch sync failed: {e}");
             }
         }
+    }
+
+    // Дальше — обслуживание ДАННЫХ пользователя: разметка приёмов пищи, разбор
+    // необработанной еды, открытие недель, заморозка дней, пересчёт планок.
+    // Без базы всему этому не над чем работать: считать не по чему, а результат
+    // некуда положить — каждая запись просто терялась. Вошедшему в этой же
+    // сессии обслуживание достанется на следующем запуске; у только что
+    // заведённого аккаунта замораживать и открывать всё равно нечего.
+    if services::db::current_name().is_none() {
+        leptos::logging::log!("обслуживание данных пропущено: базы пользователя нет");
+        return;
+    }
+
+    if services::net::online_now() {
         // One-time backfill of explicit meal labels on pre-existing entries (runs
         // on the merged dump, after the pull, so server entries get labelled too).
         services::local::migrate_meal_labels().await;
@@ -182,6 +196,7 @@ async fn bootstrap_network() {
             }
         });
     }
+
     // Open the activity week if the week-2 gate is now cleared (local-only; runs
     // regardless of connectivity).
     services::indicators::maybe_unlock_activity_week().await;

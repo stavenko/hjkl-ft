@@ -12,6 +12,15 @@ thread_local! {
     // after iOS force-closes it on a backgrounded PWA (see [`reopen`]).
     static DB_NAME: RefCell<Option<String>> = RefCell::new(None);
     static STORE_VERSIONS: RefCell<HashMap<&'static str, RwSignal<u32>>> = RefCell::new(HashMap::new());
+    /// Реактивное «база пользователя открыта». По нему ждут те, кому без базы
+    /// работать не над чем: роутер смонтирован под экранами установки и входа, и
+    /// дашборд иначе оживает раньше, чем появляется, что считать.
+    static READY: RefCell<Option<RwSignal<bool>>> = const { RefCell::new(None) };
+}
+
+/// Реактивный признак «база пользователя открыта».
+pub fn ready_signal() -> RwSignal<bool> {
+    READY.with(|c| c.borrow().expect("db::init_signals() must run before ready_signal()"))
 }
 
 /// Reopen the active database connection. iOS closes a PWA's IndexedDB connection
@@ -256,6 +265,11 @@ pub fn init_signals() {
             map.entry(name).or_insert_with(|| create_rw_signal(0u32));
         }
     });
+    READY.with(|cell| {
+        if cell.borrow().is_none() {
+            *cell.borrow_mut() = Some(create_rw_signal(false));
+        }
+    });
 }
 
 /// Открыть базу пользователя и сделать её активной.
@@ -274,6 +288,9 @@ pub async fn activate_for_user(user_id: &str) -> Result<(), String> {
     crate::services::profile::hydrate().await;
 
     bump_all();
+    // Последним: те, кто ждал базу, начинают работу — и уже по гидратированному
+    // профилю и обновлённым версиям сторов, а не по полупустому состоянию.
+    ready_signal().set(true);
     Ok(())
 }
 
@@ -303,16 +320,18 @@ where
 /// Сообщить, что обращение к хранилищу случилось до входа.
 ///
 /// ЧТЕНИЕ до входа законно: виджеты строятся раньше, чем выясняется, есть ли
-/// сессия, и пустой ответ для них — правда. А вот ЗАПИСЬ означает, что данные
-/// пытаются положить туда, где их некому хранить: молчать об этом нельзя.
+/// сессия, и пустой ответ для них — правда. ЗАПИСЬ до входа — наша ошибка: код
+/// затеял работу там, где хранить некому.
+///
+/// В журнал приложения — тот, что человек видит под треугольником, — это НЕ
+/// попадает. Там место тому, с чем человек может что-то сделать: нет сети,
+/// не отвечает распознавание. «Не смогли положить в базу, потому что базы нет»
+/// он не починит ничем, а испуг про потерянную запись получит. Ругаемся в
+/// консоль — громко и ровно для нас.
 fn no_db(op: &str, store_name: &str) {
     if op == "read" {
         return;
     }
-    crate::services::errors::record(
-        "Хранилище",
-        &format!("{op} в «{store_name}» до входа: базы пользователя ещё нет, запись потеряна"),
-    );
     leptos::logging::error!("db::{op}({store_name}) без активной базы — запись потеряна");
 }
 

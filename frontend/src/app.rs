@@ -325,7 +325,7 @@ pub fn App() -> impl IntoView {
                      style="position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4.5rem;">
                     <div style="padding: 0.75rem;">
                     <Routes>
-                        <Route path="/" view=pages::dashboard::DashboardPage />
+                        <Route path="/" view=DashboardGate />
                         <Route path="/help/food" view=pages::help::HelpFoodPage />
                         <Route path="/help/:id" view=pages::help::HelpArticlePage />
                         <Route path="/onboard" view=pages::onboard::OnboardPage />
@@ -409,4 +409,24 @@ pub fn App() -> impl IntoView {
         <crate::components::story_tray::StoryViewerHost/>
     }
     .into_view()
+}
+
+/// Дашборд не строится, пока не открыта база пользователя.
+///
+/// Роутер смонтирован ПОД экранами установки и входа, поэтому дашборд оживал
+/// раньше базы: его ресурсы считали индикаторы по пустоте и пытались положить
+/// результат туда, где хранить некому. Расчёт был заведомо бессмысленным (данных
+/// нет по определению), запись — заведомо потерянной, а человек получал
+/// три сообщения об ошибке, с которыми ничего сделать не мог.
+///
+/// Ждать надо ИМЕННО не построив компонент: ресурсы Leptos стартуют при создании,
+/// и спрятать готовый дашборд под условие в разметке было бы поздно.
+#[component]
+fn DashboardGate() -> impl IntoView {
+    let ready = crate::services::db::ready_signal();
+    move || {
+        ready
+            .get()
+            .then(|| view! { <pages::dashboard::DashboardPage/> })
+    }
 }

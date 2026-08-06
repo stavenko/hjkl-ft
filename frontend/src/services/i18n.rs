@@ -98,6 +98,15 @@ pub fn get_lang() -> Lang {
     lang_signal().get()
 }
 
+/// Есть ли перевод ключа на ОБА языка.
+///
+/// Ключи, которые код собирает из кусков, легко разъезжаются со словарём, а на
+/// экране это «???» вместо объяснения. Проверяется тестами.
+#[cfg(test)]
+pub(crate) fn translated_everywhere(key: &str) -> bool {
+    en(key) != "???" && ru(key) != "???"
+}
+
 pub fn t(key: &str) -> &'static str {
     match lang_signal().get() {
         Lang::En => en(key),
@@ -741,11 +750,51 @@ fn en(key: &str) -> &'static str {
         "qr.copied" => "Copied!",
         "qr.paste_link" => "Paste link",
 
-        "auth.error_network" => "Could not connect to server. Check your internet connection.",
         "auth.error_key_unknown" => "We cannot find your key on the server. You will have to register.",
-        "auth.error_server" => "The server rejected the sign-in",
-        "auth.error_passkey" => "PassKey is not supported in this browser.",
-        "auth.error_cancelled" => "PassKey creation was cancelled.",
+
+        // --- PassKey failure reasons ---
+        "pk.unsupported" => "This browser cannot work with PassKeys. Open the app in Safari or Chrome.",
+        "pk.insecure" => "The page is not on a secure connection, so a PassKey cannot be created. This is on us — please contact support.",
+        "pk.offline" => "No internet connection. A PassKey lives in the keychain and cannot be created offline. Reconnect and try again.",
+        "pk.offline_note" => "The device is offline right now.",
+        "pk.create.cancelled" => "PassKey creation was cancelled.",
+        "pk.create.blocked" => "The system refused to create a PassKey without even asking you. This usually means the keychain is unavailable: check that iCloud Keychain (or Google sync on Android) is on and that you have internet.",
+        "pk.create.timeout" => "Time ran out while creating the PassKey. Try again and confirm on your device.",
+        "pk.create.exists" => "This device already has a key for this account. Do not create a new one — sign in with the existing key.",
+        "pk.create.unsupported_algo" => "This device does not support the required key type. Tell us your device and browser.",
+        "pk.create.origin" => "The page address does not match the domain the key is issued for. This is a configuration error on our side — please contact support.",
+        "pk.create.no_screen_lock" => "A PassKey requires device protection. Turn on Face ID, Touch ID, fingerprint or a passcode and try again.",
+        "pk.create.aborted" => "PassKey creation was interrupted. Try again.",
+        "pk.create.storage" => "The keychain could not create the PassKey. Try again; if it repeats, restart the device.",
+        "pk.create.bad_options" => "The server sent invalid key parameters. This is on us — please contact support.",
+        "pk.create.unknown" => "The PassKey could not be created, reason unknown.",
+        "pk.get.cancelled" => "PassKey sign-in was cancelled.",
+        "pk.get.blocked" => "The system refused to present a PassKey without even asking you. Most likely there is no key on this device, or the keychain is unavailable.",
+        "pk.get.timeout" => "Time ran out while confirming the PassKey. Try again.",
+        "pk.get.no_key" => "There is no PassKey on this device. Sign in with a code or your recovery phrase.",
+        "pk.get.unsupported_algo" => "This device does not support the required key type. Tell us your device and browser.",
+        "pk.get.origin" => "The page address does not match the key's domain. This is a configuration error on our side — please contact support.",
+        "pk.get.no_screen_lock" => "PassKey sign-in requires device protection. Turn on Face ID, Touch ID, fingerprint or a passcode and try again.",
+        "pk.get.aborted" => "PassKey sign-in was interrupted. Try again.",
+        "pk.get.storage" => "The keychain could not present the PassKey. Try again; if it repeats, restart the device.",
+        "pk.get.bad_options" => "The server sent invalid sign-in parameters. This is on us — please contact support.",
+        "pk.get.unknown" => "PassKey sign-in failed, reason unknown.",
+        "pk.net.register_begin" => "Could not reach the server to start registration. No key was created yet — check your internet and try again.",
+        "pk.net.login_begin" => "Could not reach the server to start sign-in. Check your internet and try again.",
+        "pk.net.add_begin" => "Could not reach the server to add a key. No key was created yet — check your internet and try again.",
+        "pk.net.pair_begin" => "Could not reach the server to link this device. Check your internet and try again.",
+        "pk.net.register_finish" => "The PassKey was created on this device, but the server never learned about it: the connection dropped. Check your internet and try signing in with that key; if that fails, delete the re:Norma key in your password settings and register again.",
+        "pk.net.login_finish" => "The PassKey was confirmed, but the server did not answer: the connection dropped. Check your internet and sign in again.",
+        "pk.net.add_finish" => "The PassKey was created on this device, but the server never learned about it: the connection dropped. Check your internet and retry — if the key ends up added twice, delete the spare in your password settings.",
+        "pk.net.pair_finish" => "The PassKey was created on this device, but the server never learned about it: the connection dropped. Check your internet and link the device again.",
+        "pk.srv.register_begin" => "The server refused to start registration",
+        "pk.srv.register_finish" => "The server rejected the created PassKey",
+        "pk.srv.login_begin" => "The server refused to start sign-in",
+        "pk.srv.login_finish" => "The server rejected the presented PassKey",
+        "pk.srv.add_begin" => "The server refused to add the key",
+        "pk.srv.add_finish" => "The server rejected the added PassKey",
+        "pk.srv.pair_begin" => "The server refused to link the device",
+        "pk.srv.pair_finish" => "The server rejected the new device's key",
         "auth.recovery_link" => "Recover access with password",
         "auth.recovery_title" => "Recover access",
         "auth.recovery_hint" => "Enter your recovery password to regain access to your account.",
@@ -1568,11 +1617,57 @@ fn ru(key: &str) -> &'static str {
         "qr.copied" => "Скопировано!",
         "qr.paste_link" => "Вставить ссылку",
 
-        "auth.error_network" => "Не удалось подключиться к серверу. Проверьте интернет.",
         "auth.error_key_unknown" => "Мы не можем найти вашего ключа на сервере. Вам придётся зарегистрироваться.",
-        "auth.error_server" => "Сервер отклонил вход",
-        "auth.error_passkey" => "PassKey не поддерживается в этом браузере.",
-        "auth.error_cancelled" => "Создание PassKey было отменено.",
+
+        // --- PassKey: причина отказа ---
+        // Состояние страницы и устройства
+        "pk.unsupported" => "Этот браузер не умеет работать с PassKey. Откройте приложение в Safari или Chrome.",
+        "pk.insecure" => "Страница открыта не по защищённому протоколу — создать PassKey нельзя. Это наша ошибка, сообщите в поддержку.",
+        "pk.offline" => "Нет связи с интернетом. PassKey хранится в связке ключей и без сети не создаётся. Подключитесь и попробуйте снова.",
+        "pk.offline_note" => "Устройство сейчас без сети.",
+        // Создание ключа
+        "pk.create.cancelled" => "Создание PassKey отменено.",
+        "pk.create.blocked" => "Система не дала создать PassKey — вас даже не спросили. Обычно это значит, что связка ключей недоступна: проверьте, что в настройках включена «Связка ключей iCloud» (на Android — синхронизация Google), и что есть интернет.",
+        "pk.create.timeout" => "Время на создание PassKey истекло. Попробуйте ещё раз и подтвердите на устройстве.",
+        "pk.create.exists" => "На этом устройстве уже есть ключ для этого аккаунта. Не создавайте новый — войдите по существующему.",
+        "pk.create.unsupported_algo" => "Устройство не поддерживает нужный тип ключа. Сообщите нам, какое у вас устройство и браузер.",
+        "pk.create.origin" => "Адрес страницы не совпадает с доменом, для которого выдаётся ключ. Это ошибка настройки на нашей стороне — сообщите в поддержку.",
+        "pk.create.no_screen_lock" => "Для PassKey нужна защита устройства. Включите Face ID, Touch ID, отпечаток или код-пароль и повторите.",
+        "pk.create.aborted" => "Создание PassKey прервалось. Попробуйте ещё раз.",
+        "pk.create.storage" => "Хранилище ключей не смогло создать PassKey. Попробуйте ещё раз; если повторится — перезагрузите устройство.",
+        "pk.create.bad_options" => "Сервер прислал негодные параметры для ключа. Это наша ошибка — сообщите в поддержку.",
+        "pk.create.unknown" => "Не удалось создать PassKey по неизвестной причине.",
+        // Предъявление ключа
+        "pk.get.cancelled" => "Вход по PassKey отменён.",
+        "pk.get.blocked" => "Система не дала предъявить PassKey — вас даже не спросили. Скорее всего, на этом устройстве ключа нет либо связка ключей недоступна.",
+        "pk.get.timeout" => "Время на подтверждение PassKey истекло. Попробуйте ещё раз.",
+        "pk.get.no_key" => "На этом устройстве нет PassKey для входа. Войдите по коду или по фразе восстановления.",
+        "pk.get.unsupported_algo" => "Устройство не поддерживает нужный тип ключа. Сообщите нам, какое у вас устройство и браузер.",
+        "pk.get.origin" => "Адрес страницы не совпадает с доменом ключа. Это ошибка настройки на нашей стороне — сообщите в поддержку.",
+        "pk.get.no_screen_lock" => "Для входа по PassKey нужна защита устройства. Включите Face ID, Touch ID, отпечаток или код-пароль и повторите.",
+        "pk.get.aborted" => "Вход по PassKey прервался. Попробуйте ещё раз.",
+        "pk.get.storage" => "Хранилище ключей не смогло предъявить PassKey. Попробуйте ещё раз; если повторится — перезагрузите устройство.",
+        "pk.get.bad_options" => "Сервер прислал негодные параметры для входа. Это наша ошибка — сообщите в поддержку.",
+        "pk.get.unknown" => "Не удалось войти по PassKey по неизвестной причине.",
+        // Связь с сервером: до создания ключа
+        "pk.net.register_begin" => "Не удалось связаться с сервером, чтобы начать регистрацию. Ключ ещё не создан — проверьте интернет и попробуйте снова.",
+        "pk.net.login_begin" => "Не удалось связаться с сервером, чтобы начать вход. Проверьте интернет и попробуйте снова.",
+        "pk.net.add_begin" => "Не удалось связаться с сервером, чтобы добавить ключ. Ключ ещё не создан — проверьте интернет и попробуйте снова.",
+        "pk.net.pair_begin" => "Не удалось связаться с сервером, чтобы подключить устройство. Проверьте интернет и попробуйте снова.",
+        // Связь с сервером: ключ УЖЕ создан или предъявлен
+        "pk.net.register_finish" => "PassKey создан на устройстве, но сервер о нём не узнал: связь прервалась. Проверьте интернет и попробуйте войти по этому ключу; если вход не удастся — удалите ключ re:Norma в настройках паролей и зарегистрируйтесь заново.",
+        "pk.net.login_finish" => "PassKey подтверждён, но сервер не ответил: связь прервалась. Проверьте интернет и повторите вход.",
+        "pk.net.add_finish" => "PassKey создан на устройстве, но сервер о нём не узнал: связь прервалась. Проверьте интернет и повторите — если ключ добавится дважды, лишний можно удалить в настройках паролей.",
+        "pk.net.pair_finish" => "PassKey создан на устройстве, но сервер о нём не узнал: связь прервалась. Проверьте интернет и повторите подключение.",
+        // Сервер ответил отказом
+        "pk.srv.register_begin" => "Сервер не дал начать регистрацию",
+        "pk.srv.register_finish" => "Сервер отклонил созданный PassKey",
+        "pk.srv.login_begin" => "Сервер не дал начать вход",
+        "pk.srv.login_finish" => "Сервер отклонил предъявленный PassKey",
+        "pk.srv.add_begin" => "Сервер не дал добавить ключ",
+        "pk.srv.add_finish" => "Сервер отклонил добавленный PassKey",
+        "pk.srv.pair_begin" => "Сервер не дал подключить устройство",
+        "pk.srv.pair_finish" => "Сервер отклонил ключ нового устройства",
         "auth.recovery_link" => "Восстановить доступ по паролю",
         "auth.recovery_title" => "Восстановление доступа",
         "auth.recovery_hint" => "Введите пароль восстановления для доступа к аккаунту.",

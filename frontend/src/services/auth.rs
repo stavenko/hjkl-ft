@@ -531,7 +531,7 @@ pub async fn register(display_name: &str) -> Result<String, String> {
         "display_name": display_name,
         "fingerprint": fingerprint
     })).await
-        .map_err(|e| auth_api_message("register begin", e))?;
+        .map_err(|e| auth_api_message(Step::RegisterBegin, e))?;
 
     let user_id = begin_resp.get("user_id")
         .and_then(|v| v.as_str())
@@ -541,27 +541,8 @@ pub async fn register(display_name: &str) -> Result<String, String> {
     let public_key = begin_resp.get("publicKey")
         .ok_or("missing publicKey")?;
 
-    let pk_js = build_create_options(public_key)?;
-
-    let create_opts = js_sys::Object::new();
-    js_sys::Reflect::set(&create_opts, &"publicKey".into(), &pk_js)
-        .map_err(|e| format!("{:?}", e))?;
-
-    let cred_promise = web_sys::window().expect("no window")
-        .navigator()
-        .credentials()
-        .create_with_options(create_opts.unchecked_ref())
-        .map_err(|e| {
-            leptos::logging::error!("credentials.create error: {:?}", e);
-            crate::services::i18n::t("auth.error_passkey").to_string()
-        })?;
-
-    let credential = JsFuture::from(cred_promise)
-        .await
-        .map_err(|e| {
-            leptos::logging::error!("PassKey create rejected: {:?}", e);
-            crate::services::i18n::t("auth.error_cancelled").to_string()
-        })?;
+    let credential =
+        webauthn_call(crate::services::webauthn_error::Op::Create, public_key).await?;
 
     let credential_json = serialize_credential(&credential)?;
 
@@ -570,7 +551,7 @@ pub async fn register(display_name: &str) -> Result<String, String> {
         "credential": credential_json,
         "fingerprint": fingerprint
     })).await
-        .map_err(|e| auth_api_message("register finish", e))?;
+        .map_err(|e| auth_api_message(Step::RegisterFinish, e))?;
 
     let user_id = finish_resp.get("user_id")
         .and_then(|v| v.as_str())
@@ -680,7 +661,9 @@ pub async fn add_passkey_named(display_name: &str) -> Result<(), String> {
     if !display_name.trim().is_empty() {
         begin_body["display_name"] = serde_json::Value::String(display_name.trim().to_string());
     }
-    let begin_resp = post_json_auth("/add-device/begin", &begin_body).await?;
+    let begin_resp = post_json_auth_typed("/add-device/begin", &begin_body)
+        .await
+        .map_err(|e| auth_api_message(Step::AddBegin, e))?;
 
     let user_id = begin_resp
         .get("user_id")
@@ -688,53 +671,121 @@ pub async fn add_passkey_named(display_name: &str) -> Result<(), String> {
         .ok_or("missing user_id")?
         .to_string();
     let public_key = begin_resp.get("publicKey").ok_or("missing publicKey")?;
-    let pk_js = build_create_options(public_key)?;
 
-    let create_opts = js_sys::Object::new();
-    js_sys::Reflect::set(&create_opts, &"publicKey".into(), &pk_js)
-        .map_err(|e| format!("{:?}", e))?;
-
-    let cred_promise = web_sys::window().expect("no window")
-        .navigator()
-        .credentials()
-        .create_with_options(create_opts.unchecked_ref())
-        .map_err(|e| {
-            leptos::logging::error!("add-device create error: {:?}", e);
-            crate::services::i18n::t("auth.error_passkey").to_string()
-        })?;
-
-    let credential = JsFuture::from(cred_promise)
-        .await
-        .map_err(|e| {
-            leptos::logging::error!("add-device create rejected: {:?}", e);
-            crate::services::i18n::t("auth.error_cancelled").to_string()
-        })?;
+    let credential =
+        webauthn_call(crate::services::webauthn_error::Op::Create, public_key).await?;
 
     let credential_json = serialize_credential(&credential)?;
-    post_json_auth("/add-device/finish", &serde_json::json!({
+    post_json_auth_typed("/add-device/finish", &serde_json::json!({
         "user_id": user_id,
         "credential": credential_json,
         "fingerprint": fingerprint
-    })).await?;
+    }))
+    .await
+    .map_err(|e| auth_api_message(Step::AddFinish, e))?;
     Ok(())
+}
+
+/// Шаг обращения к серверу, на котором всё сорвалось.
+///
+/// Различие не косметическое. До создания ключа оборванный запрос не оставляет
+/// следов — достаточно повторить. После создания ключ УЖЕ лежит в хранилище
+/// устройства, а сервер о нём не знает: молчать об этом нельзя, иначе следующая
+/// попытка упрётся в `InvalidStateError` и человек не поймёт, откуда взялся ключ,
+/// которого он «не создавал».
+#[derive(Clone, Copy, Debug)]
+enum Step {
+    RegisterBegin,
+    RegisterFinish,
+    LoginBegin,
+    LoginFinish,
+    AddBegin,
+    AddFinish,
+    PairBegin,
+    PairFinish,
+}
+
+impl Step {
+    fn slug(self) -> &'static str {
+        match self {
+            Step::RegisterBegin => "register_begin",
+            Step::RegisterFinish => "register_finish",
+            Step::LoginBegin => "login_begin",
+            Step::LoginFinish => "login_finish",
+            Step::AddBegin => "add_begin",
+            Step::AddFinish => "add_finish",
+            Step::PairBegin => "pair_begin",
+            Step::PairFinish => "pair_finish",
+        }
+    }
 }
 
 /// Отказ auth-воркера в человеческом виде. Ответ сервера НИКОГДА не выдаём за
 /// проблему с сетью: «проверьте интернет» на 401 — ложь, из-за которой
 /// настоящую причину не видно ни пользователю, ни нам.
-fn auth_api_message(stage: &str, e: AuthApiError) -> String {
-    leptos::logging::error!("auth::authenticate {stage}: {e}");
+fn auth_api_message(step: Step, e: AuthApiError) -> String {
+    leptos::logging::error!("auth {}: {e}", step.slug());
+    let t = crate::services::i18n::t;
     match &e {
-        AuthApiError::Network(_) => crate::services::i18n::t("auth.error_network").to_string(),
+        AuthApiError::Network(_) => {
+            let msg = t(&format!("pk.net.{}", step.slug())).to_string();
+            // `onLine == false` — достоверный признак, и его стоит назвать: иначе
+            // человек будет искать причину в приложении.
+            if crate::services::webauthn_error::offline() {
+                format!("{msg} {}", t("pk.offline_note"))
+            } else {
+                msg
+            }
+        }
         AuthApiError::Http { status, .. } => {
             // Ключ, которого сервер не знает: его удалили, а на устройстве он остался.
             if e.code().as_deref() == Some("passkey_not_found") {
-                crate::services::i18n::t("auth.error_key_unknown").to_string()
+                t("auth.error_key_unknown").to_string()
             } else {
-                format!("{} (HTTP {status})", crate::services::i18n::t("auth.error_server"))
+                format!("{} (HTTP {status})", t(&format!("pk.srv.{}", step.slug())))
             }
         }
     }
+}
+
+/// Обращение к хранилищу ключей с точным разбором отказа.
+///
+/// Единственная точка, откуда вызываются `credentials.create/get`: раньше их было
+/// четыре, и каждая одинаково объявляла ЛЮБОЙ отказ отменой пользователя.
+async fn webauthn_call(
+    op: crate::services::webauthn_error::Op,
+    public_key: &serde_json::Value,
+) -> Result<JsValue, String> {
+    use crate::services::webauthn_error::{describe, precheck, Clock, DomError, Op};
+
+    // Заведомо невозможную операцию не начинаем: на сервере уже лежит начатая
+    // регистрация, и добивать её отказом браузера незачем.
+    if let Some(msg) = precheck() {
+        return Err(msg);
+    }
+
+    let pk_js = match op {
+        Op::Create => build_create_options(public_key)?,
+        Op::Get => build_get_options(public_key)?,
+    };
+    let opts = js_sys::Object::new();
+    js_sys::Reflect::set(&opts, &"publicKey".into(), &pk_js).map_err(|e| format!("{:?}", e))?;
+
+    // Таймаут пришёл от сервера в опциях — по нему отличается «время вышло» от
+    // «человек закрыл окно».
+    let timeout_ms = public_key.get("timeout").and_then(|v| v.as_f64());
+
+    let creds = web_sys::window().expect("no window").navigator().credentials();
+    let clock = Clock::start();
+    let promise = match op {
+        Op::Create => creds.create_with_options(opts.unchecked_ref()),
+        Op::Get => creds.get_with_options(opts.unchecked_ref()),
+    }
+    .map_err(|e| describe(op, &DomError::from_js(&e), clock.elapsed_ms(), timeout_ms))?;
+
+    JsFuture::from(promise)
+        .await
+        .map_err(|e| describe(op, &DomError::from_js(&e), clock.elapsed_ms(), timeout_ms))
 }
 
 /// Authenticate with existing PassKey (discoverable credential)
@@ -743,32 +794,12 @@ pub async fn authenticate() -> Result<String, String> {
     let begin_resp = post_json_typed("/authenticate/begin", &serde_json::json!({
         "fingerprint": fingerprint
     })).await
-        .map_err(|e| auth_api_message("begin", e))?;
+        .map_err(|e| auth_api_message(Step::LoginBegin, e))?;
 
     let public_key = begin_resp.get("publicKey")
         .ok_or("missing publicKey")?;
 
-    let pk_js = build_get_options(public_key)?;
-
-    let get_opts = js_sys::Object::new();
-    js_sys::Reflect::set(&get_opts, &"publicKey".into(), &pk_js)
-        .map_err(|e| format!("{:?}", e))?;
-
-    let cred_promise = web_sys::window().expect("no window")
-        .navigator()
-        .credentials()
-        .get_with_options(get_opts.unchecked_ref())
-        .map_err(|e| {
-            leptos::logging::error!("credentials.get error: {:?}", e);
-            crate::services::i18n::t("auth.error_passkey").to_string()
-        })?;
-
-    let credential = JsFuture::from(cred_promise)
-        .await
-        .map_err(|e| {
-            leptos::logging::error!("PassKey auth rejected: {:?}", e);
-            crate::services::i18n::t("auth.error_cancelled").to_string()
-        })?;
+    let credential = webauthn_call(crate::services::webauthn_error::Op::Get, public_key).await?;
 
     let credential_json = serialize_credential(&credential)?;
 
@@ -776,7 +807,7 @@ pub async fn authenticate() -> Result<String, String> {
         "credential": credential_json,
         "fingerprint": fingerprint
     })).await
-        .map_err(|e| auth_api_message("finish", e))?;
+        .map_err(|e| auth_api_message(Step::LoginFinish, e))?;
 
     let user_id = finish_resp.get("user_id")
         .and_then(|v| v.as_str())
@@ -794,39 +825,51 @@ pub async fn authenticate() -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 async fn post_json_auth(path: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let token = get_token().ok_or_else(|| "not authenticated".to_string())?;
+    post_json_auth_typed(path, body).await.map_err(|e| e.to_string())
+}
+
+/// То же, что [`post_json_auth`], но отказ сохраняет разделение «не дошло» /
+/// «сервер отказал» — без него точное сообщение о сорванном PassKey не собрать.
+async fn post_json_auth_typed(
+    path: &str,
+    body: &serde_json::Value,
+) -> std::result::Result<serde_json::Value, AuthApiError> {
+    let net = |e: JsValue| AuthApiError::Network(format!("{:?}", e));
+
+    let token = get_token()
+        .ok_or_else(|| AuthApiError::Network("not authenticated".to_string()))?;
     let url = format!("{}{}", auth_base_url(), path);
-    let body_str = serde_json::to_string(body).map_err(|e| e.to_string())?;
+    let body_str = serde_json::to_string(body).map_err(|e| AuthApiError::Network(e.to_string()))?;
 
     let opts = web_sys::RequestInit::new();
     opts.set_method("POST");
     opts.set_body(&JsValue::from_str(&body_str));
 
-    let headers = web_sys::Headers::new().map_err(|e| format!("{:?}", e))?;
-    headers.set("Content-Type", "application/json").map_err(|e| format!("{:?}", e))?;
-    headers.set("Authorization", &format!("Bearer {}", token))
-        .map_err(|e| format!("{:?}", e))?;
+    let headers = web_sys::Headers::new().map_err(net)?;
+    headers.set("Content-Type", "application/json").map_err(net)?;
+    headers.set("Authorization", &format!("Bearer {}", token)).map_err(net)?;
     opts.set_headers(&headers);
 
-    let request = web_sys::Request::new_with_str_and_init(&url, &opts)
-        .map_err(|e| format!("{:?}", e))?;
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts).map_err(net)?;
 
     let window = web_sys::window().expect("no window");
     let resp_val = JsFuture::from(window.fetch_with_request(&request))
         .await
-        .map_err(|e| format!("{:?}", e))?;
-    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response")?;
+        .map_err(net)?;
+    let resp: web_sys::Response = resp_val
+        .dyn_into()
+        .map_err(|_| AuthApiError::Network("not a Response".into()))?;
 
-    let text = JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
-        .await
-        .map_err(|e| format!("{:?}", e))?;
-    let text = text.as_string().ok_or("response not string")?;
+    let text = JsFuture::from(resp.text().map_err(net)?).await.map_err(net)?;
+    let text = text
+        .as_string()
+        .ok_or_else(|| AuthApiError::Network("response not string".into()))?;
 
     if !resp.ok() {
-        return Err(format!("HTTP {}: {}", resp.status(), text));
+        return Err(AuthApiError::Http { status: resp.status(), body: text });
     }
 
-    serde_json::from_str(&text).map_err(|e| e.to_string())
+    serde_json::from_str(&text).map_err(|e| AuthApiError::Network(e.to_string()))
 }
 
 async fn get_json(path: &str) -> Result<serde_json::Value, String> {
@@ -886,11 +929,11 @@ pub async fn pair_check(pairing_id: &str, secret: &str) -> Result<serde_json::Va
 /// New device claims a pairing created by the logged-in device.
 /// Receives a publicKey challenge, creates a PassKey, finishes registration.
 pub async fn pair_claim(pairing_id: &str, secret: &str) -> Result<String, String> {
-    let claim_resp = post_json("/pair/claim", &serde_json::json!({
+    let claim_resp = post_json_typed("/pair/claim", &serde_json::json!({
         "pairing_id": pairing_id,
         "secret": secret,
     })).await
-        .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
+        .map_err(|e| auth_api_message(Step::PairBegin, e))?;
 
     let public_key = claim_resp.get("publicKey")
         .ok_or("missing publicKey in claim response")?;
@@ -899,35 +942,16 @@ pub async fn pair_claim(pairing_id: &str, secret: &str) -> Result<String, String
         .ok_or("missing user_id in claim response")?
         .to_string();
 
-    let pk_js = build_create_options(public_key)?;
-
-    let create_opts = js_sys::Object::new();
-    js_sys::Reflect::set(&create_opts, &"publicKey".into(), &pk_js)
-        .map_err(|e| format!("{:?}", e))?;
-
-    let cred_promise = web_sys::window().expect("no window")
-        .navigator()
-        .credentials()
-        .create_with_options(create_opts.unchecked_ref())
-        .map_err(|e| {
-            leptos::logging::error!("credentials.create error: {:?}", e);
-            crate::services::i18n::t("auth.error_passkey").to_string()
-        })?;
-
-    let credential = JsFuture::from(cred_promise)
-        .await
-        .map_err(|e| {
-            leptos::logging::error!("PassKey create rejected: {:?}", e);
-            crate::services::i18n::t("auth.error_cancelled").to_string()
-        })?;
+    let credential =
+        webauthn_call(crate::services::webauthn_error::Op::Create, public_key).await?;
 
     let credential_json = serialize_credential(&credential)?;
 
-    let finish_resp = post_json("/pair/finish", &serde_json::json!({
+    let finish_resp = post_json_typed("/pair/finish", &serde_json::json!({
         "pairing_id": pairing_id,
         "credential": credential_json,
     })).await
-        .map_err(|_| crate::services::i18n::t("auth.error_network").to_string())?;
+        .map_err(|e| auth_api_message(Step::PairFinish, e))?;
 
     let user_id = finish_resp.get("user_id")
         .and_then(|v| v.as_str())
@@ -968,4 +992,31 @@ pub async fn fetch_tokens() -> Result<Vec<serde_json::Value>, String> {
 /// Return the fingerprint of the current device (for highlighting in session list).
 pub fn current_fingerprint() -> String {
     generate_fingerprint()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Step;
+    use crate::services::i18n::translated_everywhere;
+
+    const STEPS: &[Step] = &[
+        Step::RegisterBegin,
+        Step::RegisterFinish,
+        Step::LoginBegin,
+        Step::LoginFinish,
+        Step::AddBegin,
+        Step::AddFinish,
+        Step::PairBegin,
+        Step::PairFinish,
+    ];
+
+    #[test]
+    fn u_kazhdogo_shaga_est_svoyo_soobshchenie_o_seti_i_ob_otkaze_servera() {
+        for step in STEPS {
+            for prefix in ["pk.net", "pk.srv"] {
+                let key = format!("{prefix}.{}", step.slug());
+                assert!(translated_everywhere(&key), "нет перевода для {key}");
+            }
+        }
+    }
 }

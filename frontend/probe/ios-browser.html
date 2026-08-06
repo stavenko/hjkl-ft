@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>re:Norma — проверка браузера iOS</title>
+<style>
+  body { font: 16px/1.5 system-ui, -apple-system, sans-serif; margin: 0; padding: 20px 16px 40px;
+         background: #f1f4f9; color: #0e1630; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  h2 { font-size: 15px; margin: 22px 0 8px; color: #39425f; }
+  p.sub { margin: 0 0 16px; color: #5a6580; font-size: 14px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 12px; overflow: hidden; }
+  td { padding: 10px 12px; border-bottom: 1px solid #e6eaf2; vertical-align: top; word-break: break-word; font-size: 14px; }
+  td:first-child { color: #5a6580; width: 52%; }
+  .v { font-weight: 700; }
+  .yes { color: #1fa463; } .no { color: #e0304f; } .warn { color: #e8850d; }
+  button { margin-top: 10px; width: 100%; padding: 13px; font-size: 15px; font-weight: 700;
+           border: none; border-radius: 12px; background: #0e1630; color: #fff; }
+  button.sec { background: #fff; color: #0e1630; border: 1px solid #cfd6e4; }
+  textarea { width: 100%; height: 190px; margin-top: 12px; border-radius: 12px; border: 1px solid #cfd6e4;
+             padding: 10px; font: 12px/1.4 ui-monospace, monospace; background: #fff; color: #0e1630;
+             box-sizing: border-box; }
+</style>
+</head>
+<body>
+  <h1>Где открыта страница</h1>
+  <p class="sub">Откройте эту страницу ТЕМ ЖЕ путём, каким открывается приложение — из Telegram,
+     из переписки, из соцсети. Потом нажмите «Скопировать отчёт» и пришлите его.</p>
+
+  <table id="t"></table>
+
+  <h2>Попытки уйти в Safari</h2>
+  <p class="sub">Нажимайте по очереди и запоминайте, какая сработала. «Сработала» — значит
+     страница открылась в настоящем Safari (внизу появилась адресная строка с кнопкой «Поделиться»).</p>
+  <button id="b-telegram" class="sec">1. Telegram.WebApp.openLink</button>
+  <button id="b-xsafari" class="sec">2. x-safari-https://</button>
+  <button id="b-blank" class="sec">3. Обычная ссылка в новом окне</button>
+
+  <h2>Отчёт</h2>
+  <textarea id="out" readonly></textarea>
+  <button id="copy">Скопировать отчёт</button>
+
+<script>
+(function () {
+  var rows = [];
+  function add(label, value, cls) {
+    rows.push([label, String(value)]);
+    var tr = document.createElement('tr');
+    var a = document.createElement('td'); a.textContent = label;
+    var b = document.createElement('td'); b.className = 'v ' + (cls || ''); b.textContent = String(value);
+    tr.appendChild(a); tr.appendChild(b);
+    document.getElementById('t').appendChild(tr);
+  }
+  var yn = function (v) { return v ? 'yes' : 'no'; };
+
+  var ua = navigator.userAgent || '';
+  var lua = ua.toLowerCase();
+  var isIOS = /iphone|ipad|ipod/.test(lua);
+
+  // ГЛАВНЫЙ признак. В Safari на iOS `navigator.standalone` ОПРЕДЕЛЁН (false в
+  // браузере, true у иконки с домашнего экрана). В WKWebView, куда попадает
+  // страница из Telegram или соцсети, его нет вовсе — и «нет» здесь значит
+  // «установить на домашний экран отсюда нельзя».
+  var stType = typeof navigator.standalone;
+  var stVal = navigator.standalone;
+
+  add('User-Agent', ua);
+  add('iOS по UA', isIOS ? 'да' : 'нет', yn(isIOS));
+  add('typeof navigator.standalone', stType, stType === 'undefined' ? 'no' : 'yes');
+  add('navigator.standalone', String(stVal));
+  add('display-mode: standalone', matchMedia('(display-mode: standalone)').matches);
+  add('display-mode: browser', matchMedia('(display-mode: browser)').matches);
+
+  // Маркеры конкретных приложений — на случай, если признака standalone не хватит.
+  add('window.TelegramWebviewProxy', typeof window.TelegramWebviewProxy);
+  add('window.Telegram', typeof window.Telegram);
+  add('window.Telegram.WebApp', window.Telegram ? typeof window.Telegram.WebApp : '—');
+  add('UA: Instagram', /instagram/.test(lua), yn(/instagram/.test(lua)));
+  add('UA: FBAN/FBAV (Facebook)', /fban|fbav/.test(lua), yn(/fban|fbav/.test(lua)));
+  add('UA: VK', /vkclient|vkandroidapp|vk_/.test(lua), yn(/vkclient|vkandroidapp|vk_/.test(lua)));
+  add('UA: Line', /\bline\//.test(lua), yn(/\bline\//.test(lua)));
+  add('UA: содержит Safari', /safari/.test(lua), yn(/safari/.test(lua)));
+  add('UA: содержит CriOS (Chrome iOS)', /crios/.test(lua), yn(/crios/.test(lua)));
+  add('UA: содержит FxiOS (Firefox iOS)', /fxios/.test(lua), yn(/fxios/.test(lua)));
+
+  // Что решило бы приложение СЕЙЧАС: любой iOS у него — «ios_safari».
+  var verdict = isIOS ? 'ios_safari (приложение считает, что это Safari)' : 'не iOS';
+  add('вердикт нынешнего кода', verdict, isIOS && stType === 'undefined' ? 'warn' : '');
+
+  // Итог для человека.
+  var inApp = isIOS && stType === 'undefined';
+  add('ВЫВОД', inApp ? 'встроенный браузер приложения — установить нельзя'
+                     : (isIOS ? 'настоящий Safari — установить можно' : '—'),
+      inApp ? 'no' : 'yes');
+
+  var here = location.href;
+
+  document.getElementById('b-telegram').onclick = function () {
+    try {
+      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openLink) {
+        window.Telegram.WebApp.openLink(here, { try_instant_view: false });
+      } else {
+        alert('Telegram.WebApp.openLink недоступен');
+      }
+    } catch (e) { alert('ошибка: ' + e.message); }
+  };
+  document.getElementById('b-xsafari').onclick = function () {
+    location.href = here.replace(/^https:/, 'x-safari-https:');
+  };
+  document.getElementById('b-blank').onclick = function () {
+    window.open(here, '_blank');
+  };
+
+  var report = rows.map(function (r) { return r[0] + ': ' + r[1]; }).join('\n');
+  document.getElementById('out').value = report;
+  document.getElementById('copy').onclick = function () {
+    var ta = document.getElementById('out');
+    ta.select(); ta.setSelectionRange(0, 99999);
+    try { document.execCommand('copy'); this.textContent = 'Скопировано'; }
+    catch (e) { this.textContent = 'Выделите текст выше и скопируйте вручную'; }
+  };
+})();
+</script>
+</body>
+</html>

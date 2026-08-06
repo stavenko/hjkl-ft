@@ -29,5 +29,6 @@ pub mod subscription;
 pub mod support_chat;
 pub mod sync;
 pub mod update;
+pub mod webauthn_error;
 pub mod weight_cycle;
 pub mod weight_trend;

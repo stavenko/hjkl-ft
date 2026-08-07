@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>re:Norma — что умеет этот браузер</title>
+<link rel="manifest" href="/probe-manifest.json" />
+<style>
+  body { font: 16px/1.5 system-ui, -apple-system, sans-serif; margin: 0; padding: 20px 16px 40px;
+         background: #f1f4f9; color: #0e1630; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  h2 { font-size: 15px; margin: 22px 0 8px; color: #39425f; }
+  p.sub { margin: 0 0 16px; color: #5a6580; font-size: 14px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 12px; overflow: hidden;
+          margin-bottom: 6px; }
+  td { padding: 9px 12px; border-bottom: 1px solid #e6eaf2; vertical-align: top;
+       word-break: break-word; font-size: 14px; }
+  td:first-child { color: #5a6580; width: 54%; }
+  .v { font-weight: 700; }
+  .yes { color: #1fa463; } .no { color: #e0304f; } .warn { color: #e8850d; }
+  .verdict { border-radius: 12px; padding: 12px 14px; margin: 14px 0; font-weight: 700; }
+  .verdict.ok { background: #e4f6ec; color: #10633b; }
+  .verdict.bad { background: #fde7ea; color: #a01228; }
+  button { margin-top: 10px; width: 100%; padding: 13px; font-size: 15px; font-weight: 700;
+           border: none; border-radius: 12px; background: #0e1630; color: #fff; }
+  button.sec { background: #fff; color: #0e1630; border: 1px solid #cfd6e4; }
+  textarea { width: 100%; height: 210px; margin-top: 12px; border-radius: 12px; border: 1px solid #cfd6e4;
+             padding: 10px; font: 12px/1.4 ui-monospace, monospace; background: #fff; color: #0e1630;
+             box-sizing: border-box; }
+</style>
+</head>
+<body>
+  <h1>Что умеет этот браузер</h1>
+  <p class="sub">Откройте страницу ТЕМ ЖЕ путём, каким открывается приложение. Дождитесь, пока
+     строки заполнятся, потом нажмите «Скопировать отчёт» и пришлите его.</p>
+
+  <div id="verdict"></div>
+  <table id="t"></table>
+
+  <h2>Проверки вручную</h2>
+  <p class="sub">Нажимайте по очереди и запоминайте, что произошло.</p>
+  <button id="b-passkey" class="sec">Попробовать создать ключ</button>
+  <button id="b-install" class="sec">Показать окно установки</button>
+  <button id="b-chrome" class="sec">Открыть в Chrome (intent)</button>
+  <button id="b-share" class="sec">Поделиться ссылкой</button>
+
+  <h2>Отчёт</h2>
+  <textarea id="out" readonly></textarea>
+  <button id="copy">Скопировать отчёт</button>
+
+<script>
+(function () {
+  // Сервис-воркер обязателен: без него страница не считается устанавливаемой и
+  // beforeinstallprompt не придёт — проба показала бы ложное «установить нельзя».
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/probe-sw.js").catch(function () {});
+  }
+
+  var rows = [];
+  var tbl = document.getElementById("t");
+  function add(label, value, cls) {
+    rows.push(label + ": " + value);
+    var tr = document.createElement("tr");
+    var a = document.createElement("td"); a.textContent = label;
+    var b = document.createElement("td"); b.className = "v " + (cls || ""); b.textContent = String(value);
+    b.id = "row-" + rows.length;
+    tr.appendChild(a); tr.appendChild(b);
+    tbl.appendChild(tr);
+    return b;
+  }
+  function refresh() {
+    document.getElementById("out").value = rows.join("\n");
+  }
+  var yn = function (v) { return v ? "yes" : "no"; };
+
+  var ua = navigator.userAgent || "";
+  var lua = ua.toLowerCase();
+
+  // ── Кто это ──────────────────────────────────────────────────────────────
+  // Порядок важен: у всех встроенных браузеров в UA есть Chrome или Safari,
+  // поэтому «свой» маркер обязан проверяться раньше общего.
+  var marks = [
+    ["Mi (Xiaomi)",   /miuibrowser/],
+    ["Яндекс",        /yabrowser|yasearchbrowser|yaapp_android/],
+    ["Samsung",       /samsungbrowser/],
+    ["Huawei",        /huaweibrowser/],
+    ["Opera",         /\bopr\/|opera/],
+    ["Edge",          /\bedg\//],
+    ["Firefox",       /firefox|fxios/],
+    ["Chrome iOS",    /crios/],
+    ["Instagram",     /instagram/],
+    ["Facebook",      /fban|fbav/],
+    ["VK",            /vkclient|vkandroidapp/],
+    ["Chrome",        /chrome|chromium/],
+    ["Safari",        /safari/],
+  ];
+  var who = "не опознан";
+  for (var i = 0; i < marks.length; i++) {
+    if (marks[i][1].test(lua)) { who = marks[i][0]; break; }
+  }
+  var isIOS = /iphone|ipad|ipod/.test(lua);
+  var isAndroid = /android/.test(lua);
+
+  add("User-Agent", ua);
+  add("Определён как", who, who === "не опознан" ? "warn" : "yes");
+  add("Система", isIOS ? "iOS" : isAndroid ? "Android" : "не телефон");
+
+  // ── Ключи (PassKey) ──────────────────────────────────────────────────────
+  // Главное для онбординга: без создания ключа аккаунт здесь не завести.
+  var hasPKC = typeof window.PublicKeyCredential !== "undefined";
+  var creds = navigator.credentials;
+  var hasCreds = !!creds;
+  var hasCreate = !!(creds && typeof creds.create === "function");
+  add("window.PublicKeyCredential", hasPKC, yn(hasPKC));
+  add("navigator.credentials", hasCreds, yn(hasCreds));
+  add("navigator.credentials.create", hasCreate, yn(hasCreate));
+  var iuvpaaCell = add("Встроенный аутентификатор", "спрашиваем…");
+  if (hasPKC && typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === "function") {
+    window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(function (v) {
+      iuvpaaCell.textContent = String(v);
+      iuvpaaCell.className = "v " + yn(v);
+      rows.push("Встроенный аутентификатор (ответ): " + v);
+      refresh();
+      verdict(v);
+    }).catch(function (e) {
+      iuvpaaCell.textContent = "ошибка: " + e;
+      iuvpaaCell.className = "v no";
+      rows.push("Встроенный аутентификатор (ответ): ошибка " + e);
+      refresh();
+      verdict(false);
+    });
+  } else {
+    iuvpaaCell.textContent = "нет такого метода";
+    iuvpaaCell.className = "v no";
+    verdict(false);
+  }
+
+  // ── Установка на домашний экран ──────────────────────────────────────────
+  var promptEvent = null;
+  var bipCell = add("Событие beforeinstallprompt", "ждём 5 с…");
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault();
+    promptEvent = e;
+    bipCell.textContent = "пришло";
+    bipCell.className = "v yes";
+    rows.push("Событие beforeinstallprompt (итог): пришло");
+    refresh();
+  });
+  setTimeout(function () {
+    if (!promptEvent) {
+      bipCell.textContent = "не пришло за 5 с";
+      bipCell.className = "v warn";
+      rows.push("Событие beforeinstallprompt (итог): не пришло");
+      refresh();
+    }
+  }, 5000);
+
+  add("Service Worker", "serviceWorker" in navigator, yn("serviceWorker" in navigator));
+  add("Manifest поддержан", "onbeforeinstallprompt" in window, yn("onbeforeinstallprompt" in window));
+  add("typeof navigator.standalone", typeof navigator.standalone);
+  add("display-mode: standalone", matchMedia("(display-mode: standalone)").matches);
+  add("display-mode: minimal-ui", matchMedia("(display-mode: minimal-ui)").matches);
+  add("navigator.share", typeof navigator.share);
+  add("Хранилище (IndexedDB)", typeof indexedDB);
+  add("Язык", navigator.language || "—");
+  add("Экран", screen.width + "×" + screen.height + " @" + (window.devicePixelRatio || 1));
+
+  // ── Что решит НАШЕ приложение ────────────────────────────────────────────
+  // Повторяет detect_platform() из pwa_prompt.rs — чтобы сразу видеть, какую
+  // инструкцию по установке человек получит.
+  function ourPlatform() {
+    var isChrome = /chrome/.test(lua) && !/edg/.test(lua) && !/opr/.test(lua);
+    var isFirefox = /firefox/.test(lua);
+    var isSafari = /safari/.test(lua) && !/chrome|chromium/.test(lua);
+    var isSamsung = /samsungbrowser/.test(lua);
+    var isYandex = /yabrowser|yasearchbrowser|yaapp_android/.test(lua);
+    if (isIOS && isYandex) return "ios_yandex";
+    if (isIOS && isSafari) return "ios_safari";
+    if (isIOS) return "ios_safari";
+    if (isAndroid && isSamsung) return "android_samsung";
+    if (isAndroid && isYandex) return "android_yandex";
+    if (isAndroid && isFirefox) return "android_firefox";
+    if (isAndroid) return "android_chrome";
+    return "desktop_chrome";
+  }
+  var plat = ourPlatform();
+  add("Приложение покажет инструкцию", plat, plat === "android_chrome" && who === "Mi (Xiaomi)" ? "warn" : "");
+
+  function verdict(authOk) {
+    var el = document.getElementById("verdict");
+    var can = hasPKC && hasCreate && authOk;
+    el.className = "verdict " + (can ? "ok" : "bad");
+    el.textContent = can
+      ? "Ключ здесь создать можно — онбординг должен пройти."
+      : "Ключ здесь создать НЕЛЬЗЯ — нужен вход по коду из Telegram или переход в Chrome.";
+    rows.push("ВЫВОД: " + el.textContent);
+    refresh();
+  }
+
+  refresh();
+
+  // ── Кнопки ───────────────────────────────────────────────────────────────
+  document.getElementById("b-passkey").onclick = function () {
+    var self = this;
+    if (!hasCreate) { self.textContent = "credentials.create отсутствует"; return; }
+    var challenge = new Uint8Array(32);
+    (crypto.getRandomValues || function (a) { return a; })(challenge);
+    var t0 = Date.now();
+    navigator.credentials.create({ publicKey: {
+      challenge: challenge,
+      rp: { name: "re:Norma", id: location.hostname },
+      user: { id: new Uint8Array(16), name: "probe", displayName: "probe" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+      authenticatorSelection: { userVerification: "preferred" },
+      timeout: 60000,
+    }}).then(function () {
+      self.textContent = "ключ создан за " + (Date.now() - t0) + " мс";
+      rows.push("Проба ключа: СОЗДАН за " + (Date.now() - t0) + " мс");
+      refresh();
+    }).catch(function (e) {
+      var line = (e && e.name ? e.name : "?") + ": " + (e && e.message ? e.message : e)
+        + " (через " + (Date.now() - t0) + " мс)";
+      self.textContent = line;
+      rows.push("Проба ключа: " + line);
+      refresh();
+    });
+  };
+
+  document.getElementById("b-install").onclick = function () {
+    var self = this;
+    if (!promptEvent) { self.textContent = "окна установки браузер не предлагал"; return; }
+    promptEvent.prompt();
+    promptEvent.userChoice.then(function (c) {
+      self.textContent = "ответ: " + c.outcome;
+      rows.push("Окно установки: " + c.outcome);
+      refresh();
+    });
+  };
+
+  document.getElementById("b-chrome").onclick = function () {
+    var host = location.host;
+    var fb = encodeURIComponent("https://" + host + "/browser");
+    location.href = "intent://" + host + "/browser#Intent;scheme=https;package=com.android.chrome;"
+      + "S.browser_fallback_url=" + fb + ";end";
+  };
+
+  document.getElementById("b-share").onclick = function () {
+    if (!navigator.share) { this.textContent = "navigator.share отсутствует"; return; }
+    navigator.share({ url: location.href, title: "re:Norma" }).catch(function (e) {
+      rows.push("Поделиться: " + e);
+      refresh();
+    });
+  };
+
+  document.getElementById("copy").onclick = function () {
+    var ta = document.getElementById("out");
+    ta.select(); ta.setSelectionRange(0, 99999);
+    try { document.execCommand("copy"); this.textContent = "Скопировано"; }
+    catch (e) { this.textContent = "Выделите текст выше и скопируйте вручную"; }
+  };
+})();
+</script>
+</body>
+</html>

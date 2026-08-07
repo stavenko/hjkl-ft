@@ -52,6 +52,11 @@ fn initial_state() -> AppState {
     if platform::detect_platform_is_yandex() {
         return AppState::PwaPrompt;
     }
+    // Mi Browser — по той же причине и на том же месте: ссылка из Telegram ведёт
+    // на `/onboard`, а ключ там создать нечем.
+    if platform::detect_platform_is_mi() {
+        return AppState::PwaPrompt;
+    }
     // Onboarding drives its own flow; bypass all overlays so neither the Auth (login) nor the
     // PWA-install overlay covers it.
     if is_onboard_entry() {
@@ -205,6 +210,16 @@ pub fn App() -> impl IntoView {
     // would burn the one-time login code from the Telegram link right there,
     // invisibly, leaving the link stale by the time the user reaches Chrome.
     if platform::detect_platform_is_yandex() {
+        return view! {
+            <div style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main); overflow-y: auto;">
+                <pages::pwa_prompt::PwaPrompt on_dismiss=Callback::new(|_| {}) />
+            </div>
+        }
+        .into_view();
+    }
+    // Mi Browser — то же самое и по той же причине: `/onboard` под оверлеем сожгла
+    // бы одноразовый код из телеграм-ссылки раньше, чем человек дойдёт до Chrome.
+    if platform::detect_platform_is_mi() {
         return view! {
             <div style="position: fixed; inset: 0; z-index: 100; background: var(--bulma-scheme-main); overflow-y: auto;">
                 <pages::pwa_prompt::PwaPrompt on_dismiss=Callback::new(|_| {}) />

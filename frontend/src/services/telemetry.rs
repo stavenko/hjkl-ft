@@ -20,9 +20,10 @@ use wasm_bindgen::JsValue;
 use super::errors::{code_of, AppError};
 use super::{auth, config};
 
-/// Сколько символов технической причины отправляем. Длинные ответы модели режем:
-/// диагностическая ценность в начале, а точка данных не резиновая.
-const CAUSE_LIMIT: usize = 400;
+/// Сколько символов причины отправляем. Причина — это и есть то, ради чего всё
+/// затевалось: по ней чинят. Режем только чтобы не упереться в предел точки
+/// данных (16 КБ на все блобы разом), а не «на всякий случай».
+const CAUSE_LIMIT: usize = 8000;
 
 #[derive(Serialize)]
 struct Event<'a> {
@@ -40,26 +41,38 @@ struct Event<'a> {
     platform: &'static str,
 }
 
-/// Отправить ошибку. Ничего не возвращает и ни на что не влияет.
+/// Отправить то, что человеку не показывают.
+///
+/// Наши внутренние сбои — не открылась база, не разобралась строка, упала
+/// паника. Человеку про них сообщать нечего (чинить ему нечем), а нам знать
+/// обязательно: до этого они жили только в консоли его телефона.
+pub fn report_internal(kind: &str, subject: &str, cause: &str) {
+    send(kind, subject, cause);
+}
+
+/// Отправить ошибку, показанную человеку.
 pub fn report(e: &AppError) {
-    let base = config::get().bug_report_base_url.clone();
+    let cause = e.cause.clone().unwrap_or_else(|| e.message.clone());
+    send(&e.kind, &e.context, &cause);
+}
+
+fn send(kind: &str, subject: &str, cause: &str) {
     // Без адреса приёмника или без сессии отправлять некуда и нечем: событие
     // теряется молча. Шуметь об этом бессмысленно — человеку это не сообщение.
+    let base = config::get().bug_report_base_url.clone();
     if base.is_empty() {
         return;
     }
     let Some(token) = auth::get_token() else { return };
-
-    let cause = e.cause.clone().unwrap_or_else(|| e.message.clone());
     let cause: String = cause.chars().take(CAUSE_LIMIT).collect();
     // Код считается по ВИДУ и ПРИЧИНЕ, без названия продукта: иначе одна и та же
     // поломка на сотне продуктов дала бы сотню разных кодов и не сложилась бы.
-    let code = code_of(&format!("{}|{cause}", e.kind));
+    let code = code_of(&format!("{kind}|{cause}"));
 
     let event = Event {
         code,
-        kind: &e.kind,
-        subject: &e.context,
+        kind,
+        subject,
         cause,
         build: build_version(),
         platform: crate::pages::pwa_prompt::detect_platform(),

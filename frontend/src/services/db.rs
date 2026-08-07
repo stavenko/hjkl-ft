@@ -359,6 +359,11 @@ fn no_db(op: &str, store_name: &str) {
         return;
     }
     leptos::logging::error!("db::{op}({store_name}) без активной базы — запись потеряна");
+    crate::services::telemetry::report_internal(
+        "db.no_database",
+        store_name,
+        &format!("{op} до открытия базы пользователя"),
+    );
 }
 
 // ── Sync v2 outbox: EVERY local mutation of a synced store is journaled ──────

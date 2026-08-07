@@ -67,11 +67,24 @@ pub fn detect_platform_is_yandex() -> bool {
     crate::pages::pwa_prompt::detect_platform() == "android_yandex"
 }
 
+/// Mi Browser (Xiaomi) на Android. Отдельно от Яндекса и НЕ вместе с ним:
+/// яндексовский путь выстрадан замерами (intent оттуда не работает, учим листу
+/// «Поделиться»), а здесь intent как раз работает — проверено на устройстве.
+/// Общая ветка склеила бы два разных лечения в одно и сломала бы рабочее.
+pub fn detect_platform_is_mi() -> bool {
+    crate::pages::pwa_prompt::detect_platform() == "android_mi"
+}
+
 pub fn needs_pwa_prompt() -> bool {
     // Yandex Browser: ALWAYS. The app is unusable there (no passkey, no PWA), so
     // the «open it in Chrome» screen is shown on every launch and cannot be
     // dismissed — an earlier dismissal from the old screen must not hide it.
     if detect_platform_is_yandex() {
+        return true;
+    }
+    // Mi Browser — по той же причине и так же безусловно: ключ там не создать,
+    // значит и пользоваться нечем, пока человек не перешёл в Chrome.
+    if detect_platform_is_mi() {
         return true;
     }
     let pwa = is_pwa();

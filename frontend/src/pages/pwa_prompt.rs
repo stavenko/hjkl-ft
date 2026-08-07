@@ -22,6 +22,12 @@ pub fn detect_platform() -> &'static str {
     // yaapp_android) — the latter has NO "yabrowser" in its UA but does contain "chrome",
     // so without this it would fall through to the Chrome instructions.
     let is_yandex = ua.contains("yabrowser") || ua.contains("yasearchbrowser") || ua.contains("yaapp_android");
+    // Mi Browser (Xiaomi). В UA есть "chrome", поэтому без своей проверки он
+    // уходил бы в ветку Chrome — а ключи он не умеет: `PublicKeyCredential` там
+    // отсутствует вовсе (замерено пробником на Redmi, Android 15, MiuiBrowser
+    // 14.60). Зеркальный случай Яндекса: там был интерфейс без `credentials`,
+    // здесь — `credentials.create` без интерфейса.
+    let is_mi = ua.contains("miuibrowser");
 
     // Яндекс.Браузер на iPhone проверяется ПЕРВЫМ: его UA содержит и "safari", и
     // "version/", поэтому иначе он уходил бы в ветку Safari — а там инструкция
@@ -35,6 +41,9 @@ pub fn detect_platform() -> &'static str {
 
     if is_android && is_samsung { return "android_samsung"; }
     if is_android && is_yandex { return "android_yandex"; }
+    // ПОСЛЕ яндексовской строки намеренно: если UA когда-нибудь понесёт оба
+    // маркера, победит прежний, выстраданный путь, а не новый.
+    if is_android && is_mi { return "android_mi"; }
     if is_android && is_firefox { return "android_firefox"; }
     if is_android && is_chrome { return "android_chrome"; }
     if is_android { return "android_chrome"; }
@@ -338,6 +347,53 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
     // the screen teaches the only route that does work: the browser's own share
     // button → pick Chrome. Blocking by design: there is no way past it.
     // iOS is untouched: this branch is Android-Yandex only.
+    // Mi Browser. Отдельный экран, НЕ общий с яндексовским: там intent не
+    // срабатывает (Chromium не запускает intent, целящий в другой браузер, и молча
+    // уходит по browser_fallback_url — то есть переоткрывает страницу здесь же),
+    // поэтому там учат листу «Поделиться». Здесь intent работает — проверено на
+    // устройстве, — и человеку нужна ровно одна кнопка, а не инструкция.
+    if platform == "android_mi" {
+        let intent = system_browser_intent_url();
+        let plain = {
+            let win = web_sys::window().expect("no window");
+            let host = win.location().host().unwrap_or_default();
+            format!("https://{host}/")
+        };
+        return view! {
+            <div attr:data-testid="pwa-mi-screen"
+                 style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; \
+                        justify-content: center; padding: 32px 24px; text-align: center; \
+                        background: var(--bulma-scheme-main);">
+                <div style="max-width: 24rem; width: 100%;">
+                    <img src="/icon-192.png" alt="re:Norma"
+                         style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 20px;" />
+                    <h1 class="title is-4" style="line-height: 1.3; margin-bottom: 12px;">
+                        {move || t("pwa.mi.title")}
+                    </h1>
+                    <p class="has-text-grey" style="line-height: 1.55; margin-bottom: 28px;">
+                        {move || t("pwa.mi.lead")}
+                    </p>
+                    <a
+                        attr:data-testid="pwa-btn-open-chrome"
+                        class="button is-link is-large is-fullwidth has-text-weight-semibold"
+                        href=intent
+                    >
+                        {move || t("pwa.mi.open")}
+                    </a>
+                    // Запасной путь на случай, если Chrome не установлен: тогда
+                    // intent уходит по fallback и переоткрывает страницу здесь же,
+                    // и человеку надо дать хотя бы адрес.
+                    <p class="has-text-grey is-size-7" style="margin-top: 22px; line-height: 1.5;">
+                        {move || t("pwa.mi.fallback")}
+                        <br/>
+                        <span style="font-weight: 700; word-break: break-all;">{plain}</span>
+                    </p>
+                </div>
+            </div>
+        }
+        .into_view();
+    }
+
     if platform == "android_yandex" {
         return view! {
             <div attr:data-testid="pwa-yandex-screen"

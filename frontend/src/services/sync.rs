@@ -284,7 +284,11 @@ async fn apply_upsert(store: &str, row: &serde_json::Value, ctx: &mut ApplyCtx) 
             };
             upsert_row(store, id, row).await;
         }
-        other => leptos::logging::error!("sync v2: unknown wire store {other:?}"),
+        other => {
+            leptos::logging::error!("sync v2: unknown wire store {other:?}");
+            crate::services::telemetry::report_internal(
+                "sync.unknown_store", other, "пришло с сервера, применить некуда");
+        }
     }
 }
 
@@ -614,6 +618,7 @@ pub fn push_background() {
     leptos::spawn_local(async {
         if let Err(e) = sync_cycle().await {
             leptos::logging::warn!("Background sync push failed: {e}");
+            crate::services::telemetry::report_internal("sync.push_failed", "", &e);
         }
     });
 }
@@ -623,6 +628,7 @@ pub fn sync_now_background() {
     leptos::spawn_local(async {
         if let Err(e) = sync_now().await {
             leptos::logging::warn!("Sync reconcile failed: {e}");
+            crate::services::telemetry::report_internal("sync.reconcile_failed", "", &e);
         }
     });
 }

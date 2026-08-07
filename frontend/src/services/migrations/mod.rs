@@ -185,6 +185,11 @@ pub async fn run_all() -> usize {
                     &format!("прервана: {e}. Следующие миграции не выполнялись."),
                 );
                 leptos::logging::error!("миграция {} прервана: {e}", m.version);
+                crate::services::telemetry::report_internal(
+                    "db.migration_failed",
+                    &format!("{} {}", m.version, m.description),
+                    &format!("прервана: {e}. Следующие миграции не выполнялись."),
+                );
                 return done;
             }
         }

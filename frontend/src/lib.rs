@@ -16,6 +16,7 @@ const PROBE_POLL_MS: i32 = 15_000;
 #[wasm_bindgen(start)]
 pub fn main() {
     console_error_panic_hook::set_once();
+    install_panic_reporter();
     leptos::spawn_local(async {
         // ---- Critical path (under the splash): LOCAL ONLY, no network. <1s. ----
         // Config synchronously from cache-or-default so `config::get()` never
@@ -94,6 +95,29 @@ pub fn main() {
     });
 }
 
+/// Отправлять нам падения WASM.
+///
+/// Паника обрывает приложение целиком: человек видит замерший экран и не может
+/// ни рассказать, что случилось, ни даже понять, что случилось что-то. До этого
+/// след оставался только в консоли его телефона, то есть нигде.
+///
+/// Ставится ПОСЛЕ `console_error_panic_hook::set_once()` и оборачивает его: тот
+/// печатает в консоль с разобранным стеком, мы добавляем отправку. Порядок
+/// обратный — сначала отправка, потом печать, — потому что печать может и не
+/// вернуть управление.
+#[cfg(not(test))]
+fn install_panic_reporter() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let place = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "неизвестно где".to_string());
+        services::telemetry::report_internal("panic", &place, &info.to_string());
+        previous(info);
+    }));
+}
+
 /// A short, stable code for an error message (6 hex, FNV-1a) — the same failure
 /// always yields the same «Код ошибки», so a user's screenshot pins it down.
 #[cfg(not(test))]
@@ -112,6 +136,9 @@ fn error_code(msg: &str) -> String {
 #[cfg(not(test))]
 fn show_critical_error(msg: &str) {
     let code = error_code(msg);
+    // Приложение не запустилось вовсе — худшее, что может случиться, и до сих пор
+    // мы узнавали об этом только если человек присылал скриншот.
+    services::telemetry::report_internal("app.launch_failed", &code, msg);
     let short = msg
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -182,6 +209,7 @@ async fn sync_at_launch() {
     // Reconcile with the server: push then pull the merged dump.
     if let Err(e) = services::sync::sync_now().await {
         leptos::logging::warn!("Launch sync failed: {e}");
+            services::telemetry::report_internal("sync.launch_failed", "", &e);
     }
     // Разовая разметка приёмов пищи в старых записях. Место жёсткое: ПОСЛЕ
     // подтянутого дампа. Отметка «уже размечено» ставится раз и навсегда — начнись

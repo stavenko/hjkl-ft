@@ -69,7 +69,10 @@ pub async fn reopen() {
             DB.with(|cell| cell.replace(Some(fresh)));
             bump_all();
         }
-        Err(e) => leptos::logging::warn!("db::reopen failed: {e}"),
+        Err(e) => {
+            leptos::logging::warn!("db::reopen failed: {e}");
+            crate::services::telemetry::report_internal("db.reopen_failed", &name, &e);
+        }
     }
 }
 
@@ -476,7 +479,14 @@ pub async fn put<T: Serialize>(store_name: &str, value: &T) {
             .and_then(|v| v.get(key_field(store_name)).and_then(|k| k.as_str().map(String::from)));
         match key {
             Some(key) => note_mutation(store_name, "upsert", &key).await,
-            None => leptos::logging::error!("db::put({store_name}): row has no key field — not journaled"),
+            None => {
+                leptos::logging::error!("db::put({store_name}): row has no key field — not journaled");
+                crate::services::telemetry::report_internal(
+                    "sync.not_journaled",
+                    store_name,
+                    "строка без ключа — изменение не попало в журнал синхронизации",
+                );
+            }
         }
     }
 }
@@ -582,6 +592,11 @@ fn decode_row<T: DeserializeOwned>(store_name: &str, val: JsValue) -> Option<T> 
                 &format!("строка не разобрана и пропущена: {e}"),
             );
             leptos::logging::error!("db::{store_name}: строка не разобрана и пропущена: {e}");
+            crate::services::telemetry::report_internal(
+                "db.bad_row",
+                store_name,
+                &format!("строка не разобрана и пропущена: {e}"),
+            );
             None
         }
     }

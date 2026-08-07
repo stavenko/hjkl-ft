@@ -15,7 +15,7 @@
 //! Ничего сверх этого — ни дневника, ни веса, ни переписки.
 
 use serde::Serialize;
-use wasm_bindgen::JsValue;
+use wasm_bindgen::{JsCast, JsValue};
 
 use super::errors::{code_of, AppError};
 use super::{auth, config};
@@ -79,11 +79,25 @@ fn send(kind: &str, subject: &str, cause: &str) {
     };
     let Ok(body) = serde_json::to_string(&event) else { return };
 
+    // Запрос отправляется ЗДЕСЬ, синхронно, а не внутри задачи. Разница
+    // принципиальна для паники: после неё исполнение wasm обрывается, и
+    // отложенная задача уже не запустится — сообщение о падении потерялось бы
+    // ровно там, где нужнее всего. `fetch` же уходит в сеть в момент вызова.
+    let Some(promise) = dispatch(&base, &token, &body) else { return };
+
+    // Ответ дожидаемся только ради жалобы в консоль; сам запрос уже в пути.
     leptos::spawn_local(async move {
-        if let Err(e) = post(&base, &token, &body).await {
+        match wasm_bindgen_futures::JsFuture::from(promise).await {
+            Ok(v) => {
+                if let Some(resp) = v.dyn_ref::<web_sys::Response>() {
+                    if !resp.ok() {
+                        leptos::logging::warn!("телеметрия: HTTP {}", resp.status());
+                    }
+                }
+            }
             // Только в консоль. В журнал нельзя: запись оттуда снова позвала бы
             // сюда, и неудачная отправка закольцевалась бы сама на себя.
-            leptos::logging::warn!("телеметрия не ушла: {e}");
+            Err(e) => leptos::logging::warn!("телеметрия не ушла: {e:?}"),
         }
     });
 }
@@ -96,30 +110,26 @@ fn build_version() -> String {
         .unwrap_or_default()
 }
 
-async fn post(base: &str, token: &str, body: &str) -> Result<(), String> {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen_futures::JsFuture;
-
+/// Отправить запрос НЕМЕДЛЕННО и вернуть его обещание.
+///
+/// Ни одного `expect`: сюда приходят и из обработчика паники, а паника внутри
+/// обработчика паники — это уже ничем не диагностируемый обрыв.
+fn dispatch(base: &str, token: &str, body: &str) -> Option<js_sys::Promise> {
     let opts = web_sys::RequestInit::new();
     opts.set_method("POST");
     opts.set_body(&JsValue::from_str(body));
+    // `keepalive` — чтобы браузер не отменил запрос, если страница в этот момент
+    // рушится или закрывается. В web-sys этого сеттера нет, а поле обычное.
+    let _ = js_sys::Reflect::set(&opts, &JsValue::from_str("keepalive"), &JsValue::TRUE);
 
-    let headers = web_sys::Headers::new().map_err(|e| format!("{e:?}"))?;
-    headers.set("Content-Type", "application/json").map_err(|e| format!("{e:?}"))?;
-    headers.set("Authorization", &format!("Bearer {token}")).map_err(|e| format!("{e:?}"))?;
+    let headers = web_sys::Headers::new().ok()?;
+    headers.set("Content-Type", "application/json").ok()?;
+    headers.set("Authorization", &format!("Bearer {token}")).ok()?;
     opts.set_headers(&headers);
 
-    let request = web_sys::Request::new_with_str_and_init(&format!("{base}/event"), &opts)
-        .map_err(|e| format!("{e:?}"))?;
-    let window = web_sys::window().expect("no window");
-    let resp_val = JsFuture::from(window.fetch_with_request(&request))
-        .await
-        .map_err(|e| format!("{e:?}"))?;
-    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
-    if !resp.ok() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    Ok(())
+    let request = web_sys::Request::new_with_str_and_init(&format!("{base}/event"), &opts).ok()?;
+    let window = web_sys::window()?;
+    Some(window.fetch_with_request(&request))
 }
 
 #[cfg(test)]

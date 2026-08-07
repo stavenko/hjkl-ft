@@ -354,11 +354,6 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
     // устройстве, — и человеку нужна ровно одна кнопка, а не инструкция.
     if platform == "android_mi" {
         let intent = system_browser_intent_url();
-        let plain = {
-            let win = web_sys::window().expect("no window");
-            let host = win.location().host().unwrap_or_default();
-            format!("https://{host}/")
-        };
         return view! {
             <div attr:data-testid="pwa-mi-screen"
                  style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; \
@@ -367,12 +362,9 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                 <div style="max-width: 24rem; width: 100%;">
                     <img src="/icon-192.png" alt="re:Norma"
                          style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 20px;" />
-                    <h1 class="title is-4" style="line-height: 1.3; margin-bottom: 12px;">
+                    <h1 class="title is-4" style="line-height: 1.3; margin-bottom: 28px;">
                         {move || t("pwa.mi.title")}
                     </h1>
-                    <p class="has-text-grey" style="line-height: 1.55; margin-bottom: 28px;">
-                        {move || t("pwa.mi.lead")}
-                    </p>
                     <a
                         attr:data-testid="pwa-btn-open-chrome"
                         class="button is-link is-large is-fullwidth has-text-weight-semibold"
@@ -380,14 +372,6 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                     >
                         {move || t("pwa.mi.open")}
                     </a>
-                    // Запасной путь на случай, если Chrome не установлен: тогда
-                    // intent уходит по fallback и переоткрывает страницу здесь же,
-                    // и человеку надо дать хотя бы адрес.
-                    <p class="has-text-grey is-size-7" style="margin-top: 22px; line-height: 1.5;">
-                        {move || t("pwa.mi.fallback")}
-                        <br/>
-                        <span style="font-weight: 700; word-break: break-all;">{plain}</span>
-                    </p>
                 </div>
             </div>
         }

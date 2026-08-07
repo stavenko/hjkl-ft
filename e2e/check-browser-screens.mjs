@@ -50,7 +50,12 @@ async function open(ua) {
   check(shown, "показан экран Mi");
   if (shown) {
     const text = await page.innerText("body");
-    check(/работает в браузере Chrome/.test(text), "сказано, что нужен Chrome");
+    check(
+      /Приложение re:Norma работает в браузере Chrome\./.test(text),
+      "фраза ровно та, что просили",
+    );
+    // Ничего сверх фразы и кнопки: сочинённые пояснения тут не нужны.
+    check(!/ключ доступа|не установлен/.test(text), "лишнего текста нет");
     const href = await page.getByTestId("pwa-btn-open-chrome").getAttribute("href");
     check(/^intent:\/\//.test(href), "кнопка — intent-ссылка");
     check(/package=com\.android\.chrome/.test(href), "intent целится в Chrome");

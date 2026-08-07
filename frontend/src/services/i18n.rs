@@ -708,6 +708,7 @@ fn en(key: &str) -> &'static str {
         // Onboard (paid-landing claim flow: register → bind the paid subscription)
         "onboard.installed_title" => "re:Norma is installed as an app on your home screen.",
         "onboard.installed_body" => "Close the browser and open the app by tapping its icon on the home screen.",
+        "onboard.installed_wait" => "Installing the app and putting the icon on the home screen can take a few minutes — please wait a little.",
         "onboard.title" => "Create your account",
         "onboard.subtitle" => "Your payment went through. Create an account and we'll link your subscription to it.",
         "onboard.claiming" => "Linking your subscription…",
@@ -1598,6 +1599,7 @@ fn ru(key: &str) -> &'static str {
         // Онбординг (после оплаты на лендинге: регистрация → привязка подписки)
         "onboard.installed_title" => "re:Norma установлено как приложение на ваш рабочий стол.",
         "onboard.installed_body" => "Закройте браузер и откройте приложение, тапнув по иконке на рабочем столе.",
+        "onboard.installed_wait" => "Установка приложения и появление иконки могут занять несколько минут — немного подождите.",
         "onboard.title" => "Создайте аккаунт",
         "onboard.subtitle" => "Оплата прошла. Создайте аккаунт — мы привяжем к нему вашу подписку.",
         "onboard.claiming" => "Привязываем подписку…",

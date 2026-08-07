@@ -217,6 +217,14 @@ pub fn OnboardPage() -> impl IntoView {
                     <p class="has-text-grey" style="line-height: 1.6;">
                         {move || t("onboard.installed_body")}
                     </p>
+                    // Иконка появляется НЕ мгновенно: Android собирает и ставит
+                    // приложение уже после того, как страница отчиталась об
+                    // установке. Без предупреждения человек решает, что не
+                    // сработало, и идёт ставить заново.
+                    <div class="notification is-warning is-light"
+                         style="margin-top: 22px; text-align: left; line-height: 1.55;">
+                        {move || t("onboard.installed_wait")}
+                    </div>
                 </div>
             </div>
         }.into_view(),

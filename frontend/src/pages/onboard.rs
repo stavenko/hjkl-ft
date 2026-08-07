@@ -225,6 +225,26 @@ pub fn OnboardPage() -> impl IntoView {
                          style="margin-top: 22px; text-align: left; line-height: 1.55;">
                         {move || t("onboard.installed_wait")}
                     </div>
+
+                    // Событие `appinstalled` приходит раньше, чем Android доводит
+                    // установку до конца. Сорвись она — отметка уже стоит и врёт,
+                    // а человек заперт на экране, который говорит «всё готово».
+                    // Кнопка снимает отметку и возвращает к инструкции.
+                    <p class="has-text-grey is-size-7"
+                       style="margin-top: 18px; text-align: left; line-height: 1.55;">
+                        {move || t("onboard.installed_missing")}
+                    </p>
+                    <button
+                        attr:data-testid="onboard-btn-show-instructions"
+                        class="button is-light is-fullwidth"
+                        style="margin-top: 12px;"
+                        on:click=move |_| {
+                            crate::services::platform::clear_pwa_installed();
+                            step.set(Step::InstallPwa);
+                        }
+                    >
+                        {move || t("onboard.installed_show")}
+                    </button>
                 </div>
             </div>
         }.into_view(),

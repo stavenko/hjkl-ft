@@ -21,12 +21,16 @@ const b = await chromium.launch();
 
 async function openOnboard(seedInstalled) {
   const ctx = await b.newContext({ viewport: { width: 390, height: 844 } });
-  await ctx.addInitScript((installed) => {
-    sessionStorage.setItem("update_auto_applied", "1");
-    if (installed) localStorage.setItem("pwa_installed", "1");
-  }, seedInstalled);
+  await ctx.addInitScript(() => sessionStorage.setItem("update_auto_applied", "1"));
   const page = await ctx.newPage();
   await page.goto(`${BASE}/onboard?u=${UID}`, { waitUntil: "domcontentloaded" });
+  if (seedInstalled) {
+    // Отметку ставим ОДИН раз и перезагружаем, а не через addInitScript: тот
+    // возвращал бы её на каждую навигацию, и проверка «после сброса не вернулось»
+    // проверяла бы саму себя.
+    await page.evaluate(() => localStorage.setItem("pwa_installed", "1"));
+    await page.reload({ waitUntil: "domcontentloaded" });
+  }
   await page.waitForTimeout(9000);
   return { ctx, page };
 }
@@ -63,14 +67,36 @@ async function openOnboard(seedInstalled) {
     /могут занять несколько минут/.test(text),
     "предупреждение про ожидание на месте",
   );
-  // «Ни ссылок, ни переходов»: на ЭКРАНЕ не должно быть ничего нажимаемого.
+  check(
+    /Если приложение так и не появилось.*прервавшегося VPN/s.test(text),
+    "сказано, что делать, если иконка не появилась",
+  );
   // Считаем только видимое: нижнее меню приложения живёт в оболочке роутера под
   // этим экраном и человеку не показывается.
   const visible = (sel) =>
     page.$$eval(sel, (els) => els.filter((e) => e.offsetParent !== null).length);
   check((await visible("a")) === 0, "видимых ссылок нет");
-  check((await visible("button")) === 0, "видимых кнопок нет");
-  check(!/Создать|ключ|Установить/.test(text), "инструкции по установке нет");
+  check((await visible("button")) === 1, "кнопка ровно одна — показать инструкцию");
+  check(!/Создать ключ/.test(text), "инструкции по установке ещё нет");
+
+  // ── Кнопка снимает отметку и возвращает к инструкции ──
+  await page.getByTestId("onboard-btn-show-instructions").click();
+  await page.waitForTimeout(1500);
+  check(
+    /Как установить/.test(await page.innerText("body")),
+    "по кнопке показана инструкция по установке",
+  );
+  check(
+    (await page.evaluate(() => localStorage.getItem("pwa_installed"))) === null,
+    "отметка об установке снята",
+  );
+  // И это переживает перезагрузку: иначе человек снова упрётся в «всё готово».
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(9000);
+  check(
+    !(await page.getByTestId("onboard-installed").isVisible().catch(() => false)),
+    "после перезагрузки конечный экран не возвращается",
+  );
   await ctx.close();
 }
 

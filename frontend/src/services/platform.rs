@@ -52,6 +52,18 @@ pub fn pwa_installed() -> bool {
         .is_some()
 }
 
+/// Забыть, что приложение поставлено.
+///
+/// Нужно, когда человек говорит, что иконка так и не появилась: отметку ставит
+/// событие `appinstalled`, а оно приходит РАНЬШЕ, чем Android доводит установку
+/// до конца, — и если та сорвалась, отметка врёт. Снимаем и показываем
+/// инструкцию заново.
+pub fn clear_pwa_installed() {
+    if let Some(s) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = s.remove_item("pwa_installed");
+    }
+}
+
 pub fn pwa_dismissed() -> bool {
     let storage = web_sys::window()
         .expect("no window")

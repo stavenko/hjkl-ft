@@ -40,7 +40,7 @@ async fn wait_for_online() {
 /// - if ONLINE but still failing (bad JSON / model error / transient) → record the
 ///   error and give up (the next activation sweep retries it anyway).
 /// Returns `Some(value)` on success, `None` if given up.
-async fn with_retries<F, Fut, T>(mut op: F, ctx: &str) -> Option<T>
+async fn with_retries<F, Fut, T>(mut op: F, aspect: errors::FoodAspect, food: &str) -> Option<T>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, String>>,
@@ -62,7 +62,7 @@ where
             wait_for_online().await;
             continue; // connection is a temporary problem — retry the whole batch
         }
-        errors::record(ctx, &last);
+        errors::record_food(aspect, food, &last);
         return None;
     }
 }
@@ -129,9 +129,11 @@ async fn run_worker() {
 
         if needs_classification(&food) {
             let name = food.name.clone();
-            let ctx = format!("Классификация: {name}");
-            if let Some(tags) =
-                with_retries(move || { let n = name.clone(); async move { ai::classify_food(&[n]).await } }, &ctx).await
+            if let Some(tags) = with_retries(
+                move || { let n = name.clone(); async move { ai::classify_food(&[n]).await } },
+                errors::FoodAspect::Kind,
+                &food.name,
+            ).await
             {
                 if let Some(t) = tags.into_iter().next() {
                     local::cache_food_tags(&[(id.clone(), t)]).await;
@@ -142,18 +144,24 @@ async fn run_worker() {
         // `food.nutrients` is unchanged by classification, so the loaded copy is
         // still current for the enrichment gate.
         if super::enrich::needs_enrichment(&food) {
-            let ctx = format!("Нутриенты: {}", food.name);
             let f = food.clone();
-            with_retries(move || { let f = f.clone(); async move { super::enrich::enrich_food(&f).await } }, &ctx).await;
+            with_retries(
+                move || { let f = f.clone(); async move { super::enrich::enrich_food(&f).await } },
+                errors::FoodAspect::Nutrients,
+                &food.name,
+            ).await;
         }
 
         // Iron is its OWN pass: it needs the absorbed fraction alongside the
         // amount, so it can't ride the generic nutrient request (see `iron.rs`).
         // Runs only once the iron week is open — before that nothing reads it.
         if super::iron::unlocked() && super::iron::needs_iron(&food) {
-            let ctx = format!("Железо: {}", food.name);
             let f = food.clone();
-            with_retries(move || { let f = f.clone(); async move { super::iron::enrich_iron(&f).await } }, &ctx).await;
+            with_retries(
+                move || { let f = f.clone(); async move { super::iron::enrich_iron(&f).await } },
+                errors::FoodAspect::Iron,
+                &food.name,
+            ).await;
         }
     }
 }

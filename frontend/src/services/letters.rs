@@ -162,7 +162,8 @@ pub async fn maybe_recompute_weekly_planka() {
         // Срок вышел, а пересчёта не будет. Молчать об этом нельзя: снаружи это
         // выглядит как «планка просто не пересчиталась», и разобраться потом не по
         // чему. В журнал ошибок — чтобы человек увидел это в приложении.
-        super::errors::record(
+        super::errors::record_kind(
+            "planka.calories",
             "Планка по калориям",
             &format!(
                 "пересчёт отложен: срок вышел ({waited} дн. с {anchor}), но за последние 7 \
@@ -243,7 +244,8 @@ pub async fn maybe_recompute_weekly_steps_planka() {
         // Not judgeable (no step data in the window) — defer WITHOUT advancing the
         // anchor, so the next launch tries again instead of silently skipping a week.
         // Видимо в журнале ошибок: срок вышел, а планка не двинулась.
-        super::errors::record(
+        super::errors::record_kind(
+            "planka.steps",
             "Планка по шагам",
             &format!(
                 "пересчёт отложен: срок вышел ({waited} дн. с {anchor}), но за последние 7 \

@@ -245,6 +245,8 @@ fn net_problem_entries() -> Vec<AppError> {
         v.push(AppError {
             context: t("net.offline_title").to_string(),
             message: t("net.offline_body_vpn").to_string(),
+            cause: None,
+            kind: String::new(),
         });
     }
     let down = net::degraded().get();
@@ -253,6 +255,8 @@ fn net_problem_entries() -> Vec<AppError> {
         v.push(AppError {
             context: t("net.degraded_title").to_string(),
             message: format!("{} {}", t("net.degraded_body"), names),
+            cause: None,
+            kind: String::new(),
         });
     }
     v

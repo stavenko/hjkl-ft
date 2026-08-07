@@ -260,5 +260,83 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         return cors_relay(res).await;
     }
 
+    if method == Method::Post && path == "/event" {
+        return record_event(req, env, &user_id).await;
+    }
+
     Ok(error_response("Not found", 404))
+}
+
+// ── Клиентские ошибки → Analytics Engine ─────────────────────────────────────
+//
+// Приложение шлёт сюда каждую ошибку, о которой сообщает человеку под
+// треугольником. Раньше это оставалось на устройстве и умирало с перезагрузкой:
+// узнать, что у десяти человек не определяется один и тот же продукт, было
+// неоткуда.
+//
+// РАСКЛАДКА ТОЧКИ ДАННЫХ. В SQL столбцы позиционные (index1, blob1…blob20,
+// double1…), имён у них нет — поменять порядок значит сломать все запросы и
+// перемешать уже записанное. Менять только добавлением в конец.
+//
+//   index1  — код ошибки (устойчивый, считает клиент): по нему группируем
+//   blob1   — вид: food.iron | food.kind | food.nutrients | planka.calories …
+//   blob2   — к чему относится: название продукта
+//   blob3   — техническая причина
+//   blob4   — версия сборки
+//   blob5   — платформа (ios_safari, android_chrome, …)
+//   blob6   — user_id: сколько РАЗНЫХ людей задело, а не сколько раз стрельнуло
+//   double1 — 1, чтобы складывать
+const EVENT_DATASET: &str = "CLIENT_ERRORS";
+
+/// Максимальная длина строкового поля. Точка данных ограничена по размеру, а
+/// причина может прилететь ответом модели на несколько килобайт.
+const FIELD_LIMIT: usize = 512;
+
+fn field(body: &serde_json::Value, key: &str) -> String {
+    body.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .chars()
+        .take(FIELD_LIMIT)
+        .collect()
+}
+
+/// POST /event (app JWT) — записать одну клиентскую ошибку.
+///
+/// Отвечает 202 и НЕ обещает, что запись случилась: у Analytics Engine запись
+/// «выстрелил и забыл», подтверждения не бывает. Клиенту это и не нужно —
+/// повторять он не станет.
+async fn record_event(mut req: Request, env: &Env, user_id: &str) -> Result<Response> {
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let code = field(&body, "code");
+    let kind = field(&body, "kind");
+    if code.is_empty() || kind.is_empty() {
+        return Ok(error_response("missing code/kind", 400));
+    }
+
+    let dataset = match env.analytics_engine(EVENT_DATASET) {
+        Ok(d) => d,
+        Err(e) => {
+            // Биндинга нет — это наша ошибка развёртывания, а не клиента. Громко в
+            // лог, но клиенту 202: терять из-за этого его работу незачем.
+            console_error!("analytics engine binding {EVENT_DATASET}: {e}");
+            return Response::from_json(&serde_json::json!({ "ok": false }))
+                .map(|r| r.with_status(202));
+        }
+    };
+
+    let point = AnalyticsEngineDataPointBuilder::new()
+        .indexes([code.as_str()].as_slice())
+        .add_blob(kind)
+        .add_blob(field(&body, "subject"))
+        .add_blob(field(&body, "cause"))
+        .add_blob(field(&body, "build"))
+        .add_blob(field(&body, "platform"))
+        .add_blob(user_id)
+        .add_double(1);
+
+    if let Err(e) = point.write_to(&dataset) {
+        console_error!("analytics engine write: {e}");
+    }
+    Response::from_json(&serde_json::json!({ "ok": true })).map(|r| r.with_status(202))
 }

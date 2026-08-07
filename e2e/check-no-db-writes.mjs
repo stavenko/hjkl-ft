@@ -71,7 +71,9 @@ async function run(session) {
   }).match(/^token:\s+(\S+)$/m)[1];
   const { ctx, page, hits, started } = await run([uid, token]);
   console.log("\n2. Запуск с сессией");
-  check(started.length === 1, `обслуживание данных отработало (${started.length})`);
+  // Не «ровно один»: первый заход перезагружается сам, когда встаёт
+  // сервис-воркер, и запуск честно повторяется.
+  check(started.length >= 1, `обслуживание данных отработало (${started.length})`);
   if (hits.length) console.log("   записи:", [...new Set(hits)].join(" | "));
   check(
     await page.getByTestId("nav-diary").isVisible().catch(() => false),

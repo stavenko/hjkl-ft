@@ -41,6 +41,9 @@ enum Step {
     Failed,
     Passkey,
     InstallPwa,
+    /// Приложение поставлено. Конечная: ни ссылок, ни кнопок — дальше человек
+    /// уходит с иконки на рабочем столе, а не отсюда.
+    Installed,
 }
 
 /// Enter the app — the app itself shows the existing PWA-install prompt when appropriate.
@@ -82,7 +85,14 @@ pub fn OnboardPage() -> impl IntoView {
     // (get_user_id) is the source of truth. So: already signed in → we're in, never «stale».
     let authed_at_mount = auth::get_user_id().is_some();
 
-    let step = create_rw_signal(if authed_at_mount || param_code().is_some() {
+    // Приложение уже поставлено — онбординг окончен. Проверяем ДО всего
+    // остального и синхронно: `appinstalled` перезагружает вкладку, и без этого
+    // человек на мгновение увидел бы экран создания ключа, который он уже прошёл.
+    let installed_at_mount = crate::services::platform::pwa_installed();
+
+    let step = create_rw_signal(if installed_at_mount {
+        Step::Installed
+    } else if authed_at_mount || param_code().is_some() {
         Step::Verifying
     } else {
         Step::Failed
@@ -95,6 +105,9 @@ pub fn OnboardPage() -> impl IntoView {
     // force-reloaded on SW-activation / appinstalled) → continue the flow, DON'T re-verify the
     // consumed code, DON'T show «stale». A verify failure with NO session → genuinely stale link.
     create_effect(move |_| {
+        if installed_at_mount {
+            return;
+        }
         spawn_local(async move {
             // Первое открытие в НОВОМ браузере (переход из Яндекса в Chrome) идёт
             // без кэша конфигурации: сперва дожидаемся адресов воркеров, иначе
@@ -190,6 +203,24 @@ pub fn OnboardPage() -> impl IntoView {
             <PwaPrompt on_dismiss=Callback::new(|_| go_app()) />
         }.into_view(),
 
+        Step::Installed => view! {
+            <div attr:data-testid="onboard-installed"
+                 style="min-height: 100vh; display: flex; flex-direction: column; \
+                        align-items: center; justify-content: center; padding: 32px 24px; \
+                        text-align: center; background: var(--bulma-scheme-main);">
+                <div style="max-width: 24rem; width: 100%;">
+                    <img src="/icon-192.png" alt="re:Norma"
+                         style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 20px;" />
+                    <h1 class="title is-4" style="line-height: 1.35; margin-bottom: 14px;">
+                        {move || t("onboard.installed_title")}
+                    </h1>
+                    <p class="has-text-grey" style="line-height: 1.6;">
+                        {move || t("onboard.installed_body")}
+                    </p>
+                </div>
+            </div>
+        }.into_view(),
+
         // ── Verifying / Failed / Passkey share the onboarding chrome ──
         _ => view! {
         <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main);">
@@ -261,8 +292,9 @@ pub fn OnboardPage() -> impl IntoView {
                         </div>
                     }.into_view(),
 
-                    // InstallPwa is handled by the outer match (its own full screen).
-                    Step::InstallPwa => view! { <div></div> }.into_view(),
+                    // InstallPwa и Installed рисует внешний match — у каждого свой
+                    // полный экран, без общей обвязки онбординга.
+                    Step::InstallPwa | Step::Installed => view! { <div></div> }.into_view(),
                 }}
             </div>
         </div>

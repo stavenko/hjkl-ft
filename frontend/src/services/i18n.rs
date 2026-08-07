@@ -706,6 +706,8 @@ fn en(key: &str) -> &'static str {
         // Weekly recommendation card
 
         // Onboard (paid-landing claim flow: register → bind the paid subscription)
+        "onboard.installed_title" => "re:Norma is installed as an app on your home screen.",
+        "onboard.installed_body" => "Close the browser and open the app by tapping its icon on the home screen.",
         "onboard.title" => "Create your account",
         "onboard.subtitle" => "Your payment went through. Create an account and we'll link your subscription to it.",
         "onboard.claiming" => "Linking your subscription…",
@@ -1594,6 +1596,8 @@ fn ru(key: &str) -> &'static str {
         // Карточка еженедельной рекомендации
 
         // Онбординг (после оплаты на лендинге: регистрация → привязка подписки)
+        "onboard.installed_title" => "re:Norma установлено как приложение на ваш рабочий стол.",
+        "onboard.installed_body" => "Закройте браузер и откройте приложение, тапнув по иконке на рабочем столе.",
         "onboard.title" => "Создайте аккаунт",
         "onboard.subtitle" => "Оплата прошла. Создайте аккаунт — мы привяжем к нему вашу подписку.",
         "onboard.claiming" => "Привязываем подписку…",

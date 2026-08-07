@@ -326,6 +326,11 @@ if ('serviceWorker' in navigator) {
     });
 }
 window.addEventListener('appinstalled', function() {
+    // Отметка ДО перезагрузки: сама перезагрузка стирает всё состояние страницы,
+    // и без неё онбординг начинался заново и снова просил создать ключ — тот, что
+    // человек создал минуту назад. Отметка переживает перезагрузку и говорит
+    // онбордингу, что дело сделано.
+    try { localStorage.setItem('pwa_installed', '1'); } catch (e) {}
     // Force reload after PWA install so the new window gets fresh content
     window.location.reload();
 });

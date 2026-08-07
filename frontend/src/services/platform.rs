@@ -40,6 +40,18 @@ pub fn is_pwa() -> bool {
     !browser
 }
 
+/// Приложение уже поставлено на этот рабочий стол.
+///
+/// Отметку ставит обработчик `appinstalled` в index.html — прямо перед тем, как
+/// перезагрузить страницу. Перезагрузка стирает состояние, и без отметки
+/// онбординг начинался бы заново.
+pub fn pwa_installed() -> bool {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item("pwa_installed").ok().flatten())
+        .is_some()
+}
+
 pub fn pwa_dismissed() -> bool {
     let storage = web_sys::window()
         .expect("no window")

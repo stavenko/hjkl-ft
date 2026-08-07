@@ -42,12 +42,22 @@ async function open(ua) {
   return { ctx, page };
 }
 
-// ── 1. Mi Browser: свой экран с кнопкой-intent ──
+// ── 1. Mi Browser: своя страница от воркера, приложение не грузится ──
+// Экран `android_mi` внутри приложения при этом остаётся — он запасной, на случай
+// когда навигацию отдаёт сервис-воркер из кэша и до воркера дело не доходит.
 {
   const { ctx, page } = await open(UAS.mi);
   console.log("\n1. Mi Browser");
-  const shown = await page.getByTestId("pwa-mi-screen").isVisible().catch(() => false);
-  check(shown, "показан экран Mi");
+  const shown = await page.getByTestId("pwa-mi-page").isVisible().catch(() => false);
+  check(shown, "показана страница Mi");
+  check(
+    !(await page.evaluate(() => !!document.querySelector('link[rel="manifest"]'))),
+    "манифеста на странице нет",
+  );
+  check(
+    await page.evaluate(() => !document.querySelector('script[src*="init.js"]')),
+    "приложение не грузится",
+  );
   if (shown) {
     const text = await page.innerText("body");
     check(
@@ -80,8 +90,8 @@ async function open(ua) {
   check(shots.includes("/onboard-img/hop-share.gif"), "гифка «Поделиться» на месте");
   check(shots.includes("/onboard-img/hop-chrome.gif"), "гифка «выбрать Chrome» на месте");
   check(
-    !(await page.getByTestId("pwa-mi-screen").isVisible().catch(() => false)),
-    "экран Mi сюда не подмешался",
+    !(await page.getByTestId("pwa-mi-page").isVisible().catch(() => false)),
+    "страница Mi сюда не подмешалась",
   );
   check(
     !(await page.getByTestId("pwa-btn-open-chrome").isVisible().catch(() => false)),
@@ -97,8 +107,8 @@ async function open(ua) {
   const text = await page.innerText("body");
   check(/Как установить на Android/.test(text), "показана инструкция по установке");
   check(
-    !(await page.getByTestId("pwa-mi-screen").isVisible().catch(() => false)),
-    "экран Mi сюда не подмешался",
+    !(await page.getByTestId("pwa-mi-page").isVisible().catch(() => false)),
+    "страница Mi сюда не подмешалась",
   );
   await ctx.close();
 }

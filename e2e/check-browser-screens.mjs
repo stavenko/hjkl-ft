@@ -113,6 +113,37 @@ async function open(ua) {
   await ctx.close();
 }
 
+// ── 4. Mi, но документ пришёл мимо воркера (так делает сервис-воркер из кэша) ──
+// Тогда работает запасной экран внутри приложения. Он тоже обязан сохранять путь:
+// ссылка из Telegram ведёт на /onboard, и увести оттуда на корень — значит
+// показать человеку установку вместо регистрации.
+{
+  const ctx = await b.newContext({
+    userAgent: UAS.mi,
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  // Документ берём с обычным UA — воркер отдаст приложение, как отдал бы кэш.
+  await ctx.route("**/onboard*", async (route) => {
+    const res = await route.fetch({ headers: { ...route.request().headers(), "user-agent": UAS.chrome } });
+    await route.fulfill({ response: res });
+  });
+  const page = await ctx.newPage();
+  await page.goto(`${BASE}/onboard?u=00000000-1111-2222-3333-444444444444`, {
+    waitUntil: "domcontentloaded",
+  });
+  console.log("\n4. Mi, приложение пришло мимо воркера");
+  const ok = await page.getByTestId("pwa-mi-screen").waitFor({ timeout: 40000 })
+    .then(() => true).catch(() => false);
+  check(ok, "показан запасной экран приложения");
+  if (ok) {
+    const href = await page.getByTestId("pwa-btn-open-chrome").getAttribute("href");
+    check(/\/onboard\?u=00000000/.test(href), `путь /onboard сохранён (${href.slice(0, 70)}…)`);
+  }
+  await ctx.close();
+}
+
 await b.close();
 console.log(failed ? `\nПРОВАЛОВ: ${failed}` : "\nвсё сошлось");
 process.exit(failed ? 1 : 0);

@@ -60,12 +60,15 @@ function isPageRequest(request) {
 }
 
 function miPage(url) {
-  const u = url.searchParams.get("u") || "";
-  const q = u ? `?u=${encodeURIComponent(u)}` : "";
+  // Путь сохраняем как есть. Ссылка из Telegram ведёт на `/onboard?u=…`, и это
+  // ОСОБЫЙ вход: там приложение не накрывает страницу оверлеями, а ведёт свой
+  // порядок — код, ключ, и лишь в конце установка. Уведи мы человека на корень,
+  // он попал бы сразу на экран установки, не зарегистрировавшись.
   const host = url.host;
-  const target = `https://${host}/${q}`;
+  const rest = `${url.pathname}${url.search}`;
+  const target = `https://${host}${rest}`;
   const intent =
-    `intent://${host}/${q}#Intent;scheme=https;package=com.android.chrome;` +
+    `intent://${host}${rest}#Intent;scheme=https;package=com.android.chrome;` +
     `S.browser_fallback_url=${encodeURIComponent(target)};end`;
   // Ни <link rel="manifest">, ни регистрации сервис-воркера — намеренно.
   return `<!doctype html>

@@ -307,24 +307,35 @@ fn render_steps(platform: &str) -> View {
 /// plain https URL when Chrome is absent.
 fn system_browser_intent_url() -> String {
     let win = web_sys::window().expect("no window");
-    let host = win.location().host().unwrap_or_default();
-    // Account id: the signed-in session first, else the `?u=` this page was
-    // opened with (unauthenticated launch of a `?u=`-carrying link).
-    let url_u = win
-        .location()
+    let loc = win.location();
+    let host = loc.host().unwrap_or_default();
+
+    // Путь СОХРАНЯЕТСЯ. Раньше здесь стоял корень, и это уводило человека не туда:
+    // ссылка из Telegram ведёт на `/onboard?u=…`, а это особый вход — там
+    // приложение не накрывает страницу оверлеями, а ведёт свой порядок (код,
+    // ключ, и лишь в конце установка). На корне же первым делом показывается
+    // экран установки, так что перешедший видел предложение поставить приложение
+    // вместо регистрации, а зарегистрироваться ему было негде.
+    let path = loc.pathname().unwrap_or_else(|_| "/".to_string());
+    let params = loc
         .search()
         .ok()
         .and_then(|s| web_sys::UrlSearchParams::new_with_str(&s).ok())
-        .and_then(|p| p.get("u"))
-        .filter(|s| !s.is_empty());
-    let uid_q = crate::services::auth::get_user_id()
-        .or(url_u)
-        .map(|u| format!("?u={u}"))
-        .unwrap_or_default();
-    let target = format!("https://{host}/{uid_q}");
+        .unwrap_or_else(|| web_sys::UrlSearchParams::new().expect("UrlSearchParams"));
+
+    // Account id: the signed-in session first, else the `?u=` this page was
+    // opened with (unauthenticated launch of a `?u=`-carrying link).
+    let url_u = params.get("u").filter(|s| !s.is_empty());
+    if let Some(uid) = crate::services::auth::get_user_id().or(url_u) {
+        params.set("u", &uid);
+    }
+    let query = String::from(params.to_string());
+    let query = if query.is_empty() { String::new() } else { format!("?{query}") };
+
+    let target = format!("https://{host}{path}{query}");
     let fallback = js_sys::encode_uri_component(&target);
     format!(
-        "intent://{host}/{uid_q}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url={fallback};end"
+        "intent://{host}{path}{query}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url={fallback};end"
     )
 }
 

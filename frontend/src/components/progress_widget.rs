@@ -193,7 +193,9 @@ fn weekly_heme_gauge(w: crate::services::heme::WeeklyHeme) -> impl IntoView {
         <crate::components::gauge::Gauge
             value=w.portions target=w.target
             label="Гем/нед".to_string()
-            unit="порц.".to_string()
+            // Без единицы: «2.08 / 3.00» и так читается как счёт порций, а «порц.»
+            // рядом с дробью только загромождает подпись.
+            unit=String::new()
             color=bar.to_string()
             height=12.0
             decimals=2

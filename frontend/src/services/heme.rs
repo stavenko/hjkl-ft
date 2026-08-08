@@ -125,13 +125,15 @@ pub async fn weekly_series() -> super::indicators::IndicatorSeries {
             let logged = (0..7).any(|d| {
                 diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
             });
-            if !logged {
-                continue;
-            }
+            // Неделя без дневника попадает в ряд БЕЗ доли: столбика нет, вердикта
+            // нет, но подпись остаётся. Пропускать её нельзя — сетка тогда съезжает
+            // и у гема оказывается четыре недели там, где у железа восемь, хотя
+            // недели у них одни и те же.
             let p = portions_between(s, e).await;
-            points.push((s.format("%Y-%m-%d").to_string(), p, Some(p / WEEKLY_PORTIONS)));
+            let ratio = logged.then(|| p / WEEKLY_PORTIONS);
+            points.push((s.format("%Y-%m-%d").to_string(), p, ratio));
             labels.push(format!("−{back}"));
-            met.push(Some(p >= WEEKLY_PORTIONS));
+            met.push(ratio.map(|r| r >= 1.0));
         }
     }
     let missed = met.iter().filter(|m| **m == Some(false)).count() as u32;

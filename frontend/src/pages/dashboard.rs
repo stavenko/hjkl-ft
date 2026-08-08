@@ -578,7 +578,8 @@ pub fn DashboardPage() -> impl IntoView {
                                 view! {
                                     <Gauge value=w.portions target=w.target
                                         label="Гем/нед".to_string()
-                                        unit="порц.".to_string()
+                                        // Без единицы — как и в самом виджете.
+                                        unit=String::new()
                                         color=bar.to_string()
                                         height=12.0
                                         decimals=2
@@ -613,7 +614,7 @@ pub fn DashboardPage() -> impl IntoView {
                                             unit={match s.key {
                                                 "calories" => "ккал",
                                                 "iron" => "мг",
-                                                "heme" => "порц.",
+                                                "heme" => "",
                                                 "steps" => "",
                                                 _ => "г",
                                             }.to_string()}

@@ -59,6 +59,10 @@ struct DetailData {
     calorie_hint: String,
     protein_hint: String,
     veg_hint: String,
+    /// Пояснение про сам показатель, по одному на индикатор. Собирается здесь, а не
+    /// в разметке: часть текстов асинхронна (норма белка читает вес, планка калорий
+    /// — цель), а разметка синхронна.
+    bodies: std::collections::HashMap<&'static str, String>,
 }
 
 fn gauge_label(key: &str) -> &'static str {
@@ -213,6 +217,29 @@ fn fat_ratio_hint_text() -> String {
     )
 }
 
+/// Пояснение «?» для кальция.
+fn calcium_hint_text() -> String {
+    "Кальций — это кости, и запас в них набирается годами, а тратится десятилетиями. \
+     Планка — 1000 мг в день.\n\n\
+     Больше всего его в твёрдых сырах, твороге и молочном, в кунжуте и тахини, в консервах \
+     с костями (сардины, шпроты), в тофу и миндале. Из зелени он усваивается хуже — щавель \
+     и шпинат связывают его собственными оксалатами.\n\n\
+     Кальций и железо делят один транспорт: когда кальция много, железа усваивается меньше. \
+     Большинству об этом можно не думать, но если с железом туго — разведите их по разным \
+     приёмам пищи."
+        .to_string()
+}
+
+/// Пояснение «?» для шагов.
+fn steps_hint_text() -> String {
+    "Планка по шагам — не общая рекомендация, а ВАША: она посчитана по вашей же истории и \
+     поднимается по мере того, как вы к ней привыкаете.\n\n\
+     Ходьба — единственная нагрузка, которая почти ничего не требует и работает каждый день: \
+     она тратит калории, не разгоняя аппетит так, как тяжёлые тренировки.\n\n\
+     День без записи о шагах не судится: это не провал, а отсутствие данных."
+        .to_string()
+}
+
 /// The veg/fruit "?" text — sex-specific.
 fn veg_hint_text() -> String {
     let who = match profile::get_sex() {
@@ -225,12 +252,13 @@ fn veg_hint_text() -> String {
     )
 }
 
-/// The "?" explanation for a daily indicator's colour — how many of the last 7 days
-/// missed the target, the green/orange/red rule, and why it matters.
-/// Что именно закрывается за неделю — для недельных индикаторов, кроме железа (у
-/// того свой текст: там надо объяснить ещё и усвоение). `None` у дневных.
+/// Что именно закрывается за неделю — у НЕДЕЛЬНЫХ индикаторов. `None` у дневных.
+///
+/// Недельные судятся не по дням: съесть недельную норму «сегодня» нельзя и не нужно,
+/// поэтому у них считаются ЗАКРЫТЫЕ недели, а `missed` означает недели, а не дни.
 fn weekly_metric_name(key: &str) -> Option<&'static str> {
     match key {
+        "iron" => Some("норму железа"),
         "heme" => Some("норму порций гемовых продуктов"),
         "epa_dha" => Some("норму морских омега-3"),
         "ala" => Some("норму АЛК"),
@@ -239,84 +267,61 @@ fn weekly_metric_name(key: &str) -> Option<&'static str> {
     }
 }
 
-fn indicator_reason(key: &str, state: IndicatorState, missed: u32) -> String {
+/// У дневных — как назвать норму в родительном падеже: «не добрали норму …».
+fn daily_metric_name(key: &str) -> &'static str {
+    match key {
+        "protein" => "белка",
+        "veg_fruit" => "овощей и фруктов",
+        "calcium" => "кальция",
+        "steps" => "шагов",
+        "fiber" => "клетчатки",
+        _ => "нормы",
+    }
+}
+
+/// ПЕРВЫЙ абзац пояснения «?»: чем вызван цвет. Дальше идёт текст про сам показатель
+/// — свой у каждого индикатора, см. [`indicator_body`].
+fn indicator_verdict(key: &str, state: IndicatorState, missed: u32) -> String {
     use IndicatorState::*;
-    // НЕДЕЛЬНЫЕ индикаторы судятся не по дням. Железо копится всю неделю: съесть
-    // норму «сегодня» нельзя и не нужно, поэтому и правило у него другое — считаются
-    // ЗАКРЫТЫЕ недели, а `missed` для него означает недели, а не дни.
-    if key == "iron" {
-        let target = crate::services::iron::weekly_target_mg();
-        let head = match state {
-            Green => "Зелёный: все недели, которые можно оценить, вы закрывали норму железа."
-                .to_string(),
-            Orange => format!(
-                "Оранжевый: {missed} недель из последних оценённых остались незакрытыми \
-                 (хотя бы одна → оранжевый)."
-            ),
-            Red => format!(
-                "Красный: {missed} недель остались незакрытыми — это половина или больше \
-                 из тех, что можно оценить."
-            ),
-            Unknown => {
-                return "Пока не завершилась ни одна неделя железа — оценивать нечего."
-                    .to_string()
-            }
-        };
-        return format!(
-            "{head} Считаются только ЗАВЕРШЁННЫЕ недели, текущая не судится: железо \
-             набирается неделей, а не за день. Окно — последние восемь недель; если их \
-             прошло меньше, берутся все, что есть.\n\n\
-             Считается УСВОЕННОЕ железо, а не съеденное: из печени и красного мяса организм \
-             берёт 20–25 %, из рыбы и птицы около 15 %, из растительной еды 2–10 %. Поэтому \
-             ваша норма — {target:.1} мг усвоенного в неделю, и растительными источниками \
-             её набрать трудно.",
-        );
-    }
-    // Остальные НЕДЕЛЬНЫЕ индикаторы — гем и три жировых. У них тоже считаются
-    // закрытые недели, а не дни, поэтому дневная формулировка ниже им не годится:
-    // она обещала бы «каждый день добирали норму» там, где норма недельная.
     if let Some(what) = weekly_metric_name(key) {
-        let head = match state {
-            Green => format!("Зелёный: все недели, которые можно оценить, вы закрывали {what}."),
+        return match state {
+            Green => format!(
+                "Зелёный: все недели, которые можно оценить, вы закрывали {what}. Считаются \
+                 только ЗАВЕРШЁННЫЕ недели, текущая не судится — это набирается неделей, а не \
+                 за день."
+            ),
             Orange => format!(
                 "Оранжевый: {missed} недель из последних оценённых остались незакрытыми \
-                 (хотя бы одна → оранжевый)."
+                 (хотя бы одна → оранжевый). Окно — последние восемь недель; если их прошло \
+                 меньше, берутся все, что есть."
             ),
             Red => format!(
-                "Красный: {missed} недель остались незакрытыми — это половина или больше \
-                 из тех, что можно оценить."
+                "Красный: {missed} недель остались незакрытыми — это половина или больше из \
+                 тех, что можно оценить."
             ),
-            Unknown => {
-                return "Пока не завершилась ни одна неделя — оценивать нечего.".to_string()
-            }
+            Unknown => "Пока не завершилась ни одна неделя — оценивать нечего.".to_string(),
         };
-        return format!(
-            "{head} Считаются только ЗАВЕРШЁННЫЕ недели, текущая не судится: это \
-             набирается неделей, а не за день. Окно — последние восемь недель; если их \
-             прошло меньше, берутся все, что есть."
-        );
     }
-    // Calories has band (±50 ккал) semantics, not «добрать норму».
+    // Калории судятся КОРИДОРОМ (±50 ккал), а не «добрать норму»: перебор и недобор
+    // одинаково выводят из планки.
     if key == "calories" {
         return match state {
-            Green => "Зелёный: за последнюю неделю вы каждый день попадали в свою планку по калориям (±50 ккал).".to_string(),
+            Green => "Зелёный: за последнюю неделю вы каждый день попадали в свою планку по \
+                      калориям (±50 ккал)."
+                .to_string(),
             Orange => format!(
-                "Оранжевый: за последнюю неделю вы {missed} из 7 дней не попали в планку по калориям \
-                 (±50 ккал; 1–3 дня → оранжевый)."
+                "Оранжевый: за последнюю неделю вы {missed} из 7 дней не попали в планку по \
+                 калориям (±50 ккал; 1–3 дня → оранжевый)."
             ),
             Red => format!(
-                "Красный: за последнюю неделю вы {missed} из 7 дней не попали в планку по калориям \
-                 (±50 ккал; 4 и более → красный)."
+                "Красный: за последнюю неделю вы {missed} из 7 дней не попали в планку по \
+                 калориям (±50 ккал; 4 и более → красный)."
             ),
             Unknown => "Пока недостаточно данных, чтобы оценить.".to_string(),
         };
     }
-    let metric = match key {
-        "protein" => "белка",
-        "veg_fruit" => "овощей и фруктов",
-        _ => "нормы",
-    };
-    let head = match state {
+    let metric = daily_metric_name(key);
+    match state {
         Green => format!("Зелёный: за последнюю неделю вы каждый день добирали норму {metric}."),
         Orange => format!(
             "Оранжевый: за последнюю неделю вы {missed} из 7 дней не добрали норму {metric} \
@@ -326,18 +331,40 @@ fn indicator_reason(key: &str, state: IndicatorState, missed: u32) -> String {
             "Красный: за последнюю неделю вы {missed} из 7 дней не добрали норму {metric} \
              (4 и более → красный)."
         ),
-        Unknown => return "Пока недостаточно данных, чтобы оценить.".to_string(),
-    };
-    let tail = match (key, state) {
-        ("protein", Orange) | ("protein", Red) => {
-            " Регулярный недобор белка грозит потерей мышц и сказывается на здоровье в долгую."
-        }
-        ("veg_fruit", Orange) | ("veg_fruit", Red) => {
-            " Нехватка овощей и фруктов — это дефицит клетчатки и витаминов."
-        }
-        _ => "",
-    };
-    format!("{head}{tail}")
+        Unknown => "Пока недостаточно данных, чтобы оценить.".to_string(),
+    }
+}
+
+/// Текст про САМ показатель: что меряем, откуда норма, где это взять.
+///
+/// Свой у каждого индикатора. Общего текста тут быть не должно: правило цвета
+/// одинаковое у всех и уже сказано выше, а «не добрали норму нормы» — это не
+/// объяснение. Один и тот же текст показывается и под «?» у шкалы, и под «?» у
+/// индикатора: показатель один, значит и объяснение одно.
+async fn indicator_body(key: &str, planka: Option<f64>) -> String {
+    match key {
+        "calories" => calorie_hint_text(planka).await,
+        "protein" => protein_hint_text().await,
+        "veg_fruit" => veg_hint_text(),
+        "calcium" => calcium_hint_text(),
+        "steps" => steps_hint_text(),
+        "iron" => iron_hint_text(),
+        "heme" => heme_hint_text(),
+        "epa_dha" => epa_dha_hint_text(),
+        "ala" => ala_hint_text(),
+        "fat_ratio" => fat_ratio_hint_text(),
+        // Нового индикатора без своего текста быть не должно — падаем громко, а не
+        // показываем человеку пустоту.
+        _ => panic!("indicator_body: нет пояснения для индикатора {key:?}"),
+    }
+}
+
+fn indicator_reason(key: &str, state: IndicatorState, missed: u32, body: &str) -> String {
+    let verdict = indicator_verdict(key, state, missed);
+    if body.is_empty() {
+        return verdict;
+    }
+    format!("{verdict}\n\n{body}")
 }
 
 /// Current network problems as error-log entries, so they appear in the SAME list
@@ -498,6 +525,10 @@ pub fn DashboardPage() -> impl IntoView {
             }
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             let planka = local::calorie_goal_amount().await;
+            let mut bodies = std::collections::HashMap::new();
+            for key in indicators::displayed_indicators() {
+                bodies.insert(key, indicator_body(key, planka).await);
+            }
             Some(DetailData {
                 planka,
                 eaten: local::kcal_on(&today).await,
@@ -509,6 +540,7 @@ pub fn DashboardPage() -> impl IntoView {
                 calorie_hint: calorie_hint_text(planka).await,
                 protein_hint: protein_hint_text().await,
                 veg_hint: veg_hint_text(),
+                bodies,
             })
         },
     );
@@ -703,13 +735,15 @@ pub fn DashboardPage() -> impl IntoView {
                             let detail = d.series.iter().map(|s| {
                                 let (paths, name) = progress_widget::icon_for(s.key);
                                 let (stroke, tint) = progress_widget::state_colors(s.state);
-                                let reason = indicator_reason(s.key, s.state, s.missed);
+                                let body = d.bodies.get(s.key).map(String::as_str).unwrap_or("");
+                                let reason = indicator_reason(s.key, s.state, s.missed, body);
                                 let days = s.days.clone();
                                 // Each indicator on its own bordered panel: a header row
                                 // [icon] [name] … [?] naming which indicator this is, with
                                 // the histogram full-width below.
                                 view! {
-                                    <div style="display: flex; flex-direction: column; gap: 6px; \
+                                    <div attr:data-ind-panel=s.key
+                                        style="display: flex; flex-direction: column; gap: 6px; \
                                             border: 0.5px solid var(--bulma-border-weak); border-radius: 12px; \
                                             padding: 8px 10px; background: var(--bulma-scheme-main-bis);">
                                         <div style="display: flex; align-items: center; gap: 8px;">

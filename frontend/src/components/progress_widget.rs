@@ -69,7 +69,9 @@ pub fn icon_for(k: &str) -> (&'static str, &'static str) {
         "omega3" => (IC_FISH, "Омега-3"),
         "eggs" => (IC_EGG, "Яйца"),
         "iron" => (IC_DROPLET, "Железо"),
-        "heme" => (IC_DROPLET, "Гем"),
+        // Не капля, как у железа: два одинаковых значка рядом читаются как один
+        // индикатор, продублированный по ошибке. Гем — про сам продукт, отсюда мясо.
+        "heme" => (IC_HAM, "Гем"),
         "red_meat" => (IC_HAM, "Мясо"),
         "veg_fruit" => (IC_APPLE, "Фр/овощи"),
         "steps" => (IC_STEPS, "Шаги"),
@@ -125,6 +127,7 @@ fn gauge_label(key: &str) -> &'static str {
 fn daily_gauges_grid(
     gauges: Vec<indicators::DailyGauge>,
     iron: Option<crate::services::iron::WeeklyIron>,
+    heme: Option<crate::services::heme::WeeklyHeme>,
 ) -> impl IntoView {
     view! {
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 14px;">
@@ -142,6 +145,9 @@ fn daily_gauges_grid(
             }).collect_view()}
             // Недельное железо — последней ячейкой, чтобы встать напротив кальция.
             {iron.map(weekly_iron_gauge)}
+            // Порции гемовых продуктов — следующей ячейкой, рядом с железом:
+            // это две стороны одного разговора, и врозь они читаются хуже.
+            {heme.map(weekly_heme_gauge)}
         </div>
     }
 }
@@ -167,6 +173,30 @@ fn weekly_iron_gauge(w: crate::services::iron::WeeklyIron) -> impl IntoView {
             color=bar.to_string()
             height=12.0
             decimals=1
+            pace=Some(pace)
+            value_color=val.map(String::from)/>
+    }
+}
+
+/// Недельные порции печени, красного мяса и моллюсков — ячейка той же сетки.
+///
+/// Значение дробное намеренно: порция считается по белку, а не по числу приёмов,
+/// и «2,08 из 3» честнее округлённого «2» — иначе непонятно, что кусок поменьше
+/// засчитался не полностью.
+fn weekly_heme_gauge(w: crate::services::heme::WeeklyHeme) -> impl IntoView {
+    let (bar, val) = crate::components::gauge::at_least_colors(w.portions, w.target);
+    let pace = crate::components::gauge::GaugePace {
+        segments: 7,
+        passed: w.day_of_week.saturating_sub(1),
+    };
+    view! {
+        <crate::components::gauge::Gauge
+            value=w.portions target=w.target
+            label="Гем/нед".to_string()
+            unit="порц.".to_string()
+            color=bar.to_string()
+            height=12.0
+            decimals=2
             pace=Some(pace)
             value_color=val.map(String::from)/>
     }
@@ -247,6 +277,10 @@ pub fn ProgressWidget() -> impl IntoView {
     // Недельное железо (усвоенные мг за текущую неделю железа против нормы).
     // Зависит от дневника и продуктов — коэффициент усвоения приезжает фоновым
     // проходом по железу.
+    let heme_week = create_local_resource(
+        move || food_ver.get(),
+        |_| async { crate::services::heme::weekly_progress().await },
+    );
     let iron_week = create_local_resource(
         move || (food_ver.get(), foods_ver.get()),
         |_| async { crate::services::iron::weekly_progress().await },
@@ -388,7 +422,7 @@ pub fn ProgressWidget() -> impl IntoView {
                             view! {
                                 {calorie}
                                 // Daily-nutrient bars below the calorie one.
-                                {move || gauges_s().map(|g| daily_gauges_grid(g, iron_week.get().flatten()))}
+                                {move || gauges_s().map(|g| daily_gauges_grid(g, iron_week.get().flatten(), heme_week.get().flatten()))}
                             }.into_view()
                         },
                         // Before the first food entry: explain how to add food + «?».

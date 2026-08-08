@@ -1057,7 +1057,19 @@ const S5: &[Frame] = &[
             ru: "Ваш новый индикатор по железу будет недельным. За ближайшую неделю съешьте норму вашего железа. Ваша норма будет зависеть от вашего пола и возраста.",
         },
     },
-    // 8 — calcium vs iron: the interaction you may ignore
+    // 8 — и второй индикатор: не только ради железа
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("heme-highlight.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "Iron", ru: "Железо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "And one more indicator: heme iron. We make you eat liver, meat and molluscs not only for the iron.",
+            ru: "И ещё индикатор потребления гемового железа. Мы заставляем вас есть печень, мясо и моллюсков не только ради железа.",
+        },
+    },
+    // 9 — calcium vs iron: the interaction you may ignore
     Frame {
         bg: Bg::Dark,
         media: Media::Cover("iron-ca-vs-fe.jpg"),

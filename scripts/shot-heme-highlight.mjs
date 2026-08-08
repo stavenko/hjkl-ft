@@ -1,8 +1,10 @@
-// Мигающая подсветка для 7-го кадра недели железа: недельный gauge и иконка
-// индикатора железа в ряду индикаторов. Тот же приём, что у кальция.
+// Мигающая подсветка для кадра про ГЕМОВОЕ железо: недельная шкала порций и
+// иконка индикатора «Гем» в ряду индикаторов. Тот же приём, что у железа.
 //
-// Состояние сеем так, чтобы неделя ШЛА: 4-й день, набрано чуть больше суточного
-// темпа — на полосе горят три точки и она обведена зелёным.
+// Состояние сеем так, чтобы неделя ШЛА и цель была близка, но не закрыта: 4-й
+// день, съедено две порции с небольшим — шкала показывает дробное «2,1 / 3».
+// Дробность тут намеренная: она объясняет, что порция считается по белку, а не
+// по числу приёмов.
 import { chromium } from "playwright";
 import { openSeeded, DEFAULT_URL } from "./harness.mjs";
 import { makeWidgetGif } from "./highlight-gif.mjs";
@@ -10,12 +12,12 @@ import path from "node:path";
 
 const BASE = process.env.FE || DEFAULT_URL;
 const ROOT = path.resolve(import.meta.dirname, "..");
-const OUT = process.env.OUT || path.join(ROOT, "frontend/story-img/iron-highlight.gif");
+const OUT = process.env.OUT || path.join(ROOT, "frontend/story-img/heme-highlight.gif");
 
-// 60 г печени в день = 60 × 9 мг/100 г × 0.25 = 1.35 мг усвоенного.
-// За 4 дня 5.4 мг при недельной норме 10.08 и ожидании на 4-й день 4.32 —
-// идём с опережением, обводка зелёная.
-const GRAMS = 60;
+// Печень: 20 г белка на 100 г. Порция — 25 г белка, значит 125 г печени = 1 порция.
+// Кладём её в дневник ДВА раза за неделю по 130 г: 2 × 26 / 25 = 2,08 порции из
+// трёх. Шкала горит дробным «2,08», цель ещё не закрыта.
+const GRAMS = 130;
 
 const seed = async (page, uid) => {
   await page.evaluate(async ({ uid, GRAMS }) => {
@@ -30,7 +32,7 @@ const seed = async (page, uid) => {
     };
     const app_flags = [
       // Иначе миграция m001 сотрёт засеянные кальций и железо (она стирает всё,
-      // набранное испорченными промптами), и шкала покажет ноль.
+      // набранное испорченными промптами), и шкалы покажут ноль.
       { key: "db_schema_version", value: "999" },
       { key: "push_onboarding_dismissed", value: "true" },
       { key: "welcome_shown", value: "true" },
@@ -60,7 +62,7 @@ const seed = async (page, uid) => {
       id, name, kcal: 120, protein: 0, fat: 0, carbs: 0, nutrients: {},
       package_weight: null, is_recipe: false, recipe_id: null, archived: false,
       is_restaurant: false, is_snack: false, is_liquid_cal: false, is_veg_fruit: false,
-      is_egg: false, is_red_meat: false, iron_mg: null, iron_absorption: null,
+      is_egg: false, is_red_meat: false, is_heme: false, iron_mg: null, iron_absorption: null,
       created_at: nowIso, updated_at: nowIso, ...extra,
     });
     const foods = [
@@ -68,7 +70,7 @@ const seed = async (page, uid) => {
       food("veg", "Овощи", { is_veg_fruit: true }),
       food("liver", "Куриная печень", {
         protein: 20, nutrients: { "Кальций": 1200 },
-        is_red_meat: true, iron_mg: 9.0, iron_absorption: 0.25 }),
+        is_red_meat: true, is_heme: true, iron_mg: 9.0, iron_absorption: 0.25 }),
     ];
     const weight_entries = [], step_entries = [], diary = [];
     for (let i = 0; i < 10; i++) {
@@ -80,8 +82,12 @@ const seed = async (page, uid) => {
         waste_grams: 0, meal_label: "lunch", deleted: false, created_at: nowIso, updated_at: nowIso });
       diary.push({ id: "dv" + i, food_id: "veg", date: ymd(i), time: null, grams: 850,
         waste_grams: 0, meal_label: "lunch", deleted: false, created_at: nowIso, updated_at: nowIso });
-      diary.push({ id: "dl" + i, food_id: "liver", date: ymd(i), time: null, grams: GRAMS,
-        waste_grams: 0, meal_label: "lunch", deleted: false, created_at: nowIso, updated_at: nowIso });
+      // Печень — только в двух днях текущей недели: цель в 3 порции должна быть
+      // видимо НЕ закрыта, иначе кадр не объясняет, к чему стремиться.
+      if (i === 0 || i === 2) {
+        diary.push({ id: "dl" + i, food_id: "liver", date: ymd(i), time: null, grams: GRAMS,
+          waste_grams: 0, meal_label: "lunch", deleted: false, created_at: nowIso, updated_at: nowIso });
+      }
     }
     const rec = { app_flags, profile, goals, foods, weight_entries, step_entries, diary };
     const avail = Array.from(db.objectStoreNames);
@@ -102,23 +108,27 @@ const b = await chromium.launch({ headless: true });
 const { context, page } = await openSeeded(b, {
   baseUrl: BASE,
   context: { serviceWorkers: "block", deviceScaleFactor: 2 },
-  uid: `iron-hl-${Math.floor(Math.random() * 1e6)}`,
+  uid: `heme-hl-${Math.floor(Math.random() * 1e6)}`,
   seed,
 });
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForTimeout(4000);
 await page.setViewportSize({ width: 440, height: 1100 });
 await page.waitForTimeout(3000); // дать полосам доиграть анимацию заполнения
 
-const gauge = page.locator('[data-gauge="Железо/нед"]');
+console.log("шкалы на экране:", await page.$$eval('[data-gauge]', els => els.map(e => e.getAttribute('data-gauge'))));
+console.log("индикаторы:", await page.$$eval('[data-ind]', els => els.map(e => e.getAttribute('data-ind'))));
+const gauge = page.locator('[data-gauge="Гем/нед"]');
 console.log("gauge:", (await gauge.innerText()).replace(/\s+/g, " "));
 console.log("точек горит:", await page.locator('[data-pace-dot="lit"]').count(),
             "погашено:", await page.locator('[data-pace-dot="dim"]').count());
 
 // Снимок виджета — для сверки состояния перед сборкой гифки.
 await page.locator('[data-testid="progress-widget"]').screenshot({
-  path: process.env.SHOT || "/private/tmp/claude-501/-Users-vasilijstavenko-projects-hjkl-ft/56df53af-a1ed-4117-8e82-8a1f8aad90e8/scratchpad/iron/highlight-widget.png",
+  path: process.env.SHOT || "/tmp/heme-highlight-widget.png",
 });
 
-await makeWidgetGif(page, ['[data-ind="Железо"] > div', '[data-gauge="Железо/нед"]'], OUT);
+await makeWidgetGif(page, ['[data-ind="Гем"] > div', '[data-gauge="Гем/нед"]'], OUT);
 
 await context.close();
 await b.close();

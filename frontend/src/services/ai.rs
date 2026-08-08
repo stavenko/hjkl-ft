@@ -789,6 +789,16 @@ struct FoodVerdicts {
     egg: Vec<bool>,
     red_meat: Vec<bool>,
     heme: Vec<bool>,
+    /// Обоснование вердикта, по одному на продукт.
+    ///
+    /// Длинное имя — часть инструкции: модель читает схему и по имени поля понимает,
+    /// что от неё хотят, вернее, чем по отдельному абзацу. Короткое `heme_reason`
+    /// такого сигнала не даёт. Ограничение длины живёт в тексте промпта, а не в имени.
+    ///
+    /// Поле нужно не для показа: ответ рефлексом плавал от прогона к прогону на одном
+    /// и том же названии. Обязанность назвать причину до вердикта его удерживает, а
+    /// нам оставляет след в логе — видно, ЧЕМ модель сочла продукт.
+    reason_why_this_product_classified_as_gem_source: Vec<String>,
 }
 
 /// Classify each food NAME into the existing categories (snack / liquid calories /
@@ -838,30 +848,53 @@ pub async fn classify_food(names: &[String]) -> Result<Vec<FoodTags>, String> {
          6) \"heme\": a RICH source of HEME iron — the well-absorbed animal form. TRUE for only \
          three groups: (a) LIVER and other offal — liver, pâté, kidney, heart, tongue, blood \
          sausage; (b) RED MEAT — beef, veal, lamb, mutton, pork, venison, and dishes whose main \
-         part is such meat; (c) MOLLUSCS and other iron-rich shellfish — mussels, clams, oysters, \
-         scallops, squid, octopus, cockles. FALSE for everything else, INCLUDING: chicken, turkey \
-         and other poultry; fish (salmon, tuna, cod, herring — fish is NOT a mollusc); shrimp and \
-         crab; eggs and dairy; ALL plant food however iron-rich (lentils, spinach, buckwheat, \
+         part is such meat; (c) MOLLUSCS FROM THIS CLOSED LIST, and no others: mussels, clams \
+         (vongole), cockles, oysters, octopus, whelks, winkles. Squid, cuttlefish and scallops are \
+         molluscs too but are NOT on the list — they are FALSE. Do NOT reason about how many \
+         milligrams of iron a food holds: you do not know those numbers, and the list already \
+         accounts for them. Your only job is to say whether the food IS one of the listed kinds. \
+         FALSE for everything else, INCLUDING: chicken, turkey \
+         and other poultry; fish (salmon, tuna, cod, herring — fish is NOT a mollusc); \
+         CRUSTACEANS — animals with legs and claws (shrimp, prawn, crab, lobster, crayfish); they \
+         are NOT molluscs, and a shelled mollusc is NOT a crustacean; eggs and dairy; ALL plant food however iron-rich (lentils, spinach, buckwheat, \
          fortified cereal — that iron is non-heme). Processed meat products where meat is a minor \
          part (wiener, bologna, meat-filled pastry, pizza) are FALSE. Judge the food ITSELF: a \
-         dish is TRUE only when such meat, offal or mollusc is its MAIN part.\n\n\
+         dish is TRUE only when such meat, offal or mollusc is its MAIN part. The answer depends \
+         ONLY on WHAT THE FOOD IS. Words about preparation, storage, packaging, cut, grade or \
+         country of origin do not change what it is, and never change the answer.\n\n\
+         For EVERY food also fill \"reason_why_this_product_classified_as_gem_source\". Keep it \
+         SHORT: one sentence, at most 10 words. Decide the reason FIRST and let \"heme\" follow \
+         from it — the two must agree.\n\n\
          Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object with five boolean arrays, each exactly \
-         one per food, in the SAME order. Example for 2 foods: \
+         Respond with ONLY a single minified JSON object with six boolean arrays and one string \
+         array, each exactly one entry per food, in the SAME order. Example for 2 foods: \
          {{\"snack\":[true,false],\"liquid_cal\":[false,true],\"veg_fruit\":[true,false],\
-         \"egg\":[false,false],\"red_meat\":[false,true],\"heme\":[false,true]}}",
+         \"egg\":[false,false],\"red_meat\":[false,true],\"heme\":[false,true],\
+         \"reason_why_this_product_classified_as_gem_source\":\
+         [\"хлеб — растительная еда\",\"говядина — красное мясо\"]}}",
     );
     let v: FoodVerdicts = generate(prompt, |_| {}).await?;
     let n = names.len();
     if v.snack.len() != n || v.liquid_cal.len() != n || v.veg_fruit.len() != n
         || v.egg.len() != n || v.red_meat.len() != n || v.heme.len() != n
+        || v.reason_why_this_product_classified_as_gem_source.len() != n
     {
         return Err(format!(
             "food classification length mismatch for {n} foods: snack={}, liquid_cal={}, \
-             veg_fruit={}, egg={}, red_meat={}, heme={}",
+             veg_fruit={}, egg={}, red_meat={}, heme={}, reason={}",
             v.snack.len(), v.liquid_cal.len(), v.veg_fruit.len(), v.egg.len(),
-            v.red_meat.len(), v.heme.len()
+            v.red_meat.len(), v.heme.len(),
+            v.reason_why_this_product_classified_as_gem_source.len()
         ));
+    }
+    // Обоснование — в лог: по нему видно, ЧЕМ модель сочла продукт, и промах
+    // разбирается по следу, а не гаданием.
+    for (i, name) in names.iter().enumerate() {
+        leptos::logging::log!(
+            "гем «{name}»: {} — {}",
+            v.heme[i],
+            v.reason_why_this_product_classified_as_gem_source[i]
+        );
     }
     Ok((0..n)
         .map(|i| FoodTags {

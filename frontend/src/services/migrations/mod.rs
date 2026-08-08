@@ -50,6 +50,7 @@ mod m002_drop_bootstrap_db;
 mod m003_seed_planka_history;
 mod m004_reset_iron;
 mod m005_recompute_recipes;
+mod m006_reset_heme;
 
 #[cfg(test)]
 mod tests;
@@ -101,6 +102,11 @@ const ALL: &[Migration] = &[
         version: m005_recompute_recipes::VERSION,
         description: m005_recompute_recipes::DESCRIPTION,
         script: || Box::pin(m005_recompute_recipes::script()),
+    },
+    Migration {
+        version: m006_reset_heme::VERSION,
+        description: m006_reset_heme::DESCRIPTION,
+        script: || Box::pin(m006_reset_heme::script()),
     },
 ];
 

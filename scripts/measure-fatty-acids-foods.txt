@@ -1,0 +1,75 @@
+# Корпус для замера промпта на жирные кислоты: «продукт|ожидаемая строка таблицы».
+# Со зажимом ответа в границы строки вердикт определяется СТРОКОЙ, поэтому мерим
+# именно попадание в строку. Выдуманные марки («Творожок Здоровье+») стоят
+# намеренно: они проверяют, что модель опирается на тип продукта, а не вспоминает
+# конкретный товар.
+Оливковое масло|olive_avocado
+Маслины консервированные|olive_avocado
+Авокадо|olive_avocado
+Кокосовое масло|coconut_palm
+Кокосовое молоко|coconut_palm
+Пальмовое масло|coconut_palm
+Сливочное масло|dairy_fat
+Сметана 20%|dairy_fat
+Сыр гауда|dairy_fat
+Молоко 3.2%|dairy_fat
+Мороженое сливочное|dairy_fat
+Творожок Здоровье+ фруктовый|dairy_fat
+Говядина лопатка|beef_lamb_fat
+Баранина|beef_lamb_fat
+Печень говяжья|beef_lamb_fat
+Сало солёное|pork_fat
+Бекон|pork_fat
+Колбаса докторская|pork_fat
+Куриное бедро с кожей|poultry_fat
+Утиная грудка|poultry_fat
+Печень куриная|poultry_fat
+Яйцо куриное|egg_fat
+Яичный желток|egg_fat
+Рапсовое масло|rapeseed_mustard
+Горчичное масло|rapeseed_mustard
+Арахисовая паста|peanut
+Подсолнечное масло|seed_oils_linoleic
+Кукурузное масло|seed_oils_linoleic
+Семечки подсолнуха|seed_oils_linoleic
+Кунжут|seed_oils_linoleic
+Тахини|seed_oils_linoleic
+Маргарин|seed_oils_linoleic
+Майонез провансаль|seed_oils_linoleic
+Масло растительное|seed_oils_linoleic
+Высокоолеиновое подсолнечное масло|high_oleic_oils
+Льняное масло|flax_chia
+Семена льна|flax_chia
+Семена чиа|flax_chia
+Грецкий орех|walnut_hemp
+Скумбрия|fish_fatty_cold
+Сельдь атлантическая|fish_fatty_cold
+Лосось атлантический|fish_fatty_cold
+Форель радужная|fish_fatty_cold
+Сардины в масле|fish_fatty_cold
+Икра лососевая|fish_fatty_cold
+Треска|fish_lean_seafood
+Тунец в собственном соку|fish_lean_seafood
+Мидии варёно-мороженые|fish_lean_seafood
+Креветки|fish_lean_seafood
+Тилапия|fish_warm_low_n3
+Пангасиус|fish_warm_low_n3
+Карп|fish_warm_low_n3
+Дорадо|fish_warm_low_n3
+Миндаль|nuts_tree
+Фундук|nuts_tree
+Кешью|nuts_tree
+Макадамия|nuts_tree
+Шоколад тёмный 70%|cocoa_confectionery
+Шоколад молочный|cocoa_confectionery
+Какао-порошок|cocoa_confectionery
+Печенье овсяное|cocoa_confectionery
+Овсянка|grain_legume
+Гречка варёная|grain_legume
+Чечевица варёная|grain_legume
+Хлеб пшеничный|grain_legume
+Тофу жареный|grain_legume
+Огурец|no_fat
+Яблоко|no_fat
+Картофель варёный|no_fat
+Сахар|no_fat

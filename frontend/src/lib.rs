@@ -260,6 +260,9 @@ async fn maintain_user_data() {
     // Then the iron week, once the calcium gate is cleared.
     services::indicators::maybe_unlock_iron_week().await;
 
+    // И жиры — когда закрыта недельная планка железа.
+    services::indicators::maybe_unlock_fat_week().await;
+
     // Freeze each recent completed day's calorie result (its planka) BEFORE the
     // weekly recompute below might change the planka — so past-day diary gauges keep
     // the planka that actually applied. Independent of the recompute itself.

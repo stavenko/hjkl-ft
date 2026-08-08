@@ -49,6 +49,10 @@ const IC_WHEAT: &str = r#"<path d="M2 22 16 8"/><path d="M3.47 12.53 5 11l1.53 1
 const IC_BEEF: &str = r#"<circle cx="12.5" cy="8.5" r="2.5"/><path d="M12.5 2a6.5 6.5 0 0 0-6.22 4.6c-1.1 3.13-.78 3.9-3.18 6.08A3 3 0 0 0 5 18c4 0 8.4-1.8 11.4-4.3A6.5 6.5 0 0 0 12.5 2Z"/><path d="m18.5 6 2.19 4.5a6.48 6.48 0 0 1 .31 2 6.49 6.49 0 0 1-2.6 5.2C15.4 20.2 11 22 7 22a3 3 0 0 1-2.68-1.66L2.4 16.5"/>"#;
 // Lucide "footprints" — the steps (activity) indicator.
 const IC_STEPS: &str = r#"<path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/>"#;
+/// Росток — растительная омега-3 (АЛК): лён, чиа, рапс, грецкий орех.
+const IC_SPROUT: &str = r#"<path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"/>"#;
+/// Капля масла — качество жира: отношение (МНЖК+ПНЖК)/НЖК.
+const IC_OIL: &str = r#"<path d="M12 2v6"/><path d="M9 5h6"/><path d="M12 8c-3 3-5 5.5-5 8a5 5 0 0 0 10 0c0-2.5-2-5-5-8z"/>"#;
 
 /// (stroke, tint background) for an indicator state.
 pub fn state_colors(s: IndicatorState) -> (&'static str, &'static str) {
@@ -66,7 +70,11 @@ pub fn icon_for(k: &str) -> (&'static str, &'static str) {
         "calories" => (IC_FLAME, "Калории"),
         "protein" => (IC_BEEF, "Белок"),
         "calcium" => (IC_BONE, "Кальций"),
-        "omega3" => (IC_FISH, "Омега-3"),
+        // Три жировых: EPA+DHA — рыба (единственный их источник), АЛК — росток
+        // (растительная омега-3), качество жира — капля.
+        "epa_dha" => (IC_FISH, "Омега-3"),
+        "ala" => (IC_SPROUT, "АЛК"),
+        "fat_ratio" => (IC_OIL, "Жиры"),
         "eggs" => (IC_EGG, "Яйца"),
         "iron" => (IC_DROPLET, "Железо"),
         // Не капля, как у железа: два одинаковых значка рядом читаются как один
@@ -97,9 +105,15 @@ fn indicator(paths: &'static str, label: &'static str, state: IndicatorState) ->
     }
 }
 
+/// Сетка индикаторов: СЕМЬ В СТРОКУ, остальные переносятся на следующую.
+///
+/// Раньше это был один ряд, обрезанный на семи по ширине экрана. С открытием жиров
+/// индикаторов стало десять, и три просто исчезали — причём молча: обрезка стояла
+/// после сортировки по цвету, поэтому пропадали зелёные, то есть ровно те, о которых
+/// человек и не подозревал бы.
 fn indicators_row(states: Vec<(&'static str, IndicatorState)>) -> impl IntoView {
     view! {
-        <div style="display: flex; gap: 4px; justify-content: space-between;">
+        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px 4px;">
             {states.into_iter().map(|(k, st)| {
                 let (paths, label) = icon_for(k);
                 indicator(paths, label, st)
@@ -128,6 +142,7 @@ fn daily_gauges_grid(
     gauges: Vec<indicators::DailyGauge>,
     iron: Option<crate::services::iron::WeeklyIron>,
     heme: Option<crate::services::heme::WeeklyHeme>,
+    fats: Option<crate::services::fats::WeeklyFats>,
 ) -> impl IntoView {
     view! {
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 14px;">
@@ -148,6 +163,9 @@ fn daily_gauges_grid(
             // Порции гемовых продуктов — следующей ячейкой, рядом с железом:
             // это две стороны одного разговора, и врозь они читаются хуже.
             {heme.map(weekly_heme_gauge)}
+            // Жиры — три ячейки подряд, тоже вместе: «сколько морских омега-3»,
+            // «сколько растительных» и «каков жир в целом».
+            {fats.map(weekly_fat_gauges)}
         </div>
     }
 }
@@ -201,6 +219,39 @@ fn weekly_heme_gauge(w: crate::services::heme::WeeklyHeme) -> impl IntoView {
             decimals=2
             pace=Some(pace)
             value_color=val.map(String::from)/>
+    }
+}
+
+/// Три недельные шкалы по жирам — ячейки той же сетки.
+///
+/// Отношение (МНЖК+ПНЖК)/НЖК рисуется шкалой «не меньше двух»: значение — само
+/// отношение, цель — двойка. Пока насыщенных не съедено, отношения нет — шкала
+/// показывает ноль, а не «бесконечно хорошо».
+fn weekly_fat_gauges(w: crate::services::fats::WeeklyFats) -> impl IntoView {
+    let pace = crate::components::gauge::GaugePace {
+        segments: 7,
+        passed: w.day_of_week.saturating_sub(1),
+    };
+    let cell = |value: f64, target: f64, label: &'static str, unit: &'static str, decimals: usize| {
+        let (bar, val) = crate::components::gauge::at_least_colors(value, target);
+        let pace = pace.clone();
+        view! {
+            <crate::components::gauge::Gauge
+                value=value target=target
+                label=label.to_string()
+                unit=unit.to_string()
+                color=bar.to_string()
+                height=12.0
+                decimals=decimals
+                pace=Some(pace)
+                value_color=val.map(String::from)/>
+        }
+    };
+    view! {
+        {cell(w.acids.epa_dha_g, w.epa_dha_target, "Омега-3/нед", "г", 2)}
+        {cell(w.acids.ala_g, w.ala_target, "АЛК/нед", "г", 1)}
+        {cell(w.ratio().unwrap_or(0.0), crate::services::fats::UNSAT_TO_SAT_MIN,
+              "Жиры/нед", "", 2)}
     }
 }
 
@@ -282,6 +333,10 @@ pub fn ProgressWidget() -> impl IntoView {
     let heme_week = create_local_resource(
         move || food_ver.get(),
         |_| async { crate::services::heme::weekly_progress().await },
+    );
+    let fat_week = create_local_resource(
+        move || food_ver.get(),
+        |_| async { crate::services::fats::weekly_progress().await },
     );
     let iron_week = create_local_resource(
         move || (food_ver.get(), foods_ver.get()),
@@ -424,7 +479,7 @@ pub fn ProgressWidget() -> impl IntoView {
                             view! {
                                 {calorie}
                                 // Daily-nutrient bars below the calorie one.
-                                {move || gauges_s().map(|g| daily_gauges_grid(g, iron_week.get().flatten(), heme_week.get().flatten()))}
+                                {move || gauges_s().map(|g| daily_gauges_grid(g, iron_week.get().flatten(), heme_week.get().flatten(), fat_week.get().flatten()))}
                             }.into_view()
                         },
                         // Before the first food entry: explain how to add food + «?».
@@ -503,7 +558,9 @@ pub fn ProgressWidget() -> impl IntoView {
                             .collect();
                         // Sort left→right by severity: red, then orange, then green
                         // (unknown/grey last). Equal priority within a colour → by name.
-                        // At most 7 indicators are drawn.
+                        // Ничего не обрезаем: сетка переносит лишние на вторую строку.
+                        // Обрезка молча съедала бы индикаторы — и именно зелёные, самые
+                        // хвостовые после этой сортировки.
                         let rank = |s: IndicatorState| match s {
                             IndicatorState::Red => 0,
                             IndicatorState::Orange => 1,
@@ -513,7 +570,6 @@ pub fn ProgressWidget() -> impl IntoView {
                         row.sort_by(|a, b| {
                             rank(a.1).cmp(&rank(b.1)).then_with(|| icon_for(a.0).1.cmp(icon_for(b.0).1))
                         });
-                        row.truncate(7);
                         // "Keep them green" gate caption, right before the indicators.
                         // Week-2 gate (protein/veg-fruit) first; once it's cleared and
                         // the activity week is unlocked, the SAME caption tracks the

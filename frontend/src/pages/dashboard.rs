@@ -54,6 +54,7 @@ struct DetailData {
     iron: Option<crate::services::iron::WeeklyIron>,
     /// Порции гемовых продуктов за текущую неделю. Неделя та же, что у железа.
     heme: Option<crate::services::heme::WeeklyHeme>,
+    fats: Option<crate::services::fats::WeeklyFats>,
     series: Vec<indicators::IndicatorSeries>,
     calorie_hint: String,
     protein_hint: String,
@@ -172,6 +173,46 @@ fn heme_hint_text() -> String {
     )
 }
 
+/// Пояснения «?» для трёх жировых шкал.
+fn epa_dha_hint_text() -> String {
+    format!(
+        "EPA и DHA — длинные омега-3. Они есть только в рыбе холодных морей, \
+         морепродуктах и рыбьем жире: в растениях их нет вовсе.\n\n\
+         Считаем их отдельно от АЛК, потому что организм делает EPA и DHA из АЛК с \
+         конверсией в единицы процентов — льняным маслом эту норму не закрыть.\n\n\
+         Цель — {:.2} г в неделю. Это закрывается двумя рыбными трапезами: порция \
+         скумбрии или сельди даёт около двух граммов.",
+        crate::services::fats::EPA_DHA_PER_WEEK_G,
+    )
+}
+
+fn ala_hint_text() -> String {
+    let who = match profile::get_sex() {
+        Some(Sex::Female) => "Женщинам",
+        _ => "Мужчинам",
+    };
+    format!(
+        "АЛК — растительная омега-3. Её много в льняном и рапсовом масле, семенах льна \
+         и чиа, грецком орехе.\n\n\
+         {who} нужно {:.1} г в неделю. Ложка льняного масла закрывает норму почти \
+         целиком, горсть грецких орехов — примерно половину.",
+        crate::services::fats::ala_target_g(),
+    )
+}
+
+fn fat_ratio_hint_text() -> String {
+    format!(
+        "Это отношение ненасыщенных жиров к насыщенным: (МНЖК + ПНЖК) / НЖК. Оно \
+         говорит не сколько жира вы съели, а КАКОЙ.\n\n\
+         Цель — не меньше {:.0}. Так устроен средиземноморский рацион: оливковое масло, \
+         орехи, рыба и авокадо поднимают отношение, а сливочное масло, сало, сыр, \
+         шоколад и кокосовое масло опускают.\n\n\
+         Считается по суммам за неделю, а не по каждому продукту: ложка оливкового \
+         масла не искупает двести граммов сала.",
+        crate::services::fats::UNSAT_TO_SAT_MIN,
+    )
+}
+
 /// The veg/fruit "?" text — sex-specific.
 fn veg_hint_text() -> String {
     let who = match profile::get_sex() {
@@ -186,6 +227,18 @@ fn veg_hint_text() -> String {
 
 /// The "?" explanation for a daily indicator's colour — how many of the last 7 days
 /// missed the target, the green/orange/red rule, and why it matters.
+/// Что именно закрывается за неделю — для недельных индикаторов, кроме железа (у
+/// того свой текст: там надо объяснить ещё и усвоение). `None` у дневных.
+fn weekly_metric_name(key: &str) -> Option<&'static str> {
+    match key {
+        "heme" => Some("норму порций гемовых продуктов"),
+        "epa_dha" => Some("норму морских омега-3"),
+        "ala" => Some("норму АЛК"),
+        "fat_ratio" => Some("нужное отношение ненасыщенных жиров к насыщенным"),
+        _ => None,
+    }
+}
+
 fn indicator_reason(key: &str, state: IndicatorState, missed: u32) -> String {
     use IndicatorState::*;
     // НЕДЕЛЬНЫЕ индикаторы судятся не по дням. Железо копится всю неделю: съесть
@@ -217,6 +270,30 @@ fn indicator_reason(key: &str, state: IndicatorState, missed: u32) -> String {
              берёт 20–25 %, из рыбы и птицы около 15 %, из растительной еды 2–10 %. Поэтому \
              ваша норма — {target:.1} мг усвоенного в неделю, и растительными источниками \
              её набрать трудно.",
+        );
+    }
+    // Остальные НЕДЕЛЬНЫЕ индикаторы — гем и три жировых. У них тоже считаются
+    // закрытые недели, а не дни, поэтому дневная формулировка ниже им не годится:
+    // она обещала бы «каждый день добирали норму» там, где норма недельная.
+    if let Some(what) = weekly_metric_name(key) {
+        let head = match state {
+            Green => format!("Зелёный: все недели, которые можно оценить, вы закрывали {what}."),
+            Orange => format!(
+                "Оранжевый: {missed} недель из последних оценённых остались незакрытыми \
+                 (хотя бы одна → оранжевый)."
+            ),
+            Red => format!(
+                "Красный: {missed} недель остались незакрытыми — это половина или больше \
+                 из тех, что можно оценить."
+            ),
+            Unknown => {
+                return "Пока не завершилась ни одна неделя — оценивать нечего.".to_string()
+            }
+        };
+        return format!(
+            "{head} Считаются только ЗАВЕРШЁННЫЕ недели, текущая не судится: это \
+             набирается неделей, а не за день. Окно — последние восемь недель; если их \
+             прошло меньше, берутся все, что есть."
         );
     }
     // Calories has band (±50 ккал) semantics, not «добрать норму».
@@ -427,6 +504,7 @@ pub fn DashboardPage() -> impl IntoView {
                 gauges: indicators::daily_gauges().await,
                 iron: crate::services::iron::weekly_progress().await,
                 heme: crate::services::heme::weekly_progress().await,
+                fats: crate::services::fats::weekly_progress().await,
                 series: indicators::unlocked_indicator_series().await,
                 calorie_hint: calorie_hint_text(planka).await,
                 protein_hint: protein_hint_text().await,
@@ -588,6 +666,40 @@ pub fn DashboardPage() -> impl IntoView {
                                         value_color=val.map(String::from)/>
                                 }
                             });
+                            // Три жировые шкалы: морские омега-3, растительная АЛК и
+                            // качество жира в целом.
+                            let fats = d.fats.as_ref().map(|w| {
+                                let pace = crate::components::gauge::GaugePace {
+                                    segments: 7,
+                                    passed: w.day_of_week.saturating_sub(1),
+                                };
+                                let cell = |value: f64, target: f64, label: &'static str,
+                                            unit: &'static str, decimals: usize, hint: String| {
+                                    let (bar, val) =
+                                        crate::components::gauge::at_least_colors(value, target);
+                                    let pace = pace.clone();
+                                    view! {
+                                        <Gauge value=value target=target
+                                            label=label.to_string()
+                                            unit=unit.to_string()
+                                            color=bar.to_string()
+                                            height=12.0
+                                            decimals=decimals
+                                            pace=Some(pace)
+                                            hint=hint
+                                            value_color=val.map(String::from)/>
+                                    }
+                                };
+                                view! {
+                                    {cell(w.acids.epa_dha_g, w.epa_dha_target, "Омега-3/нед", "г", 2,
+                                          epa_dha_hint_text())}
+                                    {cell(w.acids.ala_g, w.ala_target, "АЛК/нед", "г", 1,
+                                          ala_hint_text())}
+                                    {cell(w.ratio().unwrap_or(0.0),
+                                          crate::services::fats::UNSAT_TO_SAT_MIN,
+                                          "Жиры/нед", "", 2, fat_ratio_hint_text())}
+                                }
+                            });
                             let detail = d.series.iter().map(|s| {
                                 let (paths, name) = progress_widget::icon_for(s.key);
                                 let (stroke, tint) = progress_widget::state_colors(s.state);
@@ -615,6 +727,8 @@ pub fn DashboardPage() -> impl IntoView {
                                                 "calories" => "ккал",
                                                 "iron" => "мг",
                                                 "heme" => "",
+                                                "epa_dha" | "ala" => "г",
+                                                "fat_ratio" => "",
                                                 "steps" => "",
                                                 _ => "г",
                                             }.to_string()}
@@ -634,6 +748,7 @@ pub fn DashboardPage() -> impl IntoView {
                                     {daily}
                                     {iron}
                                     {heme}
+                                    {fats}
                                     <div>
                                         <div style="border-top: 0.5px solid var(--bulma-border-weak); margin-bottom: 14px;"></div>
                                         <div style="display: flex; flex-direction: column; gap: 12px;">

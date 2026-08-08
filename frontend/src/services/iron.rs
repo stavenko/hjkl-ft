@@ -249,6 +249,32 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
     super::indicators::weekly_state(&history)
 }
 
+/// Закрыта ли ПОСЛЕДНЯЯ завершённая неделя железа — гейт, открывающий жиры.
+///
+/// Именно последняя, а не «хоть одна за всю историю»: гейт означает «человек держит
+/// планку сейчас», а не «однажды получилось». Неделя без дневника не судится — её не
+/// было, и провалом она быть не может.
+pub async fn planka_closed() -> bool {
+    let today = local::today_date();
+    let Some((cur_start, _)) = week_bounds(today) else {
+        return false;
+    };
+    let target = weekly_target_mg();
+    if target <= 0.0 {
+        return false;
+    }
+    let s = cur_start - Duration::days(7);
+    let e = s + Duration::days(6);
+    let diary_days: std::collections::HashSet<String> =
+        local::list_diary_dates().await.into_iter().collect();
+    let logged = (0..7)
+        .any(|d| diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string()));
+    if !logged {
+        return false;
+    }
+    absorbed_between(s, e).await >= target
+}
+
 /// Недельные столбики для гистограммы: последние 8 ЗАВЕРШЁННЫХ недель железа,
 /// от старой к свежей, подписанные «−8 … −1» — сколько недель назад. Значение —
 /// усвоенные мг за неделю, доля — к недельной норме, поэтому закрытая неделя
@@ -374,8 +400,8 @@ mod tests {
             id: "x".into(), name: "x".into(), kcal: 0.0, protein: 0.0, fat: 0.0, carbs: 0.0,
             nutrients: Default::default(), package_weight: None, is_recipe: false, recipe_id: None,
             archived: false, is_restaurant: false, is_snack: None, is_liquid_cal: None,
-            is_veg_fruit: None, is_egg: None, is_red_meat: None,
-            iron_mg: None, iron_absorption: None,
+            is_veg_fruit: None, is_egg: None, is_red_meat: None, is_heme: None,
+            iron_mg: None, iron_absorption: None, fat_profile: None,
             created_at: String::new(), updated_at: String::new(),
         };
         assert_eq!(f.absorbed_iron_mg_per_100g(), None);

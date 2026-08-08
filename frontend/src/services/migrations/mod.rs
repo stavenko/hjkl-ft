@@ -51,6 +51,7 @@ mod m003_seed_planka_history;
 mod m004_reset_iron;
 mod m005_recompute_recipes;
 mod m006_reset_heme;
+mod m007_drop_omega3;
 
 #[cfg(test)]
 mod tests;
@@ -107,6 +108,11 @@ const ALL: &[Migration] = &[
         version: m006_reset_heme::VERSION,
         description: m006_reset_heme::DESCRIPTION,
         script: || Box::pin(m006_reset_heme::script()),
+    },
+    Migration {
+        version: m007_drop_omega3::VERSION,
+        description: m007_drop_omega3::DESCRIPTION,
+        script: || Box::pin(m007_drop_omega3::script()),
     },
 ];
 

@@ -106,11 +106,108 @@ pub struct Food {
     /// pass. `None` = not looked up yet.
     #[serde(default)]
     pub iron_absorption: Option<f64>,
+    /// Профиль жира этого продукта. `None` — ещё не спрашивали.
+    #[serde(default)]
+    pub fat_profile: Option<FatProfile>,
     pub created_at: String,
     pub updated_at: String,
 }
 
+/// Состав жира продукта — ДОЛИ от его собственного жира, в процентах.
+///
+/// Доли, а не граммы на 100 г, намеренно. Во-первых, `Food::fat` у нас уже есть, и
+/// он получен не из этого запроса — граммы кислот считаются умножением, а не берутся
+/// у модели второй раз. Во-вторых, доли не зависят от разбавления, уварки и способа
+/// готовки: профиль — свойство ТИПА жира, а не блюда, поэтому подсолнечное масло и
+/// соус на нём делят один профиль. У железа отдельных строк для сырого и готового
+/// продукта не хватило, и варёная чечевица систематически завышалась.
+///
+/// Три доли не обязаны давать 100: остаток веса жира — глицерин. Требование «ровно
+/// сто» на замере превращало младшую фракцию в мусорную корзину — сливочное масло
+/// получало вдвое завышенную ПНЖК.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FatProfile {
+    /// Насыщенные, % от общего жира.
+    pub sfa_pct: f64,
+    /// Мононенасыщенные, % от общего жира.
+    pub mufa_pct: f64,
+    /// Полиненасыщенные, % от общего жира.
+    pub pufa_pct: f64,
+    /// Альфа-линоленовая (АЛК, 18:3 n-3), % от общего жира. Часть `pufa_pct`.
+    pub ala_pct: f64,
+    /// EPA + DHA вместе, % от общего жира. Часть `pufa_pct`.
+    pub epa_dha_pct: f64,
+}
+
+/// Жирные кислоты в ГРАММАХ. Складываются: за день, за неделю, по составу блюда.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FattyAcids {
+    pub sfa_g: f64,
+    pub mufa_g: f64,
+    pub pufa_g: f64,
+    pub ala_g: f64,
+    pub epa_dha_g: f64,
+}
+
+impl std::ops::Add for FattyAcids {
+    type Output = Self;
+    fn add(self, o: Self) -> Self {
+        Self {
+            sfa_g: self.sfa_g + o.sfa_g,
+            mufa_g: self.mufa_g + o.mufa_g,
+            pufa_g: self.pufa_g + o.pufa_g,
+            ala_g: self.ala_g + o.ala_g,
+            epa_dha_g: self.epa_dha_g + o.epa_dha_g,
+        }
+    }
+}
+
+impl std::ops::AddAssign for FattyAcids {
+    fn add_assign(&mut self, o: Self) {
+        *self = *self + o;
+    }
+}
+
+impl FattyAcids {
+    /// Умножить на вес: доли считаются на 100 г, поэтому `grams / 100.0`.
+    pub fn scaled(self, factor: f64) -> Self {
+        Self {
+            sfa_g: self.sfa_g * factor,
+            mufa_g: self.mufa_g * factor,
+            pufa_g: self.pufa_g * factor,
+            ala_g: self.ala_g * factor,
+            epa_dha_g: self.epa_dha_g * factor,
+        }
+    }
+
+    /// Отношение (МНЖК+ПНЖК)/НЖК. `None`, когда насыщенных нет: делить не на что, и
+    /// «бесконечно хорошо» — не значение, которое можно показать шкалой.
+    pub fn unsat_to_sat(&self) -> Option<f64> {
+        (self.sfa_g > 0.0).then(|| (self.mufa_g + self.pufa_g) / self.sfa_g)
+    }
+}
+
+impl FatProfile {
+    /// Граммы кислот на 100 г продукта: доля × собственный жир.
+    pub fn per_100g(&self, fat_per_100g: f64) -> FattyAcids {
+        let g = |pct: f64| fat_per_100g * pct / 100.0;
+        FattyAcids {
+            sfa_g: g(self.sfa_pct),
+            mufa_g: g(self.mufa_pct),
+            pufa_g: g(self.pufa_pct),
+            ala_g: g(self.ala_pct),
+            epa_dha_g: g(self.epa_dha_pct),
+        }
+    }
+}
+
 impl Food {
+    /// Жирные кислоты этого продукта в граммах на 100 г. `None`, пока профиль не
+    /// спрошен. Ноль жира — полноценный ответ, а не пробел: у сахара кислот нет.
+    pub fn fatty_acids_per_100g(&self) -> Option<FattyAcids> {
+        Some(self.fat_profile?.per_100g(self.fat))
+    }
+
     /// Iron this food actually delivers, in mg per 100 g: amount × absorption.
     /// `None` until the dedicated iron pass has filled BOTH fields.
     pub fn absorbed_iron_mg_per_100g(&self) -> Option<f64> {
@@ -215,6 +312,7 @@ impl FoodDraft {
             is_egg: None,
             is_red_meat: None,
             is_heme: None,
+            fat_profile: None,
             iron_mg: None,
             iron_absorption: None,
             created_at: self.created_at.clone(),

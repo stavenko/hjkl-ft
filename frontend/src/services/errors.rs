@@ -26,6 +26,8 @@ pub enum FoodAspect {
     Nutrients,
     /// Железо — свой проход, со своей долей усвоения.
     Iron,
+    /// Жирные кислоты — свой проход, профиль жира одним запросом.
+    Fats,
 }
 
 impl FoodAspect {
@@ -35,6 +37,7 @@ impl FoodAspect {
             FoodAspect::Kind => "тип продукта",
             FoodAspect::Nutrients => "кальций и омегу",
             FoodAspect::Iron => "железо",
+            FoodAspect::Fats => "жирные кислоты",
         }
     }
 
@@ -44,6 +47,7 @@ impl FoodAspect {
             FoodAspect::Kind => "kind",
             FoodAspect::Nutrients => "nutrients",
             FoodAspect::Iron => "iron",
+            FoodAspect::Fats => "fats",
         }
     }
 }

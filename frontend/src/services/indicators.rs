@@ -35,8 +35,12 @@ pub enum IndicatorState {
 const FIBER_PER_DAY_G: f64 = 25.0; // WHO ≥25 g/day
 const CALCIUM_PER_DAY_MG: f64 = 1000.0; // user: 1 g/day for everyone
 const EGG_PER_WEEK_G: f64 = 350.0; // ~1 egg/day (≈50 g × 7)
-const OMEGA3_PER_WEEK_MG: f64 = 3500.0; // user: 3.5 g/week
 const RED_MEAT_LIMIT_PER_WEEK_G: f64 = 700.0; // user: up to 700 g/week
+// Омеги-3 здесь БОЛЬШЕ НЕТ. Она собиралась общим проходом как обычный нутриент в
+// миллиграммах на 100 г — то есть «назови число» без таблицы категорий, — и одна
+// порция скумбрии закрывала недельную норму 3500 мг целиком. Теперь длинные морские
+// омега-3 (EPA+DHA) и растительная АЛК считаются из профиля жира и живут в
+// `services::fats` со своими недельными нормами.
 
 /// Vegetables/fruit target (g/day): user-set — women 600, men 800. Unknown sex →
 /// 600 (the lower, so it isn't spuriously missed before the persona is complete).
@@ -55,6 +59,9 @@ pub const N_CALCIUM: &str = "Кальций";
 /// from it any more (iron moved to its own fields + `services::iron`); the name is
 /// kept solely so those old values can be FILTERED OUT of nutrient listings.
 pub const N_IRON: &str = "Железо";
+/// Тоже legacy: ранние сборки писали омегу-3 в карту нутриентов. Ничего от неё уже
+/// не считается — омега-3 выводится из профиля жира (`services::fats`), — имя
+/// сохранено только чтобы отфильтровать старые значения из списков нутриентов.
 pub const N_OMEGA3: &str = "Омега-3";
 pub const N_FIBER: &str = "Клетчатка";
 
@@ -162,13 +169,11 @@ pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
     let meat = gather_meat(&window).await;
     let cal = gather_nutrient(&window, N_CALCIUM).await;
     let fib = gather_nutrient(&window, N_FIBER).await;
-    let omega = gather_nutrient(&window, N_OMEGA3).await;
 
     let last7: Vec<NaiveDate> = window.iter().take(7).copied().collect();
 
     vec![
         ("calcium", daily_nutrient(&cal, &last7, CALCIUM_PER_DAY_MG)),
-        ("omega3", weekly(&omega, &diary_days, today, OMEGA3_PER_WEEK_MG, false, true)),
         ("eggs", weekly(&eggs, &diary_days, today, EGG_PER_WEEK_G, false, false)),
         ("red_meat", weekly(&meat, &diary_days, today, RED_MEAT_LIMIT_PER_WEEK_G, true, false)),
         ("veg_fruit", daily_classifier(&veg, &last7, veg_fruit_per_day_g())),
@@ -224,6 +229,14 @@ pub fn displayed_indicators() -> Vec<&'static str> {
         // Гемовое железо открывается ВМЕСТЕ с железом: это две стороны одного
         // разговора — «хватило ли» и «из чего». Своего условия у него нет.
         v.push("heme");
+    }
+    // Жиры — три недельных индикатора, открываются вместе, после закрытой планки
+    // железа. Порознь они не читаются: «сколько морских омега-3», «сколько
+    // растительных» и «каков жир в целом» — три вопроса об одном.
+    if crate::services::fats::unlocked() {
+        v.push("epa_dha");
+        v.push("ala");
+        v.push("fat_ratio");
     }
     v
 }
@@ -306,6 +319,36 @@ pub async fn maybe_unlock_iron_week() {
     crate::services::classify::sweep_unprocessed().await;
 }
 
+/// Открыть ЖИРЫ, когда закрыта планка железа: поставить якорь недели жира, поднять
+/// флаг (три шкалы и три индикатора появляются, фоновый проход начинает выяснять
+/// профили) и поставить в очередь всю уже имеющуюся продукцию.
+///
+/// Условие — именно ЗАКРЫТАЯ недельная планка железа, а не семь зелёных дней: железо
+/// недельное, и «выдержал планку» у него означает закрытую неделю.
+///
+/// Идемпотентно: флаг монотонен, и за гардом «уже открыто» ничего не считается.
+/// Возвращает `true`, если открытие произошло именно сейчас — по этому признаку
+/// вызывающий может показать историю шестой недели.
+pub async fn maybe_unlock_fat_week() -> bool {
+    use crate::services::{fats, iron};
+    if fats::unlocked() {
+        return false;
+    }
+    if !iron::unlocked() {
+        return false; // неделя железа должна открыться первой
+    }
+    if !iron::planka_closed().await {
+        return false; // планка железа ещё не закрыта
+    }
+    let today = crate::services::local::today_date();
+    crate::services::app_flags::set(fats::FAT_WEEK_OPEN_KEY, &fmt(today));
+    crate::services::app_flags::set_bool(fats::FAT_UNLOCKED_KEY, true);
+    // У продуктов в дневнике профиля жира ещё нет — иначе первая неделя жира
+    // мерилась бы по пустому множеству.
+    crate::services::classify::sweep_unprocessed().await;
+    true
+}
+
 // ── Per-indicator per-day cache ──────────────────────────────────────────────
 // Each cacheable indicator has its OWN store (`ind_<key>`), keyed by date, holding
 // the completed-day aggregate so it isn't recomputed on every render. Today is
@@ -383,6 +426,14 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
         // показывает количество, но день по нему не судится: недельная механика.
         "iron" => crate::services::iron::absorbed_on(date).await,
         "heme" => crate::services::heme::portions_on(date).await,
+        // Жиры — тоже недельная механика: дневное значение показывается столбиком,
+        // но день по нему не судится (дневной цели нет).
+        "epa_dha" => crate::services::local::fatty_acids_on(date).await.epa_dha_g,
+        "ala" => crate::services::local::fatty_acids_on(date).await.ala_g,
+        "fat_ratio" => crate::services::local::fatty_acids_on(date)
+            .await
+            .unsat_to_sat()
+            .unwrap_or(0.0),
         _ => 0.0,
     }
 }
@@ -678,6 +729,17 @@ fn is_classifier(key: &str) -> bool {
 /// Indicator colour for `key` over the 7 COMPLETED days ending yesterday, read
 /// through the per-day cache. Unknown (grey) when the target is unset or a nutrient
 /// metric has no data yet.
+/// Ключ индикатора → который из трёх жировых, если это он.
+fn fat_key(key: &str) -> Option<crate::services::fats::Fat> {
+    use crate::services::fats::Fat;
+    match key {
+        "epa_dha" => Some(Fat::EpaDha),
+        "ala" => Some(Fat::Ala),
+        "fat_ratio" => Some(Fat::Ratio),
+        _ => None,
+    }
+}
+
 pub async fn indicator_state(key: &str) -> IndicatorState {
     // Iron has its OWN weekly mechanics and its own week anchor — it never goes
     // through the 7-completed-days path below.
@@ -687,6 +749,10 @@ pub async fn indicator_state(key: &str) -> IndicatorState {
     // Гем считается порциями и своими неделями — тоже мимо дневного пути.
     if key == "heme" {
         return crate::services::heme::indicator_state().await;
+    }
+    // Жиры — три своих недельных индикатора, у каждого своя величина и своя норма.
+    if let Some(which) = fat_key(key) {
+        return crate::services::fats::indicator_state(which).await;
     }
     // Not evaluable yet (e.g. protein before the profile/weight is set).
     if target_for(key).await <= 0.0 {
@@ -768,8 +834,17 @@ pub async fn share_states() -> Vec<(&'static str, IndicatorState)> {
     // Weekly indicators (rolling-7-day sum vs a weekly target) — only `compute()`
     // evaluates these correctly; the widget doesn't surface them.
     for (k, s) in compute().await {
-        if matches!(k, "omega3" | "eggs" | "red_meat") {
+        if matches!(k, "eggs" | "red_meat") {
             out.push((k, s));
+        }
+    }
+    // Жиры — три своих недельных индикатора, каждый со своей нормой. Только когда
+    // открыты: до этого у продуктов нет профиля, и куратор увидел бы «не ел ни
+    // грамма» вместо «ещё не считается».
+    if crate::services::fats::unlocked() {
+        use crate::services::fats::Fat;
+        for which in [Fat::EpaDha, Fat::Ala, Fat::Ratio] {
+            out.push((which.key(), crate::services::fats::indicator_state(which).await));
         }
     }
     out
@@ -937,6 +1012,10 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
         }
         if key == "heme" {
             out.push(crate::services::heme::weekly_series().await);
+            continue;
+        }
+        if let Some(which) = fat_key(key) {
+            out.push(crate::services::fats::weekly_series(which).await);
             continue;
         }
         let mut days = Vec::with_capacity(dates.len());

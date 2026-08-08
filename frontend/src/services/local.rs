@@ -672,6 +672,41 @@ pub async fn red_meat_grams_on(date: &str) -> f64 {
     food_tag_grams_on(date, is_red_meat_food).await
 }
 
+/// Жирные кислоты за день, в граммах.
+///
+/// Состав блюда здесь НЕ раскрывается — и это не упущение: профиль блюда уже
+/// посчитан из состава (`recipe_nutrition`) и лежит на самом блюде, как и его
+/// железо. Раскрывать второй раз значило бы считать одно и то же двумя путями.
+///
+/// Продукт без профиля не вносит ничего: у него не «нет кислот», а «мы пока не
+/// знаем», и подставлять ноль нельзя.
+pub async fn fatty_acids_on(date: &str) -> FattyAcids {
+    let entries = list_diary(date).await;
+    let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
+    let mut total = FattyAcids::default();
+    for e in &entries {
+        let Some(food) = foods.get(&e.food_id) else { continue };
+        let Some(per100) = food.fatty_acids_per_100g() else { continue };
+        let eaten = (e.grams - e.waste_grams).max(0.0);
+        if eaten <= 0.0 {
+            continue;
+        }
+        total += per100.scaled(eaten / 100.0);
+    }
+    total
+}
+
+/// Записать профиль жира продукта. Блюда с этим продуктом в составе устаревают —
+/// пересчёт идёт сразу, как у железа.
+pub async fn cache_food_fat_profile(id: &str, profile: FatProfile) {
+    let Some(mut food) = db::get::<Food>("foods", id).await else { return };
+    food.fat_profile = Some(profile);
+    food.updated_at = now();
+    db::put("foods", &food).await;
+    recompute_recipes_using(id).await;
+    crate::services::sync::push_background();
+}
+
 /// Total amount of the custom nutrient `key` eaten on `date` — sum of
 /// `food.nutrients[key] * eaten_grams / 100` over the day's entries. Recipe dishes
 /// already carry the SUMMED ingredient nutrients per 100 g (see `finish_recipe`),
@@ -1115,6 +1150,7 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
             is_liquid_cal: None,
             is_veg_fruit: None, is_egg: None, is_red_meat: None, is_heme: None,
             iron_mg: None, iron_absorption: None,
+            fat_profile: None,
             created_at: now(),
             updated_at: now(),
         };
@@ -1198,6 +1234,7 @@ pub async fn add_detected_foods_to_diary(items: &[ResolvedFood]) -> Vec<DiaryEnt
             is_heme: None,
             iron_mg: None,
             iron_absorption: None,
+            fat_profile: None,
             created_at: now(),
             updated_at: now(),
         };
@@ -1372,6 +1409,14 @@ pub struct RecipeNutrition {
     /// одно за другое нельзя.
     pub iron_mg: Option<f64>,
     pub iron_absorption: Option<f64>,
+    /// Профиль жира блюда. Складывается ПО ВКЛАДУ: граммы кислот от каждого
+    /// ингредиента суммируются и делятся на общий жир блюда — среднее по долям
+    /// ингредиентов было бы неверным, потому что ложка льняного масла и стакан
+    /// сметаны вносят в жир блюда несопоставимо разное.
+    ///
+    /// `None`, если профиля нет хоть у одного ингредиента, В КОТОРОМ ЕСТЬ ЖИР:
+    /// безжирный ингредиент без профиля ничего не портит, у него нечего складывать.
+    pub fat_profile: Option<FatProfile>,
 }
 
 pub fn recipe_nutrition(
@@ -1391,11 +1436,16 @@ pub fn recipe_nutrition(
     let mut iron_mg = 0.0_f64;
     let mut iron_absorbed = 0.0_f64;
     let mut iron_known = true;
+    // Жир копим В ГРАММАХ КИСЛОТ, а доли восстанавливаем в конце: это и есть
+    // «по вкладу».
+    let mut fa = api_types::FattyAcids::default();
+    let mut fa_known = true;
 
     for ing in ingredients {
         let Some(f) = foods.get(&ing.food_id) else {
             // Ингредиента нет в базе — состав неполон, и железо блюда неизвестно.
             iron_known = false;
+            fa_known = false;
             continue;
         };
         let factor = ing.grams / 100.0;
@@ -1413,6 +1463,13 @@ pub fn recipe_nutrition(
             }
             _ => iron_known = false,
         }
+        match f.fatty_acids_per_100g() {
+            Some(acids) => fa += acids.scaled(factor),
+            // Безжирный ингредиент без профиля блюду не мешает: складывать у него
+            // нечего. Неизвестен профиль только там, где жир есть.
+            None if f.fat <= 0.0 => {}
+            None => fa_known = false,
+        }
     }
 
     let scale = 100.0 / total_grams;
@@ -1427,6 +1484,23 @@ pub fn recipe_nutrition(
         // масштабируются одинаково. Нулевое железо — доля неопределена.
         iron_absorption: iron_known
             .then(|| (iron_mg > 0.0).then(|| iron_absorbed / iron_mg))
+            .flatten(),
+        // Доли от веса не зависят — обе части отношения масштабируются одинаково,
+        // поэтому делим на НЕмасштабированный жир. Нет жира — нет и профиля: делить
+        // не на что, а нули означали бы «выяснено, что кислот нет».
+        fat_profile: fa_known
+            .then(|| {
+                (fat > 0.0).then(|| {
+                    let pct = |g: f64| g / fat * 100.0;
+                    FatProfile {
+                        sfa_pct: pct(fa.sfa_g),
+                        mufa_pct: pct(fa.mufa_g),
+                        pufa_pct: pct(fa.pufa_g),
+                        ala_pct: pct(fa.ala_g),
+                        epa_dha_pct: pct(fa.epa_dha_g),
+                    }
+                })
+            })
             .flatten(),
     }
 }
@@ -1476,6 +1550,17 @@ pub async fn recompute_recipe(recipe_id: &str) -> bool {
             (Some(a), Some(b)) => same(a, b),
             (None, None) => true,
             _ => false,
+        }
+        && match (food.fat_profile, n.fat_profile) {
+            (Some(a), Some(b)) => {
+                same(a.sfa_pct, b.sfa_pct)
+                    && same(a.mufa_pct, b.mufa_pct)
+                    && same(a.pufa_pct, b.pufa_pct)
+                    && same(a.ala_pct, b.ala_pct)
+                    && same(a.epa_dha_pct, b.epa_dha_pct)
+            }
+            (None, None) => true,
+            _ => false,
         };
     if unchanged {
         return false;
@@ -1488,6 +1573,7 @@ pub async fn recompute_recipe(recipe_id: &str) -> bool {
     food.nutrients = n.nutrients;
     food.iron_mg = n.iron_mg;
     food.iron_absorption = n.iron_absorption;
+    food.fat_profile = n.fat_profile;
     food.updated_at = now();
     db::put("foods", &food).await;
     true
@@ -1608,6 +1694,8 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         // сюда, когда выяснится.
         iron_mg: n.iron_mg,
         iron_absorption: n.iron_absorption,
+        // То же и с профилем жира: он складывается из состава.
+        fat_profile: n.fat_profile,
         created_at: now(),
         updated_at: now(),
     };
@@ -2179,6 +2267,7 @@ mod recipe_tests {
             is_heme: None,
             iron_mg: iron.map(|(mg, _)| mg),
             iron_absorption: iron.map(|(_, a)| a),
+            fat_profile: None,
             created_at: String::new(),
             updated_at: String::new(),
         }

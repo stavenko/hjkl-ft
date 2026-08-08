@@ -189,6 +189,25 @@ async fn run_worker() {
             ).await;
         }
 
+        // Жиры — свой проход: спрашивается ПРОФИЛЬ (доли от жира), а не количество,
+        // и одним запросом сразу все пять величин. Идёт только после того, как жиры
+        // открылись: до этого их никто не читает.
+        if super::fats::unlocked() && food.fat_profile.is_none() {
+            let name = food.name.clone();
+            if let Some(profile) = with_retries(
+                move || {
+                    let n = name.clone();
+                    async move { super::ai::lookup_fat_profile(&n).await }
+                },
+                errors::FoodAspect::Fats,
+                &food.name,
+            )
+            .await
+            {
+                local::cache_food_fat_profile(&id, profile).await;
+            }
+        }
+
         // Iron is its OWN pass: it needs the absorbed fraction alongside the
         // amount, so it can't ride the generic nutrient request (see `iron.rs`).
         // Runs only once the iron week is open — before that nothing reads it.
@@ -217,6 +236,7 @@ fn needs_processing(food: &Food) -> bool {
     needs_classification(food)
         || super::enrich::needs_enrichment(food)
         || (super::iron::unlocked() && super::iron::needs_iron(food))
+        || (super::fats::unlocked() && food.fat_profile.is_none())
 }
 
 /// Enqueue EVERY product in the database that still lacks something — tags,

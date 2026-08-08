@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use api_types::Food;
 
-use super::indicators::{N_CALCIUM, N_FIBER, N_OMEGA3};
+use super::indicators::{N_CALCIUM, N_FIBER};
 use super::{ai, local};
 
 #[derive(Clone, Copy)]
@@ -41,18 +41,22 @@ impl Unit {
 /// fraction, so it has its own pass, its own fields on `Food` and its own weekly
 /// mechanics — see `services::iron`. Putting it back in this map would also
 /// resurface it in every nutrient form and badge, which it must never appear in.
+/// ОМЕГИ-3 ЗДЕСЬ ТОЖЕ НЕТ, и по той же причине. Миллиграммы «омеги-3» без ответа на
+/// вопрос, какой именно, ничего не значат: EPA+DHA организм из растительной АЛК почти
+/// не делает, а общий проход спрашивал одно число без таблицы категорий — и порция
+/// скумбрии закрывала недельную норму целиком. Теперь и то, и другое считается из
+/// профиля жира, см. `services::fats`.
 const TARGETS: &[(&str, Unit)] = &[
     (N_CALCIUM, Unit::Mg),
-    (N_OMEGA3, Unit::Mg),
     (N_FIBER, Unit::G),
 ];
 
 /// Nutrient keys that must NEVER be rendered in nutrient lists / forms / badges.
-/// `Железо` was written into `Food.nutrients` by earlier builds; those legacy
-/// values stay in the data (harmless) but are filtered out of every UI listing —
-/// iron is surfaced only by its own weekly gauge and indicator.
+/// `Железо` and `Омега-3` were written into `Food.nutrients` by earlier builds;
+/// those legacy values stay in the data (harmless) but are filtered out of every UI
+/// listing — both are surfaced only by their own weekly gauges and indicators.
 pub fn is_hidden_nutrient(name: &str) -> bool {
-    name == super::indicators::N_IRON
+    name == super::indicators::N_IRON || name == super::indicators::N_OMEGA3
 }
 
 /// True if `food` is missing any of the enriched nutrients yet.

@@ -760,6 +760,240 @@ pub(crate) struct IronAmount {
 }
 
 
+// ── Профиль жира ─────────────────────────────────────────────────────────────
+//
+// Спрашиваются ДОЛИ от жира продукта, а не миллиграммы на 100 г: `Food::fat` у нас
+// уже есть, граммы кислот считаются умножением, и профиль не плывёт от разбавления
+// и уварки (см. `api_types::FatProfile`).
+//
+// Строка таблицы — один источник правды: из этого массива И рендерится промпт, И
+// берутся границы, в которые зажимается ответ. Замер (scripts/measure-fatty-acids.sh)
+// показал, что БЕЗ диапазонов промпт негоден — словесные подсказки модель применяет
+// непоследовательно: грецкий орех уходил в мононенасыщенные, чечевица давала разброс
+// ПНЖК от 17 до 60. С диапазонами: 72 базовых продукта, ни одного промаха по строке.
+
+pub(crate) struct FatRow {
+    /// Ключ, который модель обязана вернуть дословно.
+    pub(crate) key: &'static str,
+    /// Границы долей: НЖК, МНЖК, ПНЖК, АЛК, EPA+DHA — в процентах от общего жира.
+    pub(crate) sfa: (f64, f64),
+    pub(crate) mufa: (f64, f64),
+    pub(crate) pufa: (f64, f64),
+    pub(crate) ala: (f64, f64),
+    pub(crate) epa_dha: (f64, f64),
+    /// Примеры — по ним модель узнаёт продукт; они важнее диапазона.
+    pub(crate) examples: &'static str,
+}
+
+/// Строки — по ТИПУ ЖИРА, а не по типу блюда: профиль задаёт источник жира.
+pub(crate) const FAT_ROWS: &[FatRow] = &[
+    FatRow { key: "coconut_palm", sfa: (82.0, 92.0), mufa: (5.0, 12.0), pufa: (1.0, 3.0),
+        ala: (0.0, 0.0), epa_dha: (0.0, 0.0),
+        examples: "кокосовое масло, пальмовое масло, кокосовая стружка, кокосовое молоко, \
+                   пальмоядровый жир" },
+    FatRow { key: "dairy_fat", sfa: (60.0, 70.0), mufa: (22.0, 30.0), pufa: (2.0, 6.0),
+        ala: (0.0, 1.0), epa_dha: (0.0, 0.0),
+        examples: "сливочное масло, топлёное масло, сливки, сметана, сыр, молоко, творог, \
+                   мороженое, кефир" },
+    FatRow { key: "beef_lamb_fat", sfa: (38.0, 48.0), mufa: (40.0, 50.0), pufa: (2.0, 6.0),
+        ala: (0.0, 1.0), epa_dha: (0.0, 0.0),
+        examples: "говядина, телятина, баранина, курдючное сало, говяжий жир, \
+                   субпродукты жвачных" },
+    FatRow { key: "pork_fat", sfa: (33.0, 40.0), mufa: (42.0, 50.0), pufa: (8.0, 14.0),
+        ala: (0.0, 1.0), epa_dha: (0.0, 0.0),
+        examples: "свинина, сало, шпик, бекон, ветчина, колбаса, сосиски, свиные субпродукты" },
+    FatRow { key: "poultry_fat", sfa: (26.0, 32.0), mufa: (40.0, 48.0), pufa: (18.0, 26.0),
+        ala: (0.0, 2.0), epa_dha: (0.0, 1.0),
+        examples: "курица, индейка, утка, гусь, куриная кожа, куриный жир, куриная печень" },
+    FatRow { key: "egg_fat", sfa: (28.0, 34.0), mufa: (40.0, 48.0), pufa: (12.0, 18.0),
+        ala: (0.0, 1.0), epa_dha: (0.0, 2.0),
+        examples: "яйцо, яичный желток, омлет, яичница" },
+    FatRow { key: "olive_avocado", sfa: (12.0, 18.0), mufa: (65.0, 75.0), pufa: (10.0, 16.0),
+        ala: (0.0, 1.0), epa_dha: (0.0, 0.0),
+        examples: "оливковое масло, оливки, маслины, авокадо, масло авокадо" },
+    FatRow { key: "rapeseed_mustard", sfa: (6.0, 9.0), mufa: (58.0, 66.0), pufa: (26.0, 32.0),
+        ala: (8.0, 11.0), epa_dha: (0.0, 0.0),
+        examples: "рапсовое масло, каноловое масло, горчичное масло, семена горчицы" },
+    FatRow { key: "peanut", sfa: (15.0, 20.0), mufa: (45.0, 55.0), pufa: (25.0, 35.0),
+        ala: (0.0, 0.0), epa_dha: (0.0, 0.0),
+        examples: "арахис, арахисовое масло, арахисовая паста" },
+    FatRow { key: "seed_oils_linoleic", sfa: (10.0, 15.0), mufa: (18.0, 28.0), pufa: (55.0, 68.0),
+        ala: (0.0, 8.0), epa_dha: (0.0, 0.0),
+        examples: "подсолнечное масло, кукурузное масло, соевое масло, масло виноградных \
+                   семечек, семечки подсолнуха, тыквенные семечки, кунжут, тахини, майонез, \
+                   маргарин" },
+    FatRow { key: "high_oleic_oils", sfa: (7.0, 12.0), mufa: (75.0, 85.0), pufa: (5.0, 12.0),
+        ala: (0.0, 0.0), epa_dha: (0.0, 0.0),
+        examples: "высокоолеиновое подсолнечное, высокоолеиновое сафлоровое, \
+                   олеиновый подсолнечник" },
+    FatRow { key: "flax_chia", sfa: (8.0, 11.0), mufa: (15.0, 22.0), pufa: (66.0, 75.0),
+        ala: (50.0, 60.0), epa_dha: (0.0, 0.0),
+        examples: "льняное масло, семена льна, семена чиа, рыжиковое масло" },
+    FatRow { key: "walnut_hemp", sfa: (9.0, 12.0), mufa: (13.0, 22.0), pufa: (65.0, 75.0),
+        ala: (10.0, 18.0), epa_dha: (0.0, 0.0),
+        examples: "грецкий орех, конопляное семя, масло грецкого ореха" },
+    FatRow { key: "fish_fatty_cold", sfa: (20.0, 28.0), mufa: (30.0, 45.0), pufa: (20.0, 30.0),
+        ala: (0.0, 2.0), epa_dha: (12.0, 25.0),
+        examples: "скумбрия, сельдь, лосось, форель, сардина, шпроты, анчоус, икра, рыбий жир, \
+                   печень трески, голец, кета, чавыча, нерка, горбуша, сайра, мойва, палтус" },
+    FatRow { key: "fish_lean_seafood", sfa: (18.0, 25.0), mufa: (12.0, 20.0), pufa: (30.0, 45.0),
+        ala: (0.0, 2.0), epa_dha: (25.0, 40.0),
+        examples: "треска, минтай, навага, судак, тунец, креветки, мидии, кальмар, гребешок, \
+                   крабовые палочки" },
+    FatRow { key: "fish_warm_low_n3", sfa: (25.0, 35.0), mufa: (25.0, 40.0), pufa: (20.0, 30.0),
+        ala: (0.0, 2.0), epa_dha: (3.0, 8.0),
+        examples: "тилапия, пангасиус, баса, дорадо, сибас, карп, толстолобик, сом — \
+                   тепловодная и прудовая рыба" },
+    FatRow { key: "nuts_tree", sfa: (7.0, 14.0), mufa: (55.0, 70.0), pufa: (15.0, 30.0),
+        ala: (0.0, 1.0), epa_dha: (0.0, 0.0),
+        examples: "миндаль, фундук, кешью, фисташки, кедровый орех, бразильский орех, макадамия" },
+    FatRow { key: "cocoa_confectionery", sfa: (55.0, 65.0), mufa: (28.0, 35.0), pufa: (2.0, 5.0),
+        ala: (0.0, 0.0), epa_dha: (0.0, 0.0),
+        examples: "шоколад, какао, какао-масло, конфеты, вафли, печенье, торт, кондитерский жир" },
+    FatRow { key: "grain_legume", sfa: (15.0, 22.0), mufa: (12.0, 25.0), pufa: (45.0, 60.0),
+        ala: (2.0, 10.0), epa_dha: (0.0, 0.0),
+        examples: "крупы, хлеб, макароны, рис, овсянка, бобовые, чечевица, нут, соя, тофу" },
+    FatRow { key: "no_fat", sfa: (0.0, 0.0), mufa: (0.0, 0.0), pufa: (0.0, 0.0),
+        ala: (0.0, 0.0), epa_dha: (0.0, 0.0),
+        examples: "овощи, фрукты, зелень, сахар, мёд, вода, чай, кофе, алкоголь, желатин, \
+                   специи — всё, где жира практически нет" },
+];
+
+fn fat_row_table() -> String {
+    FAT_ROWS
+        .iter()
+        .map(|r| {
+            format!(
+                "  {key:<20} SFA {s0}–{s1}, MUFA {m0}–{m1}, PUFA {p0}–{p1}, ALA {a0}–{a1}, \
+                 EPA+DHA {e0}–{e1} — {ex}",
+                key = r.key,
+                s0 = r.sfa.0, s1 = r.sfa.1, m0 = r.mufa.0, m1 = r.mufa.1,
+                p0 = r.pufa.0, p1 = r.pufa.1, a0 = r.ala.0, a1 = r.ala.1,
+                e0 = r.epa_dha.0, e1 = r.epa_dha.1, ex = r.examples,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// NB: `///` на полях уезжает В ПРОМПТ (схема вставляется текстом) — писать их как
+// инструкцию модели. Пояснения для людей — `//`, как это.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct FatProfileAnswer {
+    /// The category key from the table, copied EXACTLY as written there.
+    pub(crate) category: String,
+    /// What this product actually is, in two or three words.
+    pub(crate) food_type: String,
+    /// SATURATED fatty acids as a PERCENT OF THIS FOOD'S TOTAL FAT, by weight. Not
+    /// per 100 g of food.
+    pub(crate) sfa_pct: f64,
+    /// MONOUNSATURATED fatty acids as a PERCENT OF THIS FOOD'S TOTAL FAT, by weight.
+    pub(crate) mufa_pct: f64,
+    /// POLYUNSATURATED fatty acids as a PERCENT OF THIS FOOD'S TOTAL FAT, by weight.
+    pub(crate) pufa_pct: f64,
+    /// ALPHA-LINOLENIC acid (ALA, 18:3 n-3) as a PERCENT OF THIS FOOD'S TOTAL FAT.
+    /// Part of `pufa_pct`, so it can never exceed it.
+    pub(crate) ala_pct: f64,
+    /// EPA plus DHA together as a PERCENT OF THIS FOOD'S TOTAL FAT. Part of
+    /// `pufa_pct`, so it can never exceed it. Zero for everything except fish,
+    /// seafood and fish oil.
+    pub(crate) epa_dha_pct: f64,
+    /// One short sentence: why this row and this profile. Keep it under 20 words.
+    pub(crate) reason: String,
+}
+
+/// Профиль жира продукта. Промпт — дословно тот, что прошёл замер.
+pub async fn lookup_fat_profile(food_name: &str) -> Result<api_types::FatProfile, String> {
+    let lang = match crate::services::i18n::get_lang() {
+        crate::services::i18n::Lang::Ru => "Russian",
+        crate::services::i18n::Lang::En => "English",
+    };
+    let prompt = format!(
+        "You are a nutritional database. For the food item \"{food_name}\", report the \
+         FATTY-ACID PROFILE OF ITS FAT.\n\n\
+         Every number you report is a PERCENT OF THIS FOOD'S TOTAL FAT, by weight — NOT grams \
+         per 100 g of food. A food's total fat is already known to us; you only describe how \
+         that fat is composed. This means the profile does NOT depend on how much fat the food \
+         has: pure sunflower oil and a sauce made from it share the same profile.\n\n\
+         First place the food in ONE row of this table — rows are by the TYPE OF FAT, not by \
+         the type of dish — then give values INSIDE that row's ranges:\n\n\
+         {table}\n\n\
+         Report:\n\
+         - category: the row key, copied EXACTLY as written above\n\
+         - food_type: what this product is, in two or three words, in {lang}\n\
+         - sfa_pct / mufa_pct / pufa_pct: percent of total fat, each INSIDE its range in the \
+           chosen row. The remaining weight is glycerol, so the three need not add up to 100 — \
+           never inflate a fraction to make them.\n\
+         - ala_pct: alpha-linolenic acid (18:3 n-3), percent of total fat, inside the row's ALA \
+           range. It is PART of pufa_pct and can never exceed it.\n\
+         - epa_dha_pct: EPA plus DHA together, percent of total fat, inside the row's range. \
+           Also part of pufa_pct. Zero for everything that is not fish, seafood or fish oil — \
+           plants contain NO EPA or DHA, however rich in omega-3 they are.\n\
+         - reason: ONE short sentence (under 20 words) in {lang} — why this row and this \
+           profile\n\n\
+         Rules for choosing the row:\n\
+         - Go by WHERE THE FAT COMES FROM. A dish fried in sunflower oil whose own fat is mostly \
+           that oil belongs to the oil's row, not to the row of the vegetable.\n\
+         - A mixed dish goes to the row of its DOMINANT fat source.\n\
+         - Cooking, freezing, canning and packaging do not change the profile. The row does not \
+           depend on them.\n\
+         - A plain name goes to the ORDINARY variety of that oil. Only an explicit \
+           «высокоолеиновое» / «high-oleic» in the name moves sunflower or safflower oil to \
+           high_oleic_oils.\n\
+         - Fish splits by WHERE IT LIVES, not by how fatty it is: cold-water sea fish carry EPA \
+           and DHA, while warm-water and farmed pond fish carry mostly linoleic acid and very \
+           little n-3. A fish you do not recognise as a cold-water sea species goes to \
+           fish_warm_low_n3.\n\
+         - Anything with practically no fat goes to no_fat; its profile is irrelevant, report \
+           the row and zeros.\n\n\
+         Base the answer only on the food name \"{food_name}\". Respond with ONLY a single \
+         minified JSON object and nothing else — no markdown, no prose.",
+        table = fat_row_table(),
+        lang = lang,
+    );
+
+    let v: FatProfileAnswer = generate_validated(prompt, |_| {}, 4, |v: &FatProfileAnswer| {
+        let key = v.category.trim().to_ascii_lowercase();
+        if !FAT_ROWS.iter().any(|r| r.key == key) {
+            return Err(format!("unknown fat row «{}» for «{food_name}»", v.category));
+        }
+        // Больше ста процентов жира не бывает. Нижнего порога у суммы НЕТ: у постной
+        // рыбы справочники дают около семидесяти (остальное — фосфолипиды), а у
+        // безжирного продукта честный ответ — нули.
+        let sum = v.sfa_pct + v.mufa_pct + v.pufa_pct;
+        if sum > 100.5 {
+            return Err(format!("fat fractions sum to {sum:.1}% for «{food_name}»"));
+        }
+        Ok(())
+    })
+    .await?;
+
+    let key = v.category.trim().to_ascii_lowercase();
+    let row = FAT_ROWS
+        .iter()
+        .find(|r| r.key == key)
+        .ok_or_else(|| format!("unknown fat row «{}»", v.category))?;
+    let clamp = |x: f64, (lo, hi): (f64, f64)| x.clamp(lo, hi);
+    let pufa = clamp(v.pufa_pct, row.pufa);
+    // АЛК и EPA+DHA — ЧАСТИ ПНЖК, поэтому зажимаются ещё и под неё: замер поймал
+    // ответы, где сумма частей превышала целое.
+    let ala = clamp(v.ala_pct, row.ala).min(pufa);
+    let epa_dha = clamp(v.epa_dha_pct, row.epa_dha).min(pufa - ala);
+    let profile = api_types::FatProfile {
+        sfa_pct: clamp(v.sfa_pct, row.sfa),
+        mufa_pct: clamp(v.mufa_pct, row.mufa),
+        pufa_pct: pufa,
+        ala_pct: ala,
+        epa_dha_pct: epa_dha,
+    };
+    leptos::logging::log!(
+        "жиры «{food_name}»: {} · {} — НЖК {:.0} МНЖК {:.0} ПНЖК {:.0} АЛК {:.0} EPA+DHA {:.0} ({})",
+        row.key, v.food_type, profile.sfa_pct, profile.mufa_pct, profile.pufa_pct,
+        profile.ala_pct, profile.epa_dha_pct, v.reason
+    );
+    Ok(profile)
+}
+
 // ── Признаки спрашиваются ПО ОДНОМУ ─────────────────────────────────────────
 //
 // Раньше все ехали одним запросом — дешевле по числу вызовов, но признаки в нём

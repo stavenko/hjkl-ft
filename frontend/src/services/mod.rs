@@ -10,6 +10,7 @@ pub mod curator_share;
 pub mod db;
 pub mod enrich;
 pub mod errors;
+pub mod fats;
 pub mod diag;
 pub mod i18n;
 pub mod heme;

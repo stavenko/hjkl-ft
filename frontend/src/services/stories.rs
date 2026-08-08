@@ -150,6 +150,8 @@ pub enum Appears {
     AfterCalciumWeek,
     /// Visible once the iron week (weekly iron gauge + indicator) has been unlocked.
     AfterIronWeek,
+    /// Видна, когда открылись ЖИРЫ — то есть после закрытой недельной планки железа.
+    AfterFatWeek,
 }
 
 pub struct Story {
@@ -272,6 +274,7 @@ pub fn visible(
     activity_unlocked: bool,
     calcium_unlocked: bool,
     iron_unlocked: bool,
+    fat_unlocked: bool,
 ) -> Vec<&'static Story> {
     STORIES
         .iter()
@@ -281,6 +284,7 @@ pub fn visible(
             Appears::AfterActivityWeek => activity_unlocked,
             Appears::AfterCalciumWeek => calcium_unlocked,
             Appears::AfterIronWeek => iron_unlocked,
+            Appears::AfterFatWeek => fat_unlocked,
         })
         .collect()
 }

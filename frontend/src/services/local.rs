@@ -415,29 +415,6 @@ pub async fn progress_week_counts() -> (u32, u32, u32) {
     (food, weight, steps)
 }
 
-// --- Chapter 2 detection helpers ---
-//
-// Case-insensitive substring name-matching on `food.name.to_lowercase()`. These
-// back the chapter-2 section tasks and the daily report's per-day facts.
-
-/// Substrings that mark a DRINK food (chapter 2 / s5).
-const DRINK_SUBSTRINGS: &[&str] = &[
-    "сок", "газиров", "кола", "лимонад", "морс", "квас", "компот", "нектар",
-    "энергетик", "пепси", "фанта", "спрайт", "cola", "pepsi", "sprite", "fanta",
-];
-
-fn name_matches(name: &str, needles: &[&str]) -> bool {
-    let lower = name.to_lowercase();
-    needles.iter().any(|n| lower.contains(n))
-}
-
-/// True if `food` is a low-calorie snack — by the cached AI tag (language-
-/// independent). `None` (not yet classified) counts as not-a-snack until tagged
-/// in the background by the `classify` queue. See [`cache_food_tags`].
-pub fn is_snack_food(food: &Food) -> bool {
-    food.is_snack == Some(true)
-}
-
 /// True if `food` is a vegetable / fruit — by the cached AI tag. `None` counts as
 /// not-veg-fruit until classified in the background.
 pub fn is_veg_fruit_food(food: &Food) -> bool {
@@ -458,7 +435,6 @@ pub fn is_red_meat_food(food: &Food) -> bool {
 /// пишутся порознь: ответ про один признак не трогает соседние поля.
 #[derive(Debug, Clone, Copy)]
 pub enum FoodFlag {
-    LiquidCal,
     VegFruit,
     Heme,
 }
@@ -468,7 +444,6 @@ pub enum FoodFlag {
 pub async fn cache_food_flag(id: &str, flag: FoodFlag, value: bool) {
     let Some(mut food) = db::get::<Food>("foods", id).await else { return };
     match flag {
-        FoodFlag::LiquidCal => food.is_liquid_cal = Some(value),
         FoodFlag::VegFruit => food.is_veg_fruit = Some(value),
         FoodFlag::Heme => food.is_heme = Some(value),
     }
@@ -520,27 +495,6 @@ pub async fn cache_food_iron(id: &str, iron_mg: f64, absorption: f64) {
     }
 }
 
-/// True if `food` is a drink by name.
-pub fn is_drink_food(food: &Food) -> bool {
-    name_matches(&food.name, DRINK_SUBSTRINGS)
-}
-
-/// A drink is HIGH-CAL ("liquid calories"). Prefers the cached AI tag
-/// (`is_liquid_cal`); for foods not yet classified, falls back to the old
-/// name+kcal heuristic (drink name AND per-100g kcal > 10) so behaviour degrades
-/// gracefully before the background queue tags it.
-pub fn is_high_cal_drink(food: &Food) -> bool {
-    match food.is_liquid_cal {
-        Some(v) => v,
-        None => is_drink_food(food) && food.kcal > 10.0,
-    }
-}
-
-/// A drink is ZERO-CAL if its per-100g kcal <= 5.
-pub fn is_zero_cal_drink(food: &Food) -> bool {
-    is_drink_food(food) && food.kcal <= 5.0
-}
-
 /// Fetch ONLY the foods with these ids (deduped), each by primary key — a bounded
 /// slice, never the whole `foods` table. Missing ids are skipped. Every per-day
 /// aggregate loads just the handful of foods its own diary slice references, so
@@ -554,27 +508,6 @@ pub(crate) async fn foods_by_ids(ids: impl IntoIterator<Item = String>) -> BTree
         }
     }
     map
-}
-
-/// True if the diary for `date` contains at least one SNACK food.
-pub async fn snack_logged_on(date: &str) -> bool {
-    let entries = list_diary(date).await;
-    let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
-    entries.iter().any(|e| foods.get(&e.food_id).map_or(false, is_snack_food))
-}
-
-/// True if the diary for `date` contains at least one HIGH-CAL drink.
-pub async fn high_cal_drink_on(date: &str) -> bool {
-    let entries = list_diary(date).await;
-    let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
-    entries.iter().any(|e| foods.get(&e.food_id).map_or(false, is_high_cal_drink))
-}
-
-/// True if the diary for `date` contains at least one ZERO-CAL drink.
-pub async fn zero_cal_drink_on(date: &str) -> bool {
-    let entries = list_diary(date).await;
-    let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
-    entries.iter().any(|e| foods.get(&e.food_id).map_or(false, is_zero_cal_drink))
 }
 
 /// Evening protein (grams) on `date`: sum of `protein * eaten_grams / 100`

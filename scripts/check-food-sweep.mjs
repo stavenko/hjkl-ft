@@ -101,14 +101,14 @@ await page.evaluate(async (uid) => {
     recipe_id: null, archived: false, is_restaurant: false, created_at: nowIso, updated_at: nowIso };
   const foods = [
     // 1. Съеден ГОД назад — в прежнее окно 14 дней не попадал бы никогда.
-    { ...bare, id: "old", name: "Гречка", nutrients: {}, is_snack: null, is_liquid_cal: null,
-      is_veg_fruit: null, is_egg: null, is_red_meat: null, iron_mg: null, iron_absorption: null },
+    { ...bare, id: "old", name: "Гречка", nutrients: {},
+      is_veg_fruit: null, is_heme: null, iron_mg: null, iron_absorption: null },
     // 2. Вообще не съеден — в дневнике его нет.
-    { ...bare, id: "never", name: "Творог", nutrients: {}, is_snack: null, is_liquid_cal: null,
-      is_veg_fruit: null, is_egg: null, is_red_meat: null, iron_mg: null, iron_absorption: null },
+    { ...bare, id: "never", name: "Творог", nutrients: {},
+      is_veg_fruit: null, is_heme: null, iron_mg: null, iron_absorption: null },
     // 3. Заполнен целиком, часть значений — НУЛИ. Переспрашивать нечего.
     { ...bare, id: "done", name: "Вода", nutrients: { "Кальций": 0, "Клетчатка": 0, "Омега-3": 0 },
-      is_snack: false, is_liquid_cal: false, is_veg_fruit: false, is_egg: false, is_red_meat: false,
+      is_veg_fruit: false, is_heme: false,
       iron_mg: 0, iron_absorption: 0.05 },
   ];
   const diary = [{ id: "d-old", food_id: "old", date: ymd(365), time: null, grams: 100,
@@ -141,7 +141,9 @@ const readFoods = () => page.evaluate(async (uid) => {
   const size = (n) => (n instanceof Map ? n.size : Object.keys(n || {}).length);
   const dump = (n) => JSON.stringify(n instanceof Map ? Object.fromEntries(n) : n || {});
   return all.map((f) => ({ id: f.id, name: f.name, mg: f.iron_mg, abs: f.iron_absorption,
-    tagged: f.is_snack !== null && f.is_snack !== undefined,
+    // Размечен = отвечены те признаки, которые СПРАШИВАЮТСЯ: фрукты/овощи и гем.
+    // Перекус, яйца, красное мясо и жидкие калории у модели больше не спрашиваются.
+    tagged: f.is_veg_fruit != null && f.is_heme != null,
     values: dump(f.nutrients), nutrients: size(f.nutrients) }));
 }, uid);
 

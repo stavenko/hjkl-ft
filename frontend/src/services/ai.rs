@@ -804,7 +804,6 @@ macro_rules! flag_answer {
     };
 }
 
-flag_answer!(LiquidCalAnswer, reason_why_this_product_classified_as_liquid_calories);
 flag_answer!(VegFruitAnswer, reason_why_this_product_classified_as_vegetable_or_fruit);
 flag_answer!(HemeAnswer, reason_why_this_product_classified_as_gem_source);
 
@@ -854,11 +853,6 @@ where
 // FAIL LOUDLY: ошибка модели, разбора или несовпадение длины массива — это `Err`
 // (вызывающий его показывает; ничего не размечается молча наугад).
 
-/// «Жидкие калории»: сок, сладкая газировка, алкоголь.
-pub async fn classify_liquid_cal(names: &[String]) -> Result<Vec<bool>, String> {
-    ask_flag::<LiquidCalAnswer>(names, "жидкие калории", LIQUID_CAL_DEF).await
-}
-
 /// Овощ или фрукт — свежий, приготовленный или очевидное овощное/фруктовое блюдо.
 pub async fn classify_veg_fruit(names: &[String]) -> Result<Vec<bool>, String> {
     ask_flag::<VegFruitAnswer>(names, "фрукты/овощи", VEG_FRUIT_DEF).await
@@ -869,15 +863,6 @@ pub async fn classify_veg_fruit(names: &[String]) -> Result<Vec<bool>, String> {
 pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
     ask_flag::<HemeAnswer>(names, "гем", HEME_DEF).await
 }
-
-const LIQUID_CAL_DEF: &str =
-        "QUESTION: is this food \"liquid calories\"? TRUE for ONLY these three kinds of drink: \
-         (a) JUICE, including juice with pulp; (b) sugary/sweetened SODA (cola, lemonade, etc.); \
-         (c) any ALCOHOLIC drink, including alcoholic beer, wine, cocktails, spirits. \
-         Everything else is FALSE, INCLUDING: non-alcoholic beer; fermented-milk drinks (kefir, \
-         ayran, tan, acidophilus milk / ацидофилин, ryazhenka) and any drink that carries protein, \
-         live bacteria, or other nutrients — not just sugar/carbs; water, tea/coffee (even \
-         sweetened), milk, smoothies, cocoa, milkshakes, energy drinks; and any solid food.";
 
 const VEG_FRUIT_DEF: &str =
         "QUESTION: is this food a vegetable or a fruit — fresh, cooked, or an obvious \

@@ -92,13 +92,14 @@ pub fn init() {
 /// один пустой признак не имеет права тянуть перезапрос остальных. У каждого свой
 /// гейт, свой запрос и своя запись.
 ///
-/// Перекус, яйца и красное мясо у модели больше не спрашиваются — их тут нет.
+/// Спрашивается ровно то, что кто-то ЧИТАЕТ: фрукты/овощи — дневная планка в
+/// виджете, гем — недельные порции. Перекус, яйца, красное мясо и жидкие калории
+/// не спрашиваются: их потребители ушли вместе с удалённой «Оценкой».
 const FLAGS: &[(
     &str,
     fn(&Food) -> bool,
     local::FoodFlag,
 )] = &[
-    ("жидкие калории", |f| f.is_liquid_cal.is_none(), local::FoodFlag::LiquidCal),
     ("фрукты/овощи", |f| f.is_veg_fruit.is_none(), local::FoodFlag::VegFruit),
     ("гем", |f| f.is_heme.is_none(), local::FoodFlag::Heme),
 ];
@@ -107,7 +108,6 @@ const FLAGS: &[(
 async fn ask(flag: local::FoodFlag, name: &str) -> Result<bool, String> {
     let names = [name.to_string()];
     let v = match flag {
-        local::FoodFlag::LiquidCal => ai::classify_liquid_cal(&names).await?,
         local::FoodFlag::VegFruit => ai::classify_veg_fruit(&names).await?,
         local::FoodFlag::Heme => ai::classify_heme(&names).await?,
     };

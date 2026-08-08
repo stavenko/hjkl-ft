@@ -52,6 +52,8 @@ struct DetailData {
     /// Недельное железо — в развёрнутом виде оно должно быть ровно так же, как в
     /// свёрнутом виджете. `None`, пока неделя железа не открыта.
     iron: Option<crate::services::iron::WeeklyIron>,
+    /// Порции гемовых продуктов за текущую неделю. Неделя та же, что у железа.
+    heme: Option<crate::services::heme::WeeklyHeme>,
     series: Vec<indicators::IndicatorSeries>,
     calorie_hint: String,
     protein_hint: String,
@@ -152,6 +154,21 @@ fn iron_hint_text() -> String {
          {target:.1} мг.\n\n\
          Точки на полосе делят неделю на семь дней: они показывают, где вы были бы, \
          если бы набирали норму равномерно."
+    )
+}
+
+/// Пояснение «?» для гема: что считается порцией и зачем это отдельно от железа.
+fn heme_hint_text() -> String {
+    use crate::services::heme;
+    format!(
+        "Одна порция — {:.0} г белка из печени, красного мяса или моллюсков. Это \
+         примерно 120 г говядины, 100 г печени или 200 г мидий.\n\n\
+         Считаем отдельно от железа, потому что с этими продуктами приходит не только \
+         оно: B12, цинк, селен и полноценный белок усваиваются из них заметно лучше, \
+         чем из растительной пищи.\n\n\
+         Цель — {:.0} порции в неделю. Точки на полосе делят неделю на семь дней.",
+        heme::PORTION_PROTEIN_G,
+        heme::WEEKLY_PORTIONS,
     )
 }
 
@@ -409,6 +426,7 @@ pub fn DashboardPage() -> impl IntoView {
                 eaten: local::kcal_on(&today).await,
                 gauges: indicators::daily_gauges().await,
                 iron: crate::services::iron::weekly_progress().await,
+                heme: crate::services::heme::weekly_progress().await,
                 series: indicators::unlocked_indicator_series().await,
                 calorie_hint: calorie_hint_text(planka).await,
                 protein_hint: protein_hint_text().await,
@@ -547,6 +565,28 @@ pub fn DashboardPage() -> impl IntoView {
                                         value_color=val.map(String::from)/>
                                 }
                             });
+                            // Порции гемовых продуктов — своя шкала под железной.
+                            // Дробное значение намеренно: «1,2 из 3» честнее, чем
+                            // округлённое «1», когда съеден кусок мяса поменьше.
+                            let heme = d.heme.as_ref().map(|w| {
+                                let (bar, val) =
+                                    crate::components::gauge::at_least_colors(w.portions, w.target);
+                                let pace = crate::components::gauge::GaugePace {
+                                    segments: 7,
+                                    passed: w.day_of_week.saturating_sub(1),
+                                };
+                                view! {
+                                    <Gauge value=w.portions target=w.target
+                                        label="Гем/нед".to_string()
+                                        unit="порц.".to_string()
+                                        color=bar.to_string()
+                                        height=12.0
+                                        decimals=2
+                                        pace=Some(pace)
+                                        hint=heme_hint_text()
+                                        value_color=val.map(String::from)/>
+                                }
+                            });
                             let detail = d.series.iter().map(|s| {
                                 let (paths, name) = progress_widget::icon_for(s.key);
                                 let (stroke, tint) = progress_widget::state_colors(s.state);
@@ -573,6 +613,7 @@ pub fn DashboardPage() -> impl IntoView {
                                             unit={match s.key {
                                                 "calories" => "ккал",
                                                 "iron" => "мг",
+                                                "heme" => "порц.",
                                                 "steps" => "",
                                                 _ => "г",
                                             }.to_string()}
@@ -591,6 +632,7 @@ pub fn DashboardPage() -> impl IntoView {
                                         value_color={(d.eaten > target).then(|| "#e0304f".to_string())}/>
                                     {daily}
                                     {iron}
+                                    {heme}
                                     <div>
                                         <div style="border-top: 0.5px solid var(--bulma-border-weak); margin-bottom: 14px;"></div>
                                         <div style="display: flex; flex-direction: column; gap: 12px;">

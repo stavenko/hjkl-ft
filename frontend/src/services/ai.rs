@@ -774,6 +774,8 @@ pub struct FoodTags {
     pub egg: bool,
     /// Red or processed meat (beef/pork/lamb; sausage, ham, bacon, salami).
     pub red_meat: bool,
+    /// A rich source of HEME iron: liver and other offal, red meat, molluscs.
+    pub heme: bool,
 }
 
 /// Parallel boolean arrays, one entry per input food, in input order.
@@ -786,6 +788,7 @@ struct FoodVerdicts {
     veg_fruit: Vec<bool>,
     egg: Vec<bool>,
     red_meat: Vec<bool>,
+    heme: Vec<bool>,
 }
 
 /// Classify each food NAME into the existing categories (snack / liquid calories /
@@ -807,7 +810,7 @@ pub async fn classify_food(names: &[String]) -> Result<Vec<FoodTags>, String> {
         .collect::<Vec<_>>()
         .join("\n");
     let prompt = format!(
-        "For each food below, decide three independent yes/no categories. Food names may be in \
+        "For each food below, decide several independent yes/no categories. Food names may be in \
          ANY language — judge by meaning, not by wording.\n\n\
          1) \"snack\": a good low-calorie snack — something light to nibble between meals. The \
          single test is VOLUME vs CALORIES: a big, filling volume for relatively few calories \
@@ -832,27 +835,38 @@ pub async fn classify_food(names: &[String]) -> Result<Vec<FoodTags>, String> {
          5) \"red_meat\": red or processed meat — beef, pork, veal, lamb, mutton; and processed \
          meat: sausage, wiener, frankfurter, ham, bacon, salami, bologna, pepperoni, pâté. NOT: \
          chicken, turkey and other poultry; fish and seafood; eggs; plant food.\n\n\
+         6) \"heme\": a RICH source of HEME iron — the well-absorbed animal form. TRUE for only \
+         three groups: (a) LIVER and other offal — liver, pâté, kidney, heart, tongue, blood \
+         sausage; (b) RED MEAT — beef, veal, lamb, mutton, pork, venison, and dishes whose main \
+         part is such meat; (c) MOLLUSCS and other iron-rich shellfish — mussels, clams, oysters, \
+         scallops, squid, octopus, cockles. FALSE for everything else, INCLUDING: chicken, turkey \
+         and other poultry; fish (salmon, tuna, cod, herring — fish is NOT a mollusc); shrimp and \
+         crab; eggs and dairy; ALL plant food however iron-rich (lentils, spinach, buckwheat, \
+         fortified cereal — that iron is non-heme). Processed meat products where meat is a minor \
+         part (wiener, bologna, meat-filled pastry, pizza) are FALSE. Judge the food ITSELF: a \
+         dish is TRUE only when such meat, offal or mollusc is its MAIN part.\n\n\
          Foods (index. name):\n{list}\n\n\
          Respond with ONLY a single minified JSON object with five boolean arrays, each exactly \
          one per food, in the SAME order. Example for 2 foods: \
          {{\"snack\":[true,false],\"liquid_cal\":[false,true],\"veg_fruit\":[true,false],\
-         \"egg\":[false,false],\"red_meat\":[false,true]}}",
+         \"egg\":[false,false],\"red_meat\":[false,true],\"heme\":[false,true]}}",
     );
     let v: FoodVerdicts = generate(prompt, |_| {}).await?;
     let n = names.len();
     if v.snack.len() != n || v.liquid_cal.len() != n || v.veg_fruit.len() != n
-        || v.egg.len() != n || v.red_meat.len() != n
+        || v.egg.len() != n || v.red_meat.len() != n || v.heme.len() != n
     {
         return Err(format!(
             "food classification length mismatch for {n} foods: snack={}, liquid_cal={}, \
-             veg_fruit={}, egg={}, red_meat={}",
-            v.snack.len(), v.liquid_cal.len(), v.veg_fruit.len(), v.egg.len(), v.red_meat.len()
+             veg_fruit={}, egg={}, red_meat={}, heme={}",
+            v.snack.len(), v.liquid_cal.len(), v.veg_fruit.len(), v.egg.len(),
+            v.red_meat.len(), v.heme.len()
         ));
     }
     Ok((0..n)
         .map(|i| FoodTags {
             snack: v.snack[i], liquid_cal: v.liquid_cal[i], veg_fruit: v.veg_fruit[i],
-            egg: v.egg[i], red_meat: v.red_meat[i],
+            egg: v.egg[i], red_meat: v.red_meat[i], heme: v.heme[i],
         })
         .collect())
 }

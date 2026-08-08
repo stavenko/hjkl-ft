@@ -84,6 +84,15 @@ pub struct Food {
     /// ingredients too, so a dish's red-meat content can be counted by composition.
     #[serde(default)]
     pub is_red_meat: Option<bool>,
+    /// AI-assigned tag: рich source of HEME iron — печень и субпродукты, красное
+    /// мясо, моллюски. `None` = not yet classified.
+    ///
+    /// Отдельно от `is_red_meat`: тот про ограничение («не больше стольких-то
+    /// граммов в неделю»), этот — про цель («съешьте три порции»). Пересекаются
+    /// они лишь частично: печень и мидии не красное мясо, а колбаса — красное
+    /// мясо, но не источник гема в нужном смысле.
+    #[serde(default)]
+    pub is_heme: Option<bool>,
     /// Iron in mg per 100 g. Filled by the DEDICATED iron pass, not by the general
     /// nutrient enricher — iron is judged together with how well it is absorbed, so
     /// it deliberately does NOT live in `nutrients` (which is a plain amount map
@@ -205,6 +214,7 @@ impl FoodDraft {
             is_veg_fruit: None,
             is_egg: None,
             is_red_meat: None,
+            is_heme: None,
             iron_mg: None,
             iron_absorption: None,
             created_at: self.created_at.clone(),

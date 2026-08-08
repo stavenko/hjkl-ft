@@ -89,7 +89,7 @@ pub fn init() {
 /// True if `food` still has an unassigned category tag.
 fn needs_classification(food: &Food) -> bool {
     food.is_snack.is_none() || food.is_liquid_cal.is_none() || food.is_veg_fruit.is_none()
-        || food.is_egg.is_none() || food.is_red_meat.is_none()
+        || food.is_egg.is_none() || food.is_red_meat.is_none() || food.is_heme.is_none()
 }
 
 /// Enqueue a food id for background classification (no-op if already queued) and

@@ -69,6 +69,7 @@ pub fn icon_for(k: &str) -> (&'static str, &'static str) {
         "omega3" => (IC_FISH, "Омега-3"),
         "eggs" => (IC_EGG, "Яйца"),
         "iron" => (IC_DROPLET, "Железо"),
+        "heme" => (IC_DROPLET, "Гем"),
         "red_meat" => (IC_HAM, "Мясо"),
         "veg_fruit" => (IC_APPLE, "Фр/овощи"),
         "steps" => (IC_STEPS, "Шаги"),

@@ -12,6 +12,7 @@ pub mod enrich;
 pub mod errors;
 pub mod diag;
 pub mod i18n;
+pub mod heme;
 pub mod indicators;
 pub mod iron;
 pub mod iron_pipeline;

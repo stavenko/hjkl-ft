@@ -66,6 +66,7 @@ pub fn FoodEditModal(
     let f_veg = create_rw_signal(food.is_veg_fruit);
     let f_egg = create_rw_signal(food.is_egg);
     let f_meat = create_rw_signal(food.is_red_meat);
+    let f_heme = create_rw_signal(food.is_heme);
 
     // Portal строит разметку повторно, значит всё внутри должно переживать
     // повторный вызов. Обычное замыкание уехало бы в on:click при первом же
@@ -113,6 +114,7 @@ pub fn FoodEditModal(
             is_veg_fruit: f_veg.get_untracked(),
             is_egg: f_egg.get_untracked(),
             is_red_meat: f_meat.get_untracked(),
+            is_heme: f_heme.get_untracked(),
         };
         let eid = entry_id.clone();
         spawn_local(async move {
@@ -235,6 +237,7 @@ pub fn FoodEditModal(
                     {flag_row("Овощ или фрукт", f_veg)}
                     {flag_row("Яйца", f_egg)}
                     {flag_row("Красное мясо", f_meat)}
+                    {flag_row("Источник гемового железа", f_heme)}
                 </div>
             </div>
 

@@ -221,6 +221,9 @@ pub fn displayed_indicators() -> Vec<&'static str> {
     // Iron is WEEKLY (see `services::iron`) but shares the indicator row.
     if crate::services::iron::unlocked() {
         v.push("iron");
+        // Гемовое железо открывается ВМЕСТЕ с железом: это две стороны одного
+        // разговора — «хватило ли» и «из чего». Своего условия у него нет.
+        v.push("heme");
     }
     v
 }
@@ -379,6 +382,7 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
         // полоса. Дневной ЦЕЛИ у него нет (`target_for` вернёт 0), поэтому столбик
         // показывает количество, но день по нему не судится: недельная механика.
         "iron" => crate::services::iron::absorbed_on(date).await,
+        "heme" => crate::services::heme::portions_on(date).await,
         _ => 0.0,
     }
 }
@@ -680,6 +684,10 @@ pub async fn indicator_state(key: &str) -> IndicatorState {
     if key == "iron" {
         return crate::services::iron::indicator_state().await;
     }
+    // Гем считается порциями и своими неделями — тоже мимо дневного пути.
+    if key == "heme" {
+        return crate::services::heme::indicator_state().await;
+    }
     // Not evaluable yet (e.g. protein before the profile/weight is set).
     if target_for(key).await <= 0.0 {
         return IndicatorState::Unknown;
@@ -925,6 +933,10 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
         // Дни недели под ними ничего не значат.
         if key == "iron" {
             out.push(crate::services::iron::weekly_series().await);
+            continue;
+        }
+        if key == "heme" {
+            out.push(crate::services::heme::weekly_series().await);
             continue;
         }
         let mut days = Vec::with_capacity(dates.len());

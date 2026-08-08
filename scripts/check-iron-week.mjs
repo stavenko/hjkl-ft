@@ -225,8 +225,10 @@ async function paceCase(name, { ironOpenDaysAgo, gramsPerDay }, want) {
   });
   await page.waitForTimeout(9000);
   const gauge = page.locator('[data-gauge="Железо/нед"]');
-  const lit = await page.locator('[data-pace-dot="lit"]').count();
-  const dim = await page.locator('[data-pace-dot="dim"]').count();
+  // Точки считаем ВНУТРИ шкалы железа: рядом стоит такая же недельная шкала гема,
+  // и общий счёт по странице давал бы двойной результат.
+  const lit = await gauge.locator('[data-pace-dot="lit"]').count();
+  const dim = await gauge.locator('[data-pace-dot="dim"]').count();
   check(`${name}: точек ровно 6 (семь отрезков)`, lit + dim === 6, `горит ${lit}, погашено ${dim}`);
   check(`${name}: горит ${want.lit} (день ${want.day})`, lit === want.lit, `горит ${lit}`);
   // Тень берём с самой полосы — это второй потомок обёртки gauge.

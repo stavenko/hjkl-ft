@@ -84,7 +84,7 @@ pub struct Food {
     /// ingredients too, so a dish's red-meat content can be counted by composition.
     #[serde(default)]
     pub is_red_meat: Option<bool>,
-    /// AI-assigned tag: рich source of HEME iron — печень и субпродукты, красное
+    /// AI-assigned tag: rich source of HEME iron — печень и субпродукты, красное
     /// мясо, моллюски. `None` = not yet classified.
     ///
     /// Отдельно от `is_red_meat`: тот про ограничение («не больше стольких-то

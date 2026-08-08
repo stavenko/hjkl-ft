@@ -454,28 +454,28 @@ pub fn is_red_meat_food(food: &Food) -> bool {
     food.is_red_meat == Some(true)
 }
 
-/// Persist AI category verdicts onto foods by id, then push once so the tags
-/// propagate across devices. Written by the background `classify` queue as soon as
-/// a food is logged; foods not found are skipped.
-pub async fn cache_food_tags(verdicts: &[(String, crate::services::ai::FoodTags)]) {
-    if verdicts.is_empty() {
-        return;
+/// Какой признак продукта записывается. Спрашиваются они порознь, поэтому и
+/// пишутся порознь: ответ про один признак не трогает соседние поля.
+#[derive(Debug, Clone, Copy)]
+pub enum FoodFlag {
+    LiquidCal,
+    VegFruit,
+    Heme,
+}
+
+/// Записать ОДИН признак продукта и толкнуть синк, чтобы он доехал до других
+/// устройств. Продукт, которого уже нет, пропускается.
+pub async fn cache_food_flag(id: &str, flag: FoodFlag, value: bool) {
+    let Some(mut food) = db::get::<Food>("foods", id).await else { return };
+    match flag {
+        FoodFlag::LiquidCal => food.is_liquid_cal = Some(value),
+        FoodFlag::VegFruit => food.is_veg_fruit = Some(value),
+        FoodFlag::Heme => food.is_heme = Some(value),
     }
-    for (id, tags) in verdicts {
-        if let Some(mut food) = db::get::<Food>("foods", id).await {
-            food.is_snack = Some(tags.snack);
-            food.is_liquid_cal = Some(tags.liquid_cal);
-            food.is_veg_fruit = Some(tags.veg_fruit);
-            food.is_egg = Some(tags.egg);
-            food.is_red_meat = Some(tags.red_meat);
-            food.is_heme = Some(tags.heme);
-            food.updated_at = now();
-            db::put("foods", &food).await;
-            // Tags (veg/fruit etc.) changed → only the days THIS food was eaten on
-            // need re-summarizing.
-            crate::services::indicators::invalidate_food(id).await;
-        }
-    }
+    food.updated_at = now();
+    db::put("foods", &food).await;
+    // Признак изменился → пересчитать надо только те дни, в которые ели ЭТОТ продукт.
+    crate::services::indicators::invalidate_food(id).await;
     crate::services::sync::push_background();
 }
 

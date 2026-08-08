@@ -1,10 +1,10 @@
 //! Background per-food category classifier.
 //!
 //! As soon as a food is logged into the diary, its id is enqueued here; a single
-//! app-scoped worker drains the queue ONE food at a time (`ai::classify_food` →
-//! `local::cache_food_tags`), so foods are classified in order without a parallel
-//! burst. Tags (`is_snack` / `is_liquid_cal` / `is_veg_fruit`) are cached on the
-//! `Food` and synced. Idempotent: a food already fully tagged is skipped, so
+//! app-scoped worker drains the queue ONE food at a time, спрашивая КАЖДЫЙ признак
+//! отдельным запросом, so foods are classified in order without a parallel
+//! burst. Tags (`is_liquid_cal` / `is_veg_fruit` / `is_heme`) are cached on the
+//! `Food` and synced. Idempotent: признак, который уже проставлен, не переспрашивается, so
 //! re-logging a known food costs nothing.
 //!
 //! This replaces the old "tag snacks at daily-summary time" flow: classification
@@ -86,10 +86,38 @@ pub fn init() {
     });
 }
 
-/// True if `food` still has an unassigned category tag.
+/// Признаки, которые СПРАШИВАЮТСЯ у модели, и как проверить, что признака ещё нет.
+///
+/// Общего «нужна классификация» здесь нет намеренно: единого промпта больше нет, и
+/// один пустой признак не имеет права тянуть перезапрос остальных. У каждого свой
+/// гейт, свой запрос и своя запись.
+///
+/// Перекус, яйца и красное мясо у модели больше не спрашиваются — их тут нет.
+const FLAGS: &[(
+    &str,
+    fn(&Food) -> bool,
+    local::FoodFlag,
+)] = &[
+    ("жидкие калории", |f| f.is_liquid_cal.is_none(), local::FoodFlag::LiquidCal),
+    ("фрукты/овощи", |f| f.is_veg_fruit.is_none(), local::FoodFlag::VegFruit),
+    ("гем", |f| f.is_heme.is_none(), local::FoodFlag::Heme),
+];
+
+/// Спросить у модели ровно этот признак.
+async fn ask(flag: local::FoodFlag, name: &str) -> Result<bool, String> {
+    let names = [name.to_string()];
+    let v = match flag {
+        local::FoodFlag::LiquidCal => ai::classify_liquid_cal(&names).await?,
+        local::FoodFlag::VegFruit => ai::classify_veg_fruit(&names).await?,
+        local::FoodFlag::Heme => ai::classify_heme(&names).await?,
+    };
+    v.into_iter().next().ok_or_else(|| "пустой ответ классификатора".to_string())
+}
+
+/// True if `food` still misses at least one of the asked flags — то есть работа для
+/// прохода вообще есть. Что именно спрашивать, решает [`FLAGS`], каждый сам за себя.
 fn needs_classification(food: &Food) -> bool {
-    food.is_snack.is_none() || food.is_liquid_cal.is_none() || food.is_veg_fruit.is_none()
-        || food.is_egg.is_none() || food.is_red_meat.is_none() || food.is_heme.is_none()
+    FLAGS.iter().any(|(_, missing, _)| missing(food))
 }
 
 /// Enqueue a food id for background classification (no-op if already queued) and
@@ -122,26 +150,31 @@ async fn run_worker() {
             Q.with(|q| q.borrow_mut().running = false);
             return;
         };
-        // Load the food; skip if gone. One sequential background pass fills BOTH the
-        // category tags and the extra nutrients (calcium/iron/omega/fiber) — two AI
-        // calls at most, so the model isn't hit all at once.
+        // Load the food; skip if gone. Один последовательный проход добирает и
+        // признаки, и нутриенты, и железо — по запросу на каждую недостающую вещь,
+        // строго по очереди, чтобы модель не получала их пачкой.
         let Some(food) = db::get::<Food>("foods", &id).await else { continue };
         // То же и здесь: в очередь блюдо могло попасть напрямую через `enqueue`.
         if food.is_recipe {
             continue;
         }
 
-        if needs_classification(&food) {
+        // Каждый признак — сам за себя: спрашивается только тот, которого нет, и
+        // записывается сразу. Упавший признак не мешает остальным разобраться.
+        for (_, missing, flag) in FLAGS {
+            if !missing(&food) {
+                continue;
+            }
             let name = food.name.clone();
-            if let Some(tags) = with_retries(
-                move || { let n = name.clone(); async move { ai::classify_food(&[n]).await } },
+            let flag = *flag;
+            if let Some(v) = with_retries(
+                move || { let n = name.clone(); async move { ask(flag, &n).await } },
                 errors::FoodAspect::Kind,
                 &food.name,
             ).await
             {
-                if let Some(t) = tags.into_iter().next() {
-                    local::cache_food_tags(&[(id.clone(), t)]).await;
-                }
+                // Вердикт с обоснованием уже записан в лог самим запросом.
+                local::cache_food_flag(&id, flag, v).await;
             }
         }
 

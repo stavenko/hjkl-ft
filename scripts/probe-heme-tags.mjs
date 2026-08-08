@@ -107,7 +107,7 @@ const read = () => page.evaluate(async (uid) => {
     rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
   });
   db.close();
-  return all.map((f) => [f.name, f.is_heme, f.is_red_meat]);
+  return all.map((f) => [f.name, f.is_heme, f.is_liquid_cal, f.is_veg_fruit]);
 }, uid);
 
 const t0 = Date.now();
@@ -126,6 +126,7 @@ for (const [name, want] of CASES) {
   if (!ok) wrong++;
   console.log(`${ok ? "OK " : "МИМО"} ${name} → гем ${heme === undefined ? "не отвечено" : heme}` +
     (ok ? "" : ` (ждали ${want})`) +
+    `  [жидк.кал ${got?.[2]}, фр/овощи ${got?.[3]}]` +
     (reasons.has(name) ? `\n      обоснование: ${reasons.get(name)}` : ""));
 }
 console.log(`\nмимо: ${wrong} из ${CASES.length}`);

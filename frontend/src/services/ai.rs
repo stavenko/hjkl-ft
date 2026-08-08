@@ -760,59 +760,62 @@ pub(crate) struct IronAmount {
 }
 
 
-/// Per-food category verdict. All three tags are independent booleans (a raw
-/// fruit can be BOTH `snack` and `veg_fruit`).
-#[derive(Debug, Clone, Copy)]
-pub struct FoodTags {
-    /// Low-calorie snack (big filling volume for few calories).
-    pub snack: bool,
-    /// "Liquid calories": a caloric drink (soda, juice, sugary coffee, …).
-    pub liquid_cal: bool,
-    /// Vegetable or fruit (fresh, cooked, or an obvious veg/fruit dish).
-    pub veg_fruit: bool,
-    /// Eggs / an egg product (omelette, scrambled/boiled eggs).
-    pub egg: bool,
-    /// Red or processed meat (beef/pork/lamb; sausage, ham, bacon, salami).
-    pub red_meat: bool,
-    /// A rich source of HEME iron: liver and other offal, red meat, molluscs.
-    pub heme: bool,
-}
+// ── Признаки спрашиваются ПО ОДНОМУ ─────────────────────────────────────────
+//
+// Раньше все ехали одним запросом — дешевле по числу вызовов, но признаки в нём
+// тянут друг друга: определения соседей стоят в том же тексте, и продукт,
+// разобранный по одному пункту, притягивается к формулировкам другого. Гем на
+// этом и сыпался: мидии уходили к «shrimp and crab» из пункта про ракообразных.
+//
+// Теперь у каждого признака свой промпт и свой запрос. Вызовов стало по одному на
+// признак — это осознанная плата за то, что признаки перестали влиять друг на
+// друга и каждый можно замерять и править отдельно.
+//
+// Спрашиваются ТРИ: жидкие калории, фрукты/овощи, гем. Перекус, яйца и красное
+// мясо у модели больше не спрашиваются.
 
-/// Parallel boolean arrays, one entry per input food, in input order.
-// The flat-array shape (no maps / nullable / $refs) is what the strict model server
-// accepts — developer rationale, kept out of the schema on purpose.
-#[derive(Debug, Deserialize, JsonSchema)]
-struct FoodVerdicts {
-    snack: Vec<bool>,
-    liquid_cal: Vec<bool>,
-    veg_fruit: Vec<bool>,
-    egg: Vec<bool>,
-    red_meat: Vec<bool>,
-    heme: Vec<bool>,
-    /// Обоснование вердикта, по одному на продукт.
-    ///
-    /// Длинное имя — часть инструкции: модель читает схему и по имени поля понимает,
-    /// что от неё хотят, вернее, чем по отдельному абзацу. Короткое `heme_reason`
-    /// такого сигнала не даёт. Ограничение длины живёт в тексте промпта, а не в имени.
-    ///
-    /// Поле нужно не для показа: ответ рефлексом плавал от прогона к прогону на одном
-    /// и том же названии. Обязанность назвать причину до вердикта его удерживает, а
-    /// нам оставляет след в логе — видно, ЧЕМ модель сочла продукт.
-    reason_why_this_product_classified_as_gem_source: Vec<String>,
-}
-
-/// Classify each food NAME into the existing categories (snack / liquid calories /
-/// vegetable-fruit) in ONE batched request. Language-independent: the model judges
-/// meaning, guided by English examples. Returns one [`FoodTags`] per input, in the
-/// SAME order.
+/// Ответ на ОДИН признак: вердикты по продуктам и обоснование к каждому.
 ///
-/// Used by the background `classify` queue as soon as a food is logged. FAIL
-/// LOUDLY: a model / parse error, or any array whose length doesn't match the
-/// input, is an `Err` (the caller surfaces it; nothing is silently mis-tagged).
-pub async fn classify_food(names: &[String]) -> Result<Vec<FoodTags>, String> {
-    if names.is_empty() {
-        return Ok(Vec::new());
-    }
+/// Плоская форма (никаких map / nullable / $ref) — то, что принимает строгий
+/// сервер моделей.
+trait FlagAnswer {
+    fn parts(self) -> (Vec<bool>, Vec<String>);
+}
+
+/// Тип ответа на признак. Имя поля обоснования — ДЛИННОЕ намеренно: модель читает
+/// схему, и по имени понимает, что от неё хотят, вернее, чем по отдельному абзацу.
+/// Ограничение длины живёт в тексте промпта, а не в имени.
+///
+/// Само обоснование нужно не для показа: без него вердикт плавал от прогона к
+/// прогону на одном и том же названии. Обязанность назвать причину ДО вердикта его
+/// удерживает, а нам оставляет след в логе — видно, ЧЕМ модель сочла продукт.
+macro_rules! flag_answer {
+    ($ty:ident, $reason:ident) => {
+        #[derive(Debug, Deserialize, JsonSchema)]
+        struct $ty {
+            verdict: Vec<bool>,
+            $reason: Vec<String>,
+        }
+        impl FlagAnswer for $ty {
+            fn parts(self) -> (Vec<bool>, Vec<String>) {
+                (self.verdict, self.$reason)
+            }
+        }
+    };
+}
+
+flag_answer!(LiquidCalAnswer, reason_why_this_product_classified_as_liquid_calories);
+flag_answer!(VegFruitAnswer, reason_why_this_product_classified_as_vegetable_or_fruit);
+flag_answer!(HemeAnswer, reason_why_this_product_classified_as_gem_source);
+
+/// Спросить ОДИН признак про весь список продуктов.
+///
+/// `label` — как признак зовётся в логе; `definition` — единственное, чем промпты
+/// признаков отличаются друг от друга.
+async fn ask_flag<T>(names: &[String], label: &str, definition: &str) -> Result<Vec<bool>, String>
+where
+    T: serde::de::DeserializeOwned + JsonSchema + FlagAnswer,
+{
     let list = names
         .iter()
         .enumerate()
@@ -820,32 +823,71 @@ pub async fn classify_food(names: &[String]) -> Result<Vec<FoodTags>, String> {
         .collect::<Vec<_>>()
         .join("\n");
     let prompt = format!(
-        "For each food below, decide several independent yes/no categories. Food names may be in \
+        "Answer ONE yes/no question about each food below, and nothing else. Food names may be in \
          ANY language — judge by meaning, not by wording.\n\n\
-         1) \"snack\": a good low-calorie snack — something light to nibble between meals. The \
-         single test is VOLUME vs CALORIES: a big, filling volume for relatively few calories \
-         (lots of water or air). Calories per 100 g is NOT the test — air-popped popcorn IS such \
-         a snack. ARE (examples): cucumber, tomato, bell pepper, carrot, celery, radish, cabbage, \
-         lettuce, leafy greens, apple, pear, berries, orange, kiwi, grapefruit, popcorn \
-         (air-popped), rice cakes. NOT: nuts, seeds, chocolate, candy, cookies, chips, crackers, \
-         granola bars; full meals and cooked dishes, bread/cereal/pasta, meat, fish, dairy, drinks.\n\n\
-         2) \"liquid_cal\": \"liquid calories\" — TRUE for ONLY these three kinds of drink: \
+         {definition}\n\n\
+         For EVERY food also fill the reason field named in the schema. Keep it SHORT: one \
+         sentence, at most 10 words. Decide the reason FIRST and let the verdict follow from it — \
+         the two must agree.\n\n\
+         Foods (index. name):\n{list}\n\n\
+         Respond with ONLY a single minified JSON object: \"verdict\" — one boolean per food — and \
+         the reason array — one string per food, both in the SAME order as the foods above."
+    );
+    let (verdict, reason) = generate::<T>(prompt, |_| {}).await?.parts();
+    let n = names.len();
+    if verdict.len() != n || reason.len() != n {
+        return Err(format!(
+            "{label}: length mismatch for {n} foods — verdict={}, reason={}",
+            verdict.len(),
+            reason.len()
+        ));
+    }
+    for (i, name) in names.iter().enumerate() {
+        leptos::logging::log!("{label} «{name}»: {} — {}", verdict[i], reason[i]);
+    }
+    Ok(verdict)
+}
+
+// Каждый признак — своя функция, свой промпт, свой запрос. Общей «классификации»
+// больше нет: спрашивается ровно то, чего не хватает конкретному продукту.
+//
+// FAIL LOUDLY: ошибка модели, разбора или несовпадение длины массива — это `Err`
+// (вызывающий его показывает; ничего не размечается молча наугад).
+
+/// «Жидкие калории»: сок, сладкая газировка, алкоголь.
+pub async fn classify_liquid_cal(names: &[String]) -> Result<Vec<bool>, String> {
+    ask_flag::<LiquidCalAnswer>(names, "жидкие калории", LIQUID_CAL_DEF).await
+}
+
+/// Овощ или фрукт — свежий, приготовленный или очевидное овощное/фруктовое блюдо.
+pub async fn classify_veg_fruit(names: &[String]) -> Result<Vec<bool>, String> {
+    ask_flag::<VegFruitAnswer>(names, "фрукты/овощи", VEG_FRUIT_DEF).await
+}
+
+/// Богатый источник ГЕМОВОГО железа: печень и субпродукты, красное мясо, моллюски
+/// из закрытого списка.
+pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
+    ask_flag::<HemeAnswer>(names, "гем", HEME_DEF).await
+}
+
+const LIQUID_CAL_DEF: &str =
+        "QUESTION: is this food \"liquid calories\"? TRUE for ONLY these three kinds of drink: \
          (a) JUICE, including juice with pulp; (b) sugary/sweetened SODA (cola, lemonade, etc.); \
          (c) any ALCOHOLIC drink, including alcoholic beer, wine, cocktails, spirits. \
          Everything else is FALSE, INCLUDING: non-alcoholic beer; fermented-milk drinks (kefir, \
          ayran, tan, acidophilus milk / ацидофилин, ryazhenka) and any drink that carries protein, \
          live bacteria, or other nutrients — not just sugar/carbs; water, tea/coffee (even \
-         sweetened), milk, smoothies, cocoa, milkshakes, energy drinks; and any solid food.\n\n\
-         3) \"veg_fruit\": a vegetable or fruit — fresh, cooked, or an obvious vegetable/fruit \
-         dish (salad, stewed vegetables, fruit). NOT: cereals, grains, bread, meat, fish, dairy, \
-         sweets, or drinks.\n\n\
-         4) \"egg\": eggs or an egg product — whole eggs, omelette, scrambled/fried/boiled eggs, \
-         egg whites. NOT: dishes where eggs are only a minor binder (cakes, batter, pasta) — judge \
-         the food ITSELF, an individual ingredient named «egg» IS true.\n\n\
-         5) \"red_meat\": red or processed meat — beef, pork, veal, lamb, mutton; and processed \
-         meat: sausage, wiener, frankfurter, ham, bacon, salami, bologna, pepperoni, pâté. NOT: \
-         chicken, turkey and other poultry; fish and seafood; eggs; plant food.\n\n\
-         6) \"heme\": a RICH source of HEME iron — the well-absorbed animal form. TRUE for only \
+         sweetened), milk, smoothies, cocoa, milkshakes, energy drinks; and any solid food.";
+
+const VEG_FRUIT_DEF: &str =
+        "QUESTION: is this food a vegetable or a fruit — fresh, cooked, or an obvious \
+         vegetable/fruit \
+         dish (salad, stewed vegetables, fruit)? NOT: cereals, grains, bread, meat, fish, dairy, \
+         sweets, or drinks.";
+
+const HEME_DEF: &str =
+        "QUESTION: is this food a RICH source of HEME iron — the well-absorbed animal form? \
+         TRUE for only \
          three groups: (a) LIVER and other offal — liver, pâté, kidney, heart, tongue, blood \
          sausage; (b) RED MEAT — beef, veal, lamb, mutton, pork, venison, and dishes whose main \
          part is such meat; (c) MOLLUSCS FROM THIS CLOSED LIST, and no others: mussels, clams \
@@ -861,48 +903,7 @@ pub async fn classify_food(names: &[String]) -> Result<Vec<FoodTags>, String> {
          part (wiener, bologna, meat-filled pastry, pizza) are FALSE. Judge the food ITSELF: a \
          dish is TRUE only when such meat, offal or mollusc is its MAIN part. The answer depends \
          ONLY on WHAT THE FOOD IS. Words about preparation, storage, packaging, cut, grade or \
-         country of origin do not change what it is, and never change the answer.\n\n\
-         For EVERY food also fill \"reason_why_this_product_classified_as_gem_source\". Keep it \
-         SHORT: one sentence, at most 10 words. Decide the reason FIRST and let \"heme\" follow \
-         from it — the two must agree.\n\n\
-         Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object with six boolean arrays and one string \
-         array, each exactly one entry per food, in the SAME order. Example for 2 foods: \
-         {{\"snack\":[true,false],\"liquid_cal\":[false,true],\"veg_fruit\":[true,false],\
-         \"egg\":[false,false],\"red_meat\":[false,true],\"heme\":[false,true],\
-         \"reason_why_this_product_classified_as_gem_source\":\
-         [\"хлеб — растительная еда\",\"говядина — красное мясо\"]}}",
-    );
-    let v: FoodVerdicts = generate(prompt, |_| {}).await?;
-    let n = names.len();
-    if v.snack.len() != n || v.liquid_cal.len() != n || v.veg_fruit.len() != n
-        || v.egg.len() != n || v.red_meat.len() != n || v.heme.len() != n
-        || v.reason_why_this_product_classified_as_gem_source.len() != n
-    {
-        return Err(format!(
-            "food classification length mismatch for {n} foods: snack={}, liquid_cal={}, \
-             veg_fruit={}, egg={}, red_meat={}, heme={}, reason={}",
-            v.snack.len(), v.liquid_cal.len(), v.veg_fruit.len(), v.egg.len(),
-            v.red_meat.len(), v.heme.len(),
-            v.reason_why_this_product_classified_as_gem_source.len()
-        ));
-    }
-    // Обоснование — в лог: по нему видно, ЧЕМ модель сочла продукт, и промах
-    // разбирается по следу, а не гаданием.
-    for (i, name) in names.iter().enumerate() {
-        leptos::logging::log!(
-            "гем «{name}»: {} — {}",
-            v.heme[i],
-            v.reason_why_this_product_classified_as_gem_source[i]
-        );
-    }
-    Ok((0..n)
-        .map(|i| FoodTags {
-            snack: v.snack[i], liquid_cal: v.liquid_cal[i], veg_fruit: v.veg_fruit[i],
-            egg: v.egg[i], red_meat: v.red_meat[i], heme: v.heme[i],
-        })
-        .collect())
-}
+         country of origin do not change what it is, and never change the answer.";
 
 // ── Support-chat: tools + agentic tool-use loop ──
 //

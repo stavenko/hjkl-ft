@@ -126,7 +126,10 @@ fn iron_hint_text() -> String {
     use crate::services::iron;
     let sex = profile::get_sex();
     let age = profile::get_age_years();
-    let rda = iron::rda_mg_per_day(sex, age);
+    // Показываем ИМЕННО то число, от которого построена планка. У менструирующих
+    // женщин это средняя потребность, а не RDA: см. `iron::intake_basis_mg_per_day`.
+    // Назвать здесь RDA значило бы объяснять планку тем, из чего она не сделана.
+    let basis = iron::intake_basis_for_profile();
     let target = iron::weekly_absorbed_target_mg(sex, age);
     let who = match sex {
         Some(Sex::Female) => "женщинам",
@@ -134,8 +137,16 @@ fn iron_hint_text() -> String {
         None => "людям",
     };
     let age_s = age.map(|a| format!(" в {a} лет")).unwrap_or_default();
+    let menstrual = matches!(age, Some(19..=50)) && !matches!(sex, Some(Sex::Male));
+    let note = if menstrual {
+        "\n\nЭто СРЕДНЯЯ потребность. Официальная рекомендация выше — она рассчитана \
+         на самые обильные менструации, и набрать столько из обычной еды почти \
+         невозможно. Если ваши месячные обильные, норму стоит поднять."
+    } else {
+        ""
+    };
     format!(
-        "По таблице норм потребления {who}{age_s} нужно {rda:.0} мг железа в сутки.\n\n\
+        "По таблице норм потребления {who}{age_s} нужно {basis:.1} мг железа в сутки.{note}\n\n\
          Из еды усваивается лишь часть железа: из мяса и печени — заметно больше, чем из \
          растений. Поэтому мы считаем УСВОЕННОЕ железо, и недельная норма в этом счёте — \
          {target:.1} мг.\n\n\

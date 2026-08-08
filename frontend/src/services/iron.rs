@@ -79,10 +79,45 @@ pub fn rda_mg_per_day(sex: Option<Sex>, age_years: Option<i32>) -> f64 {
 /// actually measure per food — we scale it by this factor.
 pub const RDA_BIOAVAILABILITY: f64 = 0.18;
 
-/// The weekly target in ABSORBED mg of iron: the daily RDA for a week, converted
-/// from "eaten" to "absorbed" by the bioavailability the RDA assumes. Pure.
+/// Суточное потребление, из которого строится ПЛАНКА. Не всегда равно RDA.
+///
+/// RDA — это не средняя потребность. DRI берёт требование в усвоенном железе на
+/// **97,5-м процентиле** (запас на самые обильные менструации) и делит на верхнюю
+/// оценку усвоения. Для мужчин разброс потребности мал, и 97,5-й процентиль почти
+/// совпадает со средним: RDA 8 против EAR 6. У женщин разброс огромный — RDA 18
+/// против EAR 8,1, вдвое с лишним.
+///
+/// Планка по RDA означала бы 3,24 мг усвоенного в сутки. Живой рацион столько не
+/// даёт: даже западный смешанный с мясом по нашей же таблице долей выходит около
+/// 1,7 мг. Индикатор у женщин горел бы красным всегда и ничему не учил.
+///
+/// Поэтому у менструирующих женщин планка строится от EAR — СРЕДНЕЙ потребности.
+/// Той, у кого потери выше средних, планку надо поднимать отдельно и осознанно
+/// (планируется отметка «обильные менструации»), а не держать всех на верхнем крае.
+///
+/// Остальные возрастные группы — по RDA, как было: там разница между средним и
+/// верхним краем невелика, и менять устоявшееся без нужды незачем.
+fn intake_basis_mg_per_day(sex: Option<Sex>, age_years: Option<i32>) -> f64 {
+    let age = age_years.unwrap_or(30);
+    let menstruating = matches!(age, 19..=50) && !matches!(sex, Some(Sex::Male));
+    if menstruating {
+        // EAR по IOM для женщин 19–50: 8,1 мг/сут.
+        8.1
+    } else {
+        rda_mg_per_day(sex, age_years)
+    }
+}
+
+/// The weekly target in ABSORBED mg of iron: the daily intake basis for a week,
+/// converted from "eaten" to "absorbed" by the bioavailability the DRI assumes.
 pub fn weekly_absorbed_target_mg(sex: Option<Sex>, age_years: Option<i32>) -> f64 {
-    rda_mg_per_day(sex, age_years) * 7.0 * RDA_BIOAVAILABILITY
+    intake_basis_mg_per_day(sex, age_years) * 7.0 * RDA_BIOAVAILABILITY
+}
+
+/// То же суточное число, что стоит за планкой — для пояснения «?» на индикаторе.
+/// Показывать там RDA было бы враньём: планка построена не от него.
+pub fn intake_basis_for_profile() -> f64 {
+    intake_basis_mg_per_day(profile::get_sex(), profile::get_age_years())
 }
 
 /// This user's weekly absorbed-iron target, from their profile.
@@ -303,13 +338,34 @@ mod tests {
     }
 
     #[test]
-    fn weekly_target_is_the_rda_in_absorbed_terms() {
-        // Woman 35: 18 mg/day × 7 × 0.18 ≈ 22.68 mg absorbed per week.
+    fn weekly_target_is_the_intake_basis_in_absorbed_terms() {
+        // Женщина 35: планка от СРЕДНЕЙ потребности (EAR 8,1), а не от RDA 18.
+        // 8,1 × 7 × 0,18 ≈ 10,206 мг усвоенного в неделю.
         let t = weekly_absorbed_target_mg(Some(Sex::Female), Some(35));
-        assert!((t - 22.68).abs() < 1e-9, "{t}");
-        // Man 35: 8 × 7 × 0.18 ≈ 10.08.
+        assert!((t - 10.206).abs() < 1e-9, "{t}");
+        // По RDA было бы 22,68 — недостижимо на живой еде.
+        assert!(t < 18.0 * 7.0 * RDA_BIOAVAILABILITY);
+        // Man 35: 8 × 7 × 0.18 ≈ 10.08 — по RDA, как было.
         let t = weekly_absorbed_target_mg(Some(Sex::Male), Some(35));
         assert!((t - 10.08).abs() < 1e-9, "{t}");
+    }
+
+    #[test]
+    fn snizhenie_kasaetsya_tolko_menstruiruyushchih() {
+        // Подросток 16 и женщина после менопаузы — по-прежнему по RDA.
+        assert_eq!(
+            weekly_absorbed_target_mg(Some(Sex::Female), Some(16)),
+            15.0 * 7.0 * RDA_BIOAVAILABILITY
+        );
+        assert_eq!(
+            weekly_absorbed_target_mg(Some(Sex::Female), Some(60)),
+            8.0 * 7.0 * RDA_BIOAVAILABILITY
+        );
+        // Пол неизвестен в 19–50 — считаем как женщину: занижать вреднее.
+        assert_eq!(
+            weekly_absorbed_target_mg(None, Some(35)),
+            8.1 * 7.0 * RDA_BIOAVAILABILITY
+        );
     }
 
     #[test]

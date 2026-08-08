@@ -494,6 +494,8 @@ pub async fn cache_food_nutrients(id: &str, values: BTreeMap<String, f64>) {
         }
         food.updated_at = now();
         db::put("foods", &food).await;
+        // Блюда с этим продуктом считаются из состава — значит устарели.
+        recompute_recipes_using(id).await;
         // Nutrient values changed → only the days this food was eaten on need
         // re-summarizing.
         crate::services::indicators::invalidate_food(id).await;
@@ -511,6 +513,8 @@ pub async fn cache_food_iron(id: &str, iron_mg: f64, absorption: f64) {
         food.iron_absorption = Some(absorption);
         food.updated_at = now();
         db::put("foods", &food).await;
+        // Блюда с этим продуктом считаются из состава — значит устарели.
+        recompute_recipes_using(id).await;
         crate::services::sync::push_background();
     }
 }
@@ -1350,43 +1354,248 @@ pub async fn remove_ingredient(id: &str) {
 
 // --- Finalize Recipe ---
 
-pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
-    let recipe = get_recipe(recipe_id).await?;
-    let foods = list_foods().await;
+/// Питательность блюда, посчитанная ИЗ СОСТАВА, на 100 г готового.
+///
+/// Единственное место, где это считается: раньше та же арифметика стояла в ТРЁХ
+/// местах (доготовка, смена веса, показ на экране рецепта), а железа не было ни в
+/// одном — его блюду проставляла модель по НАЗВАНИЮ. Отсюда и брались мидийные
+/// 4,5 мг при 25 % у готового блюда, где мидий пятая часть массы: модель узнавала
+/// слово, а не состав.
+///
+/// Вложенные рецепты выходят сами собой: доготовленный рецепт — обычный продукт
+/// со своими значениями на 100 г, и складывается как всякий другой. Важен лишь
+/// порядок — внутренний должен быть посчитан раньше внешнего.
+pub struct RecipeNutrition {
+    pub kcal: f64,
+    pub protein: f64,
+    pub fat: f64,
+    pub carbs: f64,
+    pub nutrients: BTreeMap<String, f64>,
+    /// `None`, если ХОТЬ У ОДНОГО ингредиента железо ещё не выяснено: сумма по
+    /// части состава — это не «мало железа», а «мы пока не знаем», и выдавать
+    /// одно за другое нельзя.
+    pub iron_mg: Option<f64>,
+    pub iron_absorption: Option<f64>,
+}
 
-    let mut total_kcal = 0.0_f64;
-    let mut total_protein = 0.0_f64;
-    let mut total_fat = 0.0_f64;
-    let mut total_carbs = 0.0_f64;
-    let mut total_nutrients = BTreeMap::<String, f64>::new();
+pub fn recipe_nutrition(
+    ingredients: &[RecipeIngredient],
+    foods: &BTreeMap<String, Food>,
+    total_grams: f64,
+) -> RecipeNutrition {
+    let mut kcal = 0.0_f64;
+    let mut protein = 0.0_f64;
+    let mut fat = 0.0_f64;
+    let mut carbs = 0.0_f64;
+    let mut nutrients = BTreeMap::<String, f64>::new();
+    // Железо копим в ДВУХ величинах: всего миллиграммов и сколько из них
+    // усваивается. Долю усвоения блюда нельзя брать средним по ингредиентам —
+    // мидии с их 25 % на пятой части массы вытянули бы всё блюдо. Правильная
+    // доля — усвоенное, делённое на общее.
+    let mut iron_mg = 0.0_f64;
+    let mut iron_absorbed = 0.0_f64;
+    let mut iron_known = true;
 
-    for ing in &recipe.ingredients {
-        if let Some(f) = foods.iter().find(|f| f.id == ing.food_id) {
-            let factor = ing.grams / 100.0;
-            total_kcal += f.kcal * factor;
-            total_protein += f.protein * factor;
-            total_fat += f.fat * factor;
-            total_carbs += f.carbs * factor;
-            for (k, v) in &f.nutrients {
-                *total_nutrients.entry(k.clone()).or_default() += v * factor;
+    for ing in ingredients {
+        let Some(f) = foods.get(&ing.food_id) else {
+            // Ингредиента нет в базе — состав неполон, и железо блюда неизвестно.
+            iron_known = false;
+            continue;
+        };
+        let factor = ing.grams / 100.0;
+        kcal += f.kcal * factor;
+        protein += f.protein * factor;
+        fat += f.fat * factor;
+        carbs += f.carbs * factor;
+        for (k, v) in &f.nutrients {
+            *nutrients.entry(k.clone()).or_default() += v * factor;
+        }
+        match (f.iron_mg, f.iron_absorption) {
+            (Some(mg), Some(a)) => {
+                iron_mg += mg * factor;
+                iron_absorbed += mg * a * factor;
             }
+            _ => iron_known = false,
         }
     }
 
     let scale = 100.0 / total_grams;
-    let nutrients = total_nutrients
-        .into_iter()
-        .map(|(k, v)| (k, v * scale))
+    RecipeNutrition {
+        kcal: kcal * scale,
+        protein: protein * scale,
+        fat: fat * scale,
+        carbs: carbs * scale,
+        nutrients: nutrients.into_iter().map(|(k, v)| (k, v * scale)).collect(),
+        iron_mg: iron_known.then(|| iron_mg * scale),
+        // Доля усвоения от веса НЕ зависит: это отношение, и обе его части
+        // масштабируются одинаково. Нулевое железо — доля неопределена.
+        iron_absorption: iron_known
+            .then(|| (iron_mg > 0.0).then(|| iron_absorbed / iron_mg))
+            .flatten(),
+    }
+}
+
+
+// ── Пересчёт рецептов ────────────────────────────────────────────────────────
+//
+// Блюдо — не самостоятельный продукт, а функция от состава. Но `finish_recipe`
+// делает СНИМОК, а данные ингредиентов дозаполняются фоном уже после: человек
+// собирает рецепт из свежих продуктов, доготавливает, и только потом модель
+// выясняет их железо. Без пересчёта блюдо навсегда осталось бы с тем, что было
+// известно в момент доготовки.
+//
+// Отсюда два уровня. Точечный — сразу после того, как данные ингредиента
+// изменились. Сплошной — на запуске, чтобы поймать приехавшее синком с другого
+// устройства и всё, что точечный путь упустит.
+
+/// Пересчитать одно блюдо из состава. Пишет ТОЛЬКО если что-то изменилось:
+/// холостая перезапись попала бы в журнал синхронизации и сделала бы холостой
+/// синк нехолостым.
+///
+/// Возвращает `true`, если запись состоялась, — по этому признаку внешние рецепты
+/// понимают, что их тоже надо пересчитать.
+pub async fn recompute_recipe(recipe_id: &str) -> bool {
+    let Some(recipe) = get_recipe(recipe_id).await else { return false };
+    let Some(food_id) = recipe.food_id.clone() else { return false };
+    let Some(total_grams) = recipe.total_grams.filter(|g| *g > 0.0) else { return false };
+    let Some(mut food) = db::get::<Food>("foods", &food_id).await else { return false };
+
+    let ids = recipe.ingredients.iter().map(|i| i.food_id.clone());
+    let foods = foods_by_ids(ids).await;
+    let n = recipe_nutrition(&recipe.ingredients, &foods, total_grams);
+
+    let same = |a: f64, b: f64| (a - b).abs() < 1e-6;
+    let unchanged = same(food.kcal, n.kcal)
+        && same(food.protein, n.protein)
+        && same(food.fat, n.fat)
+        && same(food.carbs, n.carbs)
+        && food.nutrients.len() == n.nutrients.len()
+        && food.nutrients.iter().all(|(k, v)| n.nutrients.get(k).is_some_and(|w| same(*v, *w)))
+        && match (food.iron_mg, n.iron_mg) {
+            (Some(a), Some(b)) => same(a, b),
+            (None, None) => true,
+            _ => false,
+        }
+        && match (food.iron_absorption, n.iron_absorption) {
+            (Some(a), Some(b)) => same(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+    if unchanged {
+        return false;
+    }
+
+    food.kcal = n.kcal;
+    food.protein = n.protein;
+    food.fat = n.fat;
+    food.carbs = n.carbs;
+    food.nutrients = n.nutrients;
+    food.iron_mg = n.iron_mg;
+    food.iron_absorption = n.iron_absorption;
+    food.updated_at = now();
+    db::put("foods", &food).await;
+    true
+}
+
+/// Пересчитать все блюда, где этот продукт — ингредиент, и дальше вверх по
+/// вложенности: пересчитанное блюдо само может быть ингредиентом другого.
+///
+/// Глубина ограничена: рецепт, попавший сам в себя через цепочку, иначе крутил бы
+/// обход вечно. Такого состава быть не должно, но проверять это здесь — не наше
+/// дело, а вот не зависнуть — наше.
+pub async fn recompute_recipes_using(food_id: &str) {
+    let mut frontier = vec![food_id.to_string()];
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..8 {
+        if frontier.is_empty() {
+            return;
+        }
+        let mut next = Vec::new();
+        for fid in frontier.drain(..) {
+            let refs: Vec<RecipeIngredient> =
+                db::list_by_index("recipe_ingredients", "food_id", &fid).await;
+            for r in refs {
+                if !seen.insert(r.recipe_id.clone()) {
+                    continue;
+                }
+                if recompute_recipe(&r.recipe_id).await {
+                    // Изменилось — значит внешние рецепты с этим блюдом устарели.
+                    if let Some(rec) = get_recipe(&r.recipe_id).await {
+                        if let Some(fid) = rec.food_id {
+                            next.push(fid);
+                        }
+                    }
+                }
+            }
+        }
+        frontier = next;
+    }
+    leptos::logging::warn!("пересчёт рецептов: слишком глубокая вложенность, обход прерван");
+}
+
+/// Пересчитать ВСЕ блюда — от внутренних к внешним.
+///
+/// Порядок обязателен: пересчитай внешний раньше внутреннего, и он унаследует
+/// старые числа внутреннего и разойдётся до следующего запуска. Глубина
+/// ограничена по той же причине, что и выше.
+pub async fn recompute_all_recipes() -> usize {
+    let recipes = list_recipes().await;
+    // Блюдо каждого рецепта — чтобы понять, кто в ком.
+    let dish_of: BTreeMap<String, String> = recipes
+        .iter()
+        .filter_map(|r| r.food_id.clone().map(|f| (f, r.id.clone())))
         .collect();
+
+    let mut pending: Vec<Recipe> = recipes;
+    let mut done: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut changed = 0usize;
+    for _ in 0..8 {
+        if pending.is_empty() {
+            break;
+        }
+        let mut deferred = Vec::new();
+        for r in pending.drain(..) {
+            // Готов к пересчёту, когда все вложенные рецепты уже пересчитаны.
+            let waits = r.ingredients.iter().any(|i| {
+                dish_of.get(&i.food_id).is_some_and(|rid| *rid != r.id && !done.contains(rid))
+            });
+            if waits {
+                deferred.push(r);
+                continue;
+            }
+            if recompute_recipe(&r.id).await {
+                changed += 1;
+            }
+            done.insert(r.id.clone());
+        }
+        pending = deferred;
+    }
+    // Оставшиеся — кольцо в составе. Пересчитываем как есть, лишь бы не бросить.
+    for r in pending {
+        leptos::logging::warn!("пересчёт рецептов: кольцо в составе «{}»", r.name);
+        if recompute_recipe(&r.id).await {
+            changed += 1;
+        }
+    }
+    if changed > 0 {
+        crate::services::sync::push_background();
+    }
+    changed
+}
+
+pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
+    let recipe = get_recipe(recipe_id).await?;
+    let foods = foods_by_ids(recipe.ingredients.iter().map(|i| i.food_id.clone())).await;
+    let n = recipe_nutrition(&recipe.ingredients, &foods, total_grams);
 
     let food = Food {
         id: new_id(),
         name: recipe.name.clone(),
-        kcal: total_kcal * scale,
-        protein: total_protein * scale,
-        fat: total_fat * scale,
-        carbs: total_carbs * scale,
-        nutrients,
+        kcal: n.kcal,
+        protein: n.protein,
+        fat: n.fat,
+        carbs: n.carbs,
+        nutrients: n.nutrients,
         package_weight: None,
         is_recipe: true,
         recipe_id: Some(recipe_id.to_string()),
@@ -1397,8 +1606,11 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         is_veg_fruit: None,
         is_egg: None,
         is_red_meat: None,
-        iron_mg: None,
-        iron_absorption: None,
+        // Железо блюда — из состава, а не от модели по названию. `None` здесь
+        // означает «у части ингредиентов оно ещё не выяснено»; пересчёт вернётся
+        // сюда, когда выяснится.
+        iron_mg: n.iron_mg,
+        iron_absorption: n.iron_absorption,
         created_at: now(),
         updated_at: now(),
     };
@@ -1436,33 +1648,17 @@ pub async fn change_recipe_weight(recipe_id: &str, new_total_grams: f64) -> Opti
     }
     let recipe = get_recipe(recipe_id).await?;
     let food_id = recipe.food_id.clone()?;
-    let foods = list_foods().await;
+    let foods = foods_by_ids(recipe.ingredients.iter().map(|i| i.food_id.clone())).await;
+    let n = recipe_nutrition(&recipe.ingredients, &foods, new_total_grams);
 
-    let mut total_kcal = 0.0_f64;
-    let mut total_protein = 0.0_f64;
-    let mut total_fat = 0.0_f64;
-    let mut total_carbs = 0.0_f64;
-    let mut total_nutrients = BTreeMap::<String, f64>::new();
-    for ing in &recipe.ingredients {
-        if let Some(f) = foods.iter().find(|f| f.id == ing.food_id) {
-            let factor = ing.grams / 100.0;
-            total_kcal += f.kcal * factor;
-            total_protein += f.protein * factor;
-            total_fat += f.fat * factor;
-            total_carbs += f.carbs * factor;
-            for (k, v) in &f.nutrients {
-                *total_nutrients.entry(k.clone()).or_default() += v * factor;
-            }
-        }
-    }
-
-    let scale = 100.0 / new_total_grams;
     let mut food: Food = db::get("foods", &food_id).await?;
-    food.kcal = total_kcal * scale;
-    food.protein = total_protein * scale;
-    food.fat = total_fat * scale;
-    food.carbs = total_carbs * scale;
-    food.nutrients = total_nutrients.into_iter().map(|(k, v)| (k, v * scale)).collect();
+    food.kcal = n.kcal;
+    food.protein = n.protein;
+    food.fat = n.fat;
+    food.carbs = n.carbs;
+    food.nutrients = n.nutrients;
+    food.iron_mg = n.iron_mg;
+    food.iron_absorption = n.iron_absorption;
     food.updated_at = now();
     db::put("foods", &food).await;
 
@@ -1957,5 +2153,121 @@ mod tests {
         let cut = estimated(Direction::Down, -0.05, 0.55);
         assert_eq!(calorie_planka(2600.0, &cut, 90.0), 2450.0); // 2470 -> 49.4 -> 2450
         assert_eq!(calorie_planka(2000.0, &cut, 90.0), 1900.0);
+    }
+}
+
+#[cfg(test)]
+mod recipe_tests {
+    use super::*;
+
+    fn food(id: &str, kcal: f64, iron: Option<(f64, f64)>) -> Food {
+        Food {
+            id: id.to_string(),
+            name: id.to_string(),
+            kcal,
+            protein: 0.0,
+            fat: 0.0,
+            carbs: 0.0,
+            nutrients: BTreeMap::new(),
+            package_weight: None,
+            is_recipe: false,
+            recipe_id: None,
+            archived: false,
+            is_restaurant: false,
+            is_snack: None,
+            is_liquid_cal: None,
+            is_veg_fruit: None,
+            is_egg: None,
+            is_red_meat: None,
+            iron_mg: iron.map(|(mg, _)| mg),
+            iron_absorption: iron.map(|(_, a)| a),
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    fn ing(food_id: &str, grams: f64) -> RecipeIngredient {
+        RecipeIngredient {
+            id: format!("i-{food_id}"),
+            recipe_id: "r".into(),
+            food_id: food_id.to_string(),
+            grams,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    /// Тот самый случай: мидии в блюде, где их пятая часть массы.
+    #[test]
+    fn zhelezo_propocionalno_dole_i_uvarke() {
+        let mut foods = BTreeMap::new();
+        foods.insert("мидии".to_string(), food("мидии", 80.0, Some((4.5, 0.25))));
+        foods.insert("сыр".to_string(), food("сыр", 350.0, Some((0.3, 0.05))));
+
+        // 100 г мидий + 400 г сыра, уварилось до 400 г готового.
+        let n = recipe_nutrition(&[ing("мидии", 100.0), ing("сыр", 400.0)], &foods, 400.0);
+
+        // Всего железа: 4,5 + 1,2 = 5,7 мг на 500 г сырья → на 100 г готового 1,425.
+        let mg = n.iron_mg.unwrap();
+        assert!((mg - 1.425).abs() < 1e-6, "{mg}");
+        // И это НЕ мидийные 4,5 — то, что подставляла модель по названию.
+        assert!(mg < 4.5);
+
+        // Доля усвоения — по вкладу усвоенного, а не среднее по ингредиентам.
+        // Усвоено: 4,5×0,25 + 1,2×0,05 = 1,185 мг → доля 1,185/5,7 = 0,2079.
+        let a = n.iron_absorption.unwrap();
+        assert!((a - 1.185 / 5.7).abs() < 1e-6, "{a}");
+        // Мидийные 25 % блюду не достаются.
+        assert!(a < 0.25);
+    }
+
+    #[test]
+    fn uvarka_menyaet_plotnost_no_ne_dolyu() {
+        let mut foods = BTreeMap::new();
+        foods.insert("мидии".to_string(), food("мидии", 80.0, Some((4.5, 0.25))));
+        let ings = [ing("мидии", 200.0)];
+
+        let wet = recipe_nutrition(&ings, &foods, 200.0);
+        let dry = recipe_nutrition(&ings, &foods, 100.0); // уварилось вдвое
+
+        // Уварилось вдвое → на 100 г вдвое плотнее.
+        assert!((dry.iron_mg.unwrap() / wet.iron_mg.unwrap() - 2.0).abs() < 1e-6);
+        // А доля усвоения от веса не зависит — это отношение.
+        assert!((dry.iron_absorption.unwrap() - wet.iron_absorption.unwrap()).abs() < 1e-9);
+    }
+
+    /// «Не знаем» и «мало» — разные вещи, и путать их нельзя.
+    #[test]
+    fn nevyyasnennoe_zhelezo_ingredienta_delaet_blyudo_neizvestnym() {
+        let mut foods = BTreeMap::new();
+        foods.insert("мидии".to_string(), food("мидии", 80.0, Some((4.5, 0.25))));
+        foods.insert("сыр".to_string(), food("сыр", 350.0, None));
+
+        let n = recipe_nutrition(&[ing("мидии", 100.0), ing("сыр", 100.0)], &foods, 200.0);
+        assert!(n.iron_mg.is_none());
+        assert!(n.iron_absorption.is_none());
+        // Калории при этом посчитаны: они известны у обоих.
+        assert!((n.kcal - 215.0).abs() < 1e-6, "{}", n.kcal);
+    }
+
+    #[test]
+    fn otsutstvuyushchij_ingredient_ne_vydayotsya_za_izvestnoe() {
+        let foods = BTreeMap::new();
+        let n = recipe_nutrition(&[ing("пропавший", 100.0)], &foods, 100.0);
+        assert!(n.iron_mg.is_none());
+        assert_eq!(n.kcal, 0.0);
+    }
+
+    #[test]
+    fn blyudo_kak_ingredient_skladyvaetsya_kak_obychnyj_produkt() {
+        // Внутреннее блюдо уже посчитано и лежит продуктом со своими значениями.
+        let mut foods = BTreeMap::new();
+        foods.insert("соус".to_string(), food("соус", 100.0, Some((1.425, 0.2079))));
+        foods.insert("паста".to_string(), food("паста", 150.0, Some((1.0, 0.04))));
+
+        let n = recipe_nutrition(&[ing("соус", 100.0), ing("паста", 300.0)], &foods, 400.0);
+        let mg = n.iron_mg.unwrap();
+        // 1,425 + 3,0 = 4,425 мг на 400 г → 1,10625 на 100 г.
+        assert!((mg - 1.10625).abs() < 1e-6, "{mg}");
     }
 }

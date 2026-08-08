@@ -245,6 +245,12 @@ async fn maintain_user_data() {
         });
     }
 
+    // Блюда пересчитываются из состава на КАЖДОМ запуске. Точечный пересчёт (в
+    // `cache_food_*`) ловит дозаполненное фоном здесь же, а этот проход — то, что
+    // приехало синком с другого устройства. Пишет только изменившееся, поэтому
+    // на неизменных данных не стоит ничего.
+    services::local::recompute_all_recipes().await;
+
     // Open the activity week if the week-2 gate is now cleared (local-only; runs
     // regardless of connectivity).
     services::indicators::maybe_unlock_activity_week().await;

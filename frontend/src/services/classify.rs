@@ -126,6 +126,10 @@ async fn run_worker() {
         // category tags and the extra nutrients (calcium/iron/omega/fiber) — two AI
         // calls at most, so the model isn't hit all at once.
         let Some(food) = db::get::<Food>("foods", &id).await else { continue };
+        // То же и здесь: в очередь блюдо могло попасть напрямую через `enqueue`.
+        if food.is_recipe {
+            continue;
+        }
 
         if needs_classification(&food) {
             let name = food.name.clone();
@@ -167,7 +171,16 @@ async fn run_worker() {
 }
 
 /// True if a food still needs any background AI processing (tags, nutrients, iron).
+///
+/// БЛЮДА СЮДА НЕ ПОПАДАЮТ. У рецепта состав известен: и калории, и нутриенты, и
+/// железо считаются из ингредиентов (`local::recipe_nutrition`). Спрашивать про
+/// него модель — значит в лучшем случае повторить посчитанное, а в худшем
+/// подменить его догадкой по названию. Именно так у блюда из мидий оказывалось
+/// мидийное железо: модель узнавала слово, а не состав.
 fn needs_processing(food: &Food) -> bool {
+    if food.is_recipe {
+        return false;
+    }
     needs_classification(food)
         || super::enrich::needs_enrichment(food)
         || (super::iron::unlocked() && super::iron::needs_iron(food))

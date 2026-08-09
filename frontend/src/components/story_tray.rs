@@ -233,6 +233,7 @@ fn text_with_icons(s: &str) -> View {
 /// Render story text with inline emphasis markers:
 ///  * `^…^` → a BOLD WHITE→YELLOW gradient span (the «strong bones» highlight),
 ///  * `#…#` → a BOLD WHITE→RED gradient span (the iron/blood highlight),
+///  * `@…@` → a BOLD OLIVE→YELLOW gradient span (the fats highlight),
 ///  * `~…~` → a BOLD YELLOW→ORANGE→RED gradient span,
 /// all the same font-size as the surrounding text; the rest still passes through
 /// `text_with_icons` for the «⇄» repeat icon. The markers are split outermost-first,
@@ -270,6 +271,31 @@ fn text_rich_red(s: &str) -> View {
                 view! {
                     <span style="font-weight: 800; \
                         background: linear-gradient(115deg, #ffffff 0%, #fca5a5 38%, #e0304f 100%); \
+                        -webkit-background-clip: text; background-clip: text; \
+                        -webkit-text-fill-color: transparent; color: transparent;">
+                        {part.to_string()}
+                    </span>
+                }
+                .into_view(),
+            );
+        } else {
+            out.push(text_rich_olive(part));
+        }
+    }
+    out.collect_view().into_view()
+}
+
+/// The OLIVE (`@…@`) gradient pass — light greenish-yellow into yellow, the colour
+/// of olive oil. Used where the subject is fat itself, so the highlight does not
+/// borrow iron's blood-red or the warm alarm gradient.
+fn text_rich_olive(s: &str) -> View {
+    let mut out: Vec<View> = Vec::new();
+    for (i, part) in s.split('@').enumerate() {
+        if i % 2 == 1 {
+            out.push(
+                view! {
+                    <span style="font-weight: 800; \
+                        background: linear-gradient(115deg, #e9efa8 0%, #d7e56a 42%, #fde047 100%); \
                         -webkit-background-clip: text; background-clip: text; \
                         -webkit-text-fill-color: transparent; color: transparent;">
                         {part.to_string()}

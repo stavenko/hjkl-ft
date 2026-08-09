@@ -1098,7 +1098,7 @@ const S6: &[Frame] = &[
     // 1 — поздравление: железо позади, впереди жиры.
     Frame {
         bg: Bg::Dark,
-        media: Media::Emoji("🎉"),
+        media: Media::Cover("fats-lard.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Fats", ru: "Жиры" },
         title: Loc { en: "", ru: "" },
@@ -1112,7 +1112,7 @@ const S6: &[Frame] = &[
     // 2 — из чего вообще состоят жиры.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("fats-omega-foods.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Fats", ru: "Жиры" },
         title: Loc { en: "", ru: "" },
@@ -1134,10 +1134,10 @@ const S6: &[Frame] = &[
         title: Loc { en: "", ru: "" },
         body: Loc {
             en: "Besides that, there are special fatty acids — EPA and DHA — which we need and \
-                 which our body does not make. They are also called #omega-3#. As it happens, \
+                 which our body does not make. They are also called @omega-3@. As it happens, \
                  we can get them only from fish.",
             ru: "Кроме того, есть особые жирные кислоты: ЭПК и ДГК, которые нужны, и которые наш \
-                 организм не производит. Их ещё называют #омега-3#. Так вышло, что их мы можем \
+                 организм не производит. Их ещё называют @омега-3@. Так вышло, что их мы можем \
                  получить только из рыбы.",
         },
     },

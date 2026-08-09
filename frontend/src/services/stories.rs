@@ -1087,6 +1087,137 @@ const S5: &[Frame] = &[
     },
 ];
 
+// --- Story 6 «Неделя жиров» — открывается, когда ЗАКРЫТА недельная планка железа
+// (Appears::AfterFatWeek).
+//
+// Русский текст — авторский, перенесён дословно. Правлены только опечатки диктовки
+// («бальшая», «состоят и жирных кислот», «Страиваются», «декатор») и раскрыта
+// пометка «(перечислить те, что в рыбе)» — ЭПК и ДГК.
+
+const S6: &[Frame] = &[
+    // 1 — поздравление: железо позади, впереди жиры.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Emoji("🎉"),
+        accent: GREEN,
+        kicker: Loc { en: "Fats", ru: "Жиры" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Congratulations, you have dealt with iron! That, I hope, was not too hard. \
+                 Ahead lies a very big and important subject — the #fats# week.",
+            ru: "Поздравляем, вы справились с железом! Это, надеюсь, было не очень сложно. \
+                 Впереди очень большая и важная тема — #неделя жиров#.",
+        },
+    },
+    // 2 — из чего вообще состоят жиры.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fats", ru: "Жиры" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "There are a great many different fats, and living with them is rather hard. \
+                 All fats are made of fatty acids. And those come as saturated, \
+                 mono-unsaturated and poly-unsaturated.",
+            ru: "Жиров очень много разных и с ними жить довольно сложно. Все жиры состоят из \
+                 жирных кислот. А они бывают насыщенные, моно-ненасыщенные и \
+                 поли-ненасыщенные.",
+        },
+    },
+    // 3 — незаменимые: организм их не делает, взять можно только из рыбы.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fats", ru: "Жиры" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Besides that, there are special fatty acids — EPA and DHA — which we need and \
+                 which our body does not make. They are also called #omega-3#. As it happens, \
+                 we can get them only from fish.",
+            ru: "Кроме того, есть особые жирные кислоты: ЭПК и ДГК, которые нужны, и которые наш \
+                 организм не производит. Их ещё называют #омега-3#. Так вышло, что их мы можем \
+                 получить только из рыбы.",
+        },
+    },
+    // 4 — чем оборачивается дефицит.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Fats", ru: "Жиры" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "A deficit of omega-3 raises mortality from cardiovascular and oncological \
+                 disease. These acids are built into the membranes of our brain and of the \
+                 retina, keeping them working. They regulate inflammation and clotting.",
+            ru: "Дефицит омега-3 вызывает повышенную смертность из-за сердечно-сосудистых и \
+                 онкологических заболеваний. Эти кислоты встраиваются в оболочку мембран нашего \
+                 мозга и сетчатки глаза, обеспечивая их работу. Они регулируют воспаление и \
+                 тромбы.",
+        },
+    },
+    // 5 — беда не в жире как таковом, а в перекосе.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Fats", ru: "Жиры" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "And the whole problem here is exactly the #imbalance#: when there are too many \
+                 saturated fatty acids — from animal products such as beef, pork and lamb.",
+            ru: "И вся проблема здесь именно в #перекосе#: когда слишком много насыщенных жирных \
+                 кислот: из животных продуктов, таких как говядина, свинина, баранина.",
+        },
+    },
+    // 6 — первый индикатор: омега-3 из рыбы.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("fats-omega-highlight.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "Fats", ru: "Жиры" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "That is why we give you two indicators. One of them is for omega-3 from fish — \
+                 you need to close a minimum amount.",
+            ru: "Поэтому мы даём вам два индикатора: один из них по омега-3 из рыбы — необходимо \
+                 закрывать минимальное количество.",
+        },
+    },
+    // 7 — второй индикатор: соотношение, то есть баланс.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Shot("fats-ratio-highlight.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "Fats", ru: "Жиры" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "The other indicator is the ratio of saturated to unsaturated fatty acids. It \
+                 shows how well you are in balance. If this indicator is green, your risks of \
+                 cardiovascular and oncological disease are minimal.",
+            ru: "Другой индикатор — это соотношение насыщенных к ненасыщенным жирным кислотам. \
+                 Он показывает, насколько вы в балансе. Если этот индикатор зелёный, значит, ваши \
+                 риски сердечно-сосудистых и онкологических заболеваний минимальны.",
+        },
+    },
+    // 8 — что нужно сделать, чтобы открылась следующая история.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fats", ru: "Жиры" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Keep those indicators green for a whole week to discover the next story in this \
+                 journey.",
+            ru: "Держите эти индикаторы зелёными целую неделю, чтобы открыть следующую историю \
+                 этого пути.",
+        },
+    },
+];
+
 static STORIES: &[Story] = &[
     Story {
         id: "welcome",
@@ -1123,5 +1254,11 @@ static STORIES: &[Story] = &[
         appears: Appears::AfterIronWeek,
         badge: Loc { en: "5", ru: "5" },
         frames: S5,
+    },
+    Story {
+        id: "week6",
+        appears: Appears::AfterFatWeek,
+        badge: Loc { en: "6", ru: "6" },
+        frames: S6,
     },
 ];

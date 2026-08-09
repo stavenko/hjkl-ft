@@ -155,6 +155,10 @@ const b = await chromium.launch({ headless: true });
     !g.some((x) => /Омега-3\/нед|АЛК\/нед|Жиры\/нед/.test(x)), JSON.stringify(g));
   check("планка железа не закрыта: индикаторов по жирам нет",
     !i.some((x) => ["Омега-3", "АЛК", "Жиры"].includes(x)), JSON.stringify(i));
+  const tray = await page.$$eval("[data-story-id]", (els) =>
+    els.map((e) => e.getAttribute("data-story-id")));
+  check("планка железа не закрыта: истории шестой недели нет", !tray.includes("week6"),
+    JSON.stringify(tray));
   await context.close();
 }
 
@@ -192,6 +196,10 @@ const b = await chromium.launch({ headless: true });
     ["Омега-3/нед", "АЛК/нед", "Жиры/нед"].every((x) => g.includes(x)), JSON.stringify(g));
   check("три индикатора по жирам в ряду",
     ["Омега-3", "АЛК", "Жиры"].every((x) => i.includes(x)), JSON.stringify(i));
+  // История шестой недели появляется вместе с жирами — и только с ними.
+  const tray = await page.$$eval("[data-story-id]", (els) =>
+    els.map((e) => e.getAttribute("data-story-id")));
+  check("в трее появилась история шестой недели", tray.includes("week6"), JSON.stringify(tray));
   const epa = await gaugeValue(page, "Омега-3/нед");
   const ala = await gaugeValue(page, "АЛК/нед");
   const ratio = await gaugeValue(page, "Жиры/нед");

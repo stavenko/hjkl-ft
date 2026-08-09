@@ -705,11 +705,14 @@ pub fn DashboardPage() -> impl IntoView {
                                     segments: 7,
                                     passed: w.day_of_week.saturating_sub(1),
                                 };
+                                // Точки темпа — только у накопительных величин, см.
+                                // тот же разбор в progress_widget.
                                 let cell = |value: f64, target: f64, label: &'static str,
-                                            unit: &'static str, decimals: usize, hint: String| {
+                                            unit: &'static str, decimals: usize, paced: bool,
+                                            hint: String| {
                                     let (bar, val) =
                                         crate::components::gauge::at_least_colors(value, target);
-                                    let pace = pace.clone();
+                                    let pace = paced.then(|| pace.clone());
                                     view! {
                                         <Gauge value=value target=target
                                             label=label.to_string()
@@ -717,19 +720,19 @@ pub fn DashboardPage() -> impl IntoView {
                                             color=bar.to_string()
                                             height=12.0
                                             decimals=decimals
-                                            pace=Some(pace)
+                                            pace=pace
                                             hint=hint
                                             value_color=val.map(String::from)/>
                                     }
                                 };
                                 view! {
                                     {cell(w.acids.epa_dha_g, w.epa_dha_target, "Омега-3/нед", "г", 2,
-                                          epa_dha_hint_text())}
+                                          true, epa_dha_hint_text())}
                                     {cell(w.acids.ala_g, w.ala_target, "АЛК/нед", "г", 1,
-                                          ala_hint_text())}
+                                          true, ala_hint_text())}
                                     {cell(w.ratio().unwrap_or(0.0),
                                           crate::services::fats::UNSAT_TO_SAT_MIN,
-                                          "Жиры/нед", "", 2, fat_ratio_hint_text())}
+                                          "Жиры/нед", "", 2, false, fat_ratio_hint_text())}
                                 }
                             });
                             let detail = d.series.iter().map(|s| {

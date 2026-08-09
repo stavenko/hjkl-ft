@@ -232,9 +232,14 @@ fn weekly_fat_gauges(w: crate::services::fats::WeeklyFats) -> impl IntoView {
         segments: 7,
         passed: w.day_of_week.saturating_sub(1),
     };
-    let cell = |value: f64, target: f64, label: &'static str, unit: &'static str, decimals: usize| {
+    // Точки темпа — только у НАКОПИТЕЛЬНЫХ величин: граммы копятся за неделю, и
+    // «где вы были бы, набирая ровно» — осмысленный вопрос. Отношение не копится:
+    // это состояние рациона на сейчас, а не сумма. Точки под ним обещали бы, что к
+    // воскресенью оно само подрастёт.
+    let cell = |value: f64, target: f64, label: &'static str, unit: &'static str,
+                decimals: usize, paced: bool| {
         let (bar, val) = crate::components::gauge::at_least_colors(value, target);
-        let pace = pace.clone();
+        let pace = paced.then(|| pace.clone());
         view! {
             <crate::components::gauge::Gauge
                 value=value target=target
@@ -243,15 +248,15 @@ fn weekly_fat_gauges(w: crate::services::fats::WeeklyFats) -> impl IntoView {
                 color=bar.to_string()
                 height=12.0
                 decimals=decimals
-                pace=Some(pace)
+                pace=pace
                 value_color=val.map(String::from)/>
         }
     };
     view! {
-        {cell(w.acids.epa_dha_g, w.epa_dha_target, "Омега-3/нед", "г", 2)}
-        {cell(w.acids.ala_g, w.ala_target, "АЛК/нед", "г", 1)}
+        {cell(w.acids.epa_dha_g, w.epa_dha_target, "Омега-3/нед", "г", 2, true)}
+        {cell(w.acids.ala_g, w.ala_target, "АЛК/нед", "г", 1, true)}
         {cell(w.ratio().unwrap_or(0.0), crate::services::fats::UNSAT_TO_SAT_MIN,
-              "Жиры/нед", "", 2)}
+              "Жиры/нед", "", 2, false)}
     }
 }
 

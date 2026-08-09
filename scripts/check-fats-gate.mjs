@@ -152,7 +152,7 @@ const b = await chromium.launch({ headless: true });
   check("планка железа не закрыта: флага жиров нет", !f.fat_week_unlocked,
     String(f.fat_week_unlocked));
   check("планка железа не закрыта: шкал по жирам нет",
-    !g.some((x) => /Омега-3\/нед|Баланс\/нед/.test(x)), JSON.stringify(g));
+    !g.some((x) => /Омега-3\/нед|Баланс жира/.test(x)), JSON.stringify(g));
   check("планка железа не закрыта: индикаторов по жирам нет",
     !i.some((x) => ["Омега-3", "Баланс"].includes(x)), JSON.stringify(i));
   const tray = await page.$$eval("[data-story-id]", (els) =>
@@ -193,7 +193,7 @@ const b = await chromium.launch({ headless: true });
   const g = await gauges(page);
   const i = await indicators(page);
   check("шкалы по жирам на экране",
-    ["Омега-3/нед", "Баланс/нед"].every((x) => g.includes(x)), JSON.stringify(g));
+    ["Омега-3/нед", "Баланс жира"].every((x) => g.includes(x)), JSON.stringify(g));
   check("индикаторы по жирам в ряду",
     ["Омега-3", "Баланс"].every((x) => i.includes(x)), JSON.stringify(i));
   // История шестой недели появляется вместе с жирами — и только с ними.
@@ -204,9 +204,9 @@ const b = await chromium.launch({ headless: true });
   check(`EPA+DHA = ${WANT.epa_dha.toFixed(2)} г`, near(epa, WANT.epa_dha), `${epa}`);
   // Баланс показывает ОТКЛОНЕНИЕ от нормы со знаком, а не само отношение, и рисуется
   // от середины: сторона полосы обязана совпадать со знаком.
-  const bal = await page.locator('[data-gauge="Баланс/нед"]').innerText();
+  const bal = await page.locator('[data-gauge="Баланс жира"]').innerText();
   const shown = Number((/[−+-]?[\d.]+/.exec(bal.replace("−", "-")) || [""])[0]);
-  const side = await page.locator('[data-gauge="Баланс/нед"]').getAttribute("data-balance-side");
+  const side = await page.locator('[data-gauge="Баланс жира"]').getAttribute("data-balance-side");
   const want_dev = WANT.ratio - 2.0;
   check(`отклонение = ${want_dev.toFixed(2)}`, near(shown, want_dev), `${shown}`);
   check("полоса вправо, раз отклонение положительное", side === "right", String(side));

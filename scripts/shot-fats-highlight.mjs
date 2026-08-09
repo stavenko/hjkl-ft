@@ -3,7 +3,7 @@
 //
 // Две гифки за один прогон, по кадру истории на каждую:
 //   fats-omega-highlight.gif — шкала «Омега-3/нед» и индикатор «Омега-3»;
-//   fats-ratio-highlight.gif — шкала «Баланс/нед» и индикатор «Баланс».
+//   fats-ratio-highlight.gif — шкала «Баланс жира» и индикатор «Баланс».
 //
 // Состояние подобрано так, чтобы кадр объяснял, к чему стремиться: омега-3 закрыта
 // (человек ел рыбу), а соотношение НЕ закрыто — сала и сыра съедено столько, что
@@ -119,7 +119,7 @@ await page.setViewportSize({ width: 440, height: 1200 });
 await page.waitForTimeout(3000); // дать полосам доиграть анимацию заполнения
 
 console.log("шкалы:", await page.$$eval("[data-gauge]", (els) => els.map((e) => e.getAttribute("data-gauge"))));
-for (const g of ["Омега-3/нед", "Баланс/нед"]) {
+for (const g of ["Омега-3/нед", "Баланс жира"]) {
   console.log(` ${g}:`, (await page.locator(`[data-gauge="${g}"]`).innerText()).replace(/\s+/g, " "));
 }
 await page.locator('[data-testid="progress-widget"]').screenshot({
@@ -127,7 +127,7 @@ await page.locator('[data-testid="progress-widget"]').screenshot({
 });
 
 await makeWidgetGif(page, ['[data-ind="Омега-3"] > div', '[data-gauge="Омега-3/нед"]'], OUT_OMEGA);
-await makeWidgetGif(page, ['[data-ind="Баланс"] > div', '[data-gauge="Баланс/нед"]'], OUT_RATIO);
+await makeWidgetGif(page, ['[data-ind="Баланс"] > div', '[data-gauge="Баланс жира"]'], OUT_RATIO);
 
 await context.close();
 await b.close();

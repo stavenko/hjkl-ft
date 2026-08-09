@@ -1184,9 +1184,13 @@ const S6: &[Frame] = &[
         title: Loc { en: "", ru: "" },
         body: Loc {
             en: "That is why we give you two indicators. One of them is for omega-3 from fish — \
-                 you need to close a minimum amount.",
+                 you need to close a minimum amount.\n\n\
+                 Keep this indicator green for a whole week to discover the next story in this \
+                 journey.",
             ru: "Поэтому мы даём вам два индикатора: один из них по омега-3 из рыбы — необходимо \
-                 закрывать минимальное количество.",
+                 закрывать минимальное количество.\n\n\
+                 Держите этот индикатор зелёным целую неделю, чтобы открыть следующую историю \
+                 этого пути.",
         },
     },
     // 7 — второй индикатор: соотношение, то есть баланс.
@@ -1208,20 +1212,10 @@ const S6: &[Frame] = &[
                  жирной рыбы.",
         },
     },
-    // 8 — что нужно сделать, чтобы открылась следующая история.
-    Frame {
-        bg: Bg::Dark,
-        media: Media::None,
-        accent: GREEN,
-        kicker: Loc { en: "Fats", ru: "Жиры" },
-        title: Loc { en: "", ru: "" },
-        body: Loc {
-            en: "Keep those indicators green for a whole week to discover the next story in this \
-                 journey.",
-            ru: "Держите эти индикаторы зелёными целую неделю, чтобы открыть следующую историю \
-                 этого пути.",
-        },
-    },
+    // Отдельного кадра «держите неделю» здесь НЕТ: голый текст на пустом фоне
+    // ничего не показывал, а сказать это надо там, где виден сам индикатор, —
+    // поэтому фраза стоит на кадре с омега-3, по которому и открывается следующая
+    // глава.
 ];
 
 static STORIES: &[Story] = &[

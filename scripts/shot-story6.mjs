@@ -2,7 +2,7 @@
 // человека, а не в исходнике.
 //
 // Открывает кружок «6» в трее и щёлкает по правой зоне, снимая каждый кадр.
-// Файлы: OUTDIR/story6-01.png … story6-08.png.
+// Файлы: OUTDIR/story6-01.png … story6-07.png.
 import { chromium } from "playwright";
 import { openSeeded, DEFAULT_URL } from "./harness.mjs";
 import { mkdirSync } from "node:fs";
@@ -69,7 +69,7 @@ await page.waitForTimeout(6000);
 await page.locator('[data-story-id="week6"]').click();
 await page.waitForTimeout(1500);
 
-const FRAMES = 8;
+const FRAMES = 7;
 for (let i = 1; i <= FRAMES; i++) {
   // Обложкам дать ЗАГРУЗИТЬСЯ, а не только отрисоваться: они по 100–300 КБ и с
   // паузой в 900 мс кадр снимался пустым — это выглядело как «картинка не встала».

@@ -249,12 +249,17 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
     super::indicators::weekly_state(&history)
 }
 
-/// Закрыта ли ПОСЛЕДНЯЯ завершённая неделя железа — гейт, открывающий жиры.
+/// Закрыта ли ПОСЛЕДНЯЯ завершённая неделя железа, и закончилась ли она не раньше
+/// `not_before` — гейт, открывающий жиры.
 ///
 /// Именно последняя, а не «хоть одна за всю историю»: гейт означает «человек держит
 /// планку сейчас», а не «однажды получилось». Неделя без дневника не судится — её не
 /// было, и провалом она быть не может.
-pub async fn planka_closed() -> bool {
+///
+/// `not_before` — якорь: день, начиная с которого недели засчитываются (см.
+/// `fats::FAT_GATE_ANCHOR_KEY`). Он и делает правило честным: закрыть планку и
+/// дождаться конца недели, а не получить открытие за уже прожитое.
+pub async fn planka_closed(not_before: NaiveDate) -> bool {
     let today = local::today_date();
     let Some((cur_start, _)) = week_bounds(today) else {
         return false;
@@ -265,6 +270,12 @@ pub async fn planka_closed() -> bool {
     }
     let s = cur_start - Duration::days(7);
     let e = s + Duration::days(6);
+    // Неделя, ЗАКОНЧИВШАЯСЯ до якоря, не считается. Иначе правило «закрой планку и
+    // дождись конца недели» превращается в «когда-то закрывал»: у человека с уже
+    // закрытой прошлой неделей дверь открылась бы в секунду обновления.
+    if e < not_before {
+        return false;
+    }
     let diary_days: std::collections::HashSet<String> =
         local::list_diary_dates().await.into_iter().collect();
     let logged = (0..7)

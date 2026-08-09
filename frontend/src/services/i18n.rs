@@ -223,6 +223,8 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.steps_gate_title" => "Keep the steps indicator green for 7 days.",
         "dashboard.progress.calcium_gate_title" => "Keep the calcium indicator green for 7 days.",
         "dashboard.progress.iron_gate_title" => "Meet the iron target this week.",
+        "dashboard.progress.iron_done_title" => "You have met the iron target.",
+        "dashboard.progress.iron_done_progress" => "The next story opens in {n} {w}.",
         "dashboard.progress.gate_progress" => "{n} {w} left.",
         "dashboard.progress.kcal_day" => "kcal/day",
         "dashboard.progress.done_hint" => "We'll adjust it as observations come in.",
@@ -1116,6 +1118,10 @@ fn ru(key: &str) -> &'static str {
         "dashboard.progress.steps_gate_title" => "Держите индикатор планки по шагам зелёным 7 дней.",
         "dashboard.progress.calcium_gate_title" => "Держите индикатор кальция зелёным 7 дней.",
         "dashboard.progress.iron_gate_title" => "Выполните планку по железу за эту неделю.",
+        // Планка закрыта, но неделя ещё идёт: человеку надо сказать, что он своё
+        // сделал и ждёт только календаря, — иначе молчание читается как «не засчитано».
+        "dashboard.progress.iron_done_title" => "Вы закрыли планку по железу.",
+        "dashboard.progress.iron_done_progress" => "Следующая история откроется через {n} {w}.",
         "dashboard.progress.gate_progress" => "Осталось {n} {w}.",
         "dashboard.progress.kcal_day" => "ккал/день",
         "dashboard.progress.done_hint" => "Мы будем корректировать её по мере наблюдений.",

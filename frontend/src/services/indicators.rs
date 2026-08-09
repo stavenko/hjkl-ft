@@ -336,8 +336,20 @@ pub async fn maybe_unlock_fat_week() -> bool {
     if !iron::unlocked() {
         return false; // неделя железа должна открыться первой
     }
-    if !iron::planka_closed().await {
-        return false; // планка железа ещё не закрыта
+    let today = crate::services::local::today_date();
+    // Якорь ставится в первый же запуск, когда железо открыто, а жиры ещё нет. С
+    // этого дня и начинается отсчёт: недели железа, закончившиеся раньше, в гейт не
+    // идут — иначе человек с уже закрытой прошлой неделей получал бы жиры мгновенно,
+    // ничего для этого не сделав.
+    let anchor = match fats::gate_anchor() {
+        Some(d) => d,
+        None => {
+            crate::services::app_flags::set(fats::FAT_GATE_ANCHOR_KEY, &fmt(today));
+            today
+        }
+    };
+    if !iron::planka_closed(anchor).await {
+        return false; // планка железа ещё не закрыта после якоря
     }
     let today = crate::services::local::today_date();
     crate::services::app_flags::set(fats::FAT_WEEK_OPEN_KEY, &fmt(today));

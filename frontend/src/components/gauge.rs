@@ -64,16 +64,20 @@ impl GaugePace {
 ///
 /// Точек хода недели здесь НЕТ: на короткой двусторонней полосе они только рябят, а
 /// догонять у отношения всё равно нечего.
+/// `value` — `None`, когда мерить нечего: у продуктов ещё нет профиля жира. Тогда
+/// шкала серая и показывает прочерк. Подставлять сюда ноль нельзя: это дало бы
+/// полную красную полосу на пустом месте — «рацион ужасен» вместо «мы ещё не знаем».
 #[component]
 pub fn BalanceGauge(
-    value: f64,
+    value: Option<f64>,
     target: f64,
     label: String,
     #[prop(default = 8.0)] height: f64,
     #[prop(optional, into)] hint: Option<String>,
     #[prop(default = 2)] decimals: usize,
 ) -> impl IntoView {
-    let value = value + 0.0;
+    let known = value.is_some();
+    let value = value.unwrap_or(target) + 0.0;
     let good = target > 0.0 && value >= target;
     // Отклонение от нормы со знаком — то, что видит человек.
     let signed = value - target;
@@ -84,10 +88,16 @@ pub fn BalanceGauge(
     } else {
         0.0
     };
-    let half = dev * 50.0;
+    let half = if known { dev * 50.0 } else { 0.0 };
     let radius = height / 2.0;
     let bar_color = if good { "#1fa463" } else { "#e0304f" };
-    let value_color = if good { "#1fa463" } else { "#e0304f" };
+    let value_color = if !known {
+        "#9aa0a6"
+    } else if good {
+        "#1fa463"
+    } else {
+        "#e0304f"
+    };
 
     let open = create_rw_signal(false);
     let hint_btn = hint.clone().map(|_| {
@@ -144,7 +154,11 @@ pub fn BalanceGauge(
                 <span class="is-size-7" style="white-space: nowrap;">
                     <span class="has-text-weight-bold" style=format!("color: {value_color};")>
                         // Минус — типографский, а не дефис с клавиатуры.
-                        {format!("{signed:+.*}", decimals).replace('-', "\u{2212}")}
+                        {if known {
+                            format!("{signed:+.*}", decimals).replace('-', "\u{2212}")
+                        } else {
+                            "—".to_string()
+                        }}
                     </span>
                 </span>
             </div>

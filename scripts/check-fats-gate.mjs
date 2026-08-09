@@ -72,6 +72,9 @@ const seed = (opts) => async (page, uid) => {
       app_flags.push({ key: "fat_week_unlocked", value: "true" });
       app_flags.push({ key: "fat_week_opened_at", value: ymd(0) });
     }
+    if (opts.anchorDaysAgo != null) {
+      app_flags.push({ key: "fat_gate_anchor", value: ymd(opts.anchorDaysAgo) });
+    }
     const profile = [{ key: "profile", sex: "male", height_cm: 180,
       birth_year: new Date().getFullYear() - 45, goal: "lose", steps_planka: 9000,
       created_at: nowIso, updated_at: nowIso }];
@@ -162,9 +165,15 @@ const b = await chromium.launch({ headless: true });
   await context.close();
 }
 
-// ── 2. планка железа закрыта → жиры открываются сами ────────────────────────
+const today = new Date();
+const YMD0 = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+// ── 2. неделя железа закрыта, но ДО якоря → жиры НЕ открываются ──────────────
+// Ровно тот случай, что вышел на проде: человек держал планку и до появления жиров,
+// и в секунду обновления дверь распахивалась сама. Правило — «закрой планку и дождись
+// конца недели», поэтому недели, закончившиеся до якоря, не считаются.
 {
-  const uid = `fats-open-${Math.floor(Math.random() * 1e6)}`;
+  const uid = `fats-retro-${Math.floor(Math.random() * 1e6)}`;
   const { context, page } = await openSeeded(b, {
     baseUrl: BASE, context: { serviceWorkers: "block" }, uid,
     seed: seed({ closeIronWeek: true, withProfiles: false, fatsAlreadyOpen: false }),
@@ -172,11 +181,27 @@ const b = await chromium.launch({ headless: true });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForTimeout(12000);
   const f = await flags(page, uid);
-  const today = new Date();
-  const ymd0 = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  check("закрытая планка железа открыла жиры", f.fat_week_unlocked === "true",
+  check("неделя, закрытая ДО якоря, жиры не открывает", !f.fat_week_unlocked,
     String(f.fat_week_unlocked));
-  check("неделя жира привязана к сегодня", f.fat_week_opened_at === ymd0,
+  check("якорь гейта поставлен на сегодня", f.fat_gate_anchor === YMD0,
+    String(f.fat_gate_anchor));
+  await context.close();
+}
+
+// ── 3. планка закрыта ПОСЛЕ якоря → жиры открываются сами ───────────────────
+{
+  const uid = `fats-open-${Math.floor(Math.random() * 1e6)}`;
+  const { context, page } = await openSeeded(b, {
+    baseUrl: BASE, context: { serviceWorkers: "block" }, uid,
+    // Якорь на восемь дней назад: неделя −7…−1 закончилась ВЧЕРА, то есть после него.
+    seed: seed({ closeIronWeek: true, withProfiles: false, fatsAlreadyOpen: false, anchorDaysAgo: 8 }),
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(12000);
+  const f = await flags(page, uid);
+  check("закрытая после якоря планка открыла жиры", f.fat_week_unlocked === "true",
+    String(f.fat_week_unlocked));
+  check("неделя жира привязана к сегодня", f.fat_week_opened_at === YMD0,
     String(f.fat_week_opened_at));
   await context.close();
 }

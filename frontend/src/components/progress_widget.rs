@@ -101,15 +101,18 @@ fn indicator(paths: &'static str, label: &'static str, state: IndicatorState) ->
     }
 }
 
-/// Сетка индикаторов: СЕМЬ В СТРОКУ, остальные переносятся на следующую.
+/// ОДИН ряд, не больше семи значков — сколько влезает по ширине телефона.
 ///
-/// Раньше это был один ряд, обрезанный на семи по ширине экрана. С открытием жиров
-/// индикаторов стало десять, и три просто исчезали — причём молча: обрезка стояла
-/// после сортировки по цвету, поэтому пропадали зелёные, то есть ровно те, о которых
-/// человек и не подозревал бы.
+/// Индикаторов больше, чем мест, и это не проблема, а условие задачи: показывать надо
+/// не все подряд, а те, что требуют внимания. Порядок задан сортировкой у вызывающего:
+/// сначала красные, потом оранжевые, дальше зелёные. Если краснеть нечему, ряд просто
+/// заполняется зелёными — и как только что-то испортится, оно тут же встанет первым.
+///
+/// Перенос на вторую строку пробовался и оказался хуже: ряд разъезжался на две
+/// половины, из которых вторая ничего не значила.
 fn indicators_row(states: Vec<(&'static str, IndicatorState)>) -> impl IntoView {
     view! {
-        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px 4px;">
+        <div style="display: flex; gap: 4px; justify-content: space-between;">
             {states.into_iter().map(|(k, st)| {
                 let (paths, label) = icon_for(k);
                 indicator(paths, label, st)
@@ -253,7 +256,7 @@ fn weekly_fat_gauges(w: crate::services::fats::WeeklyFats) -> impl IntoView {
         // читаться так же, как о нём говорит история — «насколько вы в балансе».
         // Шкала у него РАСХОДЯЩАЯСЯ: см. `BalanceGauge`.
         <crate::components::gauge::BalanceGauge
-            value=w.ratio().unwrap_or(0.0)
+            value=w.ratio()
             target=crate::services::fats::UNSAT_TO_SAT_MIN
             label="Баланс жира".to_string()
             height=12.0
@@ -564,9 +567,10 @@ pub fn ProgressWidget() -> impl IntoView {
                             .collect();
                         // Sort left→right by severity: red, then orange, then green
                         // (unknown/grey last). Equal priority within a colour → by name.
-                        // Ничего не обрезаем: сетка переносит лишние на вторую строку.
-                        // Обрезка молча съедала бы индикаторы — и именно зелёные, самые
-                        // хвостовые после этой сортировки.
+                        // Показываются ПЕРВЫЕ СЕМЬ — ровно ряд по ширине телефона.
+                        // Отсечка стоит ПОСЛЕ сортировки, поэтому теряются самые
+                        // спокойные, а всё, что требует внимания, всегда на виду: стоит
+                        // индикатору покраснеть, он тут же встаёт первым.
                         let rank = |s: IndicatorState| match s {
                             IndicatorState::Red => 0,
                             IndicatorState::Orange => 1,
@@ -576,6 +580,7 @@ pub fn ProgressWidget() -> impl IntoView {
                         row.sort_by(|a, b| {
                             rank(a.1).cmp(&rank(b.1)).then_with(|| icon_for(a.0).1.cmp(icon_for(b.0).1))
                         });
+                        row.truncate(7);
                         // "Keep them green" gate caption, right before the indicators.
                         // Week-2 gate (protein/veg-fruit) first; once it's cleared and
                         // the activity week is unlocked, the SAME caption tracks the
@@ -606,14 +611,25 @@ pub fn ProgressWidget() -> impl IntoView {
                                 && calcium_green < indicators::GREEN_GATE_DAYS
                             {
                                 Some(("dashboard.progress.calcium_gate_title", calcium_green))
-                            } else if let Some(w) = iron_week.get().flatten().filter(
-                                |w| w.absorbed_mg < w.target_mg,
-                            ) {
+                            } else if let Some(w) = iron_week
+                                .get()
+                                .flatten()
+                                .filter(|_| !crate::services::fats::unlocked())
+                            {
                                 // У недельной планки железа тоже есть срок, и он должен
                                 // быть назван. Считается так же, как у остальных гейтов:
                                 // «сделано» — прошедшие дни недели, «осталось» — остаток
-                                // до её конца. Подпись уходит, как только норма набрана.
-                                Some(("dashboard.progress.iron_gate_title", w.day_of_week - 1))
+                                // до её конца.
+                                //
+                                // Планка набрана — подпись не исчезает, а МЕНЯЕТСЯ:
+                                // человек своё сделал и ждёт только конца недели. Молчание
+                                // на этом месте читалось бы как «не засчитано».
+                                let key = if w.absorbed_mg < w.target_mg {
+                                    "dashboard.progress.iron_gate_title"
+                                } else {
+                                    "dashboard.progress.iron_done_title"
+                                };
+                                Some((key, w.day_of_week - 1))
                             } else {
                                 None
                             };
@@ -634,7 +650,15 @@ pub fn ProgressWidget() -> impl IntoView {
                                     }
                                 }
                             };
-                            let progress = t("dashboard.progress.gate_progress")
+                            // У закрытой планки вторая строка говорит не «осталось
+                            // столько-то», а когда именно откроется следующая история:
+                            // ждать человеку больше нечего, кроме календаря.
+                            let progress_key = if title_key == "dashboard.progress.iron_done_title" {
+                                "dashboard.progress.iron_done_progress"
+                            } else {
+                                "dashboard.progress.gate_progress"
+                            };
+                            let progress = t(progress_key)
                                 .replace("{n}", &left.to_string())
                                 .replace("{w}", word);
                             view! {

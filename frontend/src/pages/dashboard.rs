@@ -717,7 +717,7 @@ pub fn DashboardPage() -> impl IntoView {
                                     // `BalanceGauge`: у отношения есть сторона, а не
                                     // «сколько набрано».
                                     <crate::components::gauge::BalanceGauge
-                                        value=w.ratio().unwrap_or(0.0)
+                                        value=w.ratio()
                                         target=crate::services::fats::UNSAT_TO_SAT_MIN
                                         label="Баланс жира".to_string()
                                         height=12.0

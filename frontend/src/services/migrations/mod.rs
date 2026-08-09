@@ -52,6 +52,7 @@ mod m004_reset_iron;
 mod m005_recompute_recipes;
 mod m006_reset_heme;
 mod m007_drop_omega3;
+mod m008_refix_fat_gate;
 
 #[cfg(test)]
 mod tests;
@@ -113,6 +114,11 @@ const ALL: &[Migration] = &[
         version: m007_drop_omega3::VERSION,
         description: m007_drop_omega3::DESCRIPTION,
         script: || Box::pin(m007_drop_omega3::script()),
+    },
+    Migration {
+        version: m008_refix_fat_gate::VERSION,
+        description: m008_refix_fat_gate::DESCRIPTION,
+        script: || Box::pin(m008_refix_fat_gate::script()),
     },
 ];
 

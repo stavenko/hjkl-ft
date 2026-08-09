@@ -65,6 +65,15 @@ pub fn DayBars(
     /// Подписи под столбиками. Пусто — берётся день недели из даты. Недельным
     /// индикаторам день недели не подходит: у них столбик — это целая неделя.
     #[prop(optional)] labels: Option<Vec<String>>,
+    /// Столбики ОТ СЕРЕДИНЫ: вверх зелёным при значении больше нуля, вниз красным
+    /// при меньше. Для показателей, у которых значение — ОТКЛОНЕНИЕ от нормы со
+    /// знаком, а не количество (баланс жира). Обычная шкала от нуля для них не
+    /// годится вдвойне: отрицательный столбик она рисует нулевой высоты, то есть
+    /// молча прячет ровно те недели, о которых и надо говорить.
+    #[prop(default = false)] signed: bool,
+    /// Знаков после запятой в подписи курсора. У отклонения баланса это сотые:
+    /// «−0.88» против бессмысленного «−0.9».
+    #[prop(default = 1)] decimals: usize,
 ) -> impl IntoView {
     let active = create_rw_signal(None::<usize>);
     let svg_ref = create_node_ref::<leptos::svg::Svg>();
@@ -115,8 +124,16 @@ pub fn DayBars(
                     if n == 0 {
                         return ().into_view();
                     }
-                    let max = data.iter().map(|(_, v, _)| *v).fold(0.0_f64, f64::max).max(1.0);
-                    let mapy = move |v: f64| PB - (v / max) * (PB - PT);
+                    // У знакового ряда масштаб берётся по МОДУЛЮ, а базовая линия
+                    // стоит посередине: иначе вверх и вниз меряются разными мерками.
+                    let max = data
+                        .iter()
+                        .map(|(_, v, _)| if signed { v.abs() } else { *v })
+                        .fold(0.0_f64, f64::max)
+                        .max(if signed { 0.01 } else { 1.0 });
+                    let base = if signed { (PT + PB) / 2.0 } else { PB };
+                    let span = if signed { (PB - PT) / 2.0 } else { PB - PT };
+                    let mapy = move |v: f64| base - (v / max) * span;
                     let bw = (PR - PL) / n as f64;
                     // Narrower bars (≈1.5× thinner than the 0.62 default).
                     let bar_w = (bw * 0.40).max(1.0);
@@ -124,15 +141,30 @@ pub fn DayBars(
 
                     let bars = data.iter().enumerate().map(|(i, (date, v, ratio))| {
                         let cx = PL + (i as f64 + 0.5) * bw;
-                        let y = mapy(*v);
-                        let h = (PB - y).max(0.0);
+                        let y0 = mapy(*v);
+                        // Знаковый столбик растёт от базовой линии в свою сторону:
+                        // положительный вверх, отрицательный вниз.
+                        let (y, h) = if signed {
+                            (y0.min(base), (y0 - base).abs())
+                        } else {
+                            (y0, (PB - y0).max(0.0))
+                        };
                         // Per-day verdict from the caller (the indicator's own rule)
-                        // when provided; the generic ratio rule otherwise.
-                        let day_fill = match met.as_ref().and_then(|m| m.get(i).copied()) {
-                            Some(Some(true)) => BAR_MET,
-                            Some(Some(false)) => &miss_color,
-                            Some(None) => BAR_NEUTRAL,
-                            None => bar_color(*ratio, &miss_color),
+                        // when provided; the generic ratio rule otherwise. У знакового
+                        // ряда вердикт — это сам знак, и цвет берётся от него.
+                        let day_fill = if signed {
+                            match ratio {
+                                None => BAR_NEUTRAL,
+                                Some(_) if *v >= 0.0 => BAR_MET,
+                                Some(_) => &miss_color,
+                            }
+                        } else {
+                            match met.as_ref().and_then(|m| m.get(i).copied()) {
+                                Some(Some(true)) => BAR_MET,
+                                Some(Some(false)) => &miss_color,
+                                Some(None) => BAR_NEUTRAL,
+                                None => bar_color(*ratio, &miss_color),
+                            }
                         };
                         let fill = if sel == Some(i) { BAR_ACTIVE } else { day_fill }.to_string();
                         view! {
@@ -159,7 +191,14 @@ pub fn DayBars(
                             .as_ref()
                             .and_then(|l| l.get(i).cloned())
                             .unwrap_or_else(|| short_date(date));
-                        let label = format!("{head} · {v:.1} {unit}");
+                        // У знакового ряда знак — часть значения, и его надо назвать:
+                        // «−0.88», а не «0.88». Минус типографский.
+                        let num = if signed {
+                            format!("{v:+.*}", decimals).replace('-', "\u{2212}")
+                        } else {
+                            format!("{v:.*}", decimals)
+                        };
+                        let label = format!("{head} · {num} {unit}");
                         view! {
                             <g>
                                 <line x1=cx y1=PT - 4.0 x2=cx y2=PB stroke=BAR_ACTIVE stroke-width="1"/>

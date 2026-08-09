@@ -760,6 +760,10 @@ pub fn DashboardPage() -> impl IntoView {
                                             }.to_string()}
                                             miss_color=stroke.to_string()
                                             labels=s.labels.clone()
+                                            // Баланс — знаковый ряд: столбики от
+                                            // середины, как и шкала в виджете.
+                                            signed=s.key == "fat_ratio"
+                                            decimals=if s.key == "fat_ratio" { 2 } else { 1 }
                                             met=s.met_days.clone()/>
                                     </div>
                                 }

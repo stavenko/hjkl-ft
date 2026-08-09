@@ -234,10 +234,15 @@ pub async fn weekly_series(which: Fat) -> indicators::IndicatorSeries {
                 diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
             });
             let acids = fatty_acids_between(s, e).await;
-            let value = which.weekly_value(&acids).unwrap_or(0.0);
-            let ratio = logged
-                .then(|| which.weekly_value(&acids).map(|v| v / which.target()))
-                .flatten();
+            // У баланса столбик показывает ОТКЛОНЕНИЕ от нормы со знаком — ровно то
+            // же, что и шкала в виджете. Показывать там сырое отношение значило бы
+            // говорить о показателе двумя разными языками на соседних экранах.
+            let raw = which.weekly_value(&acids);
+            let value = match which {
+                Fat::Ratio => raw.map(|v| v - which.target()).unwrap_or(0.0),
+                Fat::EpaDha => raw.unwrap_or(0.0),
+            };
+            let ratio = logged.then(|| raw.map(|v| v / which.target())).flatten();
             points.push((s.format("%Y-%m-%d").to_string(), value, ratio));
             labels.push(format!("−{back}"));
             met.push(ratio.map(|r| r >= 1.0));

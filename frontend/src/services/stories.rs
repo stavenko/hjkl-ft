@@ -1144,7 +1144,7 @@ const S6: &[Frame] = &[
     // 4 — чем оборачивается дефицит.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("fats-heart.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Fats", ru: "Жиры" },
         title: Loc { en: "", ru: "" },

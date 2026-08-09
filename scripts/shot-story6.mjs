@@ -71,8 +71,13 @@ await page.waitForTimeout(1500);
 
 const FRAMES = 8;
 for (let i = 1; i <= FRAMES; i++) {
-  // Гифкам дать проиграть, тексту — доехать.
-  await page.waitForTimeout(i === 6 || i === 7 ? 2500 : 900);
+  // Обложкам дать ЗАГРУЗИТЬСЯ, а не только отрисоваться: они по 100–300 КБ и с
+  // паузой в 900 мс кадр снимался пустым — это выглядело как «картинка не встала».
+  await page.waitForTimeout(2500);
+  await page.evaluate(() => Promise.all(
+    Array.from(document.images).filter((i) => !i.complete)
+      .map((i) => new Promise((r) => { i.onload = i.onerror = r; }))));
+  await page.waitForTimeout(400);
   const file = path.join(OUTDIR, `story6-${String(i).padStart(2, "0")}.png`);
   await page.screenshot({ path: file });
   const text = (await page.locator("body").innerText()).replace(/\s+/g, " ").slice(0, 90);

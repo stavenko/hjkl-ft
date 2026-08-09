@@ -1095,10 +1095,11 @@ const S5: &[Frame] = &[
 // пометка «(перечислить те, что в рыбе)» — ЭПК и ДГК.
 
 const S6: &[Frame] = &[
-    // 1 — поздравление: железо позади, впереди жиры.
+    // 1 — поздравление: железо позади, впереди жиры. Кадр-поздравление, как в
+    // остальных историях, идёт с хлопушкой, а не с фотографией еды.
     Frame {
         bg: Bg::Dark,
-        media: Media::Cover("fats-lard.jpg"),
+        media: Media::Emoji("🎉"),
         accent: GREEN,
         kicker: Loc { en: "Fats", ru: "Жиры" },
         title: Loc { en: "", ru: "" },
@@ -1112,7 +1113,7 @@ const S6: &[Frame] = &[
     // 2 — из чего вообще состоят жиры.
     Frame {
         bg: Bg::Dark,
-        media: Media::Cover("fats-omega-foods.jpg"),
+        media: Media::Cover("fats-lard.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Fats", ru: "Жиры" },
         title: Loc { en: "", ru: "" },
@@ -1128,7 +1129,7 @@ const S6: &[Frame] = &[
     // 3 — незаменимые: организм их не делает, взять можно только из рыбы.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("fats-omega-foods.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Fats", ru: "Жиры" },
         title: Loc { en: "", ru: "" },
@@ -1161,7 +1162,9 @@ const S6: &[Frame] = &[
     // 5 — беда не в жире как таковом, а в перекосе.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        // Триптих: сало, орехи, скумбрия — три рода жирных кислот РЯДОМ. Разговор
+        // здесь про баланс, а баланс виден только когда стороны показаны разом.
+        media: Media::Cover("fats-triptych.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Fats", ru: "Жиры" },
         title: Loc { en: "", ru: "" },

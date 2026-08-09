@@ -398,10 +398,12 @@ pub fn ChatPage() -> impl IntoView {
                     if e.contains("HTTP 402") {
                         navigate("/settings/subscription", Default::default());
                     } else {
-                        // FAIL LOUDLY: surface the error as an assistant-styled
-                        // bubble and log it — never drop it silently.
+                        // FAIL LOUDLY, но по-человечески: пузырь с понятным текстом и
+                        // кодом, а сама причина — в лог и в телеметрию. Дамп ошибки
+                        // модели человеку ничего не даёт и напугать может.
                         leptos::logging::error!("chat_agent error: {e}");
-                        let am = chat::append_assistant(format!("\u{26a0}\u{fe0f} {e}"), false).await;
+                        let text = crate::services::errors::service_unavailable("chat.agent", &e);
+                        let am = chat::append_assistant(format!("\u{26a0}\u{fe0f} {text}"), false).await;
                         messages.update(|v| v.push(am));
                     }
                 }

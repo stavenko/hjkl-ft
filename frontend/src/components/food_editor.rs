@@ -449,7 +449,16 @@ pub fn FoodEditor(
                     // A backend 402 means the subscription lapsed between the
                     // proactive check and the job — explain it in a modal rather
                     // than dumping a raw error or navigating away silently.
-                    if e.contains("HTTP 402") { show_paywall.set(true); } else { error_sig.set(Some(e)); }
+                    //
+                    // Всё остальное человеку показывается ОДНОЙ понятной фразой с
+                    // кодом: технический дамп он всё равно прочесть не может, а
+                    // причина уходит в телеметрию по этому же коду.
+                    if e.contains("HTTP 402") {
+                        show_paywall.set(true);
+                    } else {
+                        let ctx = if use_vision { "food.lookup.photo" } else { "food.lookup.name" };
+                        error_sig.set(Some(crate::services::errors::service_unavailable(ctx, &e)));
+                    }
                 }
             };
 
@@ -606,7 +615,14 @@ pub fn FoodEditor(
                 fitems_vision_msg.set(String::new());
                 fitems_loading.set(false);
                 if let Some(e) = err {
-                    if e.contains("HTTP 402") { show_paywall.set(true); } else { fitems_error.set(Some(e)); }
+                    if e.contains("HTTP 402") {
+                        show_paywall.set(true);
+                    } else {
+                        fitems_error.set(Some(crate::services::errors::service_unavailable(
+                            "food.lookup.dish_photo",
+                            &e,
+                        )));
+                    }
                 }
             };
 
@@ -958,7 +974,7 @@ pub fn FoodEditor(
                     </div>
                 </div>
                 {move || name_error.get().map(|e| view! {
-                    <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-top: 10px; background: var(--bulma-danger-light); border-radius: 10px;">
+                    <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-top: 10px; white-space: pre-line; background: var(--bulma-danger-light); border-radius: 10px;">
                         {e}
                     </div>
                 })}
@@ -1063,7 +1079,7 @@ pub fn FoodEditor(
                 </p>
 
                 {move || photo_error.get().map(|e| view! {
-                    <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-bottom: 10px; background: var(--bulma-danger-light); border-radius: 10px;">
+                    <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-bottom: 10px; white-space: pre-line; background: var(--bulma-danger-light); border-radius: 10px;">
                         {e}
                     </div>
                 })}
@@ -1153,7 +1169,7 @@ pub fn FoodEditor(
                 </div>
 
                 {move || fitems_error.get().map(|e| view! {
-                    <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-bottom: 10px; background: var(--bulma-danger-light); border-radius: 10px;">
+                    <div class="has-text-danger is-size-7" style="padding: 8px 12px; margin-bottom: 10px; white-space: pre-line; background: var(--bulma-danger-light); border-radius: 10px;">
                         {e}
                     </div>
                 })}

@@ -713,9 +713,15 @@ pub fn DashboardPage() -> impl IntoView {
                                 view! {
                                     {cell(w.acids.epa_dha_g, w.epa_dha_target, "Омега-3/нед", "г", 2,
                                           true, epa_dha_hint_text())}
-                                    {cell(w.ratio().unwrap_or(0.0),
-                                          crate::services::fats::UNSAT_TO_SAT_MIN,
-                                          "Баланс/нед", "", 2, false, fat_ratio_hint_text())}
+                                    // Баланс — расходящаяся шкала от середины, см.
+                                    // `BalanceGauge`: у отношения есть сторона, а не
+                                    // «сколько набрано».
+                                    <crate::components::gauge::BalanceGauge
+                                        value=w.ratio().unwrap_or(0.0)
+                                        target=crate::services::fats::UNSAT_TO_SAT_MIN
+                                        label="Баланс/нед".to_string()
+                                        height=12.0
+                                        hint=fat_ratio_hint_text()/>
                                 }
                             });
                             let detail = d.series.iter().map(|s| {

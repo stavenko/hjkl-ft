@@ -228,14 +228,13 @@ fn weekly_fat_gauges(w: crate::services::fats::WeeklyFats) -> impl IntoView {
         segments: 7,
         passed: w.day_of_week.saturating_sub(1),
     };
-    // Точки темпа — только у НАКОПИТЕЛЬНЫХ величин: граммы копятся за неделю, и
-    // «где вы были бы, набирая ровно» — осмысленный вопрос. Отношение не копится:
-    // это состояние рациона на сейчас, а не сумма. Точки под ним обещали бы, что к
-    // воскресенью оно само подрастёт.
+    // Точки стоят у обеих шкал, но означают разное: у граммов — темп набора («где
+    // вы были бы, набирая ровно»), у баланса — просто ход недели, догонять там
+    // нечего.
     let cell = |value: f64, target: f64, label: &'static str, unit: &'static str,
-                decimals: usize, paced: bool| {
+                decimals: usize| {
         let (bar, val) = crate::components::gauge::at_least_colors(value, target);
-        let pace = paced.then(|| pace.clone());
+        let pace = Some(pace);
         view! {
             <crate::components::gauge::Gauge
                 value=value target=target
@@ -249,11 +248,16 @@ fn weekly_fat_gauges(w: crate::services::fats::WeeklyFats) -> impl IntoView {
         }
     };
     view! {
-        {cell(w.acids.epa_dha_g, w.epa_dha_target, "Омега-3/нед", "г", 2, true)}
+        {cell(w.acids.epa_dha_g, w.epa_dha_target, "Омега-3/нед", "г", 2)}
         // «Баланс», а не «Жиры»: это отношение, а не количество, и название должно
         // читаться так же, как о нём говорит история — «насколько вы в балансе».
-        {cell(w.ratio().unwrap_or(0.0), crate::services::fats::UNSAT_TO_SAT_MIN,
-              "Баланс/нед", "", 2, false)}
+        // Шкала у него РАСХОДЯЩАЯСЯ: см. `BalanceGauge`.
+        <crate::components::gauge::BalanceGauge
+            value=w.ratio().unwrap_or(0.0)
+            target=crate::services::fats::UNSAT_TO_SAT_MIN
+            label="Баланс/нед".to_string()
+            height=12.0
+    />
     }
 }
 

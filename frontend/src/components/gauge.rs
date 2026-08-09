@@ -45,6 +45,116 @@ impl GaugePace {
     }
 }
 
+/// Шкала ОТ СЕРЕДИНЫ: влево красным, вправо зелёным.
+///
+/// Нужна там, где показатель — не количество, а ОТНОШЕНИЕ, и у него есть не «сколько
+/// набрал», а «в какую сторону сдвинут». Обычная полоса такому врёт: «1.12 из 2.00»
+/// заливкой читается как «половина пути», хотя это не половина нормы, а вдвое худший
+/// баланс, и никакого «пути» тут нет — значение ходит в обе стороны каждый день.
+///
+/// Середина — сама норма. Влево (красным) откладывается, насколько баланс хуже
+/// нужного: это значит, что насыщенного жира слишком много. Вправо (зелёным) —
+/// насколько лучше. Обе половины меряются в долях нормы, поэтому шкала симметрична:
+/// левый край — ноль, правый — двойная норма.
+///
+/// Число показывается СО ЗНАКОМ и считается от нормы, а не от нуля: «−0.88» значит
+/// «на 0.88 хуже нормы», «+0.17» — «на столько лучше». Само отношение (1.12) человеку
+/// ничего не говорит без второго числа рядом, а отклонение говорит сразу, и знак
+/// совпадает со стороной полосы.
+///
+/// Точек хода недели здесь НЕТ: на короткой двусторонней полосе они только рябят, а
+/// догонять у отношения всё равно нечего.
+#[component]
+pub fn BalanceGauge(
+    value: f64,
+    target: f64,
+    label: String,
+    #[prop(default = 8.0)] height: f64,
+    #[prop(optional, into)] hint: Option<String>,
+    #[prop(default = 2)] decimals: usize,
+) -> impl IntoView {
+    let value = value + 0.0;
+    let good = target > 0.0 && value >= target;
+    // Отклонение от нормы со знаком — то, что видит человек.
+    let signed = value - target;
+    // Отклонение в ДОЛЯХ нормы, зажатое единицей: левый край шкалы — ноль, правый —
+    // двойная норма. Без зажима вегетарианский рацион с отношением 8 уехал бы за край.
+    let dev = if target > 0.0 {
+        ((value - target).abs() / target).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let half = dev * 50.0;
+    let radius = height / 2.0;
+    let bar_color = if good { "#1fa463" } else { "#e0304f" };
+    let value_color = if good { "#1fa463" } else { "#e0304f" };
+
+    let open = create_rw_signal(false);
+    let hint_btn = hint.clone().map(|_| {
+        view! {
+            <button
+                attr:aria-label="?"
+                on:click=move |_| open.update(|o| *o = !*o)
+                style="width: 16px; height: 16px; min-width: 16px; border-radius: 50%; \
+                    border: 1px solid var(--bulma-border); background: transparent; \
+                    color: var(--bulma-text-weak); font-size: 0.62rem; font-weight: 700; \
+                    line-height: 1; cursor: pointer; padding: 0; display: inline-flex; \
+                    align-items: center; justify-content: center;">
+                "?"
+            </button>
+        }
+    });
+    let hint_popup = hint.map(|text| {
+        view! {
+            {move || open.get().then(|| {
+                let t = text.clone();
+                view! {
+                    <div on:pointerup=move |_| open.set(false)
+                        style="position: fixed; inset: 0; z-index: 40; cursor: pointer;"></div>
+                    <div on:pointerup=move |_| open.set(false)
+                        style="position: absolute; z-index: 41; top: 24px; left: 0; right: 0; cursor: pointer; \
+                            background: var(--bulma-scheme-main); border: 0.5px solid var(--bulma-border-weak); \
+                            box-shadow: 0 10px 30px rgba(0,0,0,0.22); border-radius: 12px; padding: 12px 14px;">
+                        <span class="is-size-7 has-text-grey" style="line-height: 1.45; white-space: pre-line;">{t}</span>
+                    </div>
+                }
+            })}
+        }
+    });
+
+    // Полоса растёт ОТ СЕРЕДИНЫ: влево — левым краем в 50 % минус ширина, вправо —
+    // левым краем ровно в 50 %.
+    let bar_left = if good { 50.0 } else { 50.0 - half };
+    view! {
+        <div attr:data-gauge=label.clone() attr:data-balance-side=if good { "right" } else { "left" }
+            style="position: relative; display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;">
+                <span style="display: inline-flex; align-items: center; gap: 6px;">
+                    <span class="is-size-7 has-text-weight-medium" style="color: var(--bulma-text-weak);">{label}</span>
+                    {hint_btn}
+                </span>
+                <span class="is-size-7" style="white-space: nowrap;">
+                    <span class="has-text-weight-bold" style=format!("color: {value_color};")>
+                        // Минус — типографский, а не дефис с клавиатуры.
+                        {format!("{signed:+.*}", decimals).replace('-', "\u{2212}")}
+                    </span>
+                </span>
+            </div>
+            <div style=format!("height: {height}px; border-radius: {radius}px; background: var(--bulma-border-weak); \
+                    overflow: hidden; position: relative;")>
+                <div style=format!("position: absolute; top: 0; height: 100%; left: {bar_left:.1}%; \
+                    width: {half:.1}%; background: {bar_color}; border-radius: {radius}px; \
+                    transition: left 0.4s, width 0.4s;")></div>
+                // Риска посередине — сама норма, то есть ноль отклонения. Без неё
+                // непонятно, от чего отсчёт.
+                <div style=format!("position: absolute; top: 0; bottom: 0; left: 50%; width: 1.5px; \
+                    margin-left: -0.75px; background: rgba(0,0,0,0.35); z-index: 3;")></div>
+            </div>
+            {hint_popup}
+        </div>
+    }
+}
+
 /// A full-width bar. `value`/`target` in the same unit; the fill spans
 /// `min(value/target, 1)` of the track. `color` is the fill (the metric's
 /// colour); the track is grey. The header line shows `label` on the left and

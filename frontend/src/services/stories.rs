@@ -1199,10 +1199,13 @@ const S6: &[Frame] = &[
         body: Loc {
             en: "The other indicator is the ratio of saturated to unsaturated fatty acids. It \
                  shows how well you are in balance. If this indicator is green, your risks of \
-                 cardiovascular and oncological disease are minimal.",
+                 cardiovascular and oncological disease are minimal.\n\n\
+                 If the bar has turned red, cut the animal and dairy fats. Or add oily fish.",
             ru: "Другой индикатор — это соотношение насыщенных к ненасыщенным жирным кислотам. \
                  Он показывает, насколько вы в балансе. Если этот индикатор зелёный, значит, ваши \
-                 риски сердечно-сосудистых и онкологических заболеваний минимальны.",
+                 риски сердечно-сосудистых и онкологических заболеваний минимальны.\n\n\
+                 Если полоска стала красной, надо убрать животные и молочные жиры. Или добавить \
+                 жирной рыбы.",
         },
     },
     // 8 — что нужно сделать, чтобы открылась следующая история.

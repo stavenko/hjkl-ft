@@ -24,8 +24,7 @@
 
 use chrono::{Duration, NaiveDate};
 
-use super::profile::Sex;
-use super::{app_flags, indicators, local, profile};
+use super::{app_flags, indicators, local};
 use api_types::FattyAcids;
 
 /// App-flag: жиры открыты (три шкалы и три индикатора видны).

@@ -201,9 +201,15 @@ const b = await chromium.launch({ headless: true });
     els.map((e) => e.getAttribute("data-story-id")));
   check("в трее появилась история шестой недели", tray.includes("week6"), JSON.stringify(tray));
   const epa = await gaugeValue(page, "Омега-3/нед");
-    const ratio = await gaugeValue(page, "Баланс/нед");
   check(`EPA+DHA = ${WANT.epa_dha.toFixed(2)} г`, near(epa, WANT.epa_dha), `${epa}`);
-  check(`отношение = ${WANT.ratio.toFixed(2)}`, near(ratio, WANT.ratio), `${ratio}`);
+  // Баланс показывает ОТКЛОНЕНИЕ от нормы со знаком, а не само отношение, и рисуется
+  // от середины: сторона полосы обязана совпадать со знаком.
+  const bal = await page.locator('[data-gauge="Баланс/нед"]').innerText();
+  const shown = Number((/[−+-]?[\d.]+/.exec(bal.replace("−", "-")) || [""])[0]);
+  const side = await page.locator('[data-gauge="Баланс/нед"]').getAttribute("data-balance-side");
+  const want_dev = WANT.ratio - 2.0;
+  check(`отклонение = ${want_dev.toFixed(2)}`, near(shown, want_dev), `${shown}`);
+  check("полоса вправо, раз отклонение положительное", side === "right", String(side));
   await page.screenshot({ path: process.env.SHOT || "/tmp/fats-gauges.png", fullPage: false });
   await context.close();
 }

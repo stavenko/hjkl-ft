@@ -125,6 +125,14 @@ pub fn BalanceGauge(
     // Полоса растёт ОТ СЕРЕДИНЫ: влево — левым краем в 50 % минус ширина, вправо —
     // левым краем ровно в 50 %.
     let bar_left = if good { 50.0 } else { 50.0 - half };
+    // Скругляется только ВНЕШНИЙ конец. У внутреннего скругления быть не должно:
+    // полоса упирается в риску нормы, и закруглённый торец отходит от неё, будто
+    // между значением и нормой есть зазор.
+    let bar_radius = if good {
+        format!("0 {radius}px {radius}px 0")
+    } else {
+        format!("{radius}px 0 0 {radius}px")
+    };
     view! {
         <div attr:data-gauge=label.clone() attr:data-balance-side=if good { "right" } else { "left" }
             style="position: relative; display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0;">
@@ -143,7 +151,7 @@ pub fn BalanceGauge(
             <div style=format!("height: {height}px; border-radius: {radius}px; background: var(--bulma-border-weak); \
                     overflow: hidden; position: relative;")>
                 <div style=format!("position: absolute; top: 0; height: 100%; left: {bar_left:.1}%; \
-                    width: {half:.1}%; background: {bar_color}; border-radius: {radius}px; \
+                    width: {half:.1}%; background: {bar_color}; border-radius: {bar_radius}; \
                     transition: left 0.4s, width 0.4s;")></div>
                 // Риска посередине — сама норма, то есть ноль отклонения. Без неё
                 // непонятно, от чего отсчёт.

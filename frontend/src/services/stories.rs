@@ -1169,9 +1169,9 @@ const S6: &[Frame] = &[
         kicker: Loc { en: "Fats", ru: "Жиры" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "And the whole problem here is exactly the ~imbalance~: when there are too many \
+            en: "And the whole problem here is exactly the *imbalance*: when there are too many \
                  saturated fatty acids — from animal products such as beef, pork and lamb.",
-            ru: "И вся проблема здесь именно в ~перекосе~: когда слишком много насыщенных жирных \
+            ru: "И вся проблема здесь именно в *перекосе*: когда слишком много насыщенных жирных \
                  кислот: из животных продуктов, таких как говядина, свинина, баранина.",
         },
     },

@@ -235,6 +235,7 @@ fn text_with_icons(s: &str) -> View {
 ///  * `#…#` → a BOLD WHITE→RED gradient span (the iron/blood highlight),
 ///  * `@…@` → a BOLD OLIVE→YELLOW gradient span (the fats highlight),
 ///  * `~…~` → a BOLD YELLOW→ORANGE→RED gradient span,
+///  * `*…*` → plain BOLD, no colour at all,
 /// all the same font-size as the surrounding text; the rest still passes through
 /// `text_with_icons` for the «⇄» repeat icon. The markers are split outermost-first,
 /// so a phrase carries exactly one of them, never nested.
@@ -325,6 +326,24 @@ fn text_rich_warm(s: &str) -> View {
                     </span>
                 }
                 .into_view(),
+            );
+        } else {
+            out.push(text_rich_bold(part));
+        }
+    }
+    out.collect_view().into_view()
+}
+
+/// The plain BOLD (`*…*`) pass — emphasis WITHOUT colour. Нужен там, где выделить
+/// слово надо, а красить нечем: любой из градиентов уже что-то означает (красный —
+/// железо и кровь, оливковый — жир, тёплый — тревогу), и брать его «просто чтобы
+/// выделялось» значит врать цветом.
+fn text_rich_bold(s: &str) -> View {
+    let mut out: Vec<View> = Vec::new();
+    for (i, part) in s.split('*').enumerate() {
+        if i % 2 == 1 {
+            out.push(
+                view! { <span style="font-weight: 800;">{part.to_string()}</span> }.into_view(),
             );
         } else {
             out.push(text_with_icons(part));

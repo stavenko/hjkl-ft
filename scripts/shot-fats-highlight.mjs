@@ -3,7 +3,7 @@
 //
 // Две гифки за один прогон, по кадру истории на каждую:
 //   fats-omega-highlight.gif — шкала «Омега-3/нед» и индикатор «Омега-3»;
-//   fats-ratio-highlight.gif — шкала «Жиры/нед» и индикатор «Жиры».
+//   fats-ratio-highlight.gif — шкала «Баланс/нед» и индикатор «Баланс».
 //
 // Состояние подобрано так, чтобы кадр объяснял, к чему стремиться: омега-3 закрыта
 // (человек ел рыбу), а соотношение НЕ закрыто — сала и сыра съедено столько, что
@@ -65,14 +65,14 @@ const seed = async (page, uid) => {
     });
     const foods = [
       food("mack", "Скумбрия", 191, 18, 13.9,
-        { sfa_pct: 24, mufa_pct: 38, pufa_pct: 26, ala_pct: 1, epa_dha_pct: 18 }, { is_heme: true }),
+        { sfa_pct: 24, mufa_pct: 38, pufa_pct: 26, epa_dha_pct: 18 }, { is_heme: true }),
       food("veg", "Овощи", 30, 1, 0.2,
-        { sfa_pct: 0, mufa_pct: 0, pufa_pct: 0, ala_pct: 0, epa_dha_pct: 0 }, { is_veg_fruit: true }),
+        { sfa_pct: 0, mufa_pct: 0, pufa_pct: 0, epa_dha_pct: 0 }, { is_veg_fruit: true }),
       // Сало и сыр — тот самый перекос, о котором говорит история.
       food("lard", "Сало", 797, 2, 89,
-        { sfa_pct: 38, mufa_pct: 45, pufa_pct: 11, ala_pct: 0, epa_dha_pct: 0 }, {}),
+        { sfa_pct: 38, mufa_pct: 45, pufa_pct: 11, epa_dha_pct: 0 }, {}),
       food("cheese", "Сыр", 356, 25, 28,
-        { sfa_pct: 65, mufa_pct: 26, pufa_pct: 4, ala_pct: 0, epa_dha_pct: 0 }, {}),
+        { sfa_pct: 65, mufa_pct: 26, pufa_pct: 4, epa_dha_pct: 0 }, {}),
     ];
     const diary = [], weight_entries = [], step_entries = [];
     for (let i = 0; i < 12; i++) {
@@ -119,7 +119,7 @@ await page.setViewportSize({ width: 440, height: 1200 });
 await page.waitForTimeout(3000); // дать полосам доиграть анимацию заполнения
 
 console.log("шкалы:", await page.$$eval("[data-gauge]", (els) => els.map((e) => e.getAttribute("data-gauge"))));
-for (const g of ["Омега-3/нед", "АЛК/нед", "Жиры/нед"]) {
+for (const g of ["Омега-3/нед", "Баланс/нед"]) {
   console.log(` ${g}:`, (await page.locator(`[data-gauge="${g}"]`).innerText()).replace(/\s+/g, " "));
 }
 await page.locator('[data-testid="progress-widget"]').screenshot({
@@ -127,7 +127,7 @@ await page.locator('[data-testid="progress-widget"]').screenshot({
 });
 
 await makeWidgetGif(page, ['[data-ind="Омега-3"] > div', '[data-gauge="Омега-3/нед"]'], OUT_OMEGA);
-await makeWidgetGif(page, ['[data-ind="Жиры"] > div', '[data-gauge="Жиры/нед"]'], OUT_RATIO);
+await makeWidgetGif(page, ['[data-ind="Баланс"] > div', '[data-gauge="Баланс/нед"]'], OUT_RATIO);
 
 await context.close();
 await b.close();

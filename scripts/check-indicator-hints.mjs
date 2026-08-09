@@ -61,7 +61,7 @@ const seed = async (page, uid) => {
       archived: false, is_restaurant: false, is_snack: false, is_liquid_cal: false,
       is_veg_fruit: false, is_egg: false, is_red_meat: false, is_heme: true,
       iron_mg: 1.6, iron_absorption: 0.15,
-      fat_profile: { sfa_pct: 24, mufa_pct: 38, pufa_pct: 26, ala_pct: 1, epa_dha_pct: 18 },
+      fat_profile: { sfa_pct: 24, mufa_pct: 38, pufa_pct: 26, epa_dha_pct: 18 },
       created_at: nowIso, updated_at: nowIso,
     }];
     const diary = [], weight_entries = [], step_entries = [];

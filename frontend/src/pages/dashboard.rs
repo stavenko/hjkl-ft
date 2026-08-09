@@ -190,19 +190,6 @@ fn epa_dha_hint_text() -> String {
     )
 }
 
-fn ala_hint_text() -> String {
-    let who = match profile::get_sex() {
-        Some(Sex::Female) => "Женщинам",
-        _ => "Мужчинам",
-    };
-    format!(
-        "АЛК — растительная омега-3. Её много в льняном и рапсовом масле, семенах льна \
-         и чиа, грецком орехе.\n\n\
-         {who} нужно {:.1} г в неделю. Ложка льняного масла закрывает норму почти \
-         целиком, горсть грецких орехов — примерно половину.",
-        crate::services::fats::ala_target_g(),
-    )
-}
 
 fn fat_ratio_hint_text() -> String {
     format!(
@@ -261,7 +248,6 @@ fn weekly_metric_name(key: &str) -> Option<&'static str> {
         "iron" => Some("норму железа"),
         "heme" => Some("норму порций гемовых продуктов"),
         "epa_dha" => Some("норму морских омега-3"),
-        "ala" => Some("норму АЛК"),
         "fat_ratio" => Some("нужное отношение ненасыщенных жиров к насыщенным"),
         _ => None,
     }
@@ -351,7 +337,6 @@ async fn indicator_body(key: &str, planka: Option<f64>) -> String {
         "iron" => iron_hint_text(),
         "heme" => heme_hint_text(),
         "epa_dha" => epa_dha_hint_text(),
-        "ala" => ala_hint_text(),
         "fat_ratio" => fat_ratio_hint_text(),
         // Нового индикатора без своего текста быть не должно — падаем громко, а не
         // показываем человеку пустоту.
@@ -728,11 +713,9 @@ pub fn DashboardPage() -> impl IntoView {
                                 view! {
                                     {cell(w.acids.epa_dha_g, w.epa_dha_target, "Омега-3/нед", "г", 2,
                                           true, epa_dha_hint_text())}
-                                    {cell(w.acids.ala_g, w.ala_target, "АЛК/нед", "г", 1,
-                                          true, ala_hint_text())}
                                     {cell(w.ratio().unwrap_or(0.0),
                                           crate::services::fats::UNSAT_TO_SAT_MIN,
-                                          "Жиры/нед", "", 2, false, fat_ratio_hint_text())}
+                                          "Баланс/нед", "", 2, false, fat_ratio_hint_text())}
                                 }
                             });
                             let detail = d.series.iter().map(|s| {
@@ -764,7 +747,7 @@ pub fn DashboardPage() -> impl IntoView {
                                                 "calories" => "ккал",
                                                 "iron" => "мг",
                                                 "heme" => "",
-                                                "epa_dha" | "ala" => "г",
+                                                "epa_dha" => "г",
                                                 "fat_ratio" => "",
                                                 "steps" => "",
                                                 _ => "г",

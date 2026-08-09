@@ -1,17 +1,18 @@
-//! Жиры: три недельных индикатора — EPA+DHA, АЛК и качество жира.
+//! Жиры: два недельных индикатора — EPA+DHA и баланс жира.
 //!
-//! Меряется не «сколько жира», а КАКОГО жира. Три вопроса, на которые по отдельности
+//! Меряется не «сколько жира», а КАКОГО жира. Два вопроса, на которые по отдельности
 //! не ответить:
 //!
-//! * **EPA+DHA** — длинные морские омега-3. Организм делает их из АЛК с конверсией в
-//!   единицы процентов, поэтому растительным маслом их не закрыть, и считать их вместе
-//!   с АЛК нельзя: льняное масло тогда «закрыло» бы норму рыбы, которую не закрывает.
-//! * **АЛК** — растительная омега-3. Своя роль и свой источник (лён, чиа, рапс,
-//!   грецкий орех), поэтому свой индикатор.
-//! * **(МНЖК+ПНЖК)/НЖК** — качество жира в целом. Не «сколько», а «какой»: то самое
+//! * **EPA+DHA** — длинные морские омега-3. Организм делает их из растительной АЛК с
+//!   конверсией в единицы процентов, поэтому растительным маслом их не закрыть.
+//! * **Баланс** — отношение (МНЖК+ПНЖК)/НЖК. Не «сколько», а «какой»: то самое
 //!   отношение, по которому средиземноморский рацион отличается от обычного.
 //!
-//! Все три НЕДЕЛЬНЫЕ. Съесть недельную норму EPA+DHA за один приём — нормально
+//! Индикатора по АЛК здесь НЕТ: он был написан, но выпускать его не стали. Вместе с
+//! ним из запроса профиля убрана и доля АЛК — спрашивать у модели то, чего никто не
+//! читает, незачем.
+//!
+//! Оба НЕДЕЛЬНЫЕ. Съесть недельную норму EPA+DHA за один приём — нормально
 //! (порция скумбрии), требовать её ежедневно бессмысленно.
 //!
 //! Величины берутся из профиля жира продукта (`api_types::FatProfile`): доли от жира
@@ -38,30 +39,15 @@ pub const FAT_WEEK_OPEN_KEY: &str = "fat_week_opened_at";
 // Проверены на типичном средиземноморском дне НАШЕЙ ЖЕ таблицей профилей — той
 // проверкой, которой не прошло железо и из-за которой женская планка там оказалась
 // недостижимой. День (оливковое масло, грецкий орех, курица, крупы, сыр) даёт НЖК
-// 12.7, МНЖК 27.4, ПНЖК 17.5, АЛК 2.3 — отношение 3.5 и 16 г АЛК в неделю. Две
-// рыбные трапезы дают 7.6 г EPA+DHA. Все три нормы закрываются с запасом.
+// 12.7, МНЖК 27.4, ПНЖК 17.5 — отношение 3.5. Две рыбные трапезы дают 7.6 г
+// EPA+DHA. Обе нормы закрываются с запасом.
 
 /// Недельная норма EPA+DHA, граммы. 250 мг/сут — AI, а не RDA: у длинных омега-3
 /// нормируется достаточное потребление, верхнего края потребности тут нет.
 pub const EPA_DHA_PER_WEEK_G: f64 = 1.75;
 
-/// Недельная норма АЛК для мужчин, граммы: AI 1.6 г/сут.
-pub const ALA_PER_WEEK_G_MALE: f64 = 11.2;
-
-/// Недельная норма АЛК для женщин, граммы: AI 1.1 г/сут.
-pub const ALA_PER_WEEK_G_FEMALE: f64 = 7.7;
-
 /// Минимальное отношение (МНЖК+ПНЖК)/НЖК.
 pub const UNSAT_TO_SAT_MIN: f64 = 2.0;
-
-/// Норма АЛК этого человека. Пол неизвестен — берём МУЖСКУЮ, она выше: занизить
-/// планку молча хуже, чем попросить лишнего.
-pub fn ala_target_g() -> f64 {
-    match profile::get_sex() {
-        Some(Sex::Female) => ALA_PER_WEEK_G_FEMALE,
-        _ => ALA_PER_WEEK_G_MALE,
-    }
-}
 
 // ── Открытие и неделя ────────────────────────────────────────────────────────
 
@@ -111,7 +97,6 @@ async fn fatty_acids_between(from: NaiveDate, to: NaiveDate) -> FattyAcids {
 pub struct WeeklyFats {
     pub acids: FattyAcids,
     pub epa_dha_target: f64,
-    pub ala_target: f64,
     /// 1…7 — какой сегодня день недели жира.
     pub day_of_week: u32,
 }
@@ -131,7 +116,6 @@ pub async fn weekly_progress() -> Option<WeeklyFats> {
     Some(WeeklyFats {
         acids: fatty_acids_between(start, today).await,
         epa_dha_target: EPA_DHA_PER_WEEK_G,
-        ala_target: ala_target_g(),
         day_of_week: (today - start).num_days() as u32 + 1,
     })
 }
@@ -140,7 +124,6 @@ pub async fn weekly_progress() -> Option<WeeklyFats> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Fat {
     EpaDha,
-    Ala,
     Ratio,
 }
 
@@ -148,7 +131,6 @@ impl Fat {
     pub fn key(self) -> &'static str {
         match self {
             Fat::EpaDha => "epa_dha",
-            Fat::Ala => "ala",
             Fat::Ratio => "fat_ratio",
         }
     }
@@ -157,7 +139,6 @@ impl Fat {
     fn weekly_value(self, acids: &FattyAcids) -> Option<f64> {
         match self {
             Fat::EpaDha => Some(acids.epa_dha_g),
-            Fat::Ala => Some(acids.ala_g),
             // Отношение без насыщенных не определено — судить нечего.
             Fat::Ratio => acids.unsat_to_sat(),
         }
@@ -167,7 +148,6 @@ impl Fat {
     pub fn target(self) -> f64 {
         match self {
             Fat::EpaDha => EPA_DHA_PER_WEEK_G,
-            Fat::Ala => ala_target_g(),
             Fat::Ratio => UNSAT_TO_SAT_MIN,
         }
     }
@@ -265,23 +245,23 @@ pub async fn week_closed() -> bool {
         return false;
     }
     let acids = fatty_acids_between(s, e).await;
-    [Fat::EpaDha, Fat::Ala, Fat::Ratio].iter().all(|f| f.met(&acids))
+    [Fat::EpaDha, Fat::Ratio].iter().all(|f| f.met(&acids))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn acids(sfa: f64, mufa: f64, pufa: f64, ala: f64, epa_dha: f64) -> FattyAcids {
-        FattyAcids { sfa_g: sfa, mufa_g: mufa, pufa_g: pufa, ala_g: ala, epa_dha_g: epa_dha }
+    fn acids(sfa: f64, mufa: f64, pufa: f64, epa_dha: f64) -> FattyAcids {
+        FattyAcids { sfa_g: sfa, mufa_g: mufa, pufa_g: pufa, epa_dha_g: epa_dha }
     }
 
     #[test]
     fn otnoshenie_schitaetsya_iz_summ_a_ne_srednim() {
         // Ложка оливкового масла (отношение 5.7) и двести граммов сала (1.4).
         // Среднее отношений дало бы 3.5 — «хорошо». Отношение сумм даёт 1.6.
-        let olive = acids(4.5, 21.0, 4.5, 0.3, 0.0);
-        let lard = acids(73.0, 92.0, 24.0, 1.0, 0.0).scaled(1.0);
+        let olive = acids(4.5, 21.0, 4.5, 0.0);
+        let lard = acids(73.0, 92.0, 24.0, 0.0);
         let sum = olive + lard;
         let by_sums = sum.unsat_to_sat().unwrap();
         assert!(by_sums < 2.0, "по суммам {by_sums:.2} — планка не закрыта");
@@ -289,15 +269,7 @@ mod tests {
 
     #[test]
     fn bez_nasyshchennyh_otnoshenie_ne_opredeleno() {
-        assert!(acids(0.0, 10.0, 5.0, 1.0, 0.0).unsat_to_sat().is_none());
-    }
-
-    #[test]
-    fn norma_alk_zavisit_ot_pola() {
-        assert!(ALA_PER_WEEK_G_FEMALE < ALA_PER_WEEK_G_MALE);
-        // 1.6 и 1.1 г/сут ровно.
-        assert!((ALA_PER_WEEK_G_MALE - 1.6 * 7.0).abs() < 1e-9);
-        assert!((ALA_PER_WEEK_G_FEMALE - 1.1 * 7.0).abs() < 1e-9);
+        assert!(acids(0.0, 10.0, 5.0, 0.0).unsat_to_sat().is_none());
     }
 
     #[test]
@@ -308,11 +280,12 @@ mod tests {
     }
 
     #[test]
-    fn nedelya_zakryta_tolko_kogda_vse_tri_soshlis() {
-        // Много рыбы, но жир при этом плохой: отношение ниже двух.
-        let bad_ratio = acids(50.0, 40.0, 30.0, 12.0, 3.0);
+    fn nedelya_zakryta_tolko_kogda_soshlis_oba() {
+        // Много рыбы, но жир при этом плохой: отношение ниже двух. Норма омега-3
+        // закрыта, а неделя — нет: индикаторы отвечают на разные вопросы, и один
+        // не искупает другого.
+        let bad_ratio = acids(50.0, 40.0, 30.0, 3.0);
         assert!(Fat::EpaDha.met(&bad_ratio));
-        assert!(Fat::Ala.met(&bad_ratio));
         assert!(!Fat::Ratio.met(&bad_ratio));
     }
 }

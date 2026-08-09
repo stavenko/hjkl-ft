@@ -230,12 +230,11 @@ pub fn displayed_indicators() -> Vec<&'static str> {
         // разговора — «хватило ли» и «из чего». Своего условия у него нет.
         v.push("heme");
     }
-    // Жиры — три недельных индикатора, открываются вместе, после закрытой планки
-    // железа. Порознь они не читаются: «сколько морских омега-3», «сколько
-    // растительных» и «каков жир в целом» — три вопроса об одном.
+    // Жиры — два недельных индикатора, открываются вместе, после закрытой планки
+    // железа. Порознь они не читаются: «сколько морских омега-3» и «каков жир в
+    // целом» — два вопроса об одном.
     if crate::services::fats::unlocked() {
         v.push("epa_dha");
-        v.push("ala");
         v.push("fat_ratio");
     }
     v
@@ -429,7 +428,6 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
         // Жиры — тоже недельная механика: дневное значение показывается столбиком,
         // но день по нему не судится (дневной цели нет).
         "epa_dha" => crate::services::local::fatty_acids_on(date).await.epa_dha_g,
-        "ala" => crate::services::local::fatty_acids_on(date).await.ala_g,
         "fat_ratio" => crate::services::local::fatty_acids_on(date)
             .await
             .unsat_to_sat()
@@ -734,7 +732,6 @@ fn fat_key(key: &str) -> Option<crate::services::fats::Fat> {
     use crate::services::fats::Fat;
     match key {
         "epa_dha" => Some(Fat::EpaDha),
-        "ala" => Some(Fat::Ala),
         "fat_ratio" => Some(Fat::Ratio),
         _ => None,
     }
@@ -843,7 +840,7 @@ pub async fn share_states() -> Vec<(&'static str, IndicatorState)> {
     // грамма» вместо «ещё не считается».
     if crate::services::fats::unlocked() {
         use crate::services::fats::Fat;
-        for which in [Fat::EpaDha, Fat::Ala, Fat::Ratio] {
+        for which in [Fat::EpaDha, Fat::Ratio] {
             out.push((which.key(), crate::services::fats::indicator_state(which).await));
         }
     }

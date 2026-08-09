@@ -1496,7 +1496,6 @@ pub fn recipe_nutrition(
                         sfa_pct: pct(fa.sfa_g),
                         mufa_pct: pct(fa.mufa_g),
                         pufa_pct: pct(fa.pufa_g),
-                        ala_pct: pct(fa.ala_g),
                         epa_dha_pct: pct(fa.epa_dha_g),
                     }
                 })
@@ -1556,7 +1555,6 @@ pub async fn recompute_recipe(recipe_id: &str) -> bool {
                 same(a.sfa_pct, b.sfa_pct)
                     && same(a.mufa_pct, b.mufa_pct)
                     && same(a.pufa_pct, b.pufa_pct)
-                    && same(a.ala_pct, b.ala_pct)
                     && same(a.epa_dha_pct, b.epa_dha_pct)
             }
             (None, None) => true,

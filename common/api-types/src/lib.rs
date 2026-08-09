@@ -133,9 +133,11 @@ pub struct FatProfile {
     pub mufa_pct: f64,
     /// Полиненасыщенные, % от общего жира.
     pub pufa_pct: f64,
-    /// Альфа-линоленовая (АЛК, 18:3 n-3), % от общего жира. Часть `pufa_pct`.
-    pub ala_pct: f64,
     /// EPA + DHA вместе, % от общего жира. Часть `pufa_pct`.
+    ///
+    /// Альфа-линоленовой (АЛК) здесь НЕТ намеренно: её считал единственный
+    /// индикатор, который решено не выпускать, а спрашивать у модели то, чего никто
+    /// не читает, незачем.
     pub epa_dha_pct: f64,
 }
 
@@ -145,7 +147,6 @@ pub struct FattyAcids {
     pub sfa_g: f64,
     pub mufa_g: f64,
     pub pufa_g: f64,
-    pub ala_g: f64,
     pub epa_dha_g: f64,
 }
 
@@ -156,7 +157,6 @@ impl std::ops::Add for FattyAcids {
             sfa_g: self.sfa_g + o.sfa_g,
             mufa_g: self.mufa_g + o.mufa_g,
             pufa_g: self.pufa_g + o.pufa_g,
-            ala_g: self.ala_g + o.ala_g,
             epa_dha_g: self.epa_dha_g + o.epa_dha_g,
         }
     }
@@ -175,7 +175,6 @@ impl FattyAcids {
             sfa_g: self.sfa_g * factor,
             mufa_g: self.mufa_g * factor,
             pufa_g: self.pufa_g * factor,
-            ala_g: self.ala_g * factor,
             epa_dha_g: self.epa_dha_g * factor,
         }
     }
@@ -195,7 +194,6 @@ impl FatProfile {
             sfa_g: g(self.sfa_pct),
             mufa_g: g(self.mufa_pct),
             pufa_g: g(self.pufa_pct),
-            ala_g: g(self.ala_pct),
             epa_dha_g: g(self.epa_dha_pct),
         }
     }

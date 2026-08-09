@@ -1,4 +1,4 @@
-// Гейт жиров и три недельные шкалы.
+// Гейт жиров и две недельные шкалы.
 //
 // Проверяется три вещи:
 //   1. пока планка железа не закрыта, жиров на дашборде НЕТ вовсе;
@@ -25,22 +25,22 @@ const near = (a, b, eps = 0.06) => a != null && Math.abs(a - b) < eps;
 // Профили — те же, что даёт замеренный промпт на этих продуктах.
 const FOODS = [
   { id: "olive", name: "Оливковое масло", kcal: 884, fat: 100,
-    fp: { sfa_pct: 15, mufa_pct: 70, pufa_pct: 15, ala_pct: 0, epa_dha_pct: 0 } },
+    fp: { sfa_pct: 15, mufa_pct: 70, pufa_pct: 15, epa_dha_pct: 0 } },
   { id: "mack", name: "Скумбрия", kcal: 191, fat: 13.9,
-    fp: { sfa_pct: 24, mufa_pct: 38, pufa_pct: 26, ala_pct: 1, epa_dha_pct: 18 } },
+    fp: { sfa_pct: 24, mufa_pct: 38, pufa_pct: 26, epa_dha_pct: 18 } },
   { id: "butter", name: "Сливочное масло", kcal: 717, fat: 82,
-    fp: { sfa_pct: 65, mufa_pct: 26, pufa_pct: 4, ala_pct: 0, epa_dha_pct: 0 } },
+    fp: { sfa_pct: 65, mufa_pct: 26, pufa_pct: 4, epa_dha_pct: 0 } },
   // Печень — чтобы закрыть недельную планку железа: 9 мг при усвоении 0.25.
   { id: "liver", name: "Печень куриная", kcal: 137, fat: 6, iron: [9.0, 0.25],
-    fp: { sfa_pct: 29, mufa_pct: 44, pufa_pct: 27, ala_pct: 1, epa_dha_pct: 0 } },
+    fp: { sfa_pct: 29, mufa_pct: 44, pufa_pct: 27, epa_dha_pct: 0 } },
 ];
 const EATEN_TODAY = [["olive", 30], ["mack", 150], ["butter", 20]];
 
 // Ожидания, посчитанные вручную:
 //   оливковое  30 г → жир 30.00 → НЖК 4.50  МНЖК 21.00 ПНЖК 4.50
-//   скумбрия  150 г → жир 20.85 → НЖК 5.00  МНЖК 7.92  ПНЖК 5.42  АЛК 0.21 EPA+DHA 3.75
+//   скумбрия  150 г → жир 20.85 → НЖК 5.00  МНЖК 7.92  ПНЖК 5.42  EPA+DHA 3.75
 //   сливочное  20 г → жир 16.40 → НЖК 10.66 МНЖК 4.26  ПНЖК 0.66
-const WANT = { epa_dha: 3.75, ala: 0.21, ratio: (33.19 + 10.58) / 20.16 };
+const WANT = { epa_dha: 3.75, ratio: (33.19 + 10.58) / 20.16 };
 
 const seed = (opts) => async (page, uid) => {
   await page.evaluate(async ({ uid, FOODS, EATEN_TODAY, opts }) => {
@@ -152,9 +152,9 @@ const b = await chromium.launch({ headless: true });
   check("планка железа не закрыта: флага жиров нет", !f.fat_week_unlocked,
     String(f.fat_week_unlocked));
   check("планка железа не закрыта: шкал по жирам нет",
-    !g.some((x) => /Омега-3\/нед|АЛК\/нед|Жиры\/нед/.test(x)), JSON.stringify(g));
+    !g.some((x) => /Омега-3\/нед|Баланс\/нед/.test(x)), JSON.stringify(g));
   check("планка железа не закрыта: индикаторов по жирам нет",
-    !i.some((x) => ["Омега-3", "АЛК", "Жиры"].includes(x)), JSON.stringify(i));
+    !i.some((x) => ["Омега-3", "Баланс"].includes(x)), JSON.stringify(i));
   const tray = await page.$$eval("[data-story-id]", (els) =>
     els.map((e) => e.getAttribute("data-story-id")));
   check("планка железа не закрыта: истории шестой недели нет", !tray.includes("week6"),
@@ -192,19 +192,17 @@ const b = await chromium.launch({ headless: true });
   await page.waitForTimeout(9000);
   const g = await gauges(page);
   const i = await indicators(page);
-  check("три шкалы по жирам на экране",
-    ["Омега-3/нед", "АЛК/нед", "Жиры/нед"].every((x) => g.includes(x)), JSON.stringify(g));
-  check("три индикатора по жирам в ряду",
-    ["Омега-3", "АЛК", "Жиры"].every((x) => i.includes(x)), JSON.stringify(i));
+  check("шкалы по жирам на экране",
+    ["Омега-3/нед", "Баланс/нед"].every((x) => g.includes(x)), JSON.stringify(g));
+  check("индикаторы по жирам в ряду",
+    ["Омега-3", "Баланс"].every((x) => i.includes(x)), JSON.stringify(i));
   // История шестой недели появляется вместе с жирами — и только с ними.
   const tray = await page.$$eval("[data-story-id]", (els) =>
     els.map((e) => e.getAttribute("data-story-id")));
   check("в трее появилась история шестой недели", tray.includes("week6"), JSON.stringify(tray));
   const epa = await gaugeValue(page, "Омега-3/нед");
-  const ala = await gaugeValue(page, "АЛК/нед");
-  const ratio = await gaugeValue(page, "Жиры/нед");
+    const ratio = await gaugeValue(page, "Баланс/нед");
   check(`EPA+DHA = ${WANT.epa_dha.toFixed(2)} г`, near(epa, WANT.epa_dha), `${epa}`);
-  check(`АЛК = ${WANT.ala.toFixed(2)} г`, near(ala, WANT.ala), `${ala}`);
   check(`отношение = ${WANT.ratio.toFixed(2)}`, near(ratio, WANT.ratio), `${ratio}`);
   await page.screenshot({ path: process.env.SHOT || "/tmp/fats-gauges.png", fullPage: false });
   await context.close();

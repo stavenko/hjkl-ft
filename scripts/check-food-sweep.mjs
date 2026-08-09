@@ -151,15 +151,17 @@ const t0 = Date.now();
 let rows = [];
 while (Date.now() - t0 < WAIT_MS) {
   rows = await readFoods();
-  const pending = rows.filter((r) => r.id !== "done" && (r.mg == null || !r.tagged || r.nutrients < 3));
+  // Общий проход заполняет ДВА нутриента — кальций и клетчатку. Омега-3 из него
+  // убрана: одним числом она не измеряется, EPA+DHA и АЛК считаются из профиля жира.
+  const pending = rows.filter((r) => r.id !== "done" && (r.mg == null || !r.tagged || r.nutrients < 2));
   if (!pending.length) break;
   await page.waitForTimeout(3000);
 }
 
 for (const r of rows) console.log(`  ${r.name.padEnd(10)} железо ${String(r.mg).padEnd(6)} усвоение ${String(r.abs).padEnd(6)} теги ${r.tagged} нутриенты ${r.values}`);
 const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
-check("продукт, съеденный ГОД назад, разобран", byId.old?.mg != null && byId.old?.tagged && byId.old?.nutrients === 3, JSON.stringify(byId.old));
-check("продукт, которого НЕТ в дневнике, разобран", byId.never?.mg != null && byId.never?.tagged && byId.never?.nutrients === 3, JSON.stringify(byId.never));
+check("продукт, съеденный ГОД назад, разобран", byId.old?.mg != null && byId.old?.tagged && byId.old?.nutrients === 2, JSON.stringify(byId.old));
+check("продукт, которого НЕТ в дневнике, разобран", byId.never?.mg != null && byId.never?.tagged && byId.never?.nutrients === 2, JSON.stringify(byId.never));
 check("уже заполненный (с нулями) не изменился", byId.done?.mg === 0 && byId.done?.abs === 0.05, JSON.stringify(byId.done));
 // Заполненный продукт не должен породить НИ ОДНОГО запроса — ни про нутриенты,
 // ни про железо, ни про теги.

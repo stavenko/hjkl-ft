@@ -53,6 +53,7 @@ mod m005_recompute_recipes;
 mod m006_reset_heme;
 mod m007_drop_omega3;
 mod m008_refix_fat_gate;
+mod m009_protein_from_calories;
 
 #[cfg(test)]
 mod tests;
@@ -119,6 +120,11 @@ const ALL: &[Migration] = &[
         version: m008_refix_fat_gate::VERSION,
         description: m008_refix_fat_gate::DESCRIPTION,
         script: || Box::pin(m008_refix_fat_gate::script()),
+    },
+    Migration {
+        version: m009_protein_from_calories::VERSION,
+        description: m009_protein_from_calories::DESCRIPTION,
+        script: || Box::pin(m009_protein_from_calories::script()),
     },
 ];
 

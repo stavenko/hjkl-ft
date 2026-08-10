@@ -107,24 +107,50 @@ async fn calorie_hint_text(planka: Option<f64>) -> String {
     )
 }
 
-/// The protein "?" text — the fat-free-mass derivation, with the user's numbers.
+/// Текст «?» у белка: доля калорийной планки и та граница, в которую упёрлись
+/// (если упёрлись) — с числами пользователя.
 async fn protein_hint_text() -> String {
     let Some(w) = local::list_weight_entries().await.last().map(|e| e.weight_kg) else {
         return "Заполните вес и профиль, чтобы рассчитать норму белка.".to_string();
     };
-    let target = profile::protein_target_from_profile(w);
+    let target = profile::protein_target_from_profile(w).await;
     if target == 0 {
         return "Заполните профиль (рост, вес, возраст, пол), чтобы рассчитать норму белка."
             .to_string();
     }
-    let ffm = target as f64 / 1.6;
-    let h = profile::get_height_cm().map(|h| format!("{h:.0} см")).unwrap_or_default();
-    let age = profile::get_age_years().map(|a| format!("{a}")).unwrap_or_default();
-    format!(
-        "Норму белка считаем от безжировой массы тела. По вашим данным (рост {h}, возраст \
-         {age}, вес {w:.0} кг) безжировая масса ≈ {ffm:.0} кг, а планка — 1,6 г белка на кг.\n\n\
-         Ваша планка по белку: {target} г."
-    )
+    let share_pct = (profile::PROTEIN_KCAL_SHARE * 100.0).round();
+    let why = "Белок насыщает лучше жиров и углеводов: высокая планка по белку — это \
+               инструмент против голода, а не формальная «потребность».";
+    let Some(kcal) = local::calorie_goal_amount().await.filter(|k| *k > 0.0) else {
+        return format!(
+            "Планка по белку — {share_pct:.0} % вашей калорийной планки, но она ещё не \
+             установлена. Пока держим нижнюю границу — 1,6 г на кг безжировой массы тела.\n\n\
+             Ваша планка по белку: {target} г.\n\n{why}"
+        );
+    };
+    let from_kcal = profile::PROTEIN_KCAL_SHARE * kcal / 4.0;
+    // Какая из границ сработала — это и есть содержательная часть ответа.
+    let derivation = if (from_kcal.round() as u32) < target {
+        let ffm = target as f64 / profile::PROTEIN_MIN_PER_KG_FFM;
+        format!(
+            "{share_pct:.0} % от вашей планки {kcal:.0} ккал — это {from_kcal:.0} г белка, но \
+             это ниже физиологического минимума. Поэтому держим нижнюю границу: 1,6 г на кг \
+             безжировой массы тела (по вашим данным ≈ {ffm:.0} кг)."
+        )
+    } else if (from_kcal.round() as u32) > target {
+        // Вес с десятыми и запятой: «при весе 64 кг» при 64.5 — уже неправда.
+        let w_s = format!("{w:.1}").replace('.', ",");
+        format!(
+            "{share_pct:.0} % от вашей планки {kcal:.0} ккал — это {from_kcal:.0} г белка, но \
+             выше 2,2 г на кг веса мы не поднимаем: при весе {w_s} кг это {target} г."
+        )
+    } else {
+        format!(
+            "Планку по белку берём как {share_pct:.0} % калорийной планки: {share_pct:.0} % от \
+             {kcal:.0} ккал — это {target} г белка (в грамме белка 4 ккал)."
+        )
+    };
+    format!("{derivation}\n\nВаша планка по белку: {target} г.\n\n{why}")
 }
 
 /// Пояснение «?» для недельного железа: откуда взялась норма и почему она

@@ -714,12 +714,10 @@ pub async fn invalidate_food(food_id: &str) {
 /// profile/weight is set).
 async fn target_for(key: &str) -> f64 {
     match key {
-        "protein" => local::list_weight_entries()
-            .await
-            .into_iter()
-            .last()
-            .map(|e| profile::protein_target_from_profile(e.weight_kg) as f64)
-            .unwrap_or(0.0),
+        "protein" => match local::list_weight_entries().await.into_iter().last() {
+            Some(e) => profile::protein_target_from_profile(e.weight_kg).await as f64,
+            None => 0.0,
+        },
         "veg_fruit" => veg_fruit_per_day_g(),
         "steps" => crate::services::profile::get_steps_planka().unwrap_or(0.0),
         "calories" => local::calorie_goal_amount().await.unwrap_or(0.0),

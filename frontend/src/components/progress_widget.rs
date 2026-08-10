@@ -303,19 +303,20 @@ pub fn ProgressWidget() -> impl IntoView {
     // Nutrition indicators (consistency over time): the states for the currently
     // UNLOCKED indicators, read through the per-day cache. Async — `None` until the
     // aggregate resolves, so the row paints grey first, then colours in. Refreshes
-    // when the diary, foods (tags/nutrients) or weight (protein target) change.
+    // when the diary, foods (tags/nutrients), weight or GOALS change — планка по
+    // белку считается от калорийной планки, а та живёт в goals.
     let foods_ver = db::version("foods");
     let inds = create_local_resource(
-        move || (food_ver.get(), foods_ver.get(), weight_ver.get()),
+        move || (food_ver.get(), foods_ver.get(), weight_ver.get(), goals_ver.get()),
         |_| async { indicators::unlocked_indicator_states().await },
     );
     let inds_s = move || sticky(&INDS_CACHE, inds.get());
 
     // Daily-nutrient gauges (today's amount vs each per-day target). Depends on the
-    // diary, the foods (nutrient values / tags) and the latest weight (protein
-    // target is derived from fat-free mass). Grey until data appears per metric.
+    // diary, the foods (nutrient values / tags), the latest weight and the calorie
+    // planka (protein is a share of it). Grey until data appears per metric.
     let gauges = create_local_resource(
-        move || (food_ver.get(), foods_ver.get(), weight_ver.get()),
+        move || (food_ver.get(), foods_ver.get(), weight_ver.get(), goals_ver.get()),
         |_| async { indicators::daily_gauges().await },
     );
     let gauges_s = move || sticky(&GAUGES_CACHE, gauges.get());
@@ -323,7 +324,7 @@ pub fn ProgressWidget() -> impl IntoView {
     // "Keep them green" gate: GREEN days accrued toward the required week. Same
     // dependencies as the indicators (they drive the per-day green check).
     let gate = create_local_resource(
-        move || (food_ver.get(), foods_ver.get(), weight_ver.get()),
+        move || (food_ver.get(), foods_ver.get(), weight_ver.get(), goals_ver.get()),
         |_| async { indicators::green_gate_progress().await },
     );
     let gate_s = move || sticky(&GATE_CACHE, gate.get());

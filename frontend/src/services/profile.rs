@@ -227,22 +227,35 @@ pub fn get_age_years() -> Option<i32> {
     get_birth_year().map(|by| current_year - by)
 }
 
-/// Daily protein target in grams, computed from estimated FAT-FREE MASS rather
-/// than raw body weight. We estimate body-fat % with the Deurenberg (1991)
-/// equation from BMI + age + sex — i.e. assuming an ordinary, UNTRAINED body
-/// composition typical for the person's population — then take 1.6 g of protein
-/// per kg of fat-free mass:
+/// Доля калорийной планки, которую отдаём белку. Рекомендации для похудения
+/// называют 25–35 % калорий из белка; берём середину. Смысл планки — не «покрыть
+/// потребность» (её закрывают куда меньшие цифры), а НАСЫТИТЬ: белок утоляет
+/// голод лучше остальных макронутриентов, и заниженная планка делает показатель
+/// бесполезным.
+pub const PROTEIN_KCAL_SHARE: f64 = 0.30;
+/// Калорийность белка.
+const KCAL_PER_G_PROTEIN: f64 = 4.0;
+/// Нижняя граница: столько граммов на кг БЕЗЖИРОВОЙ массы. Страхует случай
+/// экстремально низкой калорийной планки — доля от маленького числа не должна
+/// опускать белок ниже физиологического минимума.
+pub const PROTEIN_MIN_PER_KG_FFM: f64 = 1.6;
+/// Верхняя граница: столько граммов на кг ПОЛНОГО веса. Страхует обратный случай
+/// (высокая планка у некрупного человека) — дальше это уже не еда, а задание.
+pub const PROTEIN_MAX_PER_KG_BW: f64 = 2.2;
+
+/// Оценка БЕЗЖИРОВОЙ массы тела (кг) по уравнению Deurenberg (1991): процент жира
+/// выводится из ИМТ, возраста и пола, то есть в предположении обычного,
+/// НЕтренированного состава тела.
 ///
 /// ```text
-/// BF%   = 1.2·BMI + 0.23·age − 10.8·sex − 5.4      (sex: 1 male, 0 female)
-/// FFM   = weight · (1 − BF%/100)
-/// target = round(1.6 · FFM)
+/// BF%  = 1.2·BMI + 0.23·age − 10.8·sex − 5.4      (sex: 1 муж., 0 жен.)
+/// FFM  = weight · (1 − BF%/100)
 /// ```
 ///
-/// Returns `None` if weight/height is non-positive (BMI undefined). The estimated
-/// BF% is clamped to a physiological [3, 60]% before FFM so an out-of-range
-/// extrapolation can't yield an absurd (or negative) target.
-pub fn protein_target_g(weight_kg: f64, height_cm: f64, age_years: i32, sex: Sex) -> Option<u32> {
+/// `None`, если вес/рост неположительны (ИМТ не определён). Процент жира зажат в
+/// физиологические [3, 60] %, чтобы экстраполяция за пределы применимости не дала
+/// нелепую (или отрицательную) массу.
+pub fn fat_free_mass_kg(weight_kg: f64, height_cm: f64, age_years: i32, sex: Sex) -> Option<f64> {
     if weight_kg <= 0.0 {
         return None;
     }
@@ -252,18 +265,55 @@ pub fn protein_target_g(weight_kg: f64, height_cm: f64, age_years: i32, sex: Sex
         Sex::Female => 0.0,
     };
     let bf_pct = (1.2 * bmi + 0.23 * age_years as f64 - 10.8 * sex_term - 5.4).clamp(3.0, 60.0);
-    let ffm = weight_kg * (1.0 - bf_pct / 100.0);
-    Some((1.6 * ffm).round() as u32)
+    Some(weight_kg * (1.0 - bf_pct / 100.0))
+}
+
+/// Дневная планка по белку (граммы) — ДОЛЯ КАЛОРИЙНОЙ ПЛАНКИ, зажатая между двумя
+/// границами, считающимися от тела:
+///
+/// ```text
+/// база   = 0.30 · планка_ккал / 4
+/// пол    = 1.6 · FFM          (безжировая масса, Deurenberg)
+/// потолок = 2.2 · вес
+/// target = round(clamp(база, пол, потолок))
+/// ```
+///
+/// Пол всегда ниже потолка (1.6·FFM ≤ 1.6·вес < 2.2·вес), так что зажим корректен
+/// при любом составе тела.
+///
+/// `kcal_planka` = `None` (планки по калориям ещё нет — до конца онбординга), либо
+/// неположительна → берём пол: это ровно прежнее правило 1.6 г на кг безжировой
+/// массы, то есть до появления калорийной планки поведение не меняется.
+///
+/// `None`, если вес/рост неположительны.
+pub fn protein_target_g(
+    kcal_planka: Option<f64>,
+    weight_kg: f64,
+    height_cm: f64,
+    age_years: i32,
+    sex: Sex,
+) -> Option<u32> {
+    let ffm = fat_free_mass_kg(weight_kg, height_cm, age_years, sex)?;
+    let floor = PROTEIN_MIN_PER_KG_FFM * ffm;
+    let ceiling = PROTEIN_MAX_PER_KG_BW * weight_kg;
+    let base = match kcal_planka {
+        Some(k) if k > 0.0 => PROTEIN_KCAL_SHARE * k / KCAL_PER_G_PROTEIN,
+        _ => floor,
+    };
+    Some(base.clamp(floor, ceiling).round() as u32)
 }
 
 /// Convenience over [`protein_target_g`]: pulls height/age/sex from the profile
-/// and computes the target for `weight_kg`. Returns 0 when any of those is unset
-/// (the setup section captures them before protein ever matters), so the task
-/// simply shows «0 г» until the profile is complete — the same fallback the
-/// weight-only formula used.
-pub fn protein_target_from_profile(weight_kg: f64) -> u32 {
+/// and the current calorie planka, and computes the target for `weight_kg`.
+/// Returns 0 when any profile field is unset (the setup section captures them
+/// before protein ever matters), so the task simply shows «0 г» until the profile
+/// is complete — the same fallback the weight-only formula used.
+pub async fn protein_target_from_profile(weight_kg: f64) -> u32 {
+    let kcal = crate::services::local::calorie_goal_amount().await;
     match (get_height_cm(), get_age_years(), get_sex()) {
-        (Some(h), Some(age), Some(sex)) => protein_target_g(weight_kg, h, age, sex).unwrap_or(0),
+        (Some(h), Some(age), Some(sex)) => {
+            protein_target_g(kcal, weight_kg, h, age, sex).unwrap_or(0)
+        }
         _ => 0,
     }
 }
@@ -274,9 +324,9 @@ mod tests {
 
     #[test]
     fn deurenberg_worked_example_man() {
-        // Man, 35 y, 180 cm, 90 kg → BMI 27.8, BF% ≈ 25%, FFM ≈ 67.3 kg,
-        // protein 1.6 g/kg FFM ≈ 108 g (the reference example).
-        let g = protein_target_g(90.0, 180.0, 35, Sex::Male).unwrap();
+        // Man, 35 y, 180 cm, 90 kg → BMI 27.8, BF% ≈ 25%, FFM ≈ 67.3 kg.
+        // Без калорийной планки берётся пол: 1.6 г/кг FFM ≈ 108 г.
+        let g = protein_target_g(None, 90.0, 180.0, 35, Sex::Male).unwrap();
         assert_eq!(g, 108);
     }
 
@@ -284,14 +334,57 @@ mod tests {
     fn deurenberg_woman_higher_bf_lower_target() {
         // Same anthropometrics but female (sex term 0) → higher BF%, less FFM,
         // so a lower protein target than the man.
-        let woman = protein_target_g(90.0, 180.0, 35, Sex::Female).unwrap();
-        let man = protein_target_g(90.0, 180.0, 35, Sex::Male).unwrap();
+        let woman = protein_target_g(None, 90.0, 180.0, 35, Sex::Female).unwrap();
+        let man = protein_target_g(None, 90.0, 180.0, 35, Sex::Male).unwrap();
         assert!(woman < man, "woman {woman} should be < man {man}");
     }
 
     #[test]
     fn protein_target_needs_positive_weight_and_height() {
-        assert!(protein_target_g(0.0, 180.0, 35, Sex::Male).is_none());
-        assert!(protein_target_g(90.0, 0.0, 35, Sex::Male).is_none());
+        assert!(protein_target_g(None, 0.0, 180.0, 35, Sex::Male).is_none());
+        assert!(protein_target_g(None, 90.0, 0.0, 35, Sex::Male).is_none());
+    }
+
+    #[test]
+    fn protein_is_thirty_percent_of_the_calorie_planka() {
+        // Женщина 42 г., 180 см, 64.5 кг при планке 1800 ккал: 30 % — это 135 г,
+        // ВЫШЕ пола (74 г) и НИЖЕ потолка (2.2·64.5 ≈ 142 г). Берётся ровно доля.
+        let g = protein_target_g(Some(1800.0), 64.5, 180.0, 42, Sex::Female).unwrap();
+        assert_eq!(g, 135);
+    }
+
+    #[test]
+    fn low_calorie_planka_cannot_push_protein_below_the_ffm_floor() {
+        // Экстремально низкая планка: 30 % от 900 ккал — это 68 г, ниже пола.
+        let target = protein_target_g(Some(900.0), 64.5, 180.0, 42, Sex::Female).unwrap();
+        let floor = protein_target_g(None, 64.5, 180.0, 42, Sex::Female).unwrap();
+        assert_eq!(target, floor);
+        assert!((0.30 * 900.0 / 4.0) < floor as f64, "проверка должна упираться в пол");
+    }
+
+    #[test]
+    fn high_calorie_planka_cannot_push_protein_above_the_bodyweight_ceiling() {
+        // Крупная планка у некрупного человека: 30 % от 3000 ккал — это 225 г,
+        // выше потолка 2.2 г на кг полного веса.
+        let target = protein_target_g(Some(3000.0), 64.5, 180.0, 42, Sex::Female).unwrap();
+        assert_eq!(target, (2.2 * 64.5_f64).round() as u32);
+    }
+
+    #[test]
+    fn floor_never_exceeds_ceiling() {
+        // Зажим корректен при любом составе тела: 1.6·FFM ≤ 1.6·вес < 2.2·вес.
+        for &(w, h, age, sex) in &[
+            (45.0, 175.0, 20, Sex::Male),
+            (64.5, 180.0, 42, Sex::Female),
+            (95.0, 165.0, 35, Sex::Female),
+            (120.0, 178.0, 40, Sex::Male),
+            (200.0, 170.0, 60, Sex::Female),
+        ] {
+            let ffm = fat_free_mass_kg(w, h, age, sex).unwrap();
+            assert!(
+                PROTEIN_MIN_PER_KG_FFM * ffm <= PROTEIN_MAX_PER_KG_BW * w,
+                "пол выше потолка при {w} кг / {h} см"
+            );
+        }
     }
 }

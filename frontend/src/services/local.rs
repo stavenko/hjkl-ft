@@ -1811,6 +1811,10 @@ pub async fn set_calorie_goal(amount: f64) {
     // Установка попадает в ИСТОРИЮ: индикатор судит день по планке, действовавшей
     // именно в тот день, а не по сегодняшней.
     record_planka(PLANKA_CALORIES, amount).await;
+    // Планка по белку — ДОЛЯ калорийной, значит движется вместе с ней. Пересчёт
+    // стоит здесь, а не у вызывающих: через `set_calorie_goal` проходят ВСЕ пути
+    // установки калорий (онбординг, недельное письмо, кнопка «Пересчитать», чат).
+    record_protein_planka().await;
     // The planka now matches the current goal/trend again.
     set_planka_stale(false);
     // Restart the weekly-recompute clock: the planka was just (re)computed, so the
@@ -1901,6 +1905,9 @@ pub async fn save_weight(weight_kg: f64, no_water: bool, no_food: bool, no_wash:
         existing.morning = morning;
         existing.updated_at = now();
         db::put("weight_entries", &existing).await;
+        // Перевзвешивание в тот же день — тоже новый вес, а значит и новые границы
+        // нормы белка.
+        record_protein_planka().await;
         return existing;
     }
     let entry = WeightEntry {
@@ -1916,13 +1923,25 @@ pub async fn save_weight(weight_kg: f64, no_water: bool, no_food: bool, no_wash:
         updated_at: now(),
     };
     db::put("weight_entries", &entry).await;
-    // Норма белка считается от ВЕСА, значит новый вес — это новая норма. Пишем её в
+    // Границы нормы белка (пол по безжировой массе, потолок по полному весу)
+    // считаются от ВЕСА, значит новый вес может дать новую норму. Пишем её в
     // историю здесь: иначе прошлые дни пересуживались бы по сегодняшней норме.
-    let protein = crate::services::profile::protein_target_from_profile(weight_kg);
+    record_protein_planka().await;
+    entry
+}
+
+/// Пересчитать планку по белку по ТЕКУЩИМ данным (последний вес, профиль,
+/// действующая калорийная планка) и записать её в историю сегодняшним днём.
+/// Ничего не делает, пока нет веса или неполон профиль. Идемпотентна: повторный
+/// вызов с тем же результатом не пишет ([`record_planka`]).
+pub async fn record_protein_planka() {
+    let Some(weight_kg) = list_weight_entries().await.last().map(|e| e.weight_kg) else {
+        return;
+    };
+    let protein = crate::services::profile::protein_target_from_profile(weight_kg).await;
     if protein > 0 {
         record_planka(PLANKA_PROTEIN, protein as f64).await;
     }
-    entry
 }
 
 pub async fn get_weight_for_date(date: &str) -> Option<WeightEntry> {

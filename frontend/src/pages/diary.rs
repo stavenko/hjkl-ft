@@ -612,6 +612,7 @@ pub fn DiaryPage() -> impl IntoView {
                                                         // which is anchored directly under this button.
                                                         <div style="position: relative;">
                                                             <button
+                                                                attr:data-testid="diary-row-menu"
                                                                 class="button is-ghost has-text-grey-light"
                                                                 style="height: 2.5rem; width: 2.5rem; padding: 0; text-decoration: none;"
                                                                 on:click=move |_| {
@@ -639,6 +640,7 @@ pub fn DiaryPage() -> impl IntoView {
                                                                         }
                                                                     >{move || t("diary.duplicate")}</button>
                                                                     <button
+                                                                        attr:data-testid="diary-menu-edit"
                                                                         class="button is-ghost is-small is-fullwidth"
                                                                         style="justify-content: flex-start; text-decoration: none;"
                                                                         on:click={

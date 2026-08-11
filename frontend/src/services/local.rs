@@ -1419,6 +1419,88 @@ pub struct RecipeNutrition {
     pub fat_profile: Option<FatProfile>,
 }
 
+/// Что блюдо даёт по нашим показателям — В РАСЧЁТЕ НА 100 Г готового блюда.
+///
+/// У блюда не может быть «флагов» вроде «овощ: да/нет»: рагу из говядины с
+/// капустой — и то и другое сразу, а вопрос в том, СКОЛЬКО. Поэтому вместо
+/// пометок здесь количества, посчитанные из состава и конечного веса. Ничего из
+/// этого не спрашивается у модели и не правится руками: блюдо — функция состава.
+///
+/// `None` везде значит «не знаем», а не «ноль»: если хоть у одного ингредиента
+/// нужный признак не выяснен, сумма по остальным — не ответ.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RecipeFlags {
+    /// Граммы овощей и фруктов в 100 г блюда.
+    pub veg_fruit_g: Option<f64>,
+    /// Порций гемового железа в 100 г блюда. Порция — та же, что в недельной
+    /// шкале: [`crate::services::heme::PORTION_PROTEIN_G`] граммов белка из
+    /// гемовых продуктов.
+    pub heme_portions: Option<f64>,
+    /// Отношение (МНЖК+ПНЖК)/НЖК самого блюда. Сравнивать его с нормой —
+    /// дело показывающего; здесь только величина. `None` — жира нет или профиль
+    /// неизвестен.
+    pub unsat_to_sat: Option<f64>,
+    /// Граммы ЭПК+ДГК в 100 г блюда.
+    pub epa_dha_g: Option<f64>,
+}
+
+/// Посчитать [`RecipeFlags`] по составу и конечному весу.
+///
+/// Овощи и порции гема считаются ПО ИНГРЕДИЕНТАМ (в самом блюде таких полей нет
+/// и быть не должно), а жиры берутся из уже посчитанного профиля блюда — он
+/// собран тем же проходом по вкладу и второй раз считать его незачем.
+pub fn recipe_flags(
+    ingredients: &[RecipeIngredient],
+    foods: &BTreeMap<String, Food>,
+    total_grams: f64,
+    dish: &Food,
+) -> RecipeFlags {
+    if total_grams <= 0.0 {
+        return RecipeFlags { veg_fruit_g: None, heme_portions: None, unsat_to_sat: None, epa_dha_g: None };
+    }
+    let scale = 100.0 / total_grams;
+    let mut veg_g = 0.0_f64;
+    let mut veg_known = true;
+    let mut heme_protein_g = 0.0_f64;
+    let mut heme_known = true;
+    for ing in ingredients {
+        let Some(f) = foods.get(&ing.food_id) else {
+            veg_known = false;
+            heme_known = false;
+            continue;
+        };
+        match f.is_veg_fruit {
+            Some(true) => veg_g += ing.grams,
+            Some(false) => {}
+            None => veg_known = false,
+        }
+        match f.is_heme {
+            // Белок ингредиента — на 100 г, поэтому приводим к его массе.
+            Some(true) => heme_protein_g += f.protein * ing.grams / 100.0,
+            Some(false) => {}
+            None => heme_known = false,
+        }
+    }
+    let acids = dish.fatty_acids_per_100g();
+    RecipeFlags {
+        veg_fruit_g: veg_known.then(|| veg_g * scale),
+        heme_portions: heme_known
+            .then(|| heme_protein_g * scale / crate::services::heme::PORTION_PROTEIN_G),
+        unsat_to_sat: acids.as_ref().and_then(|a| a.unsat_to_sat()),
+        epa_dha_g: acids.map(|a| a.epa_dha_g),
+    }
+}
+
+/// [`recipe_flags`] по идентификатору блюда: сам достаёт состав, вес и продукт.
+pub async fn recipe_flags_for(recipe_id: &str) -> Option<RecipeFlags> {
+    let recipe = get_recipe(recipe_id).await?;
+    let food_id = recipe.food_id.clone()?;
+    let dish = db::get::<Food>("foods", &food_id).await?;
+    let total_grams = recipe.total_grams.filter(|g| *g > 0.0)?;
+    let foods = foods_by_ids(recipe.ingredients.iter().map(|i| i.food_id.clone())).await;
+    Some(recipe_flags(&recipe.ingredients, &foods, total_grams, &dish))
+}
+
 pub fn recipe_nutrition(
     ingredients: &[RecipeIngredient],
     foods: &BTreeMap<String, Food>,
@@ -2151,6 +2233,105 @@ mod tests {
     use super::steps_planka_for_avg;
     use super::{calorie_planka, planka_factor, PLANKA_STEP};
     use crate::services::weight_trend::{Direction, WeightTrend};
+
+    mod recipe_flags {
+        use super::super::{recipe_flags, RecipeIngredient};
+        use api_types::{FatProfile, Food};
+        use std::collections::BTreeMap;
+
+        fn food(id: &str, protein: f64, fat: f64, veg: Option<bool>, heme: Option<bool>) -> Food {
+            Food {
+                id: id.to_string(),
+                name: id.to_string(),
+                kcal: 100.0,
+                protein,
+                fat,
+                carbs: 0.0,
+                nutrients: BTreeMap::new(),
+                package_weight: None,
+                is_recipe: false,
+                recipe_id: None,
+                archived: false,
+                is_restaurant: false,
+                is_snack: None,
+                is_liquid_cal: None,
+                is_veg_fruit: veg,
+                is_egg: None,
+                is_red_meat: None,
+                is_heme: heme,
+                iron_mg: None,
+                iron_absorption: None,
+                fat_profile: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }
+        }
+
+        fn ing(food_id: &str, grams: f64) -> RecipeIngredient {
+            RecipeIngredient {
+                id: format!("i-{food_id}"),
+                recipe_id: "r".into(),
+                food_id: food_id.into(),
+                grams,
+
+                created_at: String::new(),
+                updated_at: String::new(),
+            }
+        }
+
+        /// Пример пользователя: рагу из 400 г говядины и 400 г капусты, конечный
+        /// вес 700 г. На 100 г блюда: капусты 400/700·100 = 57 г; белка от
+        /// говядины 26·4 = 104 г, на 100 г блюда 14.86 г — это 0.59 порции.
+        #[test]
+        fn stew_of_beef_and_cabbage() {
+            let mut foods = BTreeMap::new();
+            foods.insert("beef".to_string(), food("beef", 26.0, 10.0, Some(false), Some(true)));
+            foods.insert("cabbage".to_string(), food("cabbage", 1.8, 0.1, Some(true), Some(false)));
+            let dish = food("dish", 0.0, 0.0, None, None);
+            let f = recipe_flags(&[ing("beef", 400.0), ing("cabbage", 400.0)], &foods, 700.0, &dish);
+            assert!((f.veg_fruit_g.unwrap() - 57.142_857).abs() < 1e-4, "{:?}", f.veg_fruit_g);
+            assert!((f.heme_portions.unwrap() - 0.594_285).abs() < 1e-4, "{:?}", f.heme_portions);
+        }
+
+        /// Признак не выяснен хоть у одного ингредиента — ответа НЕТ. Сумма по
+        /// остальным означала бы «столько и есть», а это неправда.
+        #[test]
+        fn one_unclassified_ingredient_makes_the_answer_unknown() {
+            let mut foods = BTreeMap::new();
+            foods.insert("beef".to_string(), food("beef", 26.0, 10.0, Some(false), Some(true)));
+            foods.insert("x".to_string(), food("x", 5.0, 1.0, None, None));
+            let dish = food("dish", 0.0, 0.0, None, None);
+            let f = recipe_flags(&[ing("beef", 400.0), ing("x", 300.0)], &foods, 700.0, &dish);
+            assert_eq!(f.veg_fruit_g, None);
+            assert_eq!(f.heme_portions, None);
+        }
+
+        /// Жиры берутся из профиля САМОГО блюда — он уже собран по вкладу.
+        #[test]
+        fn fats_come_from_the_dish_profile() {
+            let foods = BTreeMap::new();
+            let mut dish = food("dish", 0.0, 20.0, None, None);
+            dish.fat_profile = Some(FatProfile {
+                sfa_pct: 20.0, mufa_pct: 40.0, pufa_pct: 30.0, epa_dha_pct: 10.0,
+            });
+            let f = recipe_flags(&[], &foods, 700.0, &dish);
+            // (40+30)/20 = 3.5 — выше нормы 2.0, значит блюдо тянет баланс вверх.
+            assert!((f.unsat_to_sat.unwrap() - 3.5).abs() < 1e-9);
+            // 20 г жира × 10 % = 2 г ЭПК+ДГК на 100 г.
+            assert!((f.epa_dha_g.unwrap() - 2.0).abs() < 1e-9);
+        }
+
+        /// Нет конечного веса — делить не на что, ответов нет вовсе.
+        #[test]
+        fn no_total_weight_no_answers() {
+            let foods = BTreeMap::new();
+            let dish = food("dish", 0.0, 0.0, None, None);
+            let f = recipe_flags(&[], &foods, 0.0, &dish);
+            assert_eq!(f.veg_fruit_g, None);
+            assert_eq!(f.heme_portions, None);
+            assert_eq!(f.epa_dha_g, None);
+        }
+    }
 
     fn estimated(dir: Direction, slope_wk: f64, conf: f64) -> WeightTrend {
         WeightTrend::Estimated { direction: dir, slope_kg_per_week: slope_wk, confidence: conf, days: 14 }

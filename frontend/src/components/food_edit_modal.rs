@@ -161,6 +161,41 @@ pub fn FoodEditModal(
         }
     };
 
+    // Строка ВЫВЕДЕННОГО значения: её не правят, потому что править нечего —
+    // величина посчитана из состава (или из профиля жира), и любая правка была бы
+    // затёрта первым же пересчётом.
+    let derived_row = |label: &'static str, value: String, unit: &'static str| {
+        view! {
+            <div style="display: flex; align-items: center; padding: 8px 0; border-bottom: 0.5px solid var(--bulma-border-weak);">
+                <span class="is-size-6" style="flex: 1; min-width: 0;">{label}</span>
+                <span attr:data-derived=label class="is-size-6 has-text-weight-semibold">{value}</span>
+                <span class="has-text-grey-light is-size-7" style="margin-left: 6px; min-width: 30px;">{unit}</span>
+            </div>
+        }
+    };
+
+    // Омега-3 продукта: граммы ЭПК+ДГК в 100 г, из профиля жира. Показываем и
+    // сырым продуктам — до этого профиль собирался, но человеку нигде не
+    // показывался, и проверить его было негде.
+    let epa_dha_own = food
+        .fatty_acids_per_100g()
+        .map(|a| format!("{:.2}", a.epa_dha_g))
+        .unwrap_or_else(|| "—".to_string());
+
+    // Блюдо — функция состава, поэтому вместо флагов у него количества на 100 г.
+    // Грузится отдельно: состав и конечный вес лежат в рецепте, а не в продукте.
+    let recipe_id = food.recipe_id.clone().filter(|_| food.is_recipe);
+    let flags = create_local_resource(
+        move || recipe_id.clone(),
+        |id| async move {
+            match id {
+                Some(id) => local::recipe_flags_for(&id).await,
+                None => None,
+            }
+        },
+    );
+    let is_recipe = food.is_recipe;
+
     // Portal принимает только `Fn`-замыкание, поэтому строки нутриентов собираем
     // здесь, а не внутри разметки: иначе `custom` уехал бы из окружения и вью стало
     // бы одноразовым.
@@ -232,12 +267,53 @@ pub fn FoodEditModal(
                     {custom_rows.clone()}
                     {macro_row("Железо".to_string(), "мг".to_string(), iron_mg)}
                     {macro_row("Усвоение железа".to_string(), "%".to_string(), iron_abs)}
-                    {flag_row("Низкокалорийный перекус", f_snack)}
-                    {flag_row("Жидкие калории", f_liquid)}
-                    {flag_row("Овощ или фрукт", f_veg)}
-                    {flag_row("Яйца", f_egg)}
-                    {flag_row("Красное мясо", f_meat)}
-                    {flag_row("Источник гемового железа", f_heme)}
+                    // У блюда флагов нет: рагу из говядины с капустой — и мясо, и
+                    // овощи разом, и вопрос в том, сколько. Вместо пометок —
+                    // количества на 100 г, посчитанные из состава и конечного веса.
+                    {if is_recipe {
+                        view! {
+                            {move || match flags.get() {
+                                None => view! {
+                                    <div class="is-size-7 has-text-grey" style="padding: 8px 0;">"Считаем из состава…"</div>
+                                }.into_view(),
+                                Some(None) => view! {
+                                    <div class="is-size-7 has-text-grey" style="padding: 8px 0;">
+                                        "Состав или конечный вес блюда неизвестны — считать не из чего."
+                                    </div>
+                                }.into_view(),
+                                Some(Some(f)) => {
+                                    let num = |v: Option<f64>, dec: usize| v
+                                        .map(|x| format!("{x:.*}", dec))
+                                        .unwrap_or_else(|| "—".to_string());
+                                    // «Улучшает/ухудшает» — про то, куда блюдо тянет
+                                    // недельный баланс: выше нормы тянет вверх, ниже —
+                                    // вниз. Числа тут намеренно нет: важна сторона.
+                                    let balance = match f.unsat_to_sat {
+                                        None => "—",
+                                        Some(r) if r > crate::services::fats::UNSAT_TO_SAT_MIN => "улучшает",
+                                        Some(r) if r < crate::services::fats::UNSAT_TO_SAT_MIN => "ухудшает",
+                                        Some(_) => "не влияет",
+                                    };
+                                    view! {
+                                        {derived_row("Овощи и фрукты", num(f.veg_fruit_g, 0), "г")}
+                                        {derived_row("Порции гемового железа", num(f.heme_portions, 2), "")}
+                                        {derived_row("Баланс жирных кислот", balance.to_string(), "")}
+                                        {derived_row("Омега-3 (ЭПК+ДГК)", num(f.epa_dha_g, 2), "г")}
+                                    }.into_view()
+                                }
+                            }}
+                        }.into_view()
+                    } else {
+                        view! {
+                            {flag_row("Низкокалорийный перекус", f_snack)}
+                            {flag_row("Жидкие калории", f_liquid)}
+                            {flag_row("Овощ или фрукт", f_veg)}
+                            {flag_row("Яйца", f_egg)}
+                            {flag_row("Красное мясо", f_meat)}
+                            {flag_row("Источник гемового железа", f_heme)}
+                            {derived_row("Омега-3 (ЭПК+ДГК)", epa_dha_own.clone(), "г")}
+                        }.into_view()
+                    }}
                 </div>
             </div>
 

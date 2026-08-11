@@ -79,23 +79,35 @@ fn title_key(platform: &str) -> &'static str {
 
 fn render_steps(platform: &str) -> View {
     match platform {
+        // Safari на iPhone. Раньше шаги были на словах и с нарисованными значками;
+        // теперь — снимки живого интерфейса с мигающей подсказкой, куда нажимать
+        // (scripts/shot-ios-install-gifs.mjs). Значок «Поделиться» у Safari стоит
+        // ПОСЕРЕДИНЕ нижней панели, а не в адресной строке, как у Chrome.
         "ios_safari" => view! {
             <div class="steps">
                 <div class="step">
                     <span class="step-num">"1"</span>
                     <div class="step-body">
-                        {move || t("pwa.inst.ios_safari.1")} " " <IosShareIcon />
+                        {move || t("pwa.inst.ios_safari.1")}
+                        <img src="/onboard-img/ios-safari-share.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
                     <div class="step-body">
-                        {move || t("pwa.inst.ios_safari.2")} " " <AddToHomeIcon />
+                        {move || t("pwa.inst.ios_safari.2")}
+                        <img src="/onboard-img/ios-safari-home.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"3"</span>
-                    <div class="step-body">{move || t("pwa.inst.ios_safari.3")}</div>
+                    <div class="step-body">
+                        {move || t("pwa.inst.ios_safari.3")}
+                        // Последний диалог — СИСТЕМНЫЙ, один на весь iOS независимо
+                        // от браузера, поэтому берётся уже снятый в яндексовском
+                        // прогоне кадр, а не заводится копия того же самого.
+                        <img src="/onboard-img/ios-ya-add.gif" alt="" class="step-shot" />
+                    </div>
                 </div>
             </div>
         }.into_view(),
@@ -152,19 +164,23 @@ fn render_steps(platform: &str) -> View {
                     <span class="step-num">"1"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.ios_chrome.1")}
-                        <img src="/onboard-img/ios-chrome-share.png" alt="" class="step-shot" />
+                        <img src="/onboard-img/ios-chrome-share.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.ios_chrome.2")}
-                        <img src="/onboard-img/ios-chrome-add.png" alt="" class="step-shot" />
+                        <img src="/onboard-img/ios-chrome-add.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"3"</span>
-                    <div class="step-body">{move || t("pwa.inst.ios_chrome.3")}</div>
+                    <div class="step-body">
+                        {move || t("pwa.inst.ios_chrome.3")}
+                        // Тот же системный диалог iOS, что и в Safari.
+                        <img src="/onboard-img/ios-ya-add.gif" alt="" class="step-shot" />
+                    </div>
                 </div>
             </div>
         }.into_view(),

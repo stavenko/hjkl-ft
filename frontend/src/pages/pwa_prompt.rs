@@ -1,4 +1,6 @@
 use leptos::*;
+use wasm_bindgen::JsValue;
+
 use crate::components::pwa_icons::*;
 use crate::services::i18n::t;
 use crate::services::platform;
@@ -394,6 +396,12 @@ fn system_browser_intent_url() -> String {
     )
 }
 
+/// Кружок с номером шага. Экран для неопознанного браузера рисуется РАНЬШЕ общей
+/// обвязки со стилями `.step-num`, поэтому оформление здесь своё, встроенное.
+const STEP_NUM: &str = "flex-shrink: 0; display: inline-flex; align-items: center; \
+     justify-content: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; \
+     background: var(--bulma-link); color: #fff; font-size: 0.85rem; font-weight: 700;";
+
 /// Логотип Chrome — нарисованный здесь же, а не картинкой со стороннего адреса:
 /// три сектора, белая втулка и синяя середина.
 #[component]
@@ -407,6 +415,44 @@ fn ChromeMark() -> impl IntoView {
             <circle cx="24" cy="24" r="9" fill="#4285F4"/>
         </svg>
     }
+}
+
+/// Снимок браузера для наших логов: строка User-Agent и ответы на те вопросы,
+/// от которых зависит, заработает ли приложение вообще. Одного UA мало — он
+/// врёт и ничего не говорит о возможностях; а «ключи есть, сервис-воркера нет»
+/// сразу показывает, чинить тут или уводить.
+fn browser_report() -> String {
+    let Some(win) = web_sys::window() else {
+        return "нет window".to_string();
+    };
+    let nav = win.navigator();
+    let ua = nav.user_agent().unwrap_or_default();
+    let has = |obj: &JsValue, key: &str| {
+        js_sys::Reflect::get(obj, &JsValue::from_str(key))
+            .map(|v| !v.is_undefined() && !v.is_null())
+            .unwrap_or(false)
+    };
+    let creds = js_sys::Reflect::get(nav.as_ref(), &JsValue::from_str("credentials")).ok();
+    let creds_create = creds
+        .as_ref()
+        .and_then(|c| js_sys::Reflect::get(c, &JsValue::from_str("create")).ok())
+        .map(|f| f.is_function())
+        .unwrap_or(false);
+    let standalone = win
+        .match_media("(display-mode: standalone)")
+        .ok()
+        .flatten()
+        .map(|m| m.matches())
+        .unwrap_or(false);
+    let lang = nav.language().unwrap_or_default();
+    format!(
+        "UA: {ua}\nplatform: unknown\nPublicKeyCredential: {}\nnavigator.credentials: {}\n\
+         credentials.create: {}\nserviceWorker: {}\nstandalone: {standalone}\nlang: {lang}",
+        has(win.as_ref(), "PublicKeyCredential"),
+        creds.as_ref().map(|c| !c.is_undefined() && !c.is_null()).unwrap_or(false),
+        creds_create,
+        has(nav.as_ref(), "serviceWorker"),
+    )
 }
 
 /// Адрес приложения, который человек унесёт в Chrome: тот же самый, что открыт
@@ -457,14 +503,10 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
     if platform == "unknown" {
         let url = current_app_url();
         // Сигнал нам: пока такие браузеры не попадали ни в какую статистику, и
-        // узнать о них было неоткуда. Уходит один раз при показе экрана.
-        crate::services::telemetry::report_internal(
-            "browser.unsupported",
-            &url,
-            &web_sys::window()
-                .and_then(|w| w.navigator().user_agent().ok())
-                .unwrap_or_default(),
-        );
+        // узнать о них было неоткуда. Уходит один раз при показе экрана — вместе
+        // со СНИМКОМ ВОЗМОЖНОСТЕЙ браузера, а не одним User-Agent'ом: чинить по
+        // строке UA нечего, а по «есть ли ключи, есть ли сервис-воркер» — есть.
+        crate::services::telemetry::report_internal("browser.unsupported", &url, &browser_report());
         let copied = create_rw_signal(false);
         let url_for_copy = url.clone();
         // «Скопировано» показываем только если буфер И ПРАВДА принял: обещание
@@ -496,30 +538,39 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                     <p style="line-height: 1.6; margin-bottom: 18px;">
                         {move || t("pwa.unknown.chrome")}
                     </p>
-                    <p class="has-text-grey" style="line-height: 1.6; margin-bottom: 10px;">
-                        {move || t("pwa.unknown.copy_hint")}
-                    </p>
-                    // Адрес копируется тапом по нему же: набирать такое руками —
-                    // отдельное мучение, а «выделите и скопируйте» на телефоне
-                    // работает через раз.
-                    <button
-                        attr:data-testid="pwa-btn-copy-url"
-                        class="button is-light is-fullwidth"
-                        style="height: auto; padding: 14px; white-space: normal; word-break: break-all; \
-                               font-family: monospace; line-height: 1.45;"
-                        on:click=copy
-                    >
-                        {url.clone()}
-                    </button>
-                    <p attr:data-testid="pwa-copied" class="has-text-success is-size-7"
-                       style="min-height: 1.2em; margin-top: 8px;">
-                        {move || if copied.get() { t("pwa.unknown.copied") } else { "" }}
-                    </p>
-                    // Два действия по строке — перенос в тексте значащий.
-                    <p class="has-text-grey"
-                       style="line-height: 1.6; margin-top: 12px; white-space: pre-line;">
-                        {move || t("pwa.unknown.steps")}
-                    </p>
+                    // Порядок действий — пунктами и ПО ЛЕВОМУ КРАЮ: тремя фразами
+                    // подряд по центру он читается как рассуждение, а не как то,
+                    // что надо сделать по шагам.
+                    <div style="text-align: left; margin-top: 4px;">
+                        <div style="display: flex; gap: 10px; margin-bottom: 8px;">
+                            <span style=STEP_NUM>"1"</span>
+                            <div style="line-height: 1.5;">{move || t("pwa.unknown.step1")}</div>
+                        </div>
+                        // Адрес копируется тапом по нему же: набирать такое руками —
+                        // отдельное мучение, а «выделите и скопируйте» на телефоне
+                        // работает через раз.
+                        <button
+                            attr:data-testid="pwa-btn-copy-url"
+                            class="button is-light is-fullwidth"
+                            style="height: auto; padding: 12px; white-space: normal; word-break: break-all; \
+                                   font-family: monospace; line-height: 1.45; margin-left: 0;"
+                            on:click=copy
+                        >
+                            {url.clone()}
+                        </button>
+                        <p attr:data-testid="pwa-copied" class="has-text-success is-size-7"
+                           style="min-height: 1.2em; margin: 6px 0 14px; text-align: center;">
+                            {move || if copied.get() { t("pwa.unknown.copied") } else { "" }}
+                        </p>
+                        <div style="display: flex; gap: 10px; margin-bottom: 8px;">
+                            <span style=STEP_NUM>"2"</span>
+                            <div style="line-height: 1.5;">{move || t("pwa.unknown.step2")}</div>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <span style=STEP_NUM>"3"</span>
+                            <div style="line-height: 1.5;">{move || t("pwa.unknown.step3")}</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         }

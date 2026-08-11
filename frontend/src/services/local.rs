@@ -663,7 +663,7 @@ pub async fn veg_fruit_grams_on(date: &str) -> f64 {
 /// Продукт без профиля не вносит ничего: у него не «нет кислот», а «мы пока не
 /// знаем», и подставлять ноль нельзя.
 pub async fn fatty_acids_on(date: &str) -> FattyAcids {
-    acids_on(date, |_| true).await
+    acids_on(date, Food::fatty_acids_per_100g).await
 }
 
 /// Кислоты за день ДЛЯ ИНДИКАТОРА БАЛАНСА: без жира, запертого в целой
@@ -677,26 +677,24 @@ pub async fn fatty_acids_on(date: &str) -> FattyAcids {
 /// Убирается ТОЛЬКО из баланса. Омега-3 такой оговорки не знает: её в молочном
 /// жире всё равно нет, и вычитать там нечего.
 pub async fn balance_acids_on(date: &str) -> FattyAcids {
-    acids_on(date, |f| f.is_milk_globule != Some(true)).await
+    acids_on(date, Food::balance_acids_per_100g).await
 }
 
-/// Общий сумматор: кислоты съеденного за день, по продуктам, прошедшим `keep`.
-/// Продукт без профиля жира пропускается — «не знаем» это не «ноль».
-async fn acids_on(date: &str, keep: impl Fn(&Food) -> bool) -> FattyAcids {
+/// Общий сумматор: кислоты съеденного за день. `per100` решает, ЧТО брать у
+/// продукта — весь его жир или только участвующий в балансе; вернувший `None`
+/// пропускается, потому что «не знаем» это не «ноль».
+async fn acids_on(date: &str, per100: impl Fn(&Food) -> Option<FattyAcids>) -> FattyAcids {
     let entries = list_diary(date).await;
     let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
     let mut total = FattyAcids::default();
     for e in &entries {
         let Some(food) = foods.get(&e.food_id) else { continue };
-        if !keep(food) {
-            continue;
-        }
-        let Some(per100) = food.fatty_acids_per_100g() else { continue };
+        let Some(acids) = per100(food) else { continue };
         let eaten = (e.grams - e.waste_grams).max(0.0);
         if eaten <= 0.0 {
             continue;
         }
-        total += per100.scaled(eaten / 100.0);
+        total += acids.scaled(eaten / 100.0);
     }
     total
 }
@@ -1141,6 +1139,7 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
             is_milk_globule: None,
             iron_mg: None, iron_absorption: None,
             fat_profile: None,
+            balance_fat_profile: None,
             created_at: now(),
             updated_at: now(),
         };
@@ -1222,6 +1221,7 @@ pub async fn add_detected_foods_to_diary(items: &[ResolvedFood]) -> Vec<DiaryEnt
             iron_mg: None,
             iron_absorption: None,
             fat_profile: None,
+            balance_fat_profile: None,
             created_at: now(),
             updated_at: now(),
         };
@@ -1404,6 +1404,12 @@ pub struct RecipeNutrition {
     /// `None`, если профиля нет хоть у одного ингредиента, В КОТОРОМ ЕСТЬ ЖИР:
     /// безжирный ингредиент без профиля ничего не портит, у него нечего складывать.
     pub fat_profile: Option<FatProfile>,
+    /// Профиль ТОЙ ЧАСТИ жира блюда, что участвует в балансе, — в долях от ОБЩЕГО
+    /// жира блюда. Ингредиенты с целой молочно-жировой глобулой в него не входят.
+    ///
+    /// `None`, если хоть у одного жирного ингредиента признак глобулы не выяснен:
+    /// сумма по остальным была бы не «меньше жира», а неправдой.
+    pub balance_fat_profile: Option<FatProfile>,
 }
 
 /// Что блюдо даёт по нашим показателям — В РАСЧЁТЕ НА 100 Г готового блюда.
@@ -1468,12 +1474,15 @@ pub fn recipe_flags(
             None => heme_known = false,
         }
     }
+    // Баланс у блюда считается по ТОЙ ЖЕ части жира, что и в индикаторе, — иначе
+    // форма и шкала говорили бы о разном. Омега-3 берётся из всего жира.
     let acids = dish.fatty_acids_per_100g();
+    let balance = dish.balance_acids_per_100g();
     RecipeFlags {
         veg_fruit_g: veg_known.then(|| veg_g * scale),
         heme_portions: heme_known
             .then(|| heme_protein_g * scale / crate::services::heme::PORTION_PROTEIN_G),
-        unsat_to_sat: acids.as_ref().and_then(|a| a.unsat_to_sat()),
+        unsat_to_sat: balance.as_ref().and_then(|a| a.unsat_to_sat()),
         epa_dha_g: acids.map(|a| a.epa_dha_g),
     }
 }
@@ -1509,12 +1518,19 @@ pub fn recipe_nutrition(
     // «по вкладу».
     let mut fa = api_types::FattyAcids::default();
     let mut fa_known = true;
+    // ВТОРАЯ сумма — только тот жир, что участвует в балансе: без ингредиентов,
+    // чей жир заперт в целой молочно-жировой глобуле. У продукта такой жир
+    // отбрасывается целиком по флагу, а у блюда флага нет и быть не может —
+    // сырники это и творог, и мука, и масло сразу. Значит считать надо по составу.
+    let mut fa_balance = api_types::FattyAcids::default();
+    let mut fa_balance_known = true;
 
     for ing in ingredients {
         let Some(f) = foods.get(&ing.food_id) else {
             // Ингредиента нет в базе — состав неполон, и железо блюда неизвестно.
             iron_known = false;
             fa_known = false;
+            fa_balance_known = false;
             continue;
         };
         let factor = ing.grams / 100.0;
@@ -1533,11 +1549,24 @@ pub fn recipe_nutrition(
             _ => iron_known = false,
         }
         match f.fatty_acids_per_100g() {
-            Some(acids) => fa += acids.scaled(factor),
+            Some(acids) => {
+                fa += acids.scaled(factor);
+                match f.is_milk_globule {
+                    // Глобульный ингредиент в баланс не идёт — но это ОТВЕТ, а не
+                    // пробел: сумма остаётся известной.
+                    Some(true) => {}
+                    Some(false) => fa_balance += acids.scaled(factor),
+                    // Признак не выяснен — неизвестно, считать его или нет.
+                    None => fa_balance_known = false,
+                }
+            }
             // Безжирный ингредиент без профиля блюду не мешает: складывать у него
             // нечего. Неизвестен профиль только там, где жир есть.
             None if f.fat <= 0.0 => {}
-            None => fa_known = false,
+            None => {
+                fa_known = false;
+                fa_balance_known = false;
+            }
         }
     }
 
@@ -1566,6 +1595,22 @@ pub fn recipe_nutrition(
                         mufa_pct: pct(fa.mufa_g),
                         pufa_pct: pct(fa.pufa_g),
                         epa_dha_pct: pct(fa.epa_dha_g),
+                    }
+                })
+            })
+            .flatten(),
+        // Тот же приём для балансовой части: доли считаются от ОБЩЕГО жира блюда,
+        // а не от «небалансового» — тогда умножение на `Food::fat` в дневнике даёт
+        // сразу нужные граммы, без второго знаменателя.
+        balance_fat_profile: fa_balance_known
+            .then(|| {
+                (fat > 0.0).then(|| {
+                    let pct = |g: f64| g / fat * 100.0;
+                    FatProfile {
+                        sfa_pct: pct(fa_balance.sfa_g),
+                        mufa_pct: pct(fa_balance.mufa_g),
+                        pufa_pct: pct(fa_balance.pufa_g),
+                        epa_dha_pct: pct(fa_balance.epa_dha_g),
                     }
                 })
             })
@@ -1603,6 +1648,17 @@ pub async fn recompute_recipe(recipe_id: &str) -> bool {
     let n = recipe_nutrition(&recipe.ingredients, &foods, total_grams);
 
     let same = |a: f64, b: f64| (a - b).abs() < 1e-6;
+    // Профили сравниваются одинаково, поэтому сравнение — одно на оба.
+    let same_profile = |a: Option<FatProfile>, b: Option<FatProfile>| match (a, b) {
+        (Some(a), Some(b)) => {
+            same(a.sfa_pct, b.sfa_pct)
+                && same(a.mufa_pct, b.mufa_pct)
+                && same(a.pufa_pct, b.pufa_pct)
+                && same(a.epa_dha_pct, b.epa_dha_pct)
+        }
+        (None, None) => true,
+        _ => false,
+    };
     let unchanged = same(food.kcal, n.kcal)
         && same(food.protein, n.protein)
         && same(food.fat, n.fat)
@@ -1619,16 +1675,8 @@ pub async fn recompute_recipe(recipe_id: &str) -> bool {
             (None, None) => true,
             _ => false,
         }
-        && match (food.fat_profile, n.fat_profile) {
-            (Some(a), Some(b)) => {
-                same(a.sfa_pct, b.sfa_pct)
-                    && same(a.mufa_pct, b.mufa_pct)
-                    && same(a.pufa_pct, b.pufa_pct)
-                    && same(a.epa_dha_pct, b.epa_dha_pct)
-            }
-            (None, None) => true,
-            _ => false,
-        };
+        && same_profile(food.fat_profile, n.fat_profile)
+        && same_profile(food.balance_fat_profile, n.balance_fat_profile);
     if unchanged {
         return false;
     }
@@ -1641,6 +1689,7 @@ pub async fn recompute_recipe(recipe_id: &str) -> bool {
     food.iron_mg = n.iron_mg;
     food.iron_absorption = n.iron_absorption;
     food.fat_profile = n.fat_profile;
+    food.balance_fat_profile = n.balance_fat_profile;
     food.updated_at = now();
     db::put("foods", &food).await;
     true
@@ -1760,6 +1809,7 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         iron_absorption: n.iron_absorption,
         // То же и с профилем жира: он складывается из состава.
         fat_profile: n.fat_profile,
+        balance_fat_profile: n.balance_fat_profile,
         created_at: now(),
         updated_at: now(),
     };
@@ -2219,7 +2269,7 @@ mod tests {
     use crate::services::weight_trend::{Direction, WeightTrend};
 
     mod recipe_flags {
-        use super::super::{recipe_flags, RecipeIngredient};
+        use super::super::{recipe_flags, recipe_nutrition, RecipeIngredient};
         use api_types::{FatProfile, Food};
         use std::collections::BTreeMap;
 
@@ -2243,6 +2293,7 @@ mod tests {
                 iron_mg: None,
                 iron_absorption: None,
                 fat_profile: None,
+                balance_fat_profile: None,
                 created_at: String::new(),
                 updated_at: String::new(),
             }
@@ -2287,19 +2338,74 @@ mod tests {
             assert_eq!(f.heme_portions, None);
         }
 
-        /// Жиры берутся из профиля САМОГО блюда — он уже собран по вкладу.
+        /// Жиры берутся из профилей САМОГО блюда, и у двух показателей они РАЗНЫЕ:
+        /// омега-3 — из всего жира, баланс — из той части, что в балансе участвует.
         #[test]
         fn fats_come_from_the_dish_profile() {
             let foods = BTreeMap::new();
             let mut dish = food("dish", 0.0, 20.0, None, None);
+            dish.is_recipe = true;
             dish.fat_profile = Some(FatProfile {
                 sfa_pct: 20.0, mufa_pct: 40.0, pufa_pct: 30.0, epa_dha_pct: 10.0,
             });
+            // Половина жира блюда — молочная глобула, в баланс она не идёт: доли
+            // вдвое меньше, но считаются от ТОГО ЖЕ общего жира.
+            dish.balance_fat_profile = Some(FatProfile {
+                sfa_pct: 10.0, mufa_pct: 20.0, pufa_pct: 15.0, epa_dha_pct: 5.0,
+            });
             let f = recipe_flags(&[], &foods, 700.0, &dish);
-            // (40+30)/20 = 3.5 — выше нормы 2.0, значит блюдо тянет баланс вверх.
+            // (20+15)/10 = 3.5 — считается по балансовой части, а не по всему жиру.
             assert!((f.unsat_to_sat.unwrap() - 3.5).abs() < 1e-9);
-            // 20 г жира × 10 % = 2 г ЭПК+ДГК на 100 г.
+            // 20 г жира × 10 % = 2 г ЭПК+ДГК на 100 г — тут ВЕСЬ жир.
             assert!((f.epa_dha_g.unwrap() - 2.0).abs() < 1e-9);
+        }
+
+        /// Молочный ингредиент не попадает в балансовую часть, но остаётся в общей.
+        #[test]
+        fn milk_globule_ingredient_leaves_the_balance() {
+            let mut foods = BTreeMap::new();
+            // Творог: весь жир — глобула.
+            let mut curd = food("curd", 18.0, 5.0, Some(false), Some(false));
+            curd.is_milk_globule = Some(true);
+            curd.fat_profile = Some(FatProfile {
+                sfa_pct: 60.0, mufa_pct: 25.0, pufa_pct: 4.0, epa_dha_pct: 0.0,
+            });
+            // Масло растительное: в балансе участвует целиком.
+            let mut oil = food("oil", 0.0, 100.0, Some(false), Some(false));
+            oil.is_milk_globule = Some(false);
+            oil.fat_profile = Some(FatProfile {
+                sfa_pct: 10.0, mufa_pct: 25.0, pufa_pct: 60.0, epa_dha_pct: 0.0,
+            });
+            foods.insert("curd".to_string(), curd);
+            foods.insert("oil".to_string(), oil);
+            // 200 г творога (10 г жира) + 10 г масла (10 г жира) → 20 г жира на 210 г.
+            let n = recipe_nutrition(&[ing("curd", 200.0), ing("oil", 10.0)], &foods, 210.0);
+            let all = n.fat_profile.unwrap();
+            let bal = n.balance_fat_profile.unwrap();
+            // Общий профиль: НЖК 6+1 = 7 г из 20 → 35 %.
+            assert!((all.sfa_pct - 35.0).abs() < 1e-6, "{all:?}");
+            // Балансовый: творога нет, остаётся только масло — 1 г НЖК из 20 → 5 %.
+            assert!((bal.sfa_pct - 5.0).abs() < 1e-6, "{bal:?}");
+            assert!((bal.pufa_pct - 30.0).abs() < 1e-6, "{bal:?}");
+            // Отношение блюда по балансу: (2.5+6)/0.5 = 17 против общих (3.5+6.4)/7.
+            let ratio = |p: FatProfile| (p.mufa_pct + p.pufa_pct) / p.sfa_pct;
+            assert!(ratio(bal) > ratio(all));
+        }
+
+        /// Признак глобулы не выяснен у жирного ингредиента — балансовой части НЕТ.
+        /// Сумма по остальным была бы не «меньше жира», а неправдой.
+        #[test]
+        fn unknown_globule_flag_leaves_no_balance_profile() {
+            let mut foods = BTreeMap::new();
+            let mut x = food("x", 5.0, 20.0, Some(false), Some(false));
+            x.fat_profile = Some(FatProfile {
+                sfa_pct: 30.0, mufa_pct: 40.0, pufa_pct: 20.0, epa_dha_pct: 0.0,
+            });
+            // is_milk_globule остаётся None.
+            foods.insert("x".to_string(), x);
+            let n = recipe_nutrition(&[ing("x", 100.0)], &foods, 100.0);
+            assert!(n.fat_profile.is_some());
+            assert_eq!(n.balance_fat_profile, None);
         }
 
         /// Нет конечного веса — делить не на что, ответов нет вовсе.
@@ -2444,6 +2550,7 @@ mod recipe_tests {
             iron_mg: iron.map(|(mg, _)| mg),
             iron_absorption: iron.map(|(_, a)| a),
             fat_profile: None,
+            balance_fat_profile: None,
             created_at: String::new(),
             updated_at: String::new(),
         }

@@ -91,6 +91,12 @@ pub struct Food {
     /// Профиль жира этого продукта. `None` — ещё не спрашивали.
     #[serde(default)]
     pub fat_profile: Option<FatProfile>,
+    /// ТОЛЬКО У БЛЮД: профиль той части жира, что участвует в индикаторе баланса —
+    /// без ингредиентов с целой молочно-жировой глобулой, в долях от общего жира
+    /// блюда. У обычного продукта `None`: там тот же вопрос решает флаг
+    /// `is_milk_globule`, целиком отбрасывающий его жир.
+    #[serde(default)]
+    pub balance_fat_profile: Option<FatProfile>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -196,6 +202,22 @@ impl Food {
         Some(self.fat_profile?.per_100g(self.fat))
     }
 
+    /// Кислоты, участвующие в ИНДИКАТОРЕ БАЛАНСА, в граммах на 100 г.
+    ///
+    /// У блюда берётся `balance_fat_profile` — состав уже разобран по ингредиентам.
+    /// У обычного продукта вопрос решается флагом: глобульный не даёт ничего,
+    /// остальные — весь свой жир. `None` значит «не знаем», а не «ноль».
+    pub fn balance_acids_per_100g(&self) -> Option<FattyAcids> {
+        if self.is_recipe {
+            return Some(self.balance_fat_profile?.per_100g(self.fat));
+        }
+        match self.is_milk_globule {
+            Some(true) => Some(FattyAcids::default()),
+            Some(false) => self.fatty_acids_per_100g(),
+            None => None,
+        }
+    }
+
     /// Iron this food actually delivers, in mg per 100 g: amount × absorption.
     /// `None` until the dedicated iron pass has filled BOTH fields.
     pub fn absorbed_iron_mg_per_100g(&self) -> Option<f64> {
@@ -298,6 +320,7 @@ impl FoodDraft {
             is_heme: None,
             is_milk_globule: None,
             fat_profile: None,
+            balance_fat_profile: None,
             iron_mg: None,
             iron_absorption: None,
             created_at: self.created_at.clone(),

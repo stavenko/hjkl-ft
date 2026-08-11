@@ -414,6 +414,7 @@ mod tests {
             is_veg_fruit: None, is_heme: None,
             is_milk_globule: None,
             iron_mg: None, iron_absorption: None, fat_profile: None,
+            balance_fat_profile: None,
             created_at: String::new(), updated_at: String::new(),
         };
         assert_eq!(f.absorbed_iron_mg_per_100g(), None);

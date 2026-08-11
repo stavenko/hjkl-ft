@@ -280,6 +280,7 @@ pub fn FoodEditor(
             iron_mg: None,
             iron_absorption: None,
             fat_profile: None,
+            balance_fat_profile: None,
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
         }

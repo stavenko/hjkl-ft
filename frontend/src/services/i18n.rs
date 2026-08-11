@@ -838,6 +838,9 @@ fn en(key: &str) -> &'static str {
         "pwa.inst.ios_yandex.4" => "Tap \"Add\" in the top right corner.",
         "pwa.inst.ios_yandex.5" => "The icon appears on your home screen. Open the app from there — it will run in its own window.",
         // iOS Chrome/Firefox
+        "pwa.inst.ios_chrome.1" => "Tap the Share icon at the right end of the address bar.",
+        "pwa.inst.ios_chrome.2" => "In the menu, pick \"Add to Home Screen\".",
+        "pwa.inst.ios_chrome.3" => "Tap \"Add\" in the top right corner. The icon appears on your home screen — open the app from there.",
         "pwa.inst.ios_other.1" => "PWA install is only supported in Safari on iOS",
         "pwa.inst.ios_other.2" => "Open this page in Safari and follow the instructions",
         // Android Chrome
@@ -1739,6 +1742,9 @@ fn ru(key: &str) -> &'static str {
         "pwa.inst.ios_yandex.3" => "Затем — «На экран „Домой“».",
         "pwa.inst.ios_yandex.4" => "Нажмите «Добавить» в правом верхнем углу.",
         "pwa.inst.ios_yandex.5" => "Значок появится на домашнем экране. Открывайте приложение с него — оно запустится отдельным окном.",
+        "pwa.inst.ios_chrome.1" => "Нажмите значок «Поделиться» в правом краю адресной строки.",
+        "pwa.inst.ios_chrome.2" => "В меню выберите «На экран „Домой“».",
+        "pwa.inst.ios_chrome.3" => "Нажмите «Добавить» в правом верхнем углу. Значок появится на домашнем экране — открывайте приложение с него.",
         "pwa.inst.ios_other.1" => "Установка PWA на iOS работает только в Safari",
         "pwa.inst.ios_other.2" => "Откройте эту страницу в Safari и следуйте инструкции",
         "pwa.inst.android_chrome.1" => "Нажмите на кебаб — вместо него может быть значок обновления",

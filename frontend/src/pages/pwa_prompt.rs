@@ -13,10 +13,17 @@ pub fn detect_platform() -> &'static str {
     let is_android = ua.contains("android");
     let is_mac = ua.contains("macintosh") || ua.contains("mac os");
 
-    let is_chrome = ua.contains("chrome") && !ua.contains("edg") && !ua.contains("opr");
+    // Chrome на iPhone зовётся в UA «CriOS», слова «chrome» там НЕТ вовсе. Без
+    // этого он не опознавался как Chrome, зато подходил под правило Safari (в его
+    // UA есть и «safari», и «version/») — и человек получал чужую инструкцию:
+    // «кнопка „Поделиться“ внизу экрана», которой у Chrome нет, значок стоит в
+    // адресной строке. Поэтому «crios» и добавляется в Chrome, и вычитается из Safari.
+    let is_crios = ua.contains("crios");
+    let is_chrome = (ua.contains("chrome") || is_crios) && !ua.contains("edg") && !ua.contains("opr");
     let is_firefox = ua.contains("firefox");
     let is_edge = ua.contains("edg/");
-    let is_safari = ua.contains("safari") && !ua.contains("chrome") && !ua.contains("chromium");
+    let is_safari =
+        ua.contains("safari") && !ua.contains("chrome") && !ua.contains("chromium") && !is_crios;
     let is_samsung = ua.contains("samsungbrowser");
     // Yandex Browser (yabrowser) AND the Yandex app's built-in browser (yasearchbrowser /
     // yaapp_android) — the latter has NO "yabrowser" in its UA but does contain "chrome",
@@ -134,7 +141,35 @@ fn render_steps(platform: &str) -> View {
             </div>
         }.into_view(),
 
-        "ios_chrome" | "ios_firefox" => view! {
+        // Chrome на iPhone. Прежде здесь висело «установка работает только в
+        // Safari» — неправда: ярлык ставится и отсюда, просто путь свой. Кнопки
+        // «Поделиться» внизу экрана, как в Safari, нет — значок стоит в правом
+        // краю адресной строки, а пункт «На экран „Домой“» лежит в СОБСТВЕННОМ
+        // меню Chrome, а не в системном листе. Снимки — с живого экрана.
+        "ios_chrome" => view! {
+            <div class="steps">
+                <div class="step">
+                    <span class="step-num">"1"</span>
+                    <div class="step-body">
+                        {move || t("pwa.inst.ios_chrome.1")}
+                        <img src="/onboard-img/ios-chrome-share.png" alt="" class="step-shot" />
+                    </div>
+                </div>
+                <div class="step">
+                    <span class="step-num">"2"</span>
+                    <div class="step-body">
+                        {move || t("pwa.inst.ios_chrome.2")}
+                        <img src="/onboard-img/ios-chrome-add.png" alt="" class="step-shot" />
+                    </div>
+                </div>
+                <div class="step">
+                    <span class="step-num">"3"</span>
+                    <div class="step-body">{move || t("pwa.inst.ios_chrome.3")}</div>
+                </div>
+            </div>
+        }.into_view(),
+
+        "ios_firefox" => view! {
             <div class="steps">
                 <div class="step">
                     <div class="step-body has-text-warning-dark">{move || t("pwa.inst.ios_other.1")}</div>

@@ -368,9 +368,18 @@ pub async fn miniapp_me(mut req: Request, env: &Env) -> Result<Response> {
                 },
                 None => format!("{base}#claim={claim_id}.{secret}"),
             };
-            // App root (for an already-registered user → «Открыть приложение»). Derived from
-            // APP_ONBOARD_URL by dropping "/onboard".
-            let app_url = base.strip_suffix("/onboard").unwrap_or(&base).to_string();
+            // Ссылка «Открыть приложение» для уже зарегистрированного человека. Она
+            // ОТЛИЧАЕТСЯ от регистрационной ровно отсутствием разового кода: тот же
+            // `/onboard?u=<user_id>`, и потому страница отдаётся с ПЕРСОНАЛЬНЫМ
+            // манифестом (`_worker.js` подставляет `?u` в <link rel=manifest>). Именно
+            // это нужно, чтобы «На экран „Домой“» в Safari поставило ярлык, знающий
+            // аккаунт: корень сайта без `?u` даёт общий манифест со `start_url:"/"`, и
+            // поставленное с него приложение теряет пользователя. Без user_id (резолв
+            // не удался) остаётся прежний корень — лучше, чем ничего.
+            let app_url = match &account_user_id {
+                Some(uid) => format!("{base}?u={uid}"),
+                None => base.strip_suffix("/onboard").unwrap_or(&base).to_string(),
+            };
             // «Access obtained» = the user reached the app (first story chapter available), NOT
             // the payment status. That decides «Открыть приложение» vs «Получить доступ» — the
             // button must reflect whether the user actually got into the app.

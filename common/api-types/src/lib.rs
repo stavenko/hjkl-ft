@@ -64,6 +64,17 @@ pub struct Food {
     /// стольких-то граммов в неделю») снят вместе со своим классификатором.
     #[serde(default)]
     pub is_heme: Option<bool>,
+    /// AI-assigned tag: жир продукта заключён в ЦЕЛУЮ молочно-жировую глобулу.
+    ///
+    /// Мембрана глобулы рвётся только сбиванием: в масле, топлёном масле и
+    /// безводном молочном жире её нет, а в молоке, сливках, сыре, твороге,
+    /// йогурте и кефире она цела. Разница не косметическая — при одинаковых
+    /// жирных кислотах жир в целой глобуле ведёт себя иначе (сыр против масла:
+    /// −6.5 % ЛПНП), поэтому такой жир не участвует в индикаторе баланса.
+    ///
+    /// `None` — ещё не классифицировано.
+    #[serde(default)]
+    pub is_milk_globule: Option<bool>,
     /// Iron in mg per 100 g. Filled by the DEDICATED iron pass, not by the general
     /// nutrient enricher — iron is judged together with how well it is absorbed, so
     /// it deliberately does NOT live in `nutrients` (which is a plain amount map
@@ -285,6 +296,7 @@ impl FoodDraft {
             is_restaurant: false,
             is_veg_fruit: None,
             is_heme: None,
+            is_milk_globule: None,
             fat_profile: None,
             iron_mg: None,
             iron_absorption: None,

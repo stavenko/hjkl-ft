@@ -276,6 +276,7 @@ pub fn FoodEditor(
             is_restaurant: false,
             is_veg_fruit: None,
             is_heme: None,
+            is_milk_globule: None,
             iron_mg: None,
             iron_absorption: None,
             fat_profile: None,

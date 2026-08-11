@@ -432,7 +432,7 @@ async fn compute_day_value(key: &str, date: &str) -> f64 {
         // Жиры — тоже недельная механика: дневное значение показывается столбиком,
         // но день по нему не судится (дневной цели нет).
         "epa_dha" => crate::services::local::fatty_acids_on(date).await.epa_dha_g,
-        "fat_ratio" => crate::services::local::fatty_acids_on(date)
+        "fat_ratio" => crate::services::local::balance_acids_on(date)
             .await
             .unsat_to_sat()
             .unwrap_or(0.0),

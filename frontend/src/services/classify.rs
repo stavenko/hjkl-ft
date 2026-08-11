@@ -102,6 +102,7 @@ const FLAGS: &[(
 )] = &[
     ("фрукты/овощи", |f| f.is_veg_fruit.is_none(), local::FoodFlag::VegFruit),
     ("гем", |f| f.is_heme.is_none(), local::FoodFlag::Heme),
+    ("молочная глобула", |f| f.is_milk_globule.is_none(), local::FoodFlag::MilkGlobule),
 ];
 
 /// Спросить у модели ровно этот признак.
@@ -110,6 +111,7 @@ async fn ask(flag: local::FoodFlag, name: &str) -> Result<bool, String> {
     let v = match flag {
         local::FoodFlag::VegFruit => ai::classify_veg_fruit(&names).await?,
         local::FoodFlag::Heme => ai::classify_heme(&names).await?,
+        local::FoodFlag::MilkGlobule => ai::classify_milk_globule(&names).await?,
     };
     v.into_iter().next().ok_or_else(|| "пустой ответ классификатора".to_string())
 }

@@ -427,6 +427,8 @@ pub fn is_veg_fruit_food(food: &Food) -> bool {
 pub enum FoodFlag {
     VegFruit,
     Heme,
+    /// Жир заключён в целую молочно-жировую глобулу — см. `Food::is_milk_globule`.
+    MilkGlobule,
 }
 
 /// Записать ОДИН признак продукта и толкнуть синк, чтобы он доехал до других
@@ -436,6 +438,7 @@ pub async fn cache_food_flag(id: &str, flag: FoodFlag, value: bool) {
     match flag {
         FoodFlag::VegFruit => food.is_veg_fruit = Some(value),
         FoodFlag::Heme => food.is_heme = Some(value),
+        FoodFlag::MilkGlobule => food.is_milk_globule = Some(value),
     }
     food.updated_at = now();
     db::put("foods", &food).await;
@@ -660,11 +663,34 @@ pub async fn veg_fruit_grams_on(date: &str) -> f64 {
 /// Продукт без профиля не вносит ничего: у него не «нет кислот», а «мы пока не
 /// знаем», и подставлять ноль нельзя.
 pub async fn fatty_acids_on(date: &str) -> FattyAcids {
+    acids_on(date, |_| true).await
+}
+
+/// Кислоты за день ДЛЯ ИНДИКАТОРА БАЛАНСА: без жира, запертого в целой
+/// молочно-жировой глобуле.
+///
+/// Мембрана глобулы меняет судьбу тех же самых жирных кислот: сыр против масла
+/// при одинаковом составе даёт другой ответ по ЛПНП. Считать их наравне значит
+/// требовать от человека компенсировать то, что компенсации не требует, — а
+/// обезжиренный творог с его тремя граммами жира ещё и не выкинуть.
+///
+/// Убирается ТОЛЬКО из баланса. Омега-3 такой оговорки не знает: её в молочном
+/// жире всё равно нет, и вычитать там нечего.
+pub async fn balance_acids_on(date: &str) -> FattyAcids {
+    acids_on(date, |f| f.is_milk_globule != Some(true)).await
+}
+
+/// Общий сумматор: кислоты съеденного за день, по продуктам, прошедшим `keep`.
+/// Продукт без профиля жира пропускается — «не знаем» это не «ноль».
+async fn acids_on(date: &str, keep: impl Fn(&Food) -> bool) -> FattyAcids {
     let entries = list_diary(date).await;
     let foods = foods_by_ids(entries.iter().map(|e| e.food_id.clone())).await;
     let mut total = FattyAcids::default();
     for e in &entries {
         let Some(food) = foods.get(&e.food_id) else { continue };
+        if !keep(food) {
+            continue;
+        }
         let Some(per100) = food.fatty_acids_per_100g() else { continue };
         let eaten = (e.grams - e.waste_grams).max(0.0);
         if eaten <= 0.0 {
@@ -1112,6 +1138,7 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
             archived: false,
             is_restaurant: false,
             is_veg_fruit: None, is_heme: None,
+            is_milk_globule: None,
             iron_mg: None, iron_absorption: None,
             fat_profile: None,
             created_at: now(),
@@ -1191,6 +1218,7 @@ pub async fn add_detected_foods_to_diary(items: &[ResolvedFood]) -> Vec<DiaryEnt
             is_restaurant: false,
             is_veg_fruit: None,
             is_heme: None,
+            is_milk_globule: None,
             iron_mg: None,
             iron_absorption: None,
             fat_profile: None,
@@ -1724,6 +1752,7 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         is_restaurant: false,
         is_veg_fruit: None,
         is_heme: None,
+        is_milk_globule: None,
         // Железо блюда — из состава, а не от модели по названию. `None` здесь
         // означает «у части ингредиентов оно ещё не выяснено»; пересчёт вернётся
         // сюда, когда выяснится.
@@ -2210,6 +2239,7 @@ mod tests {
                 is_restaurant: false,
                 is_veg_fruit: veg,
                 is_heme: heme,
+                is_milk_globule: None,
                 iron_mg: None,
                 iron_absorption: None,
                 fat_profile: None,
@@ -2410,6 +2440,7 @@ mod recipe_tests {
             is_restaurant: false,
             is_veg_fruit: None,
             is_heme: None,
+            is_milk_globule: None,
             iron_mg: iron.map(|(mg, _)| mg),
             iron_absorption: iron.map(|(_, a)| a),
             fat_profile: None,

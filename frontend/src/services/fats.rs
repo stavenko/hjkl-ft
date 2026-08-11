@@ -96,11 +96,26 @@ pub async fn fatty_acids_on(date: &str) -> FattyAcids {
     local::fatty_acids_on(date).await
 }
 
+/// Кислоты за день ДЛЯ БАЛАНСА — без жира в целых молочно-жировых глобулах
+/// (см. [`local::balance_acids_on`]).
+pub async fn balance_acids_on(date: &str) -> FattyAcids {
+    local::balance_acids_on(date).await
+}
+
 async fn fatty_acids_between(from: NaiveDate, to: NaiveDate) -> FattyAcids {
+    acids_between(from, to, false).await
+}
+
+async fn balance_acids_between(from: NaiveDate, to: NaiveDate) -> FattyAcids {
+    acids_between(from, to, true).await
+}
+
+async fn acids_between(from: NaiveDate, to: NaiveDate, for_balance: bool) -> FattyAcids {
     let mut total = FattyAcids::default();
     let mut d = from;
     while d <= to {
-        total += fatty_acids_on(&d.format("%Y-%m-%d").to_string()).await;
+        let day = d.format("%Y-%m-%d").to_string();
+        total += if for_balance { balance_acids_on(&day).await } else { fatty_acids_on(&day).await };
         d += Duration::days(1);
     }
     total
@@ -109,7 +124,12 @@ async fn fatty_acids_between(from: NaiveDate, to: NaiveDate) -> FattyAcids {
 /// Ход текущей недели — для трёх шкал в виджете.
 #[derive(Clone)]
 pub struct WeeklyFats {
+    /// ВЕСЬ жир недели — из него считается омега-3.
     pub acids: FattyAcids,
+    /// Жир БЕЗ молочных глобул — из него считается баланс. Две суммы, потому что
+    /// у двух индикаторов разные вопросы: сколько длинных омега-3 съедено и каков
+    /// состав того жира, который на баланс влияет.
+    pub balance_acids: FattyAcids,
     pub epa_dha_target: f64,
     /// 1…7 — какой сегодня день недели жира.
     pub day_of_week: u32,
@@ -120,7 +140,7 @@ impl WeeklyFats {
     /// средним по продуктам: ложка оливкового масла с её отношением 5.7 иначе
     /// перевесила бы двести граммов сала.
     pub fn ratio(&self) -> Option<f64> {
-        self.acids.unsat_to_sat()
+        self.balance_acids.unsat_to_sat()
     }
 }
 
@@ -129,6 +149,7 @@ pub async fn weekly_progress() -> Option<WeeklyFats> {
     let (start, _end) = week_bounds(today)?;
     Some(WeeklyFats {
         acids: fatty_acids_between(start, today).await,
+        balance_acids: balance_acids_between(start, today).await,
         epa_dha_target: EPA_DHA_PER_WEEK_G,
         day_of_week: (today - start).num_days() as u32 + 1,
     })
@@ -163,6 +184,16 @@ impl Fat {
             Fat::EpaDha => Some(acids.epa_dha_g),
             // Отношение без насыщенных не определено — судить нечего.
             Fat::Ratio => acids.unsat_to_sat(),
+        }
+    }
+
+    /// Кислоты за отрезок ДЛЯ ЭТОГО индикатора: у баланса — без молочных глобул,
+    /// у омега-3 — весь жир. Спрашивать «какие кислоты» в отрыве от «зачем» нельзя:
+    /// два индикатора считают разные суммы.
+    async fn acids_between(self, from: NaiveDate, to: NaiveDate) -> FattyAcids {
+        match self {
+            Fat::EpaDha => fatty_acids_between(from, to).await,
+            Fat::Ratio => balance_acids_between(from, to).await,
         }
     }
 
@@ -207,7 +238,7 @@ pub async fn indicator_state(which: Fat) -> indicators::IndicatorState {
         }
         // Неделя без данных о жире не судится — как и неделя без дневника. Иначе
         // «профиль ещё не выяснен» читалось бы как «рацион плохой».
-        let acids = fatty_acids_between(s, e).await;
+        let acids = which.acids_between(s, e).await;
         let Some(v) = which.weekly_value(&acids) else { continue };
         history.push(v >= which.target());
     }
@@ -233,7 +264,7 @@ pub async fn weekly_series(which: Fat) -> indicators::IndicatorSeries {
             let logged = (0..7).any(|d| {
                 diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
             });
-            let acids = fatty_acids_between(s, e).await;
+            let acids = which.acids_between(s, e).await;
             // У баланса столбик показывает ОТКЛОНЕНИЕ от нормы со знаком — ровно то
             // же, что и шкала в виджете. Показывать там сырое отношение значило бы
             // говорить о показателе двумя разными языками на соседних экранах.

@@ -1049,6 +1049,7 @@ macro_rules! flag_answer {
 
 flag_answer!(VegFruitAnswer, reason_why_this_product_classified_as_vegetable_or_fruit);
 flag_answer!(HemeAnswer, reason_why_this_product_classified_as_gem_source);
+flag_answer!(MilkGlobuleAnswer, reason_why_this_product_classified_as_milk_fat_globule);
 
 /// Спросить ОДИН признак про весь список продуктов.
 ///
@@ -1107,11 +1108,41 @@ pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
     ask_flag::<HemeAnswer>(names, "гем", HEME_DEF).await
 }
 
+/// Жир продукта заключён в целую молочно-жировую глобулу.
+///
+/// Граница ровно одна и она механическая: мембрану рвёт СБИВАНИЕ. Всё, что
+/// получено сбиванием или вытапливанием (масло сливочное, топлёное, безводный
+/// молочный жир, молочный жир внутри кондитерки), глобулы не имеет; всё
+/// остальное молочное — молоко, сливки, сыр, творог, йогурт, кефир — имеет.
+pub async fn classify_milk_globule(names: &[String]) -> Result<Vec<bool>, String> {
+    ask_flag::<MilkGlobuleAnswer>(names, "молочная глобула", MILK_GLOBULE_DEF).await
+}
+
 const VEG_FRUIT_DEF: &str =
         "QUESTION: is this food a vegetable or a fruit — fresh, cooked, or an obvious \
          vegetable/fruit \
          dish (salad, stewed vegetables, fruit)? NOT: cereals, grains, bread, meat, fish, dairy, \
          sweets, or drinks.";
+
+const MILK_GLOBULE_DEF: &str =
+        "QUESTION: is the fat of this food still enclosed in INTACT MILK FAT GLOBULES? \
+         Milk fat leaves the udder wrapped in a membrane. CHURNING and rendering break that \
+         membrane; nothing else does — not fermenting, not heating, not ageing, not freezing. \
+         TRUE for milk and every product made from it WITHOUT churning: milk of any fat content, \
+         cream, sour cream, kefir, ryazhenka, ayran, acidophilus, drinking and thick yogurt, \
+         cottage cheese, curd mass, ricotta, natural cheeses (hard, semi-hard, soft, brined), \
+         condensed and powdered milk, whey, ice cream, and dishes whose fat comes \
+         mainly from these (cheesecake made of cottage cheese, creamy sauce, milk porridge). \
+         FALSE for butter, ghee, clarified butter, butter oil and anhydrous milk fat — churning \
+         and rendering destroyed the membrane. FALSE for PROCESSED cheese as well (плавленый сыр, \
+         cheese spread, cheese in a tub): melting with emulsifying salts re-emulsifies the fat, \
+         and the native membrane does not survive it. FALSE for everything a cook made WITH butter \
+         rather than with milk or cream, and for confectionery where milk fat is added as \
+         butterfat: milk chocolate, buttercream, shortcrust pastry, croissant, waffles, biscuits. \
+         FALSE for everything non-dairy: meat, poultry, fish, eggs, oils, nuts, seeds, plants — \
+         they have no milk fat at all. A plant «milk» (soy, oat, almond, coconut) is NOT dairy \
+         and is FALSE. The answer depends ONLY on WHAT THE FOOD IS and whether its milk fat was \
+         churned out; fat percentage, brand, packaging and country never change it.";
 
 const HEME_DEF: &str =
         "QUESTION: is this food a RICH source of HEME iron — the well-absorbed animal form? \

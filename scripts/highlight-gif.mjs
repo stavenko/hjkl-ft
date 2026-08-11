@@ -69,7 +69,13 @@ export const drawSpark = ({ rects, frame }) => {
 
 /// Снимает петлю кадров с подсветкой на `sparkSels`, обрезанную по всему виджету
 /// прогресса (чтобы остальные индикаторы были видны), и собирает GIF через ffmpeg.
-export async function makeWidgetGif(page, sparkSels, outPath) {
+/// `band: true` — снять не всю карточку, а ПОЛОСУ вокруг самих подсветок.
+///
+/// Нужно там, где под кадром длинный текст: карточка целиком высокая, в свободное
+/// место над текстом она влезает только крошечной, а если не уменьшать — текст
+/// ложится поверх неё. Полоса же коротка и широка: подсветки оказываются в её
+/// середине по построению, а значит и в середине свободного места.
+export async function makeWidgetGif(page, sparkSels, outPath, opts = {}) {
   const box = (sel) => page.$eval(sel, (el) => {
     const r = el.getBoundingClientRect();
     return { x: r.x, y: r.y, w: r.width, h: r.height };
@@ -82,6 +88,14 @@ export async function makeWidgetGif(page, sparkSels, outPath) {
     x: Math.max(0, widget.x - M), y: Math.max(0, widget.y - M),
     width: widget.w + 2 * M, height: widget.h + 2 * M,
   };
+  if (opts.band) {
+    // Вертикальные границы — по крайним подсветкам, с запасом на лучи; по
+    // горизонтали полоса остаётся во всю карточку, иначе строка оборвётся посреди.
+    const top = Math.min(...rects.map((r) => r.y)) - M;
+    const bottom = Math.max(...rects.map((r) => r.y + r.h)) + M;
+    clip.y = Math.max(clip.y, top);
+    clip.height = Math.min(clip.y + clip.height, bottom) - clip.y;
+  }
   const name = outPath.replace(/^.*\//, "").replace(/\.gif$/, "");
   const dir = `/tmp/spk-${name}`;
   rmSync(dir, { recursive: true, force: true });

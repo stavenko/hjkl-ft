@@ -414,6 +414,18 @@ fn FrameView(frame: Frame) -> impl IntoView {
                            box-shadow: 0 18px 50px rgba(0,0,0,0.5);" />
             </div>
         }.into_view(),
+        // Полоса: своё окно, поднятое над текстом. Нижняя граница 53 % — под ней
+        // начинается длинный текст этих кадров, и залезать туда нельзя; центр окна
+        // выходит на ~28 % высоты экрана, то есть примерно в середину свободного
+        // места, куда и попадают обе подсветки.
+        Media::ShotBand(p) => view! {
+            <div style="position: absolute; top: 3%; left: 0; right: 0; bottom: 53%; z-index: 1; \
+                        display: flex; align-items: center; justify-content: center; padding: 0 12px;">
+                <img src=format!("/story-img/{p}")
+                    style="max-width: 100%; max-height: 100%; border-radius: 14px; \
+                           box-shadow: 0 18px 50px rgba(0,0,0,0.5);" />
+            </div>
+        }.into_view(),
         // Same card, panned up by `up`% of the image height so a low-sitting
         // highlight rises to the run's shared focal point. Its own (lower) box —
         // NOT the raised Shot box — keeps the three widget frames aligned to each

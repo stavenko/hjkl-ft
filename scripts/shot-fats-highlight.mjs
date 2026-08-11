@@ -126,8 +126,13 @@ await page.locator('[data-testid="progress-widget"]').screenshot({
   path: process.env.SHOT || "/tmp/fats-highlight-widget.png",
 });
 
-await makeWidgetGif(page, ['[data-ind="Омега-3"] > div', '[data-gauge="Омега-3/нед"]'], OUT_OMEGA);
-await makeWidgetGif(page, ['[data-ind="Баланс"] > div', '[data-gauge="Баланс жира"]'], OUT_RATIO);
+// Полосой, а не всей карточкой: под этими кадрами длинный текст, и высокая
+// карточка либо съёживается до нечитаемой, либо оказывается под ним. Полоса
+// вокруг самих подсветок ставит их в середину свободного места (см. makeWidgetGif).
+await makeWidgetGif(page, ['[data-ind="Омега-3"] > div', '[data-gauge="Омега-3/нед"]'], OUT_OMEGA,
+  { band: true });
+await makeWidgetGif(page, ['[data-ind="Баланс"] > div', '[data-gauge="Баланс жира"]'], OUT_RATIO,
+  { band: true });
 
 await context.close();
 await b.close();

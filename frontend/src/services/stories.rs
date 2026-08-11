@@ -50,6 +50,12 @@ pub enum Media {
     /// GIF whose highlight sits lower in the frame is panned up to a shared
     /// focal point across a run of frames (same widget, different framing).
     ShotUp(&'static str, u8),
+    /// Узкая ПОЛОСА снимка (подсветка и её ближайшее окружение), а не карточка
+    /// целиком. Для кадров с длинным текстом: высокая карточка в оставшееся над
+    /// текстом место влезает только нечитаемо мелкой, а не уменьшенная — уходит
+    /// под текст. Полоса коротка и широка, поэтому ставится выше и целиком в
+    /// свободном месте, а подсветки оказываются примерно в его середине.
+    ShotBand(&'static str),
     /// A full-bleed photo anchored to the TOP of the frame (no rounded corners,
     /// scaled slightly past the screen edges). The text sits at the bottom on a
     /// gradient whose translucency begins at the kicker line. Used for editorial
@@ -106,6 +112,10 @@ impl Frame {
                 s.push_str(p);
                 s.push(':');
                 s.push_str(&up.to_string());
+            }
+            Media::ShotBand(p) => {
+                s.push_str("shotband:");
+                s.push_str(p);
             }
             Media::Cover(p) => {
                 s.push_str("cover:");
@@ -299,7 +309,7 @@ fn all_image_paths() -> Vec<String> {
     for story in STORIES {
         for f in story.frames {
             match f.media {
-                Media::Shot(p) | Media::ShotUp(p, _) | Media::Cover(p) => {
+                Media::Shot(p) | Media::ShotUp(p, _) | Media::ShotBand(p) | Media::Cover(p) => {
                     set.insert(format!("/story-img/{p}"));
                 }
                 Media::Chart => {
@@ -1178,7 +1188,7 @@ const S6: &[Frame] = &[
     // 6 — первый индикатор: омега-3 из рыбы.
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("fats-omega-highlight.gif"),
+        media: Media::ShotBand("fats-omega-highlight.gif"),
         accent: GREEN,
         kicker: Loc { en: "Fats", ru: "Жиры" },
         title: Loc { en: "", ru: "" },
@@ -1196,7 +1206,7 @@ const S6: &[Frame] = &[
     // 7 — второй индикатор: соотношение, то есть баланс.
     Frame {
         bg: Bg::Dark,
-        media: Media::Shot("fats-ratio-highlight.gif"),
+        media: Media::ShotBand("fats-ratio-highlight.gif"),
         accent: GREEN,
         kicker: Loc { en: "Fats", ru: "Жиры" },
         title: Loc { en: "", ru: "" },

@@ -465,6 +465,11 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
     let sending = create_rw_signal(false);
     // The dataset(s) whose shared payload is open in the modal (one modal at a time).
     let shared_open = create_rw_signal(Option::<datashare::Dataset>::None);
+    // Карточка пользователя прямо из переписки. Разговор почти всегда про самого
+    // человека («не заходит», «сбросьте мне онбординг»), а его id у треда уже есть —
+    // ходить за ним в список пользователей и искать там строку незачем.
+    let card_open = create_rw_signal(false);
+    let uid_card = store_value(user_id.clone());
     // Auto-scroll to the newest message (same as the client chat): the thread opens
     // pinned to the bottom and follows new messages, but a user who scrolled up to
     // read history isn't yanked down until they return near the bottom.
@@ -676,6 +681,11 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                 <div class="appbar__title mono">{label}</div>
                 <div class="appbar__sub">"переписка · обновляется"</div>
             </div>
+            <button attr:data-testid="thread-user-card" class="btn btn--ghost"
+                attr:aria-label="Карточка пользователя"
+                on:click=move |_| card_open.set(true)>
+                "Карточка"
+            </button>
         </header>
 
         {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
@@ -854,6 +864,14 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                         </div>
                     </div>
                 }
+            })}
+
+            // Та же карточка, что открывается строкой в списке пользователей:
+            // подписка, ключи, чеки, «Сбросить доступ (онбординг заново)» и
+            // обнуление. Компонент один — расходиться этим двум местам нечем.
+            {move || card_open.get().then(|| view! {
+                <UserModal user_id=uid_card.get_value()
+                    on_close=Callback::new(move |_| card_open.set(false)) />
             })}
         </div>
     }

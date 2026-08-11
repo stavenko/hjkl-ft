@@ -99,6 +99,14 @@ pub fn detect_platform_is_mi() -> bool {
     crate::pages::pwa_prompt::detect_platform() == "android_mi"
 }
 
+/// Samsung Internet на Android. Лечение то же, что у Mi: intent в Chrome оттуда
+/// СРАБАТЫВАЕТ — проверено на устройстве (SamsungBrowser/30.0, Android 10), — а
+/// значит человеку нужна одна кнопка, а не инструкция по установке из самого
+/// Samsung Internet. Инструкцию он увидит уже в Chrome.
+pub fn detect_platform_is_samsung() -> bool {
+    crate::pages::pwa_prompt::detect_platform() == "android_samsung"
+}
+
 pub fn needs_pwa_prompt() -> bool {
     // Yandex Browser: ALWAYS. The app is unusable there (no passkey, no PWA), so
     // the «open it in Chrome» screen is shown on every launch and cannot be
@@ -109,6 +117,11 @@ pub fn needs_pwa_prompt() -> bool {
     // Mi Browser — по той же причине и так же безусловно: ключ там не создать,
     // значит и пользоваться нечем, пока человек не перешёл в Chrome.
     if detect_platform_is_mi() {
+        return true;
+    }
+    // Samsung Internet — так же безусловно: экран с одной кнопкой в Chrome, а не
+    // инструкция по установке здесь.
+    if detect_platform_is_samsung() {
         return true;
     }
     let pwa = is_pwa();

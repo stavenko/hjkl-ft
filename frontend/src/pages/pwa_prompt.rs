@@ -414,7 +414,12 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
     // уходит по browser_fallback_url — то есть переоткрывает страницу здесь же),
     // поэтому там учат листу «Поделиться». Здесь intent работает — проверено на
     // устройстве, — и человеку нужна ровно одна кнопка, а не инструкция.
-    if platform == "android_mi" {
+    // Samsung Internet — сюда же: intent оттуда срабатывает (проверено на
+    // устройстве, SamsungBrowser/30.0), значит лечение то же, что у Mi, — одна
+    // кнопка в Chrome. Инструкцию по установке человек увидит уже в Chrome, а не
+    // здесь: прежняя ветка «android_samsung» учила ставить из самого Samsung
+    // Internet и до этого экрана теперь не доходит.
+    if platform == "android_mi" || platform == "android_samsung" {
         let intent = system_browser_intent_url();
         return view! {
             <div attr:data-testid="pwa-mi-screen"

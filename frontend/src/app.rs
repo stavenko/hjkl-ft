@@ -57,6 +57,11 @@ fn initial_state() -> AppState {
     if platform::detect_platform_is_mi() {
         return AppState::PwaPrompt;
     }
+    // Samsung Internet — там же и по тому же поводу: ссылка ведёт на `/onboard`,
+    // а человека надо увести в Chrome ДО того, как он начнёт что-то делать здесь.
+    if platform::detect_platform_is_samsung() {
+        return AppState::PwaPrompt;
+    }
     // Onboarding drives its own flow; bypass all overlays so neither the Auth (login) nor the
     // PWA-install overlay covers it.
     if is_onboard_entry() {

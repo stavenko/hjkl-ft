@@ -1014,69 +1014,55 @@ pub async fn lookup_fat_profile(food_name: &str) -> Result<api_types::FatProfile
 // признак — это осознанная плата за то, что признаки перестали влиять друг на
 // друга и каждый можно замерять и править отдельно.
 //
-// Спрашиваются ТРИ: жидкие калории, фрукты/овощи, гем. Перекус, яйца и красное
-// мясо у модели больше не спрашиваются.
+// Спрашиваются ТРИ: фрукты/овощи, гем, молочная глобула. Перекус, яйца, красное
+// мясо и жидкие калории у модели больше не спрашиваются.
 
-/// Ответ на ОДИН признак: вердикты по продуктам и обоснование к каждому.
-///
-/// Плоская форма (никаких map / nullable / $ref) — то, что принимает строгий
-/// сервер моделей.
-trait FlagAnswer {
-    fn parts(self) -> (Vec<bool>, Vec<String>);
-}
+// Три признака — ТРИ ОТДЕЛЬНЫХ ПРОМПТА, целиком, без общей обвязки.
+//
+// Раньше здесь был один шаблон, в который подставлялось «определение» признака, и
+// одна общая схема ответа. Выглядело экономно, а на деле связало признаки друг с
+// другом: правка ради гема (порядок полей в схеме) молча испортила глобулу — 20/20
+// превратились в 17/20, хотя её текст никто не трогал. Общими были и заголовок, и
+// требования к ответу, и порядок полей — то есть всё, кроме одного абзаца.
+//
+// Поэтому промпты разведены. Общей осталась только МЕХАНИКА, в которой нет ни
+// одного слова, уходящего к модели: нумерация списка и сверка длин массивов.
+// Дублирование строк — осознанная плата: признак теперь можно править и замерять,
+// не оглядываясь на соседей.
+//
+// ПОРЯДОК ПОЛЕЙ В СХЕМЕ — часть промпта, а не деталь: схема уходит в запрос как
+// есть, и модель заполняет поля сверху вниз. У каждого признака он свой и выбран
+// ЗАМЕРОМ:
+//   * гем — обоснование первым (22/22 против 19/22): с вердиктом впереди модель
+//     решала первым же токеном, а объяснение подгоняла под сказанное, и свинина с
+//     куриными сердечками устойчиво объявлялись не гемовыми;
+//   * глобула — вердикт первым (20/20 против 17/20): дав ей порассуждать вслух,
+//     получаем те же сомнения, что и на голом промпте («в твороге глобулы не
+//     обязательно целые»), и творог с сырами уходят в «нет»;
+//   * овощи/фрукты — вердикт первым, как было; замера на них не делали, а менять
+//     неизмеренное нельзя.
+//
+// FAIL LOUDLY: ошибка модели, разбора или несовпадение длины массива — это `Err`
+// (вызывающий его показывает; ничего не размечается молча наугад).
 
-/// Тип ответа на признак. Имя поля обоснования — ДЛИННОЕ намеренно: модель читает
-/// схему, и по имени понимает, что от неё хотят, вернее, чем по отдельному абзацу.
-/// Ограничение длины живёт в тексте промпта, а не в имени.
-///
-/// Само обоснование нужно не для показа: без него вердикт плавал от прогона к
-/// прогону на одном и том же названии. Обязанность назвать причину ДО вердикта его
-/// удерживает, а нам оставляет след в логе — видно, ЧЕМ модель сочла продукт.
-macro_rules! flag_answer {
-    ($ty:ident, $reason:ident) => {
-        #[derive(Debug, Deserialize, JsonSchema)]
-        struct $ty {
-            verdict: Vec<bool>,
-            $reason: Vec<String>,
-        }
-        impl FlagAnswer for $ty {
-            fn parts(self) -> (Vec<bool>, Vec<String>) {
-                (self.verdict, self.$reason)
-            }
-        }
-    };
-}
-
-flag_answer!(VegFruitAnswer, reason_why_this_product_classified_as_vegetable_or_fruit);
-flag_answer!(HemeAnswer, reason_why_this_product_classified_as_gem_source);
-flag_answer!(MilkGlobuleAnswer, reason_why_this_product_classified_as_milk_fat_globule);
-
-/// Спросить ОДИН признак про весь список продуктов.
-///
-/// `label` — как признак зовётся в логе; `definition` — единственное, чем промпты
-/// признаков отличаются друг от друга.
-async fn ask_flag<T>(names: &[String], label: &str, definition: &str) -> Result<Vec<bool>, String>
-where
-    T: serde::de::DeserializeOwned + JsonSchema + FlagAnswer,
-{
-    let list = names
+/// Список продуктов для промпта: «0. имя». Механика, не текст.
+fn numbered(names: &[String]) -> String {
+    names
         .iter()
         .enumerate()
         .map(|(i, n)| format!("{i}. {n}"))
         .collect::<Vec<_>>()
-        .join("\n");
-    let prompt = format!(
-        "Answer ONE yes/no question about each food below, and nothing else. Food names may be in \
-         ANY language — judge by meaning, not by wording.\n\n\
-         {definition}\n\n\
-         For EVERY food also fill the reason field named in the schema. Keep it SHORT: one \
-         sentence, at most 10 words. Decide the reason FIRST and let the verdict follow from it — \
-         the two must agree.\n\n\
-         Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object: \"verdict\" — one boolean per food — and \
-         the reason array — one string per food, both in the SAME order as the foods above."
-    );
-    let (verdict, reason) = generate::<T>(prompt, |_| {}).await?.parts();
+        .join("\n")
+}
+
+/// Сверить длины и записать вердикты в лог. Тоже механика: к модели отсюда не
+/// уходит ни одного слова.
+fn take_flags(
+    label: &str,
+    names: &[String],
+    verdict: Vec<bool>,
+    reason: Vec<String>,
+) -> Result<Vec<bool>, String> {
     let n = names.len();
     if verdict.len() != n || reason.len() != n {
         return Err(format!(
@@ -1091,78 +1077,183 @@ where
     Ok(verdict)
 }
 
-// Каждый признак — своя функция, свой промпт, свой запрос. Общей «классификации»
-// больше нет: спрашивается ровно то, чего не хватает конкретному продукту.
-//
-// FAIL LOUDLY: ошибка модели, разбора или несовпадение длины массива — это `Err`
-// (вызывающий его показывает; ничего не размечается молча наугад).
+// ── Овощ или фрукт ───────────────────────────────────────────────────────────
+
+/// Имя поля обоснования ДЛИННОЕ намеренно: модель читает схему, и по имени
+/// понимает, чего от неё хотят, вернее, чем по отдельному абзацу.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct VegFruitAnswer {
+    verdict: Vec<bool>,
+    reason_why_this_product_classified_as_vegetable_or_fruit: Vec<String>,
+}
 
 /// Овощ или фрукт — свежий, приготовленный или очевидное овощное/фруктовое блюдо.
 pub async fn classify_veg_fruit(names: &[String]) -> Result<Vec<bool>, String> {
-    ask_flag::<VegFruitAnswer>(names, "фрукты/овощи", VEG_FRUIT_DEF).await
+    let prompt = format!(
+        "Answer ONE yes/no question about each food below, and nothing else. Food names may be \
+         in ANY language — judge by meaning, not by wording.\n\n\
+         QUESTION: is this food a vegetable or a fruit — fresh, cooked, or an obvious \
+         vegetable/fruit dish (salad, stewed vegetables, fruit)? NOT: cereals, grains, bread, \
+         meat, fish, dairy, sweets, or drinks.\n\n\
+         For EVERY food also fill the reason field named in the schema. Keep it SHORT: one \
+         sentence, at most 10 words; the verdict and the reason must agree.\n\n\
+         Foods (index. name):\n{list}\n\n\
+         Respond with ONLY a single minified JSON object: \"verdict\" — one boolean per food — \
+         and the reason array — one string per food, both in the SAME order as the foods above.",
+        list = numbered(names),
+    );
+    let v: VegFruitAnswer = generate(prompt, |_| {}).await?;
+    take_flags(
+        "фрукты/овощи",
+        names,
+        v.verdict,
+        v.reason_why_this_product_classified_as_vegetable_or_fruit,
+    )
 }
 
-/// Богатый источник ГЕМОВОГО железа: печень и субпродукты, красное мясо, моллюски
-/// из закрытого списка.
+// ── Источник гемового железа ─────────────────────────────────────────────────
+
+/// Обоснование стоит ПЕРВЫМ — см. замер в шапке раздела.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct HemeAnswer {
+    reason_why_this_product_classified_as_gem_source: Vec<String>,
+    verdict: Vec<bool>,
+}
+
+/// Богатый источник ГЕМОВОГО железа.
+///
+/// Определение — ПРОЦЕДУРА в жёстком порядке, а не набор правил. Набором оно и
+/// было, и рассыпалось там, где правила пересекались: куриная печень попадала и в
+/// «субпродукты» (да), и в «птицу» (нет), побеждало исключение — печень
+/// цыплят-бройлеров объявлялась не гемовой. Попытка починить приоритет словами
+/// «субпродукт важнее вида» вылечила печень, но уронила говядину со свининой:
+/// перечисленные отрубы птицы модель обобщила на мясо вообще. Порядок с остановкой
+/// на первом совпадении снимает сам вопрос о том, какое правило сильнее.
 pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
-    ask_flag::<HemeAnswer>(names, "гем", HEME_DEF).await
+    let prompt = format!(
+        "Answer ONE yes/no question about each food below, and nothing else. Food names may be \
+         in ANY language — judge by meaning, not by wording.\n\n\
+         QUESTION: is this food a RICH source of HEME iron — the well-absorbed animal form?\n\
+         Decide in THIS ORDER and STOP at the first step that matches.\n\
+         STEP 1 — is the food OFFAL, that is an INNER ORGAN taken out of a mammal or a bird, or \
+         something made mainly of such organs: liver, heart, kidney, tongue, gizzard, pâté or \
+         blood sausage? Then TRUE. The species does not \
+         matter here, only that it is an organ: chicken liver, broiler-chick liver, turkey \
+         liver, duck and goose liver, foie gras, chicken hearts and chicken gizzards are all \
+         TRUE. Organs of FISH are the exception: cod liver and any other fish liver are \
+         FALSE.\n\
+         STEP 2 — is the food the MEAT of a mammal: beef, veal, pork, lamb, mutton, venison, \
+         game? Then TRUE — in any cut, ground or whole, raw or cooked. Pork belongs here no \
+         matter what anyone calls «white meat».\n\
+         STEP 3 — is the food one of THESE molluscs, and no others: mussels, clams (vongole), \
+         cockles, oysters, octopus, whelks, winkles? Then TRUE. Squid, cuttlefish and scallops \
+         are molluscs too but are NOT on the list — they do not match this step.\n\
+         STEP 4 — everything else is FALSE. That includes: the MEAT of poultry (chicken, \
+         turkey, duck, goose); fish of every kind; crustaceans — animals with legs and claws \
+         (shrimp, prawn, crab, lobster, crayfish), which are NOT molluscs; eggs; dairy; ALL \
+         plant food however iron-rich (lentils, spinach, buckwheat, fortified cereal — that \
+         iron is non-heme); and processed products where meat is a minor part (wiener, bologna, \
+         meat-filled pastry, pizza).\n\
+         Do NOT reason about how many milligrams of iron a food holds: you do not know those \
+         numbers, and the steps already account for them. A composite dish takes the step its \
+         MAIN part takes. The answer depends ONLY on WHAT THE FOOD IS: words about preparation, \
+         storage, packaging, cut, grade or country of origin never change it.\n\n\
+         For EVERY food fill the reason field FIRST — name the step that matched, in one short \
+         sentence, at most 10 words — and let the verdict follow from it.\n\n\
+         Foods (index. name):\n{list}\n\n\
+         Respond with ONLY a single minified JSON object: the reason array — one string per \
+         food — and \"verdict\" — one boolean per food, both in the SAME order as the foods \
+         above.",
+        list = numbered(names),
+    );
+    // ТРИ ответа и большинство, а не один ответ.
+    //
+    // Замер оставил ровно одну качающуюся позицию — «бедро куриное печёное»: в
+    // одном прогоне «нет», в другом «да». Дешёвых способов её удержать не нашлось:
+    // перечисление отрубов и в шаге про органы, и в шаге-исключении делало ХУЖЕ
+    // (21/22 и 20/22) — названное в правиле притягивается к этому правилу.
+    //
+    // А цена ошибки здесь высокая: у бедра 73 г белка, и ложное «да» превращает его
+    // в 2.9 порции гема — одна порция мяса закрыла бы недельную планку целиком.
+    // Три запроса против одного платятся ОДИН РАЗ на продукт, за всю его жизнь.
+    let mut votes: Vec<[u8; 2]> = vec![[0, 0]; names.len()];
+    let mut last_reason: Vec<String> = vec![String::new(); names.len()];
+    for _ in 0..3 {
+        let v: HemeAnswer = generate(prompt.clone(), |_| {}).await?;
+        let verdict = take_flags(
+            "гем",
+            names,
+            v.verdict,
+            v.reason_why_this_product_classified_as_gem_source.clone(),
+        )?;
+        for (i, yes) in verdict.into_iter().enumerate() {
+            votes[i][usize::from(yes)] += 1;
+            last_reason[i] = v.reason_why_this_product_classified_as_gem_source[i].clone();
+        }
+    }
+    let verdict: Vec<bool> = votes.iter().map(|v| v[1] > v[0]).collect();
+    for (i, name) in names.iter().enumerate() {
+        leptos::logging::log!(
+            "гем «{name}»: {} голосами {}:{} — {}",
+            verdict[i], votes[i][1], votes[i][0], last_reason[i]
+        );
+    }
+    Ok(verdict)
+}
+
+// ── Молочно-жировая глобула ──────────────────────────────────────────────────
+
+/// Вердикт стоит ПЕРВЫМ — см. замер в шапке раздела.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct MilkGlobuleAnswer {
+    verdict: Vec<bool>,
+    reason_why_this_product_classified_as_milk_fat_globule: Vec<String>,
 }
 
 /// Жир продукта заключён в целую молочно-жировую глобулу.
 ///
-/// Граница ровно одна и она механическая: мембрану рвёт СБИВАНИЕ. Всё, что
-/// получено сбиванием или вытапливанием (масло сливочное, топлёное, безводный
-/// молочный жир, молочный жир внутри кондитерки), глобулы не имеет; всё
-/// остальное молочное — молоко, сливки, сыр, творог, йогурт, кефир — имеет.
+/// Граница ровно одна и она механическая: мембрану рвёт СБИВАНИЕ и вытапливание.
+/// Всё, что ими получено (масло сливочное, топлёное, безводный молочный жир,
+/// молочный жир внутри кондитерки), глобулы не имеет; всё остальное молочное —
+/// молоко, сливки, сыр, творог, йогурт, кефир — имеет.
 pub async fn classify_milk_globule(names: &[String]) -> Result<Vec<bool>, String> {
-    ask_flag::<MilkGlobuleAnswer>(names, "молочная глобула", MILK_GLOBULE_DEF).await
-}
-
-const VEG_FRUIT_DEF: &str =
-        "QUESTION: is this food a vegetable or a fruit — fresh, cooked, or an obvious \
-         vegetable/fruit \
-         dish (salad, stewed vegetables, fruit)? NOT: cereals, grains, bread, meat, fish, dairy, \
-         sweets, or drinks.";
-
-const MILK_GLOBULE_DEF: &str =
-        "QUESTION: is the fat of this food still enclosed in INTACT MILK FAT GLOBULES? \
+    let prompt = format!(
+        "Answer ONE yes/no question about each food below, and nothing else. Food names may be \
+         in ANY language — judge by meaning, not by wording.\n\n\
+         QUESTION: is the fat of this food still enclosed in INTACT MILK FAT GLOBULES? \
          Milk fat leaves the udder wrapped in a membrane. CHURNING and rendering break that \
          membrane; nothing else does — not fermenting, not heating, not ageing, not freezing. \
-         TRUE for milk and every product made from it WITHOUT churning: milk of any fat content, \
-         cream, sour cream, kefir, ryazhenka, ayran, acidophilus, drinking and thick yogurt, \
-         cottage cheese, curd mass, ricotta, natural cheeses (hard, semi-hard, soft, brined), \
-         condensed and powdered milk, whey, ice cream, and dishes whose fat comes \
+         TRUE for milk and every product made from it WITHOUT churning: milk of any fat \
+         content, cream, sour cream, kefir, ryazhenka, ayran, acidophilus, drinking and thick \
+         yogurt, cottage cheese, curd mass, ricotta, natural cheeses (hard, semi-hard, soft, \
+         brined), condensed and powdered milk, whey, ice cream, and dishes whose fat comes \
          mainly from these (cheesecake made of cottage cheese, creamy sauce, milk porridge). \
          FALSE for butter, ghee, clarified butter, butter oil and anhydrous milk fat — churning \
-         and rendering destroyed the membrane. FALSE for PROCESSED cheese as well (плавленый сыр, \
-         cheese spread, cheese in a tub): melting with emulsifying salts re-emulsifies the fat, \
-         and the native membrane does not survive it. FALSE for everything a cook made WITH butter \
-         rather than with milk or cream, and for confectionery where milk fat is added as \
-         butterfat: milk chocolate, buttercream, shortcrust pastry, croissant, waffles, biscuits. \
-         FALSE for everything non-dairy: meat, poultry, fish, eggs, oils, nuts, seeds, plants — \
-         they have no milk fat at all. A plant «milk» (soy, oat, almond, coconut) is NOT dairy \
-         and is FALSE. The answer depends ONLY on WHAT THE FOOD IS and whether its milk fat was \
-         churned out; fat percentage, brand, packaging and country never change it.";
-
-const HEME_DEF: &str =
-        "QUESTION: is this food a RICH source of HEME iron — the well-absorbed animal form? \
-         TRUE for only \
-         three groups: (a) LIVER and other offal — liver, pâté, kidney, heart, tongue, blood \
-         sausage; (b) RED MEAT — beef, veal, lamb, mutton, pork, venison, and dishes whose main \
-         part is such meat; (c) MOLLUSCS FROM THIS CLOSED LIST, and no others: mussels, clams \
-         (vongole), cockles, oysters, octopus, whelks, winkles. Squid, cuttlefish and scallops are \
-         molluscs too but are NOT on the list — they are FALSE. Do NOT reason about how many \
-         milligrams of iron a food holds: you do not know those numbers, and the list already \
-         accounts for them. Your only job is to say whether the food IS one of the listed kinds. \
-         FALSE for everything else, INCLUDING: chicken, turkey \
-         and other poultry; fish (salmon, tuna, cod, herring — fish is NOT a mollusc); \
-         CRUSTACEANS — animals with legs and claws (shrimp, prawn, crab, lobster, crayfish); they \
-         are NOT molluscs, and a shelled mollusc is NOT a crustacean; eggs and dairy; ALL plant food however iron-rich (lentils, spinach, buckwheat, \
-         fortified cereal — that iron is non-heme). Processed meat products where meat is a minor \
-         part (wiener, bologna, meat-filled pastry, pizza) are FALSE. Judge the food ITSELF: a \
-         dish is TRUE only when such meat, offal or mollusc is its MAIN part. The answer depends \
-         ONLY on WHAT THE FOOD IS. Words about preparation, storage, packaging, cut, grade or \
-         country of origin do not change what it is, and never change the answer.";
+         and rendering destroyed the membrane. FALSE for PROCESSED cheese as well (плавленый \
+         сыр, cheese spread, cheese in a tub): melting with emulsifying salts re-emulsifies the \
+         fat, and the native membrane does not survive it. FALSE for everything a cook made \
+         WITH butter rather than with milk or cream, and for confectionery where milk fat is \
+         added as butterfat: milk chocolate, buttercream, shortcrust pastry, croissant, \
+         waffles, biscuits. FALSE for everything non-dairy: meat, poultry, fish, eggs, oils, \
+         nuts, seeds, plants — they have no milk fat at all. A plant «milk» (soy, oat, almond, \
+         coconut) is NOT dairy and is FALSE. The answer depends ONLY on WHAT THE FOOD IS and \
+         whether its milk fat was churned out; fat percentage, brand, packaging and country \
+         never change it.\n\n\
+         For EVERY food also fill the reason field named in the schema. Keep it SHORT: one \
+         sentence, at most 10 words; the verdict and the reason must agree.\n\n\
+         Foods (index. name):\n{list}\n\n\
+         Respond with ONLY a single minified JSON object: \"verdict\" — one boolean per food — \
+         and the reason array — one string per food, both in the SAME order as the foods above.",
+        list = numbered(names),
+    );
+    let v: MilkGlobuleAnswer = generate(prompt, |_| {}).await?;
+    take_flags(
+        "молочная глобула",
+        names,
+        v.verdict,
+        v.reason_why_this_product_classified_as_milk_fat_globule,
+    )
+}
 
 // ── Support-chat: tools + agentic tool-use loop ──
 //

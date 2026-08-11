@@ -92,10 +92,10 @@ pub fn OnboardPage() -> impl IntoView {
 
     let step = create_rw_signal(if installed_at_mount {
         Step::Installed
-    } else {
-        // Ждём эффект: он и решает, куда вести. «Ссылка устарела» теперь только
-        // про НЕ подошедший код, а не про его отсутствие — см. ниже.
+    } else if authed_at_mount || param_code().is_some() {
         Step::Verifying
+    } else {
+        Step::Failed
     });
 
     let can_passkey = create_rw_signal(false);
@@ -146,13 +146,7 @@ pub fn OnboardPage() -> impl IntoView {
             } else if auth::get_user_id().is_some() {
                 onboarding_step();
             } else {
-                // Кода нет вовсе — это ссылка «Открыть приложение» из Mini App:
-                // та же, что регистрационная, но без разового кода. Её работа —
-                // отдать персональный манифест и показать, как поставить ярлык;
-                // ставить приложение можно и не входя, а войти всё равно придётся
-                // ВНУТРИ поставленного приложения (у него своя сессия). Ключ здесь
-                // не предлагаем: без сессии его не создать.
-                step.set(Step::InstallPwa);
+                step.set(Step::Failed);
             }
         });
     });

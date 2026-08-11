@@ -1,8 +1,8 @@
-// Кнопка «Открыть приложение» в Mini App обязана вести на ПЕРСОНАЛЬНУЮ ссылку.
+// Кнопка «Открыть приложение» в Mini App обязана вести на ПЕРСОНАЛЬНУЮ ссылку,
+// по которой человек сразу ставит PWA: корень с аккаунтом — `/?u=<user_id>`.
 //
-// Раньше она вела на корень сайта: общий манифест со `start_url:"/"`, и ярлык,
-// поставленный с такой страницы, не знает аккаунта. Теперь это та же ссылка, что
-// регистрационная, минус разовый код: `/onboard?u=<user_id>`.
+// Раньше она вела на голый корень: общий манифест со `start_url:"/"`, и ярлык,
+// поставленный с такой страницы, не знает аккаунта.
 //
 // Прогоняется живой путь на dev: телеграм-личность → оплата через мок → POST
 // /miniapp/me с ПОДПИСАННОЙ initData (на dev токен бота — публичная заглушка из
@@ -48,13 +48,13 @@ await post(`${MOCK}/pay/confirm`, { contractId: new URL(co.payUrl).searchParams.
 
 const me = await j(await post(`${TG}/miniapp/me`, { initData: initData(tg, username) }));
 check("статус оплачен", me.status === "paid" || me.status === "claimed", String(me.status));
-check("appUrl — это /onboard?u=<user_id>", me.appUrl === `${ONBOARD}?u=${userId}`, String(me.appUrl));
-check("appUrl несёт аккаунт (а не корень сайта)",
-  typeof me.appUrl === "string" && me.appUrl.includes(`?u=${userId}`), String(me.appUrl));
-check("отличие от регистрационной ссылки — только разовый код",
-  typeof me.onboardUrl === "string" && me.onboardUrl.split("#")[0] === me.appUrl
+const ROOT = ONBOARD.replace(/\/onboard$/, "");
+check("appUrl — это корень с аккаунтом", me.appUrl === `${ROOT}/?u=${userId}`, String(me.appUrl));
+check("appUrl не ведёт в онбординг", !String(me.appUrl).includes("/onboard"), String(me.appUrl));
+check("регистрационная ссылка осталась прежней",
+  typeof me.onboardUrl === "string" && me.onboardUrl.startsWith(`${ONBOARD}?u=${userId}`)
     && /#code=\d{6}$/.test(me.onboardUrl),
-  `${me.onboardUrl} vs ${me.appUrl}`);
+  String(me.onboardUrl));
 
 // Ссылка обязана открываться персональным манифестом — иначе ярлык потеряет аккаунт.
 const html = await (await fetch(me.appUrl)).text();

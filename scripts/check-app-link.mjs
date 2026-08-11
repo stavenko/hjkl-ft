@@ -1,15 +1,15 @@
-// Ссылка «Открыть приложение» из Mini App: `/onboard?u=<user_id>` без разового кода.
+// Ссылка «Открыть приложение» из Mini App: корень С АККАУНТОМ — `/?u=<user_id>`.
 //
-// Её работа — отдать ПЕРСОНАЛЬНЫЙ манифест и показать, как поставить ярлык на
-// рабочий стол. Значит от нового браузера, где нет ни кода, ни сессии, требуется:
-//   1. в HTML стоит <link rel="manifest" href="/manifest.json?u=…"> — иначе
+// Её работа одна: человек открывает её в браузере и СРАЗУ ставит ярлык на рабочий
+// стол — так возвращают удалённую иконку. Значит от чистого браузера, где нет ни
+// сессии, ни кода, требуется:
+//   1. в HTML стоит <link rel="manifest" href="/manifest.json?u=…">, иначе
 //      «На экран „Домой“» снимет общий манифест со start_url "/" и поставленное
 //      приложение потеряет аккаунт;
 //   2. манифест по этому адресу и правда персональный (start_url и id с ?u);
-//   3. на экране — инструкция по установке, а НЕ «Ссылка устарела» (кода нет не
-//      потому, что он протух, а потому, что он здесь и не нужен).
+//   3. на экране — инструкция по установке, без всякого онбординга и входа.
 //
-// Для сравнения проверяется и вход БЕЗ `?u`: он по-прежнему уводит на корень.
+// Для сравнения проверяется голый корень: там манифест обязан остаться общим.
 import { chromium } from "playwright";
 
 const BASE = process.env.FE || "https://renorma-fit-dev.pages.dev";
@@ -27,8 +27,8 @@ const b = await chromium.launch({ headless: true });
 {
   const context = await b.newContext({ serviceWorkers: "block" });
   const page = await context.newPage();
-  await page.goto(`${BASE}/onboard?u=${UID}`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(9000);
+  await page.goto(`${BASE}/?u=${UID}`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(10000);
 
   const href = await page.getAttribute('link[rel="manifest"]', "href");
   check("ссылка на манифест персональная", href === `/manifest.json?u=${UID}`, String(href));
@@ -38,21 +38,23 @@ const b = await chromium.launch({ headless: true });
     `${mf.start_url} · ${mf.id}`);
 
   const install = await page.locator('[data-testid="pwa-btn-dismiss"]').count();
-  const stale = await page.locator('[data-testid="onboard-failed"]').count();
-  check("показан экран установки", install > 0, `кнопок установки ${install}`);
-  check("«Ссылка устарела» не показывается", stale === 0);
+  check("сразу показана установка", install > 0, `экранов установки ${install}`);
+  const text = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+  check("установка, а не онбординг и не «ссылка устарела»",
+    text.includes("установить на рабочий стол") && !text.includes("Ссылка устарела"),
+    text.slice(0, 90));
 
   await context.close();
 }
 
-// ── без ?u — по-прежнему уводит на корень ───────────────────────────────────
+// ── голый корень — манифест общий ───────────────────────────────────────────
 {
   const context = await b.newContext({ serviceWorkers: "block" });
   const page = await context.newPage();
-  await page.goto(`${BASE}/onboard`, { waitUntil: "domcontentloaded" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(6000);
-  const path = new URL(page.url()).pathname;
-  check("вход без ?u уходит на корень", path === "/", page.url());
+  const href = await page.getAttribute('link[rel="manifest"]', "href");
+  check("без ?u манифест остаётся общим", !String(href).includes("u="), String(href));
   await context.close();
 }
 

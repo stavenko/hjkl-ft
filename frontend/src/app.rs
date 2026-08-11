@@ -62,6 +62,11 @@ fn initial_state() -> AppState {
     if platform::detect_platform_is_samsung() {
         return AppState::PwaPrompt;
     }
+    // Неопознанный браузер — тоже до онбординга: заводить аккаунт там, где мы не
+    // ручаемся за работу, значит завести его наполовину.
+    if platform::detect_platform_is_unknown() {
+        return AppState::PwaPrompt;
+    }
     // Onboarding drives its own flow; bypass all overlays so neither the Auth (login) nor the
     // PWA-install overlay covers it.
     if is_onboard_entry() {

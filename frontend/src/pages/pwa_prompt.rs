@@ -53,7 +53,10 @@ pub fn detect_platform() -> &'static str {
     if is_android && is_mi { return "android_mi"; }
     if is_android && is_firefox { return "android_firefox"; }
     if is_android && is_chrome { return "android_chrome"; }
-    if is_android { return "android_chrome"; }
+    // Android, но ни один известный браузер не опознан. Раньше такой человек молча
+    // получал инструкцию для Chrome — и не находил у себя ни того меню, ни тех
+    // пунктов. Честнее сказать прямо, что этот браузер мы не умеем.
+    if is_android { return "unknown"; }
 
     if is_mac && is_safari { return "macos_safari"; }
     if is_mac && is_chrome { return "macos_chrome"; }
@@ -65,7 +68,8 @@ pub fn detect_platform() -> &'static str {
     if is_edge { return "desktop_edge"; }
     if is_firefox { return "desktop_firefox"; }
 
-    "desktop_chrome"
+    // Ни система, ни браузер не опознаны — тот же честный ответ, что и на Android.
+    "unknown"
 }
 
 fn title_key(platform: &str) -> &'static str {
@@ -390,6 +394,33 @@ fn system_browser_intent_url() -> String {
     )
 }
 
+/// Логотип Chrome — нарисованный здесь же, а не картинкой со стороннего адреса:
+/// три сектора, белая втулка и синяя середина.
+#[component]
+fn ChromeMark() -> impl IntoView {
+    view! {
+        <svg viewBox="0 0 48 48" width="64" height="64" style="display: block; margin: 0 auto 18px;">
+            <path fill="#EA4335" d="M6.68 14 A20 20 0 0 1 41.32 14 Z"/>
+            <path fill="#FBBC05" d="M41.32 14 A20 20 0 0 1 24 44 Z"/>
+            <path fill="#34A853" d="M24 44 A20 20 0 0 1 6.68 14 Z"/>
+            <circle cx="24" cy="24" r="11" fill="#fff"/>
+            <circle cx="24" cy="24" r="9" fill="#4285F4"/>
+        </svg>
+    }
+}
+
+/// Адрес приложения, который человек унесёт в Chrome: тот же самый, что открыт
+/// сейчас, вместе с `?u=` — иначе он вернётся без аккаунта.
+fn current_app_url() -> String {
+    let Some(loc) = web_sys::window().map(|w| w.location()) else {
+        return String::new();
+    };
+    let origin = loc.origin().unwrap_or_default();
+    let path = loc.pathname().unwrap_or_else(|_| "/".to_string());
+    let search = loc.search().unwrap_or_default();
+    format!("{origin}{path}{search}")
+}
+
 #[component]
 pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
     let platform = detect_platform();
@@ -419,6 +450,82 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
     // кнопка в Chrome. Инструкцию по установке человек увидит уже в Chrome, а не
     // здесь: прежняя ветка «android_samsung» учила ставить из самого Samsung
     // Internet и до этого экрана теперь не доходит.
+    // Браузер не опознан вовсе. Инструкции по установке тут показывать нечего:
+    // мы не знаем ни его меню, ни его пунктов — и раньше молча подсовывали чужую,
+    // от Chrome. Вместо этого говорим прямо и даём унести адрес в Chrome руками:
+    // intent-кнопки тут нет намеренно, неизвестный браузер может её не понять.
+    if platform == "unknown" {
+        let url = current_app_url();
+        // Сигнал нам: пока такие браузеры не попадали ни в какую статистику, и
+        // узнать о них было неоткуда. Уходит один раз при показе экрана.
+        crate::services::telemetry::report_internal(
+            "browser.unsupported",
+            &url,
+            &web_sys::window()
+                .and_then(|w| w.navigator().user_agent().ok())
+                .unwrap_or_default(),
+        );
+        let copied = create_rw_signal(false);
+        let url_for_copy = url.clone();
+        // «Скопировано» показываем только если буфер И ПРАВДА принял: обещание
+        // может отклониться (нет прав, не тот контекст), и врать об этом нельзя —
+        // человек уйдёт в Chrome с пустым буфером.
+        let copy = move |_| {
+            let Some(win) = web_sys::window() else { return };
+            let promise = win.navigator().clipboard().write_text(&url_for_copy);
+            leptos::spawn_local(async move {
+                match wasm_bindgen_futures::JsFuture::from(promise).await {
+                    Ok(_) => copied.set(true),
+                    Err(e) => leptos::logging::warn!("буфер обмена отказал: {e:?}"),
+                }
+            });
+        };
+        return view! {
+            <div attr:data-testid="pwa-unknown-screen"
+                 style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; \
+                        justify-content: center; padding: 32px 24px; text-align: center; \
+                        background: var(--bulma-scheme-main);">
+                <div style="max-width: 24rem; width: 100%;">
+                    <ChromeMark />
+                    <h1 class="title is-5" style="line-height: 1.35; margin-bottom: 14px;">
+                        {move || t("pwa.unknown.title")}
+                    </h1>
+                    <p class="has-text-grey" style="line-height: 1.6; margin-bottom: 18px;">
+                        {move || t("pwa.unknown.signal")}
+                    </p>
+                    <p style="line-height: 1.6; margin-bottom: 18px;">
+                        {move || t("pwa.unknown.chrome")}
+                    </p>
+                    <p class="has-text-grey" style="line-height: 1.6; margin-bottom: 10px;">
+                        {move || t("pwa.unknown.copy_hint")}
+                    </p>
+                    // Адрес копируется тапом по нему же: набирать такое руками —
+                    // отдельное мучение, а «выделите и скопируйте» на телефоне
+                    // работает через раз.
+                    <button
+                        attr:data-testid="pwa-btn-copy-url"
+                        class="button is-light is-fullwidth"
+                        style="height: auto; padding: 14px; white-space: normal; word-break: break-all; \
+                               font-family: monospace; line-height: 1.45;"
+                        on:click=copy
+                    >
+                        {url.clone()}
+                    </button>
+                    <p attr:data-testid="pwa-copied" class="has-text-success is-size-7"
+                       style="min-height: 1.2em; margin-top: 8px;">
+                        {move || if copied.get() { t("pwa.unknown.copied") } else { "" }}
+                    </p>
+                    // Два действия по строке — перенос в тексте значащий.
+                    <p class="has-text-grey"
+                       style="line-height: 1.6; margin-top: 12px; white-space: pre-line;">
+                        {move || t("pwa.unknown.steps")}
+                    </p>
+                </div>
+            </div>
+        }
+        .into_view();
+    }
+
     if platform == "android_mi" || platform == "android_samsung" {
         let intent = system_browser_intent_url();
         return view! {

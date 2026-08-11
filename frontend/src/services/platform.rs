@@ -107,6 +107,12 @@ pub fn detect_platform_is_samsung() -> bool {
     crate::pages::pwa_prompt::detect_platform() == "android_samsung"
 }
 
+/// Браузер не опознан ни по одному признаку. Инструкции по установке для него
+/// нет и быть не может — мы не знаем ни его меню, ни его пунктов.
+pub fn detect_platform_is_unknown() -> bool {
+    crate::pages::pwa_prompt::detect_platform() == "unknown"
+}
+
 pub fn needs_pwa_prompt() -> bool {
     // Yandex Browser: ALWAYS. The app is unusable there (no passkey, no PWA), so
     // the «open it in Chrome» screen is shown on every launch and cannot be
@@ -122,6 +128,12 @@ pub fn needs_pwa_prompt() -> bool {
     // Samsung Internet — так же безусловно: экран с одной кнопкой в Chrome, а не
     // инструкция по установке здесь.
     if detect_platform_is_samsung() {
+        return true;
+    }
+    // Браузер не опознан: инструкцию по установке показывать нечем, а работать
+    // приложению здесь, скорее всего, не дадут. Экран не закрывается — как у
+    // остальных, кого мы уводим в Chrome.
+    if detect_platform_is_unknown() {
         return true;
     }
     let pwa = is_pwa();

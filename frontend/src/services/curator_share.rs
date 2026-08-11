@@ -218,8 +218,6 @@ fn indicator_label(key: &str) -> &'static str {
         "epa_dha" => "Омега-3 (EPA+DHA)",
         "fat_ratio" => "Баланс жира",
         "fiber" => "Клетчатка",
-        "eggs" => "Яйца",
-        "red_meat" => "Красное мясо",
         "steps" => "Шаги",
         _ => "—",
     }

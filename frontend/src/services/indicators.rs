@@ -34,8 +34,6 @@ pub enum IndicatorState {
 // ── Targets (WHO / user-set; adjustable) ─────────────────────────────────────
 const FIBER_PER_DAY_G: f64 = 25.0; // WHO ≥25 g/day
 const CALCIUM_PER_DAY_MG: f64 = 1000.0; // user: 1 g/day for everyone
-const EGG_PER_WEEK_G: f64 = 350.0; // ~1 egg/day (≈50 g × 7)
-const RED_MEAT_LIMIT_PER_WEEK_G: f64 = 700.0; // user: up to 700 g/week
 // Омеги-3 здесь БОЛЬШЕ НЕТ. Она собиралась общим проходом как обычный нутриент в
 // миллиграммах на 100 г — то есть «назови число» без таблицы категорий, — и одна
 // порция скумбрии закрывала недельную норму 3500 мг целиком. Теперь длинные морские
@@ -161,12 +159,8 @@ pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
     let today = crate::services::local::today_date();
     // 70-day window covers the rolling week + up to 8 complete Mon–Sun weeks.
     let window: Vec<NaiveDate> = (0..70).map(|i| today - Duration::days(i)).collect();
-    let diary_days: HashSet<String> = local::list_diary_dates().await.into_iter().collect();
-
     // Per-metric per-date value maps.
     let veg = gather_veg(&window).await;
-    let eggs = gather_egg(&window).await;
-    let meat = gather_meat(&window).await;
     let cal = gather_nutrient(&window, N_CALCIUM).await;
     let fib = gather_nutrient(&window, N_FIBER).await;
 
@@ -174,8 +168,6 @@ pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
 
     vec![
         ("calcium", daily_nutrient(&cal, &last7, CALCIUM_PER_DAY_MG)),
-        ("eggs", weekly(&eggs, &diary_days, today, EGG_PER_WEEK_G, false, false)),
-        ("red_meat", weekly(&meat, &diary_days, today, RED_MEAT_LIMIT_PER_WEEK_G, true, false)),
         ("veg_fruit", daily_classifier(&veg, &last7, veg_fruit_per_day_g())),
         ("fiber", daily_nutrient(&fib, &last7, FIBER_PER_DAY_G)),
     ]
@@ -838,13 +830,6 @@ pub async fn share_states() -> Vec<(&'static str, IndicatorState)> {
     for key in ["protein", "veg_fruit", "calcium", "fiber", "steps"] {
         out.push((key, indicator_state(key).await));
     }
-    // Weekly indicators (rolling-7-day sum vs a weekly target) — only `compute()`
-    // evaluates these correctly; the widget doesn't surface them.
-    for (k, s) in compute().await {
-        if matches!(k, "eggs" | "red_meat") {
-            out.push((k, s));
-        }
-    }
     // Жиры — три своих недельных индикатора, каждый со своей нормой. Только когда
     // открыты: до этого у продуктов нет профиля, и куратор увидел бы «не ел ни
     // грамма» вместо «ещё не считается».
@@ -1145,22 +1130,6 @@ async fn gather_veg(window: &[NaiveDate]) -> HashMap<String, f64> {
     for d in window {
         let s = fmt(*d);
         m.insert(s.clone(), local::veg_fruit_grams_on(&s).await);
-    }
-    m
-}
-async fn gather_egg(window: &[NaiveDate]) -> HashMap<String, f64> {
-    let mut m = HashMap::new();
-    for d in window {
-        let s = fmt(*d);
-        m.insert(s.clone(), local::egg_grams_on(&s).await);
-    }
-    m
-}
-async fn gather_meat(window: &[NaiveDate]) -> HashMap<String, f64> {
-    let mut m = HashMap::new();
-    for d in window {
-        let s = fmt(*d);
-        m.insert(s.clone(), local::red_meat_grams_on(&s).await);
     }
     m
 }

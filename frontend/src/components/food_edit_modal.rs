@@ -61,11 +61,7 @@ pub fn FoodEditModal(
 
     // Category flags stay TRI-state: `None` means «the model hasn't judged this
     // yet», which is not the same as «no». Untouched flags keep their `None`.
-    let f_snack = create_rw_signal(food.is_snack);
-    let f_liquid = create_rw_signal(food.is_liquid_cal);
     let f_veg = create_rw_signal(food.is_veg_fruit);
-    let f_egg = create_rw_signal(food.is_egg);
-    let f_meat = create_rw_signal(food.is_red_meat);
     let f_heme = create_rw_signal(food.is_heme);
 
     // Portal строит разметку повторно, значит всё внутри должно переживать
@@ -109,11 +105,7 @@ pub fn FoodEditModal(
             nutrients,
             iron_mg: parse_opt(iron_mg.get_untracked()).map(|v| v.max(0.0)),
             iron_absorption: absorption,
-            is_snack: f_snack.get_untracked(),
-            is_liquid_cal: f_liquid.get_untracked(),
             is_veg_fruit: f_veg.get_untracked(),
-            is_egg: f_egg.get_untracked(),
-            is_red_meat: f_meat.get_untracked(),
             is_heme: f_heme.get_untracked(),
         };
         let eid = entry_id.clone();
@@ -305,11 +297,7 @@ pub fn FoodEditModal(
                         }.into_view()
                     } else {
                         view! {
-                            {flag_row("Низкокалорийный перекус", f_snack)}
-                            {flag_row("Жидкие калории", f_liquid)}
                             {flag_row("Овощ или фрукт", f_veg)}
-                            {flag_row("Яйца", f_egg)}
-                            {flag_row("Красное мясо", f_meat)}
                             {flag_row("Источник гемового железа", f_heme)}
                             {derived_row("Омега-3 (ЭПК+ДГК)", epa_dha_own.clone(), "г")}
                         }.into_view()

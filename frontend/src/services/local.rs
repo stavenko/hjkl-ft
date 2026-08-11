@@ -421,16 +421,6 @@ pub fn is_veg_fruit_food(food: &Food) -> bool {
     food.is_veg_fruit == Some(true)
 }
 
-/// True if `food` is eggs / an egg product — by the cached AI tag.
-pub fn is_egg_food(food: &Food) -> bool {
-    food.is_egg == Some(true)
-}
-
-/// True if `food` is red / processed meat — by the cached AI tag.
-pub fn is_red_meat_food(food: &Food) -> bool {
-    food.is_red_meat == Some(true)
-}
-
 /// Какой признак продукта записывается. Спрашиваются они порознь, поэтому и
 /// пишутся порознь: ответ про один признак не трогает соседние поля.
 #[derive(Debug, Clone, Copy)]
@@ -659,17 +649,6 @@ pub async fn tag_protein_g_on(date: &str, selector: impl Fn(&Food) -> bool) -> f
 /// EATEN grams of vegetable/fruit on `date` (recipe-composition aware).
 pub async fn veg_fruit_grams_on(date: &str) -> f64 {
     food_tag_grams_on(date, is_veg_fruit_food).await
-}
-
-/// EATEN grams of eggs on `date` (recipe-composition aware): counts eggs used as
-/// recipe ingredients too (e.g. the eggs inside a slice of cake).
-pub async fn egg_grams_on(date: &str) -> f64 {
-    food_tag_grams_on(date, is_egg_food).await
-}
-
-/// EATEN grams of red / processed meat on `date` (recipe-composition aware).
-pub async fn red_meat_grams_on(date: &str) -> f64 {
-    food_tag_grams_on(date, is_red_meat_food).await
 }
 
 /// Жирные кислоты за день, в граммах.
@@ -959,11 +938,7 @@ pub struct AiFoodData {
     pub nutrients: BTreeMap<String, f64>,
     pub iron_mg: Option<f64>,
     pub iron_absorption: Option<f64>,
-    pub is_snack: Option<bool>,
-    pub is_liquid_cal: Option<bool>,
     pub is_veg_fruit: Option<bool>,
-    pub is_egg: Option<bool>,
-    pub is_red_meat: Option<bool>,
     pub is_heme: Option<bool>,
 }
 
@@ -985,24 +960,14 @@ pub async fn edit_food_for_entry(
     // Unchanged name → keep whatever the form holds (including manual corrections).
     let renamed = name != food.name;
     let mut nutrients = ai.nutrients;
-    let (is_snack, is_liquid_cal, is_veg_fruit, is_egg, is_red_meat, is_heme, iron_mg, iron_absorption) =
-        if renamed {
-            for key in crate::services::enrich::nutrient_names() {
-                nutrients.remove(key);
-            }
-            (None, None, None, None, None, None, None, None)
-        } else {
-            (
-                ai.is_snack,
-                ai.is_liquid_cal,
-                ai.is_veg_fruit,
-                ai.is_egg,
-                ai.is_red_meat,
-                ai.is_heme,
-                ai.iron_mg,
-                ai.iron_absorption,
-            )
-        };
+    let (is_veg_fruit, is_heme, iron_mg, iron_absorption) = if renamed {
+        for key in crate::services::enrich::nutrient_names() {
+            nutrients.remove(key);
+        }
+        (None, None, None, None)
+    } else {
+        (ai.is_veg_fruit, ai.is_heme, ai.iron_mg, ai.iron_absorption)
+    };
 
     let all_diary: Vec<DiaryEntry> = db::list_all("diary").await;
     let other_diary = all_diary
@@ -1016,7 +981,7 @@ pub async fn edit_food_for_entry(
         let copy = Food {
             id: new_id(),
             name, kcal, protein, fat, carbs, nutrients,
-            is_snack, is_liquid_cal, is_veg_fruit, is_egg, is_red_meat, is_heme,
+            is_veg_fruit, is_heme,
             iron_mg, iron_absorption,
             created_at: now(),
             updated_at: now(),
@@ -1030,7 +995,7 @@ pub async fn edit_food_for_entry(
     } else {
         let updated = Food {
             name, kcal, protein, fat, carbs, nutrients,
-            is_snack, is_liquid_cal, is_veg_fruit, is_egg, is_red_meat, is_heme,
+            is_veg_fruit, is_heme,
             iron_mg, iron_absorption,
             updated_at: now(),
             ..food.clone()
@@ -1146,9 +1111,7 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
             recipe_id: None,
             archived: false,
             is_restaurant: false,
-            is_snack: None,
-            is_liquid_cal: None,
-            is_veg_fruit: None, is_egg: None, is_red_meat: None, is_heme: None,
+            is_veg_fruit: None, is_heme: None,
             iron_mg: None, iron_absorption: None,
             fat_profile: None,
             created_at: now(),
@@ -1226,11 +1189,7 @@ pub async fn add_detected_foods_to_diary(items: &[ResolvedFood]) -> Vec<DiaryEnt
             recipe_id: None,
             archived: false,
             is_restaurant: false,
-            is_snack: None,
-            is_liquid_cal: None,
             is_veg_fruit: None,
-            is_egg: None,
-            is_red_meat: None,
             is_heme: None,
             iron_mg: None,
             iron_absorption: None,
@@ -1763,11 +1722,7 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         recipe_id: Some(recipe_id.to_string()),
         archived: false,
         is_restaurant: false,
-        is_snack: None,
-        is_liquid_cal: None,
         is_veg_fruit: None,
-        is_egg: None,
-        is_red_meat: None,
         is_heme: None,
         // Железо блюда — из состава, а не от модели по названию. `None` здесь
         // означает «у части ингредиентов оно ещё не выяснено»; пересчёт вернётся
@@ -2253,11 +2208,7 @@ mod tests {
                 recipe_id: None,
                 archived: false,
                 is_restaurant: false,
-                is_snack: None,
-                is_liquid_cal: None,
                 is_veg_fruit: veg,
-                is_egg: None,
-                is_red_meat: None,
                 is_heme: heme,
                 iron_mg: None,
                 iron_absorption: None,
@@ -2457,11 +2408,7 @@ mod recipe_tests {
             recipe_id: None,
             archived: false,
             is_restaurant: false,
-            is_snack: None,
-            is_liquid_cal: None,
             is_veg_fruit: None,
-            is_egg: None,
-            is_red_meat: None,
             is_heme: None,
             iron_mg: iron.map(|(mg, _)| mg),
             iron_absorption: iron.map(|(_, a)| a),

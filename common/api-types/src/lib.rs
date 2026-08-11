@@ -50,47 +50,18 @@ pub struct Food {
     /// +20% calorie surcharge, and is shown with a dashed marker in lists.
     #[serde(default)]
     pub is_restaurant: bool,
-    /// AI-assigned tag: low-calorie snack (raw vegetable/fruit to nibble between
-    /// meals). `None` = not yet classified; `Some(_)` = cached AI verdict. Tagged
-    /// lazily in the background while preparing the daily summary (NOT at food
-    /// creation), then cached here. Drives the chapter-2 snack mechanic and the
-    /// summary's "snack logged" fact. Language-independent (replaces the old
-    /// Russian name-substring match).
-    #[serde(default)]
-    pub is_snack: Option<bool>,
-    /// AI-assigned tag: "liquid calories". TRUE only for juice (incl. with pulp),
-    /// sugary soda, and alcoholic drinks (incl. alcoholic beer). NOT non-alcoholic
-    /// beer, fermented-milk drinks (kefir/ayran/tan/acidophilus/ryazhenka) or
-    /// anything carrying protein/bacteria/other nutrients, nor milk/smoothies/
-    /// sweetened coffee/energy drinks. `None` = not yet classified. Classified in
-    /// the background as soon as the food is logged (see the frontend `classify`
-    /// service). The old name+kcal heuristic (`is_high_cal_drink`) is kept only as
-    /// a rough fallback for still-untagged foods.
-    #[serde(default)]
-    pub is_liquid_cal: Option<bool>,
     /// AI-assigned tag: vegetable / fruit (fresh, cooked, or an obvious veg/fruit
     /// dish; not cereals, meat, fish, dairy, sweets or drinks). `None` = not yet
     /// classified. Classified in the background when the food is logged. Replaces
     /// the summary-time index judging as the stored source of truth.
     #[serde(default)]
     pub is_veg_fruit: Option<bool>,
-    /// AI-assigned tag: eggs (or an egg product — omelette, scrambled/boiled eggs).
-    /// `None` = not yet classified. Also classified for RECIPE INGREDIENTS, so the
-    /// egg content of a dish can be counted by composition.
-    #[serde(default)]
-    pub is_egg: Option<bool>,
-    /// AI-assigned tag: red or processed meat (beef, pork, lamb; sausages, ham,
-    /// bacon, salami, wieners). `None` = not yet classified. Classified for recipe
-    /// ingredients too, so a dish's red-meat content can be counted by composition.
-    #[serde(default)]
-    pub is_red_meat: Option<bool>,
     /// AI-assigned tag: rich source of HEME iron — печень и субпродукты, красное
     /// мясо, моллюски. `None` = not yet classified.
     ///
-    /// Отдельно от `is_red_meat`: тот про ограничение («не больше стольких-то
-    /// граммов в неделю»), этот — про цель («съешьте три порции»). Пересекаются
-    /// они лишь частично: печень и мидии не красное мясо, а колбаса — красное
-    /// мясо, но не источник гема в нужном смысле.
+    /// Единственный мясной признак, который у нас остался: он про ЦЕЛЬ («съешьте
+    /// три порции»), а не про ограничение. Прежний `is_red_meat` («не больше
+    /// стольких-то граммов в неделю») снят вместе со своим классификатором.
     #[serde(default)]
     pub is_heme: Option<bool>,
     /// Iron in mg per 100 g. Filled by the DEDICATED iron pass, not by the general
@@ -312,11 +283,7 @@ impl FoodDraft {
             recipe_id: None,
             archived: false,
             is_restaurant: false,
-            is_snack: None,
-            is_liquid_cal: None,
             is_veg_fruit: None,
-            is_egg: None,
-            is_red_meat: None,
             is_heme: None,
             fat_profile: None,
             iron_mg: None,

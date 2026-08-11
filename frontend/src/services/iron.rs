@@ -410,8 +410,8 @@ mod tests {
         let mut f = api_types::Food {
             id: "x".into(), name: "x".into(), kcal: 0.0, protein: 0.0, fat: 0.0, carbs: 0.0,
             nutrients: Default::default(), package_weight: None, is_recipe: false, recipe_id: None,
-            archived: false, is_restaurant: false, is_snack: None, is_liquid_cal: None,
-            is_veg_fruit: None, is_egg: None, is_red_meat: None, is_heme: None,
+            archived: false, is_restaurant: false,
+            is_veg_fruit: None, is_heme: None,
             iron_mg: None, iron_absorption: None, fat_profile: None,
             created_at: String::new(), updated_at: String::new(),
         };

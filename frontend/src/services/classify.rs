@@ -190,9 +190,13 @@ async fn run_worker() {
         }
 
         // Жиры — свой проход: спрашивается ПРОФИЛЬ (доли от жира), а не количество,
-        // и одним запросом сразу все пять величин. Идёт только после того, как жиры
-        // открылись: до этого их никто не читает.
-        if super::fats::unlocked() && food.fat_profile.is_none() {
+        // и одним запросом сразу все пять величин.
+        //
+        // Идёт С ПЕРВОГО ДНЯ, не дожидаясь открытия недели жиров. Показываем мы
+        // постепенно, а СОБИРАТЬ данные надо сразу: иначе в день открытия вся
+        // съеденная за месяцы еда разом уходит в очередь к модели — шквал запросов,
+        // и человек смотрит на пустые шкалы, пока он разгребается.
+        if food.fat_profile.is_none() {
             let name = food.name.clone();
             if let Some(profile) = with_retries(
                 move || {
@@ -210,8 +214,8 @@ async fn run_worker() {
 
         // Iron is its OWN pass: it needs the absorbed fraction alongside the
         // amount, so it can't ride the generic nutrient request (see `iron.rs`).
-        // Runs only once the iron week is open — before that nothing reads it.
-        if super::iron::unlocked() && super::iron::needs_iron(&food) {
+        // Тоже с первого дня — по той же причине, что и жиры.
+        if super::iron::needs_iron(&food) {
             let f = food.clone();
             with_retries(
                 move || { let f = f.clone(); async move { super::iron::enrich_iron(&f).await } },
@@ -235,8 +239,8 @@ fn needs_processing(food: &Food) -> bool {
     }
     needs_classification(food)
         || super::enrich::needs_enrichment(food)
-        || (super::iron::unlocked() && super::iron::needs_iron(food))
-        || (super::fats::unlocked() && food.fat_profile.is_none())
+        || super::iron::needs_iron(food)
+        || food.fat_profile.is_none()
 }
 
 /// Enqueue EVERY product in the database that still lacks something — tags,

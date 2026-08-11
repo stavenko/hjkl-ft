@@ -274,11 +274,7 @@ pub fn FoodEditor(
             recipe_id: None,
             archived: false,
             is_restaurant: false,
-            is_snack: None, // classified in the background once logged (see `classify`)
-            is_liquid_cal: None,
             is_veg_fruit: None,
-            is_egg: None,
-            is_red_meat: None,
             is_heme: None,
             iron_mg: None,
             iron_absorption: None,

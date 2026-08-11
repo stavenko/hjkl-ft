@@ -160,7 +160,11 @@ const raw = await openEditor("Кижуч", 1);
 console.log("продукт:", raw);
 check("у продукта флаги на месте", /Источник гемового железа/.test(raw));
 // 8 г жира × 15 % = 1.20 г.
-check("омега-3 продукта — 1.20 г", await derived("Омега-3 (ЭПК+ДГК)") === "1.20");
+// Кижуч: жир 8 г, доли 22/35/25/15 % → 1.76 / 2.80 / 2.00 / 1.20 г на 100 г.
+check("НЖК продукта — 1.76 г", await derived("Насыщенные (НЖК)") === "1.76");
+check("МНЖК продукта — 2.80 г", await derived("Мононенасыщенные (МНЖК)") === "2.80");
+check("ПНЖК продукта — 2.00 г", await derived("Полиненасыщенные (ПНЖК)") === "2.00");
+check("омега-3 продукта — 1.20 г", await derived("из них омега-3 (ЭПК+ДГК)") === "1.20");
 await page.screenshot({ path: "/tmp/food-omega3.png", fullPage: true });
 
 console.log("снято: /tmp/recipe-flags.png, /tmp/food-omega3.png");

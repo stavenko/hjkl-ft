@@ -55,6 +55,7 @@ mod m007_drop_omega3;
 mod m008_refix_fat_gate;
 mod m009_protein_from_calories;
 mod m010_drop_dead_flags;
+mod m011_recheck_fish_calcium;
 
 #[cfg(test)]
 mod tests;
@@ -131,6 +132,11 @@ const ALL: &[Migration] = &[
         version: m010_drop_dead_flags::VERSION,
         description: m010_drop_dead_flags::DESCRIPTION,
         script: || Box::pin(m010_drop_dead_flags::script()),
+    },
+    Migration {
+        version: m011_recheck_fish_calcium::VERSION,
+        description: m011_recheck_fish_calcium::DESCRIPTION,
+        script: || Box::pin(m011_recheck_fish_calcium::script()),
     },
 ];
 

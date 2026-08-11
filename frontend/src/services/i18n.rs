@@ -764,8 +764,8 @@ fn en(key: &str) -> &'static str {
         "auth.error_key_unknown" => "We cannot find your key on the server. You will have to register.",
 
         // --- Fallback when the key did not work ---
-        "auth.passkey_trouble" => "Something went wrong signing in with your key. To get into the app you can also use Telegram.",
-        "auth.tg_login" => "Sign in via Telegram",
+        "auth.passkey_trouble" => "It looks like we can't sign you in with your passkey.\n\nYou can sign in another way:",
+        "auth.tg_login" => "Sign in with a Telegram code",
         "auth.checking_account" => "Checking the account…",
         "auth.state_unknown" => "Could not check the account. Check your internet and try again.",
         "auth.no_access_title" => "There is a problem with your account",
@@ -1664,8 +1664,8 @@ fn ru(key: &str) -> &'static str {
         "auth.error_key_unknown" => "Мы не можем найти вашего ключа на сервере. Вам придётся зарегистрироваться.",
 
         // --- Обходной путь, когда ключ не сработал ---
-        "auth.passkey_trouble" => "Возникла проблема со входом по вашему ключу. Чтобы получить доступ к приложению, можно ещё воспользоваться Telegram.",
-        "auth.tg_login" => "Войти через Telegram",
+        "auth.passkey_trouble" => "Кажется, мы не можем авторизовать вас в приложении через PassKey.\n\nВы можете авторизоваться другим способом:",
+        "auth.tg_login" => "Войти по коду из Телеграм",
         "auth.checking_account" => "Проверяем аккаунт…",
         "auth.state_unknown" => "Не удалось проверить аккаунт. Проверьте интернет и попробуйте снова.",
         "auth.no_access_title" => "Возникла ошибка с вашим аккаунтом",

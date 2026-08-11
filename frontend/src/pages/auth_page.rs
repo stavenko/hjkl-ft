@@ -12,6 +12,21 @@ fn param_user_id() -> Option<String> {
     params.get("u").filter(|s| !s.is_empty())
 }
 
+/// Показывать ли на экране входа запасные способы: «Регистрация», «Добавить
+/// устройство», «Войти по фразе» и постоянную ссылку на код из Telegram.
+///
+/// ВЫКЛЮЧЕНО. Сюда попадает только тот, кто уже поставил приложение и не вошёл, —
+/// значит, аккаунт у него есть, а устройство ключи умеет: к этому моменту сделано
+/// всё, чтобы passkey работал. Единственное действие здесь — «Войти»; код из
+/// Telegram предлагается ТОЛЬКО после неудачи, и не сам по себе, а объяснением
+/// («не можем авторизовать через PassKey»). Регистрация тут не нужна вовсе,
+/// «Добавить устройство» — операция с УЖЕ вошедшего устройства и живёт в
+/// настройках, фраза — запасной путь для браузера.
+///
+/// TODO: если запасные пути на этом экране понадобятся снова — вернуть флаг в
+/// `true`; сами экраны (`Phrase`, `ShowQr`, `Scanning`) целы и работают.
+const SHOW_ALT_LOGIN_LINKS: bool = false;
+
 #[derive(Clone, PartialEq)]
 enum AuthStep {
     Login,
@@ -244,7 +259,9 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                 class="notification is-warning is-light mb-4"
                 style="text-align: left;"
             >
-                <p class="mb-3">{move || t("auth.passkey_trouble")}</p>
+                // Перенос строки в тексте значащий (две фразы: что случилось и что
+                // делать), а HTML его схлопывает — отсюда pre-line.
+                <p class="mb-3" style="white-space: pre-line;">{move || t("auth.passkey_trouble")}</p>
                 <button
                     attr:data-testid="auth-btn-tg-login"
                     class="button is-link is-fullwidth has-text-weight-semibold"
@@ -334,7 +351,6 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                         <p class="has-text-grey mb-5">{move || t("auth.tagline")}</p>
 
                         {error_view}
-                        {tg_offer_view}
 
                         // Primary: the big login CTA (passkey).
                         <button
@@ -347,52 +363,56 @@ pub fn AuthPage(on_authenticated: Callback<()>) -> impl IntoView {
                             {move || if loading.get() { t("auth.authenticating") } else { t("auth.sign_in") }}
                         </button>
 
-                        // Secondary actions as text links — clearly tappable but
-                        // visually de-emphasised (accented differently, not buttons).
-                        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
-                            <button
-                                attr:data-testid="auth-btn-register"
-                                class="button is-ghost has-text-link"
-                                style="text-decoration: underline; text-underline-offset: 3px;"
-                                disabled=move || loading.get()
-                                on:click=on_register
-                            >
-                                {move || t("auth.register")}
-                            </button>
-                            <button
-                                attr:data-testid="auth-btn-add-device"
-                                class="button is-ghost has-text-link"
-                                style="text-decoration: underline; text-underline-offset: 3px;"
-                                disabled=move || loading.get()
-                                on:click=on_show_qr
-                            >
-                                {move || t("auth.add_device")}
-                            </button>
-                            <button
-                                attr:data-testid="auth-btn-phrase"
-                                class="button is-ghost has-text-link"
-                                style="text-decoration: underline; text-underline-offset: 3px;"
-                                disabled=move || loading.get()
-                                on:click=move |_| { error.set(None); step.set(AuthStep::Phrase); }
-                            >
-                                {move || t("auth.phrase_login")}
-                            </button>
-                            // Manual Telegram-code entry point: a user who switched
-                            // browsers (system-browser hop) has a known account
-                            // (`?u=`) but no passkey HERE — the auto TgCode fallback
-                            // fires only when passkeys are impossible on the device.
-                            {has_uid.then(|| view! {
+                        // Запасной путь — ПОД кнопкой и только после неудачи: сперва
+                        // человек пробует то, ради чего сюда пришёл, и лишь когда не
+                        // вышло, ему объясняют, что случилось и что делать дальше.
+                        {tg_offer_view}
+
+                        // Запасные способы входа — под флагом SHOW_ALT_LOGIN_LINKS,
+                        // сейчас выключены: на этом экране есть ровно одна кнопка
+                        // «Войти», а код из Telegram появляется только после неудачи.
+                        {SHOW_ALT_LOGIN_LINKS.then(|| view! {
+                            <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
                                 <button
-                                    attr:data-testid="auth-btn-tg-code"
+                                    attr:data-testid="auth-btn-register"
                                     class="button is-ghost has-text-link"
                                     style="text-decoration: underline; text-underline-offset: 3px;"
                                     disabled=move || loading.get()
-                                    on:click=move |_| { error.set(None); step.set(AuthStep::TgCode); }
+                                    on:click=on_register
                                 >
-                                    "Войти по коду из Telegram"
+                                    {move || t("auth.register")}
                                 </button>
-                            })}
-                        </div>
+                                <button
+                                    attr:data-testid="auth-btn-add-device"
+                                    class="button is-ghost has-text-link"
+                                    style="text-decoration: underline; text-underline-offset: 3px;"
+                                    disabled=move || loading.get()
+                                    on:click=on_show_qr
+                                >
+                                    {move || t("auth.add_device")}
+                                </button>
+                                <button
+                                    attr:data-testid="auth-btn-phrase"
+                                    class="button is-ghost has-text-link"
+                                    style="text-decoration: underline; text-underline-offset: 3px;"
+                                    disabled=move || loading.get()
+                                    on:click=move |_| { error.set(None); step.set(AuthStep::Phrase); }
+                                >
+                                    {move || t("auth.phrase_login")}
+                                </button>
+                                {has_uid.then(|| view! {
+                                    <button
+                                        attr:data-testid="auth-btn-tg-code"
+                                        class="button is-ghost has-text-link"
+                                        style="text-decoration: underline; text-underline-offset: 3px;"
+                                        disabled=move || loading.get()
+                                        on:click=move |_| { error.set(None); step.set(AuthStep::TgCode); }
+                                    >
+                                        "Войти по коду из Telegram"
+                                    </button>
+                                })}
+                            </div>
+                        })}
                         {footer}
                     </div>
                 </div>

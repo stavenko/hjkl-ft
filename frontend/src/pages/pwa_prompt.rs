@@ -46,7 +46,12 @@ pub fn detect_platform() -> &'static str {
     if is_ios && is_safari { return "ios_safari"; }
     if is_ios && is_chrome { return "ios_chrome"; }
     if is_ios && is_firefox { return "ios_firefox"; }
-    if is_ios { return "ios_safari"; }
+    // Неопознанный браузер на iPhone — СВОЙ исход, а не «сойдёт инструкция Safari».
+    // Внутри там у всех WebKit, и сафаревская подсказка чаще всего работает, но
+    // именно «чаще всего»: у Яндекса на айфоне пункта «На экран „Домой“» в листе
+    // «Поделиться» нет вовсе, и мы завели ему отдельный экран. Значит найдётся и
+    // следующий такой — пусть получает честное «мы не умеем», а не чужую инструкцию.
+    if is_ios { return "ios_unknown"; }
 
     if is_android && is_samsung { return "android_samsung"; }
     if is_android && is_yandex { return "android_yandex"; }
@@ -402,6 +407,21 @@ const STEP_NUM: &str = "flex-shrink: 0; display: inline-flex; align-items: cente
      justify-content: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; \
      background: var(--bulma-link); color: #fff; font-size: 0.85rem; font-weight: 700;";
 
+/// Значок Safari — компас: синий круг, белое кольцо и стрелка из двух половин.
+/// Нарисован здесь же, как и хромовский: сторонних адресов мы не грузим.
+#[component]
+fn SafariMark() -> impl IntoView {
+    view! {
+        <svg viewBox="0 0 48 48" width="64" height="64" style="display: block; margin: 0 auto 18px;">
+            <circle cx="24" cy="24" r="20" fill="#1EA0F0"/>
+            <circle cx="24" cy="24" r="16" fill="none" stroke="#fff" stroke-width="1.5"/>
+            // Стрелка: красная половина смотрит на северо-восток, светлая — назад.
+            <path d="M33 15 L26 26 L22 22 Z" fill="#F5433B"/>
+            <path d="M15 33 L22 22 L26 26 Z" fill="#F2F2F2"/>
+        </svg>
+    }
+}
+
 /// Логотип Chrome — нарисованный здесь же, а не картинкой со стороннего адреса:
 /// три сектора, белая втулка и синяя середина.
 #[component]
@@ -500,7 +520,10 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
     // мы не знаем ни его меню, ни его пунктов — и раньше молча подсовывали чужую,
     // от Chrome. Вместо этого говорим прямо и даём унести адрес в Chrome руками:
     // intent-кнопки тут нет намеренно, неизвестный браузер может её не понять.
-    if platform == "unknown" {
+    if platform == "unknown" || platform == "ios_unknown" {
+        // На айфоне уводить некуда, кроме Safari: Chrome там — тот же WebKit, и
+        // советовать его бессмысленно. Отсюда две редакции текста и два значка.
+        let ios = platform == "ios_unknown";
         let url = current_app_url();
         // Сигнал нам: пока такие браузеры не попадали ни в какую статистику, и
         // узнать о них было неоткуда. Уходит один раз при показе экрана — вместе
@@ -528,7 +551,7 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                         justify-content: center; padding: 32px 24px; text-align: center; \
                         background: var(--bulma-scheme-main);">
                 <div style="max-width: 24rem; width: 100%;">
-                    <ChromeMark />
+                    {if ios { view! { <SafariMark /> } } else { view! { <ChromeMark /> } }}
                     <h1 class="title is-5" style="line-height: 1.35; margin-bottom: 14px;">
                         {move || t("pwa.unknown.title")}
                     </h1>
@@ -536,7 +559,7 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                         {move || t("pwa.unknown.signal")}
                     </p>
                     <p style="line-height: 1.6; margin-bottom: 18px;">
-                        {move || t("pwa.unknown.chrome")}
+                        {move || t(if ios { "pwa.unknown.safari" } else { "pwa.unknown.chrome" })}
                     </p>
                     // Порядок действий — пунктами и ПО ЛЕВОМУ КРАЮ: тремя фразами
                     // подряд по центру он читается как рассуждение, а не как то,
@@ -564,7 +587,7 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                         </p>
                         <div style="display: flex; gap: 10px; margin-bottom: 8px;">
                             <span style=STEP_NUM>"2"</span>
-                            <div style="line-height: 1.5;">{move || t("pwa.unknown.step2")}</div>
+                            <div style="line-height: 1.5;">{move || t(if ios { "pwa.unknown.step2_safari" } else { "pwa.unknown.step2" })}</div>
                         </div>
                         <div style="display: flex; gap: 10px;">
                             <span style=STEP_NUM>"3"</span>

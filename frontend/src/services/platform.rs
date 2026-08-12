@@ -110,7 +110,7 @@ pub fn detect_platform_is_samsung() -> bool {
 /// Браузер не опознан ни по одному признаку. Инструкции по установке для него
 /// нет и быть не может — мы не знаем ни его меню, ни его пунктов.
 pub fn detect_platform_is_unknown() -> bool {
-    crate::pages::pwa_prompt::detect_platform() == "unknown"
+    matches!(crate::pages::pwa_prompt::detect_platform(), "unknown" | "ios_unknown")
 }
 
 pub fn needs_pwa_prompt() -> bool {

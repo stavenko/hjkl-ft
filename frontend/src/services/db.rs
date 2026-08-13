@@ -445,6 +445,12 @@ async fn note_mutation(store: &str, op: &str, local_key: &str) {
         ts: js_sys::Date::now() as u64,
     };
     put_untracked("_outbox", &entry).await;
+    // ЛЮБОЕ изменение тянет за собой синхронизацию — здесь, в единственной точке,
+    // через которую проходят все они. Прежде синк звали руками из четырёх десятков
+    // мест: пропустить один вызов ничего не стоило, и запись молча оставалась
+    // только на телефоне. Запуск отложенный и склеенный: за пакетом правок пойдёт
+    // один синк, а не сорок.
+    crate::services::sync::schedule_sync();
 }
 
 /// Is this local store part of sync (its mutations belong in the outbox)?

@@ -455,10 +455,9 @@ async fn migration_days() -> std::collections::BTreeMap<String, Vec<serde_json::
 thread_local! {
     static MIGRATION_SIG: std::cell::RefCell<Option<leptos::RwSignal<Option<(u32, u32)>>>> =
         const { std::cell::RefCell::new(None) };
-    /// Сколько локальных изменений ещё не доехало до сервера. Обновляется после
-    /// каждой попытки синхронизации — по ней панель под треугольником решает,
-    /// говорить ли человеку, что его данные под угрозой.
-    static PENDING_SIG: std::cell::RefCell<Option<leptos::RwSignal<usize>>> =
+    /// Сошлись ли данные этого устройства с сервером. `false` — под треугольником
+    /// появляется плашка «синхронизация не закончена».
+    static IN_SYNC_SIG: std::cell::RefCell<Option<leptos::RwSignal<bool>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -468,38 +467,99 @@ thread_local! {
 /// first.
 pub fn init() {
     MIGRATION_SIG.with(|c| *c.borrow_mut() = Some(leptos::create_rw_signal(None)));
-    PENDING_SIG.with(|c| *c.borrow_mut() = Some(leptos::create_rw_signal(0)));
+    // Начинаем с «сошлись»: пока не выяснено обратное, пугать человека нечем.
+    IN_SYNC_SIG.with(|c| *c.borrow_mut() = Some(leptos::create_rw_signal(true)));
 }
 
-/// Сколько локальных изменений ждёт отправки. Ноль — всё доехало.
-pub fn pending_count() -> leptos::RwSignal<usize> {
-    PENDING_SIG.with(|c| (*c.borrow()).expect("sync::init() must run first"))
+/// Сошлись ли данные с сервером. `false` — под треугольником висит плашка.
+pub fn in_sync() -> leptos::RwSignal<bool> {
+    IN_SYNC_SIG.with(|c| (*c.borrow()).expect("sync::init() must run first"))
 }
 
-/// Пересчитать очередь и обновить сигнал. Зовётся после каждой попытки синка:
-/// счётчик обязан отражать состояние ПОСЛЕ неё, а не намерение.
+/// Выяснить, сошлись ли мы с сервером, и обновить сигнал.
 ///
-/// Публичный вариант — для запуска приложения: очередь могла остаться с прошлого
-/// раза, и предупреждение обязано появиться даже когда синк вообще не начнётся
-/// (нет связи, нет сессии).
-pub async fn refresh_pending_public() {
-    refresh_pending().await;
+/// Критерий — ВЕРСИЯ, а не размер очереди: очередь пуста и у того, кто отстал от
+/// сервера (чужие изменения не подтянуты), и у того, кого только что откатили.
+/// «Не сошлись» значит любое из трёх:
+///   * своей версии нет вовсе — устройство ещё не завело общую историю;
+///   * серверную версию НЕ ПОЛУЧИТЬ (нет сети, нет сессии, воркер молчит);
+///   * версии разошлись.
+///
+/// Плюс непустая очередь: версии могут совпадать, а наши изменения всё ещё
+/// лежать здесь — по смыслу это ровно тот же риск потерять данные.
+pub async fn refresh_in_sync() {
+    in_sync().set(check_in_sync().await);
 }
 
-async fn refresh_pending() {
-    pending_count().set(db::count("_outbox").await as usize);
+async fn check_in_sync() -> bool {
+    let Some(local) = client_version().await else {
+        return false;
+    };
+    if db::count("_outbox").await > 0 {
+        return false;
+    }
+    // Пустой pull от СВОЕЙ версии: сервер вернёт свою последнюю. Ничего не
+    // применяет, когда версии равны, — это самый дешёвый способ спросить «а
+    // сколько у тебя».
+    let body = serde_json::json!({ "since_version": local }).to_string();
+    match post_raw("/sync/v2/pull", &body).await {
+        Ok((status, text)) if (200..300).contains(&status) => {
+            serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|v| v.get("version").and_then(|x| x.as_u64()))
+                .is_some_and(|server| server == local)
+        }
+        // 409 store_not_initialized, любой другой код, обрыв связи — версии не
+        // получить, а значит утверждать «всё сошлось» мы не вправе.
+        _ => false,
+    }
 }
 
-/// Досылать всё, что осталось в очереди, по требованию человека — кнопка
-/// «Продолжить синхронизацию» под треугольником.
+thread_local! {
+    /// Стоит ли уже отложенный синк. Склейка: пакет правок (доготовка блюда,
+    /// фоновый проход по продуктам) даёт ОДИН синк, а не по одному на запись.
+    static SYNC_SCHEDULED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Сколько ждать после изменения, прежде чем синхронизировать. Достаточно, чтобы
+/// склеить пакет правок, и достаточно мало, чтобы человек не успел закрыть
+/// приложение с неотправленной записью.
+const SYNC_DEBOUNCE_MS: i32 = 1200;
+
+/// Запланировать синхронизацию после локального изменения.
+///
+/// Зовётся из [`db::note_mutation`] — единственной точки, через которую проходят
+/// ВСЕ журналируемые правки. Повторные вызовы, пока таймер тикает, ничего не
+/// добавляют.
+pub fn schedule_sync() {
+    if SYNC_SCHEDULED.with(|c| c.replace(true)) {
+        return;
+    }
+    let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+        SYNC_SCHEDULED.with(|c| c.set(false));
+        leptos::spawn_local(async {
+            // Исход попадёт в `in_sync` внутри цикла: неудача зажжёт плашку под
+            // треугольником, удача её погасит. Здесь ошибку глотаем намеренно —
+            // это фоновый путь, а не действие человека.
+            let _ = sync_cycle().await;
+        });
+    });
+    if let Some(win) = web_sys::window() {
+        let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+            cb.unchecked_ref(),
+            SYNC_DEBOUNCE_MS,
+        );
+    }
+}
+
+/// Досылать всё, что осталось, по требованию человека — кнопка «Продолжить
+/// синхронизацию» под треугольником.
 ///
 /// Отличается от [`sync_now`] только тем, что ошибку ВОЗВРАЩАЕТ: фоновые пути
 /// её проглатывают (пишут в журнал и живут дальше), а здесь человек нажал сам и
 /// обязан узнать исход.
 pub async fn retry_pending() -> Result<(), String> {
-    let r = sync_cycle().await;
-    refresh_pending().await;
-    r
+    sync_cycle().await
 }
 
 /// `(uploaded, total)` day-batches of an in-flight migration; `None` when no
@@ -635,9 +695,11 @@ async fn ensure_bootstrapped() -> Result<(), String> {
 /// loops back through pull; bounded retries fail loudly.
 async fn sync_cycle() -> Result<(), String> {
     let r = sync_cycle_inner().await;
-    // Счётчик обновляется В ЛЮБОМ исходе, включая ошибку: именно неудачный синк и
-    // оставляет очередь непустой, а человеку надо про это сказать.
-    refresh_pending().await;
+    // Исход КАЖДОЙ попытки и есть ответ на вопрос «сошлись ли мы»: успешный цикл
+    // подтянул хвост журнала и отдал очередь — версии сравнялись по построению.
+    // Неудачный оставил расхождение, и человеку надо об этом сказать. Отдельная
+    // проверка версий тут не нужна: стоила бы лишнего запроса и сказала то же.
+    in_sync().set(r.is_ok());
     r
 }
 

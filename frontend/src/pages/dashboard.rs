@@ -392,7 +392,11 @@ fn net_problem_entries() -> Vec<AppError> {
             kind: String::new(),
         });
     }
-    let down = net::degraded().get();
+    // Синхронизация из этого списка ИСКЛЮЧЕНА: про неё говорит своя плашка — с
+    // прямой фразой о риске потерять данные и кнопкой. Техническое «часть
+    // сервисов недоступна» рядом с ней было бы вторым словом о том же.
+    let down: Vec<net::Worker> =
+        net::degraded().get().into_iter().filter(|w| *w != net::Worker::Sync).collect();
     if !down.is_empty() {
         let names = down.iter().map(|w| t(w.label_key())).collect::<Vec<_>>().join(", ");
         v.push(AppError {
@@ -564,10 +568,9 @@ pub fn DashboardPage() -> impl IntoView {
     // себе она ошибкой не считается (сеть пропала — обычное дело), но человеку надо
     // попасть в панель, где про неё сказано и есть кнопка. Без этого предупреждение
     // жило бы за дверью, которую нечем открыть.
-    let pending_sync = crate::services::sync::pending_count();
-    let has_errors = move || {
-        !errs.get().is_empty() || !net_problem_entries().is_empty() || pending_sync.get() > 0
-    };
+    let in_sync = crate::services::sync::in_sync();
+    let has_errors =
+        move || !errs.get().is_empty() || !net_problem_entries().is_empty() || !in_sync.get();
 
     // Mail tile: a program-letters inbox that permanently occupies col 7. A red dot
     // marks unread letters. The version signal bumps when a letter is added/read.
@@ -1156,51 +1159,40 @@ fn PersonaEditor(
     }
 }
 
-/// Незавершённая синхронизация — первым, ДО списка ошибок.
+/// Строка списка про незавершённую синхронизацию — с кнопкой, потому что эту
+/// проблему человек может решить сам.
 ///
-/// Сетевой сбой сам по себе виден в журнале, но человеку он ничего не говорит о
-/// главном: часть его записей живёт только на этом телефоне, и потерять её можно
-/// вместе с телефоном. Поэтому здесь прямая фраза и кнопка, которая досылает
-/// очередь по требованию — а не «когда-нибудь в фоне».
-///
-/// Пусто, когда очередь пуста: молчание тут и означает «всё доехало».
+/// Показывается, пока данные не сошлись с сервером (`sync::in_sync`), и исчезает
+/// в момент нажатия: дальше исход решает сама попытка. Удалась — строка не
+/// вернётся; не удалась — вернётся вместе с причиной.
 #[component]
 fn SyncPending() -> impl IntoView {
-    let pending = crate::services::sync::pending_count();
+    let ok = crate::services::sync::in_sync();
     let busy = create_rw_signal(false);
-    // Итог последней ПОПЫТКИ, а не состояние очереди: неудача обязана быть
-    // названа, иначе нажатие выглядит как «ничего не произошло».
-    let failed = create_rw_signal(false);
     let retry = move |_| {
         busy.set(true);
-        failed.set(false);
+        // Скрываем сразу: нажатие обязано что-то изменить на экране, а вернуть
+        // строку — работа неудачного синка, который сам сбросит флаг.
+        ok.set(true);
         spawn_local(async move {
-            let r = crate::services::sync::retry_pending().await;
-            if let Err(e) = &r {
+            if let Err(e) = crate::services::sync::retry_pending().await {
                 leptos::logging::warn!("продолжить синхронизацию: {e}");
             }
-            failed.set(r.is_err());
             busy.set(false);
         });
     };
     move || {
-        (pending.get() > 0).then(|| view! {
+        (!ok.get() || busy.get()).then(|| view! {
             <div attr:data-testid="sync-pending"
-                 class="notification is-warning is-light"
-                 style="text-align: left; margin-bottom: 12px;">
-                <p class="is-size-6" style="line-height: 1.5;">
+                 style="border-radius: 12px; padding: 12px 14px; text-align: left; \
+                        background: var(--bulma-warning-soft);">
+                <p class="is-size-6" style="line-height: 1.45;">
                     {move || t("sync.pending_body")}
                 </p>
-                {move || failed.get().then(|| view! {
-                    <p attr:data-testid="sync-pending-failed" class="is-size-7 has-text-danger"
-                       style="margin-top: 8px;">
-                        {move || t("sync.pending_failed")}
-                    </p>
-                })}
                 <button
                     attr:data-testid="sync-pending-retry"
                     class="button is-link is-fullwidth"
-                    style="margin-top: 12px;"
+                    style="margin-top: 10px;"
                     disabled=move || busy.get()
                     on:click=retry
                 >
@@ -1217,16 +1209,20 @@ fn SyncPending() -> impl IntoView {
 fn ErrorsPanel() -> impl IntoView {
     let errs = crate::services::errors::signal();
     let copied = create_rw_signal(None::<usize>);
+    let sync_ok = crate::services::sync::in_sync();
     view! {
-        <SyncPending />
         <p class="is-size-7 has-text-grey" style="margin: 0 0 10px;">{move || t("errors.hint")}</p>
         <div style="display: flex; flex-direction: column; gap: 8px;">
+            // Незавершённая синхронизация — ПЕРВОЙ строкой того же списка, а не
+            // отдельным баннером: для человека это такая же проблема, как
+            // остальные, только эту он может решить сам — потому и с кнопкой.
+            <SyncPending />
             {move || {
                 // Network problems first (live, from `net`), then the recorded
                 // background errors — one combined list.
                 let mut list = net_problem_entries();
                 list.extend(errs.get());
-                if list.is_empty() {
+                if list.is_empty() && sync_ok.get() {
                     return view! { <p class="is-size-6 has-text-grey">{move || t("errors.none")}</p> }.into_view();
                 }
                 list.into_iter().enumerate().map(|(i, e)| {

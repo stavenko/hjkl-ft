@@ -125,9 +125,13 @@ await page.locator('[data-testid="dash-errors-widget"]').click({ timeout: 15000 
 await page.waitForTimeout(1500);
 
 const pendingVisible = await page.locator('[data-testid="sync-pending"]').count();
-check("предупреждение о незавершённой синхронизации показано", pendingVisible > 0);
+check("плашка о незавершённой синхронизации показана", pendingVisible > 0);
 const text = await page.locator('[data-testid="sync-pending"]').innerText().catch(() => "");
 check("текст про потерю данных на месте", text.includes("Вы можете потерять данные"), text.slice(0, 90));
+// Старая техническая запись про синхронизацию заменена плашкой, а не соседствует с ней.
+const panel = (await page.locator('[data-testid="errors-panel"], body').first().innerText()).replace(/\s+/g, " ");
+check("нет старой записи «временно недоступно: синхронизация»",
+  !panel.includes("временно недоступно: синхронизация"), panel.slice(0, 140));
 // Снимок ДО нажатия: после успешной отправки блок исчезает, и показывать было бы нечего.
 await page.screenshot({ path: "/tmp/sync-pending.png", fullPage: true });
 
@@ -163,6 +167,28 @@ const body = await pull.text();
 check("сервер знает запись", body.includes(marker), `${pull.status}, ${body.length} байт`);
 
 await page.screenshot({ path: "/tmp/sync-done.png", fullPage: true });
+
+// ── Любое изменение САМО запускает синхронизацию ─────────────────────────────
+// Проверяется НАПРЯМУЮ, по обращениям к серверу: сеть оставляем рабочей (иначе
+// плашку зажгла бы и проверка на запуске, и доказано было бы не то), считаем
+// запросы к /sync/v2/push до и после правки. Правка настоящая, через интерфейс:
+// открытие истории помечает её просмотренной, а это запись в app_flags —
+// синкаемый стор. Ни одного явного «синхронизировать» здесь не зовётся.
+let pushes = 0;
+page.on("request", (r) => { if (r.url().includes("/sync/v2/push")) pushes += 1; });
+
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForTimeout(10000); // пусть отработает всё, что делает запуск
+const before = pushes;
+
+await page.locator('[data-testid="story-circle"]').first().click({ timeout: 20000 });
+await page.waitForTimeout(3000);
+// Ждём дольше склейки (1.2 с) и самого запроса.
+await page.waitForTimeout(8000);
+
+check("правка сама вызвала отправку на сервер", pushes > before,
+  `запросов было ${before}, стало ${pushes}`);
+
 await ctx.close();
 await b.close();
 console.log(fail ? `\n${fail} провалов` : "\nвсё сошлось");

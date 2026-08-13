@@ -264,6 +264,10 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         return record_event(req, env, &user_id).await;
     }
 
+    if method == Method::Post && path == "/detection" {
+        return record_detection(req, env, &user_id).await;
+    }
+
     Ok(error_response("Not found", 404))
 }
 
@@ -333,6 +337,77 @@ async fn record_event(mut req: Request, env: &Env, user_id: &str) -> Result<Resp
         .add_blob(field(&body, "build"))
         .add_blob(field(&body, "platform"))
         .add_blob(user_id)
+        .add_double(1);
+
+    if let Err(e) = point.write_to(&dataset) {
+        console_error!("analytics engine write: {e}");
+    }
+    Response::from_json(&serde_json::json!({ "ok": true })).map(|r| r.with_status(202))
+}
+
+// ── Определения → Analytics Engine ───────────────────────────────────────────
+//
+// Что модель РАЗОБРАЛА, а не на чём споткнулась. Без этого потока видны только
+// сбои, а самое важное остаётся невидимым: неверный ответ, прошедший проверку,
+// выглядит как обычная работа. Голубцы, которым модель уверенно назначала жир
+// свинины, в CLIENT_ERRORS не попадали ни разу — вердикт-то валидный.
+//
+// Отсюда и назначение: набирать список того, что реально определяется у людей, и
+// время от времени прогонять эти продукты собственными замерами.
+//
+// РАСКЛАДКА ТОЧКИ ДАННЫХ — позиционная, как и у ошибок. Менять только добавлением
+// в конец, иначе перемешается уже записанное.
+//
+//   index1  — вид определения: fat.row | fat.dish | dish.composite | flag.heme …
+//   blob1   — продукт: название, как его ввёл человек
+//   blob2   — вердикт: ключ строки, «true»/«false», значение — что решила модель
+//   blob3   — обоснование модели, её словами
+//   blob4   — версия сборки
+//   blob5   — платформа
+//   blob6   — user_id
+//   double1…double4 — числа определения (у жира: НЖК, МНЖК, ПНЖК, EPA+DHA)
+//   double5 — 1, чтобы складывать
+const DETECTION_DATASET: &str = "CLIENT_DETECTIONS";
+
+/// Число из тела запроса; отсутствующее поле — ноль, а не ошибка: у определений
+/// без чисел (признаки) их и не бывает.
+fn number(body: &serde_json::Value, key: &str) -> f64 {
+    body.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0)
+}
+
+/// POST /detection (app JWT) — записать одно определение.
+///
+/// Как и `/event`: 202 без обещания, что запись случилась — у Analytics Engine
+/// подтверждения не бывает, а повторять клиенту нечего.
+async fn record_detection(mut req: Request, env: &Env, user_id: &str) -> Result<Response> {
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+    let kind = field(&body, "kind");
+    let subject = field(&body, "subject");
+    if kind.is_empty() || subject.is_empty() {
+        return Ok(error_response("missing kind/subject", 400));
+    }
+
+    let dataset = match env.analytics_engine(DETECTION_DATASET) {
+        Ok(d) => d,
+        Err(e) => {
+            console_error!("analytics engine binding {DETECTION_DATASET}: {e}");
+            return Response::from_json(&serde_json::json!({ "ok": false }))
+                .map(|r| r.with_status(202));
+        }
+    };
+
+    let point = AnalyticsEngineDataPointBuilder::new()
+        .indexes([kind.as_str()].as_slice())
+        .add_blob(subject)
+        .add_blob(field(&body, "verdict"))
+        .add_blob(field(&body, "reason"))
+        .add_blob(field(&body, "build"))
+        .add_blob(field(&body, "platform"))
+        .add_blob(user_id)
+        .add_double(number(&body, "n1"))
+        .add_double(number(&body, "n2"))
+        .add_double(number(&body, "n3"))
+        .add_double(number(&body, "n4"))
         .add_double(1);
 
     if let Err(e) = point.write_to(&dataset) {

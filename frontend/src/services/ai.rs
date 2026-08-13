@@ -967,6 +967,13 @@ pub async fn is_composite_dish(food_name: &str) -> Result<bool, String> {
         v.verdict_is_a_composite_dish,
         v.reason_where_the_fat_of_this_food_comes_from
     );
+    crate::services::telemetry::report_detection(
+        "dish.composite",
+        food_name,
+        &v.verdict_is_a_composite_dish.to_string(),
+        &v.reason_where_the_fat_of_this_food_comes_from,
+        &[],
+    );
     Ok(v.verdict_is_a_composite_dish)
 }
 
@@ -1062,6 +1069,13 @@ pub async fn lookup_basic_fat_profile(food_name: &str) -> Result<api_types::FatP
         "жиры «{food_name}»: {} · {} — НЖК {:.0} МНЖК {:.0} ПНЖК {:.0} EPA+DHA {:.0} ({})",
         row.key, v.food_type, profile.sfa_pct, profile.mufa_pct, profile.pufa_pct,
         profile.epa_dha_pct, v.reason
+    );
+    crate::services::telemetry::report_detection(
+        "fat.row",
+        food_name,
+        row.key,
+        &format!("{} — {}", v.food_type, v.reason),
+        &[profile.sfa_pct, profile.mufa_pct, profile.pufa_pct, profile.epa_dha_pct],
     );
     Ok(profile)
 }
@@ -1166,6 +1180,15 @@ async fn lookup_dish_fat_profile(food_name: &str) -> Result<api_types::FatProfil
         profile.sfa_pct, profile.mufa_pct, profile.pufa_pct,
         v.reason_where_the_fat_comes_from
     );
+    // Числа — ОТВЕТ МОДЕЛИ, до пессимизации: замер должен видеть, что она сказала,
+    // а не то, во что мы это превратили. Наш зажим восстановим сами, он известен.
+    crate::services::telemetry::report_detection(
+        "fat.dish",
+        food_name,
+        "dish",
+        &v.reason_where_the_fat_comes_from,
+        &[v.sfa_pct, v.mufa_pct, v.pufa_pct, 0.0],
+    );
     Ok(profile)
 }
 
@@ -1222,10 +1245,16 @@ fn numbered(names: &[String]) -> String {
         .join("\n")
 }
 
-/// Сверить длины и записать вердикты в лог. Тоже механика: к модели отсюда не
-/// уходит ни одного слова.
+/// Сверить длины, записать вердикты в лог и отправить их в телеметрию
+/// определений. Тоже механика: к модели отсюда не уходит ни одного слова.
+///
+/// `label` — для лога, по-русски; `kind` — устойчивый ключ, по которому вердикты
+/// группируются в аналитике и который нельзя менять задним числом. ПУСТОЙ `kind`
+/// значит «не отправлять»: у гема отсюда идут отдельные голоса, а в аналитику
+/// должен попасть их итог, иначе один продукт даст три записи с разными ответами.
 fn take_flags(
     label: &str,
+    kind: &str,
     names: &[String],
     verdict: Vec<bool>,
     reason: Vec<String>,
@@ -1240,6 +1269,11 @@ fn take_flags(
     }
     for (i, name) in names.iter().enumerate() {
         leptos::logging::log!("{label} «{name}»: {} — {}", verdict[i], reason[i]);
+        if !kind.is_empty() {
+            crate::services::telemetry::report_detection(
+                kind, name, &verdict[i].to_string(), &reason[i], &[],
+            );
+        }
     }
     Ok(verdict)
 }
@@ -1273,6 +1307,7 @@ pub async fn classify_veg_fruit(names: &[String]) -> Result<Vec<bool>, String> {
     let v: VegFruitAnswer = generate(prompt, |_| {}).await?;
     take_flags(
         "фрукты/овощи",
+        "flag.veg_fruit",
         names,
         v.verdict,
         v.reason_why_this_product_classified_as_vegetable_or_fruit,
@@ -1341,6 +1376,7 @@ pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
         let v: HemeAnswer = generate(prompt.clone(), |_| {}).await?;
         let verdict = take_flags(
             "гем",
+            "", // в аналитику уйдёт ИТОГ голосования, а не каждый голос
             names,
             v.verdict,
             v.reason_why_this_product_classified_as_gem_source.clone(),
@@ -1355,6 +1391,15 @@ pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
         leptos::logging::log!(
             "гем «{name}»: {} голосами {}:{} — {}",
             verdict[i], votes[i][1], votes[i][0], last_reason[i]
+        );
+        // Голоса уходят вместе с вердиктом: единогласное «да» и «да» со счётом
+        // 2:1 — разные вещи, и вторая как раз и есть повод для своего замера.
+        crate::services::telemetry::report_detection(
+            "flag.heme",
+            name,
+            &verdict[i].to_string(),
+            &last_reason[i],
+            &[votes[i][1].into(), votes[i][0].into()],
         );
     }
     Ok(verdict)
@@ -1416,6 +1461,7 @@ pub async fn classify_milk_globule(names: &[String]) -> Result<Vec<bool>, String
     let v: MilkGlobuleAnswer = generate(prompt, |_| {}).await?;
     take_flags(
         "молочная глобула",
+        "flag.milk_globule",
         names,
         v.verdict,
         v.reason_why_this_product_classified_as_milk_fat_globule,

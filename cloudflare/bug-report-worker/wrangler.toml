@@ -25,6 +25,13 @@ new_sqlite_classes = ["BugReportDO"]
 binding = "CLIENT_ERRORS"
 dataset = "renorma_client_errors_dev"
 
+# Определения: что модель разобрала у людей — не сбои, а обычные вердикты. Свой
+# датасет, а не ещё один вид в CLIENT_ERRORS: раскладка столбцов другая (числа в
+# double), и поток на порядки плотнее — в общей таблице он утопил бы ошибки.
+[[analytics_engine_datasets]]
+binding = "CLIENT_DETECTIONS"
+dataset = "renorma_client_detections_dev"
+
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
 # Admin key for the read endpoint (GET /reports). Dev placeholder — harden later.
@@ -53,6 +60,10 @@ class_name = "BugReportDO"
 [[env.production.analytics_engine_datasets]]
 binding = "CLIENT_ERRORS"
 dataset = "renorma_client_errors"
+
+[[env.production.analytics_engine_datasets]]
+binding = "CLIENT_DETECTIONS"
+dataset = "renorma_client_detections"
 
 # JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
 # [vars] value above). The binding name MUST equal the env name the code reads.

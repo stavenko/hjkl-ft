@@ -41,6 +41,25 @@ struct Event<'a> {
     platform: &'static str,
 }
 
+#[derive(Serialize)]
+struct Detection<'a> {
+    /// `fat.row`, `flag.heme`, `dish.composite` — по чему группировать.
+    kind: &'a str,
+    /// Продукт: название, как его ввёл человек.
+    subject: &'a str,
+    /// Что решила модель: ключ строки, «true»/«false», значение.
+    verdict: &'a str,
+    /// Обоснование модели, её словами.
+    reason: String,
+    build: String,
+    platform: &'static str,
+    /// Числа определения; у признаков нули.
+    n1: f64,
+    n2: f64,
+    n3: f64,
+    n4: f64,
+}
+
 /// Отправить то, что человеку не показывают.
 ///
 /// Наши внутренние сбои — не открылась база, не разобралась строка, упала
@@ -54,6 +73,45 @@ pub fn report_internal(kind: &str, subject: &str, cause: &str) {
 pub fn report(e: &AppError) {
     let cause = e.cause.clone().unwrap_or_else(|| e.message.clone());
     send(&e.kind, &e.context, &cause);
+}
+
+/// Что модель РАЗОБРАЛА — вердикт, а не сбой.
+///
+/// Ошибки показывают только то, обо что споткнулись; неверный ответ, прошедший
+/// проверку, выглядит как обычная работа и не виден вообще. Поэтому определения
+/// уходят отдельным потоком: по нему видно, что у людей реально определяется, и
+/// какие продукты стоит прогнать собственным замером.
+///
+/// `numbers` — до четырёх величин определения (у жира: НЖК, МНЖК, ПНЖК, EPA+DHA);
+/// у признаков чисел нет, там пустой срез.
+pub fn report_detection(kind: &str, subject: &str, verdict: &str, reason: &str, numbers: &[f64]) {
+    let base = config::get().bug_report_base_url.clone();
+    if base.is_empty() {
+        return;
+    }
+    let Some(token) = auth::get_token() else { return };
+    let n = |i: usize| numbers.get(i).copied().unwrap_or(0.0);
+    let detection = Detection {
+        kind,
+        subject: &subject.chars().take(CAUSE_LIMIT).collect::<String>(),
+        verdict: &verdict.chars().take(CAUSE_LIMIT).collect::<String>(),
+        reason: reason.chars().take(CAUSE_LIMIT).collect(),
+        build: build_version(),
+        platform: crate::pages::pwa_prompt::detect_platform(),
+        n1: n(0),
+        n2: n(1),
+        n3: n(2),
+        n4: n(3),
+    };
+    let Ok(body) = serde_json::to_string(&detection) else { return };
+    let Some(promise) = dispatch_to(&base, "/detection", &token, &body) else { return };
+    // Исход интересует только консоль: определение — не работа человека, повторять
+    // его некому и незачем.
+    leptos::spawn_local(async move {
+        if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise).await {
+            leptos::logging::warn!("телеметрия определений не ушла: {e:?}");
+        }
+    });
 }
 
 fn send(kind: &str, subject: &str, cause: &str) {
@@ -110,11 +168,16 @@ fn build_version() -> String {
         .unwrap_or_default()
 }
 
+/// Отправить ошибку на `/event`.
+fn dispatch(base: &str, token: &str, body: &str) -> Option<js_sys::Promise> {
+    dispatch_to(base, "/event", token, body)
+}
+
 /// Отправить запрос НЕМЕДЛЕННО и вернуть его обещание.
 ///
 /// Ни одного `expect`: сюда приходят и из обработчика паники, а паника внутри
 /// обработчика паники — это уже ничем не диагностируемый обрыв.
-fn dispatch(base: &str, token: &str, body: &str) -> Option<js_sys::Promise> {
+fn dispatch_to(base: &str, path: &str, token: &str, body: &str) -> Option<js_sys::Promise> {
     let opts = web_sys::RequestInit::new();
     opts.set_method("POST");
     opts.set_body(&JsValue::from_str(body));
@@ -127,7 +190,7 @@ fn dispatch(base: &str, token: &str, body: &str) -> Option<js_sys::Promise> {
     headers.set("Authorization", &format!("Bearer {token}")).ok()?;
     opts.set_headers(&headers);
 
-    let request = web_sys::Request::new_with_str_and_init(&format!("{base}/event"), &opts).ok()?;
+    let request = web_sys::Request::new_with_str_and_init(&format!("{base}{path}"), &opts).ok()?;
     let window = web_sys::window()?;
     Some(window.fetch_with_request(&request))
 }

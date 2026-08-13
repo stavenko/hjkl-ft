@@ -436,9 +436,15 @@ enum Overlay {
     Steps,
 }
 
-// 8 columns; each cell is a square whose side `--u` is derived from the viewport
-// width minus the app-shell's 0.75rem side padding and the inter-cell gaps.
-const GRID: &str = "--gap: 6px; --u: calc((100vw - 1.5rem - 7 * var(--gap)) / 8); \
+// 8 колонок; ячейка — квадрат со стороной `--u`.
+//
+// Сторона считается от ШИРИНЫ КОЛОНКИ ПРИЛОЖЕНИЯ, а не от ширины окна. Раньше
+// здесь стоял `100vw`, и на мониторе ячейка раздувалась вчетверо (46 → 172 px),
+// пока шрифты и значки, заданные в пикселях, оставались прежними. `min()` берёт
+// меньшее из ширины окна и ширины колонки — то есть на телефоне ровно то же
+// число, что и было, а на широком экране счёт идёт по колонке.
+const GRID: &str = "--gap: 6px; \
+    --u: calc((min(100vw, 480px) - 1.5rem - 7 * var(--gap)) / 8); \
     display: grid; grid-template-columns: repeat(8, 1fr); grid-auto-rows: var(--u); gap: var(--gap);";
 
 const TILE: &str = "appearance: none; -webkit-appearance: none; border: none; font: inherit; \

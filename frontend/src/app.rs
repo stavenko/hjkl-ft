@@ -5,6 +5,17 @@ use crate::pages;
 use crate::services::i18n::t;
 use crate::services::{auth, net, platform, subscription, update};
 
+/// Приложение вписано в КОЛОНКУ шириной 480 px на любом экране.
+///
+/// Отдельного «десктопного вида» у нас нет и заводить его незачем: продукт
+/// телефонный, и на мониторе он показывает ровно то же самое, посередине. Число
+/// взято по самому широкому ходовому телефону (Pro Max ≈ 430 px) плюс поля —
+/// колонка не должна оказаться уже, чем на настоящем устройстве.
+///
+/// Те же 480 px повторены в `dashboard::GRID` (сторона ячейки) и в ширине нижнего
+/// меню: CSS-переменную сюда не завести — стили у нас строками в разметке.
+const SHELL_COLUMN: &str = "max-width: 480px; margin: 0 auto; padding: 0.75rem;";
+
 #[derive(Clone, Copy, PartialEq)]
 enum AppState {
     PwaPrompt,
@@ -348,7 +359,15 @@ pub fn App() -> impl IntoView {
             <div style="position: fixed; inset: 0; overflow: hidden; background: var(--bulma-background);">
                 <div attr:data-ios-scroll="1"
                      style="position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4.5rem;">
-                    <div style="padding: 0.75rem;">
+                    // Приложение живёт КОЛОНКОЙ шириной с телефон, где бы его ни
+                    // открыли. Растянутое на весь монитор, оно разъезжалось:
+                    // квадратные ячейки сетки считаются от ширины окна и на 1440
+                    // раздувались вчетверо (плитка 46 → 172 px), а шрифты, значки
+                    // и нижнее меню заданы в пикселях и не росли — огромные пустые
+                    // карточки с крошечными подписями, кнопки не попадали под
+                    // палец. Одна колонка снимает это целиком: и вид, и пропорции
+                    // те же самые, что на телефоне.
+                    <div style=SHELL_COLUMN>
                     <Routes>
                         <Route path="/" view=DashboardGate />
                         <Route path="/help/food" view=pages::help::HelpFoodPage />
@@ -378,7 +397,7 @@ pub fn App() -> impl IntoView {
             // Hidden on /onboard: that pre-account page forces AppState::Ready to
             // bypass the auth overlays, which would otherwise surface this app-shell
             // nav before the user has registered.
-            <nav style:display=move || { let p = use_location().pathname.get(); if p == "/onboard" || p == "/onboard-tg" { "none" } else { "flex" } } style="position: fixed; bottom: 0.75rem; left: 50%; transform: translateX(-50%); z-index: 40; background: var(--bulma-scheme-main); display: flex; justify-content: space-around; align-items: center; height: 3.5rem; width: min(26rem, calc(100% - 2rem)); border-radius: 1rem; box-shadow: 0 4px 24px rgba(0,0,0,0.15);">
+            <nav style:display=move || { let p = use_location().pathname.get(); if p == "/onboard" || p == "/onboard-tg" { "none" } else { "flex" } } style="position: fixed; bottom: 0.75rem; left: 50%; transform: translateX(-50%); z-index: 40; background: var(--bulma-scheme-main); display: flex; justify-content: space-around; align-items: center; height: 3.5rem; width: min(26rem, calc(100% - 2rem), calc(480px - 2rem)); border-radius: 1rem; box-shadow: 0 4px 24px rgba(0,0,0,0.15);">
                 <a attr:data-testid="nav-dashboard" href="/" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="3" y="3" width="7" height="7" rx="1.5" />

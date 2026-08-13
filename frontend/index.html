@@ -97,8 +97,11 @@
             unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2212, U+2215, U+FEFF, U+FFFD;
         }
         /* ── Splash: shown until the WASM app mounts (which replaces <body>).
-           Palette + wordmark mirror the landing (Golos Text 800, deep-navy ink). ── */
-        #splash {
+           Palette + wordmark mirror the landing (Golos Text 800, deep-navy ink).
+           Стили висят на КЛАССЕ, а не на #splash: тем же экраном загрузки
+           накрывает сторож зависшего обновления, когда сплэша на странице уже
+           нет (обновление встало до навигации, приложение ещё живо). ── */
+        .rn-splash {
             --sp-bg: #F1F4F9; --sp-text: #0E1630; --sp-sub: #39425F;
             --sp-em: #10B981; --sp-rose: #F4536B; --sp-amber: #F5B301;
             --sp-glow: rgba(16,185,129,.18);
@@ -109,31 +112,44 @@
             animation: sp-fade .45s ease both;
         }
         @media (prefers-color-scheme: dark) {
-            #splash { --sp-bg: #0E1630; --sp-text: #EDEFF6; --sp-sub: #9AA3C0; --sp-glow: rgba(16,185,129,.28); }
+            .rn-splash { --sp-bg: #0E1630; --sp-text: #EDEFF6; --sp-sub: #9AA3C0; --sp-glow: rgba(16,185,129,.28); }
         }
-        #splash .splash-inner {
+        .rn-splash .splash-inner {
             display: flex; flex-direction: column; align-items: center; gap: 20px;
             animation: sp-rise .6s cubic-bezier(.2,.7,.3,1) both;
         }
-        #splash .splash-logo { position: relative; width: 78px; height: 78px; }
-        #splash .splash-logo::before {
+        .rn-splash .splash-logo { position: relative; width: 78px; height: 78px; }
+        .rn-splash .splash-logo::before {
             content: ""; position: absolute; inset: -22px; border-radius: 50%;
             background: radial-gradient(circle, var(--sp-glow), transparent 68%);
             animation: sp-glow 2.6s ease-in-out infinite;
         }
-        #splash .splash-ring {
+        .rn-splash .splash-ring {
             position: absolute; inset: 0; border-radius: 50%;
             background: conic-gradient(from -90deg, var(--sp-em) 0 60%, var(--sp-rose) 60% 90%, var(--sp-amber) 90% 100%);
             -webkit-mask: radial-gradient(circle, transparent 19px, #000 20px);
             mask: radial-gradient(circle, transparent 19px, #000 20px);
             animation: sp-spin 5.5s cubic-bezier(.55,.15,.45,.85) infinite;
         }
-        #splash .splash-word { font-size: 2rem; font-weight: 800; letter-spacing: -.02em; color: var(--sp-text); }
+        .rn-splash .splash-word { font-size: 2rem; font-weight: 800; letter-spacing: -.02em; color: var(--sp-text); }
+        /* Сообщение сторожа: живёт ВНУТРИ экрана загрузки, под словом re:Norma. */
+        .rn-splash .splash-stuck { max-width: 20rem; padding: 0 8px; text-align: center; }
+        .rn-splash .splash-stuck-title {
+            font-size: 17px; font-weight: 800; line-height: 1.3; color: var(--sp-text);
+        }
+        .rn-splash .splash-stuck-sub {
+            font-size: 14px; line-height: 1.5; color: var(--sp-sub); margin-top: 8px;
+        }
+        .rn-splash .splash-stuck-btn {
+            width: 100%; margin-top: 18px; padding: 15px 16px; border: none; border-radius: 12px;
+            background: #3b4cf5; color: #fff; font: inherit; font-size: 16px; font-weight: 700;
+            cursor: pointer;
+        }
         @keyframes sp-spin { to { transform: rotate(360deg); } }
         @keyframes sp-glow { 0%, 100% { opacity: .5; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.08); } }
         @keyframes sp-fade { from { opacity: 0; } }
         @keyframes sp-rise { from { opacity: 0; transform: translateY(10px); } }
-        @media (prefers-reduced-motion: reduce) { #splash, #splash * { animation: none !important; } }
+        @media (prefers-reduced-motion: reduce) { .rn-splash, .rn-splash * { animation: none !important; } }
     </style>
 </head>
 <body>
@@ -141,7 +157,7 @@
     <div style="font-size: 2.5rem;">&#x1F4F1;&#x21BB;</div>
     <div>Поверните телефон вертикально</div>
 </div>
-<div id="splash">
+<div id="splash" class="rn-splash">
     <div class="splash-inner">
         <div class="splash-logo"><div class="splash-ring"></div></div>
         <div class="splash-word">re:Norma</div>
@@ -257,26 +273,37 @@
         ]).then(done, done);
     }
 
+    // Сообщение — часть ЭКРАНА ЗАГРУЗКИ, а не отдельная страница поверх него:
+    // человек всё это время смотрел на логотип с кольцом, и подменять картинку
+    // ровно в тот момент, когда мы объясняем, что всё затянулось, — значит
+    // добавить ему второе непонятное событие. Кольцо продолжает крутиться:
+    // обновление не отменено, мы лишь предлагаем выход.
     function paint() {
         if (document.getElementById('rn-stuck')) return;
+        // Сплэша нет — обновление встало ДО навигации, страница ещё старая и на
+        // ней живой интерфейс. Собираем такой же экран загрузки поверх него.
+        var splash = document.getElementById('splash');
+        if (!splash) {
+            splash = document.createElement('div');
+            splash.className = 'rn-splash';
+            splash.style.zIndex = '2147483647';
+            splash.innerHTML = '<div class="splash-inner">'
+                + '<div class="splash-logo"><div class="splash-ring"></div></div>'
+                + '<div class="splash-word">re:Norma</div>'
+                + '</div>';
+            document.body.appendChild(splash);
+        }
+        var inner = splash.querySelector('.splash-inner') || splash;
         var box = document.createElement('div');
         box.id = 'rn-stuck';
+        box.className = 'splash-stuck';
         box.setAttribute('data-testid', 'update-stuck');
-        box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;'
-            + 'align-items:center;justify-content:center;padding:32px 24px;text-align:center;'
-            + 'background:var(--sp-bg,#F1F4F9);color:var(--sp-text,#0E1630);'
-            + "font-family:'Golos Text',system-ui,sans-serif;";
         box.innerHTML = ''
-            + '<div style="max-width:22rem;">'
-            + '<div style="font-size:19px;font-weight:800;line-height:1.3;margin-bottom:14px;">'
-            +   'Обновление длится слишком долго</div>'
-            + '<div style="font-size:15px;line-height:1.55;color:var(--sp-sub,#39425F);margin-bottom:22px;">'
-            +   'Возможно, произошло зависание из-за сетевых проблем.</div>'
-            + '<button id="rn-stuck-btn" data-testid="update-stuck-btn" style="width:100%;padding:16px;'
-            +   'border:none;border-radius:12px;background:#3b4cf5;color:#fff;font-size:17px;'
-            +   "font-weight:700;font-family:inherit;cursor:pointer;\">Перезагрузить приложение</button>"
-            + '</div>';
-        document.body.appendChild(box);
+            + '<div class="splash-stuck-title">Обновление длится слишком долго</div>'
+            + '<div class="splash-stuck-sub">Возможно, произошло зависание из-за сетевых проблем.</div>'
+            + '<button id="rn-stuck-btn" data-testid="update-stuck-btn" class="splash-stuck-btn">'
+            +   'Перезагрузить приложение</button>';
+        inner.appendChild(box);
         document.getElementById('rn-stuck-btn').addEventListener('click', hardReset);
     }
 

@@ -891,7 +891,10 @@ fn en(key: &str) -> &'static str {
         "pwa.inst.edge.2" => "Click \"Install\" to confirm",
         // Firefox desktop
         "pwa.inst.firefox.1" => "Firefox desktop does not support PWA install. Use Chrome, Edge, or Safari.",
-        "pwa.use_browser" => "I want to use it in the browser anyway",
+        "pwa.desktop.mobile_first" => "This app is made for mobile devices.",
+        "pwa.desktop.if_phone" => "If you are seeing this on a phone, «Desktop site» is turned on. Uncheck it in the browser menu.",
+        "pwa.desktop.if_desktop" => "If you want to use the app on a computer, press the button below.",
+        "pwa.use_browser" => "Use in the browser on desktop",
 
         // Pairing
         "pair.title" => "Connect device",
@@ -1798,7 +1801,10 @@ fn ru(key: &str) -> &'static str {
         "pwa.inst.edge.1" => "Меню \u{2026} \u{2192} Приложения \u{2192} Установить этот сайт как приложение",
         "pwa.inst.edge.2" => "Нажмите «Установить» для подтверждения",
         "pwa.inst.firefox.1" => "Firefox на компьютере не поддерживает установку PWA. Используйте Chrome, Edge или Safari.",
-        "pwa.use_browser" => "Я хочу использовать в браузере",
+        "pwa.desktop.mobile_first" => "Приложение предназначено для мобильных устройств.",
+        "pwa.desktop.if_phone" => "Если вы открываете это на телефоне, значит у вас включена «Версия для ПК». Уберите эту галочку в меню браузера.",
+        "pwa.desktop.if_desktop" => "Если вы хотите пользоваться приложением на компьютере — нажмите кнопку ниже.",
+        "pwa.use_browser" => "Использовать в браузере на Desktop",
 
         // Pairing
         "pair.title" => "Подключить устройство",

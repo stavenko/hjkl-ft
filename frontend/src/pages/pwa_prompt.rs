@@ -700,11 +700,27 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                 // Android открывается системным браузером (у части людей это
                 // Яндекс, где приложение не работает), поэтому выхода из
                 // инструкции нет — ставим PWA.
+                //
+                // Но десктопная ветка ловит и ТЕЛЕФОН с включённой «Версией для
+                // ПК»: браузер в этом режиме отдаёт десктопный User-Agent, и мы
+                // честно не можем отличить его от компьютера. Поэтому здесь
+                // объясняем оба случая сразу — и человеку с телефона это самое
+                // важное, потому что решается одной галочкой.
                 {(!platform.starts_with("android") && !platform.starts_with("ios")).then(|| view! {
+                    <div style="text-align: left; margin-bottom: 1.25rem; line-height: 1.6;">
+                        <p class="has-text-weight-semibold" style="margin-bottom: 8px;">
+                            {move || t("pwa.desktop.mobile_first")}
+                        </p>
+                        <p class="has-text-grey" style="margin-bottom: 8px;">
+                            {move || t("pwa.desktop.if_phone")}
+                        </p>
+                        <p class="has-text-grey">
+                            {move || t("pwa.desktop.if_desktop")}
+                        </p>
+                    </div>
                     <button
                         attr:data-testid="pwa-btn-dismiss"
-                        class="button is-ghost has-text-grey"
-                        style="text-decoration: underline; font-size: 0.85rem;"
+                        class="button is-light is-fullwidth"
                         on:click=dismiss
                     >
                         {move || t("pwa.use_browser")}

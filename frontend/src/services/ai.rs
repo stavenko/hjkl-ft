@@ -915,8 +915,71 @@ pub(crate) struct FatProfileAnswer {
     pub(crate) reason: String,
 }
 
-/// Профиль жира продукта. Промпт — дословно тот, что прошёл замер.
+// ── Развилка: базовый продукт или составное блюдо ────────────────────────────
+//
+// Таблица строк разложена по ИСТОЧНИКУ жира и годится только там, где источник
+// один. У составного блюда его нет: в фаршированном баклажане жир из фарша, из
+// масла и из самого овоща, и ни одна строка ему не подходит. Модель это честно
+// показала — замер (scripts/measure-fat-dishes.mjs) дал 36 из 36 попыток с
+// выдуманным ключом «vegetable» на фаршированных овощах, а голубцам, котлетам и
+// картофельной запеканке она с той же уверенностью назначала свинину, потому что
+// выбрать было больше не из чего.
+//
+// Поэтому сперва спрашивается ОДНО: базовый это продукт или блюдо. Базовый идёт в
+// таблицу, блюдо — в свой запрос без таблицы, где выдумать ключ попросту негде.
+
+/// Обоснование первым — оно и есть размышление модели (см. раздел про признаки).
+#[derive(Debug, Deserialize, JsonSchema)]
+struct CompositeAnswer {
+    /// Which ingredients this food is made of, and where its fat comes from. One
+    /// short sentence.
+    reason_where_the_fat_of_this_food_comes_from: String,
+    /// True when the fat comes from SEVERAL different sources mixed together.
+    verdict_is_a_composite_dish: bool,
+}
+
+/// Составное ли это блюдо (жир из нескольких источников), а не базовый продукт.
+pub async fn is_composite_dish(food_name: &str) -> Result<bool, String> {
+    let prompt = format!(
+        "Answer ONE question about the food \"{food_name}\", and nothing else. Food names may \
+         be in ANY language — judge by meaning, not by wording.\n\n\
+         QUESTION: does the FAT of this food come from SEVERAL DIFFERENT SOURCES mixed \
+         together?\n\n\
+         A food whose fat comes from ONE source is NOT a composite dish, however processed it \
+         is. These are of one source:\n\
+         — the flesh, organs, fat or skin of one animal, bird or fish, raw or cooked;\n\
+         — one plant and what is pressed or ground from it: an oil, a nut, a seed, a grain, a \
+         vegetable, a fruit;\n\
+         — milk and everything made from milk alone: butter, cream, cheese, curd, yoghurt;\n\
+         — eggs;\n\
+         — a factory product built around one of these: sausage, ham, tinned fish, nut paste.\n\n\
+         A food whose fat comes from SEVERAL sources IS a composite dish. Typically these are \
+         cooked from a recipe: stuffed vegetables, cabbage rolls, cutlets and meatballs, \
+         casseroles and bakes, pies and pastry with a filling, pilaf, stews and soups, salads \
+         with dressing, sandwiches, ready meals.\n\n\
+         THINK IT THROUGH FIRST in the reason field — name what this food is made of and where \
+         its fat comes from — and let the verdict follow from it.\n\n\
+         Respond with ONLY a single minified JSON object.",
+    );
+    let v: CompositeAnswer = generate(prompt, |_| {}).await?;
+    leptos::logging::log!(
+        "составное «{food_name}»: {} — {}",
+        v.verdict_is_a_composite_dish,
+        v.reason_where_the_fat_of_this_food_comes_from
+    );
+    Ok(v.verdict_is_a_composite_dish)
+}
+
+/// Профиль жира продукта: развилка, а дальше — своя ветка для каждого случая.
 pub async fn lookup_fat_profile(food_name: &str) -> Result<api_types::FatProfile, String> {
+    if is_composite_dish(food_name).await? {
+        return lookup_dish_fat_profile(food_name).await;
+    }
+    lookup_basic_fat_profile(food_name).await
+}
+
+/// Профиль жира БАЗОВОГО продукта. Промпт — дословно тот, что прошёл замер.
+pub async fn lookup_basic_fat_profile(food_name: &str) -> Result<api_types::FatProfile, String> {
     let lang = match crate::services::i18n::get_lang() {
         crate::services::i18n::Lang::Ru => "Russian",
         crate::services::i18n::Lang::En => "English",
@@ -999,6 +1062,109 @@ pub async fn lookup_fat_profile(food_name: &str) -> Result<api_types::FatProfile
         "жиры «{food_name}»: {} · {} — НЖК {:.0} МНЖК {:.0} ПНЖК {:.0} EPA+DHA {:.0} ({})",
         row.key, v.food_type, profile.sfa_pct, profile.mufa_pct, profile.pufa_pct,
         profile.epa_dha_pct, v.reason
+    );
+    Ok(profile)
+}
+
+// ── Профиль жира СОСТАВНОГО БЛЮДА ────────────────────────────────────────────
+//
+// Таблицы здесь нет намеренно: у блюда нет одного источника жира, и любой выбор
+// строки был бы догадкой — той самой, из-за которой голубцы и картофельная
+// запеканка получали профиль свинины. Модель отвечает свободно, а неизбежная
+// неточность трактуется НЕ В ПОЛЬЗУ человека: блюдом, состав которого мы знаем
+// только по названию, нельзя закрыть недельную планку.
+
+/// Обоснование первым — оно и есть размышление модели.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DishFatAnswer {
+    /// Which ingredients give this dish its fat, and in what proportion. One short
+    /// sentence.
+    reason_where_the_fat_comes_from: String,
+    /// SATURATED fatty acids as a PERCENT OF THIS DISH'S TOTAL FAT, by weight.
+    sfa_pct: f64,
+    /// MONOUNSATURATED fatty acids as a PERCENT OF THIS DISH'S TOTAL FAT, by weight.
+    mufa_pct: f64,
+    /// POLYUNSATURATED fatty acids as a PERCENT OF THIS DISH'S TOTAL FAT, by weight.
+    pufa_pct: f64,
+}
+
+/// Насколько ниже нормы прижимается отношение (МНЖК+ПНЖК)/НЖК у блюда.
+///
+/// Ровно нормой обойтись нельзя: индикатор засчитывает неделю при `значение >=
+/// нормы` (`fats::Fat::met`), и рацион из одних блюд выходил бы на планку впритык.
+const DISH_RATIO_OF_TARGET: f64 = 0.9;
+
+/// Свести профиль блюда к «не лучше, чем неизвестно».
+///
+/// Два действия, каждое — против конкретного индикатора (`fats.rs`):
+///   * EPA+DHA обнуляются. Длинные морские омега-3 из названия блюда не выводятся,
+///     а ошибка в плюс закрывает недельную норму рыбой, которой человек не ел.
+///   * Отношение (МНЖК+ПНЖК)/НЖК прижимается ниже нормы, если модель дала выше.
+///     Ответ ХУЖЕ нормы остаётся как есть: пессимизм не значит «портить всё».
+///
+/// Общая сумма кислот сохраняется — она задаёт, сколько жира вообще учтено; сдвиг
+/// идёт долями внутри неё.
+fn pessimise_dish_fat(sfa: f64, mufa: f64, pufa: f64) -> api_types::FatProfile {
+    let (sfa, mufa, pufa) = (sfa.max(0.0), mufa.max(0.0), pufa.max(0.0));
+    let total = sfa + mufa + pufa;
+    let cap = crate::services::fats::UNSAT_TO_SAT_MIN * DISH_RATIO_OF_TARGET;
+    let unsat = mufa + pufa;
+    // Без насыщенных отношение не определено, и делить не на что.
+    let worsen = sfa > 0.0 && unsat > sfa * cap;
+    if !worsen || total <= 0.0 {
+        return api_types::FatProfile { sfa_pct: sfa, mufa_pct: mufa, pufa_pct: pufa, epa_dha_pct: 0.0 };
+    }
+    // Искомое: (total - sfa') / sfa' = cap  ⇒  sfa' = total / (1 + cap).
+    let new_sfa = total / (1.0 + cap);
+    let k = (total - new_sfa) / unsat; // < 1: ненасыщенные ужимаются пропорционально
+    api_types::FatProfile {
+        sfa_pct: new_sfa,
+        mufa_pct: mufa * k,
+        pufa_pct: pufa * k,
+        epa_dha_pct: 0.0,
+    }
+}
+
+/// Профиль жира составного блюда: свободный ответ модели, прижатый к худшему.
+async fn lookup_dish_fat_profile(food_name: &str) -> Result<api_types::FatProfile, String> {
+    let lang = match crate::services::i18n::get_lang() {
+        crate::services::i18n::Lang::Ru => "Russian",
+        crate::services::i18n::Lang::En => "English",
+    };
+    let prompt = format!(
+        "You are a nutritional database. \"{food_name}\" is a COMPOSITE DISH — its fat comes \
+         from several ingredients at once. Report the FATTY-ACID PROFILE OF ITS FAT.\n\n\
+         Every number you report is a PERCENT OF THIS DISH'S TOTAL FAT, by weight — NOT grams \
+         per 100 g. How much fat the dish has is already known to us; you only describe how \
+         that fat is composed.\n\n\
+         THINK IT THROUGH FIRST in the reason field, in {lang}: name the ingredients this dish \
+         is usually made of, say which of them carry the fat, and which of those dominates. \
+         Then let the numbers follow from it.\n\n\
+         Where the ingredient is not fixed by the name — the kind of mince, the fat used for \
+         frying — assume the ORDINARY, most common version of the dish in home cooking.\n\n\
+         Report sfa_pct, mufa_pct and pufa_pct as percents of total fat. The rest of the weight \
+         is glycerol, so the three need not add up to 100 — never inflate a fraction to make \
+         them.\n\n\
+         Base the answer only on the dish name \"{food_name}\". Respond with ONLY a single \
+         minified JSON object and nothing else — no markdown, no prose.",
+    );
+
+    let v: DishFatAnswer = generate_validated(prompt, |_| {}, 4, |v: &DishFatAnswer| {
+        let sum = v.sfa_pct + v.mufa_pct + v.pufa_pct;
+        if sum > 100.5 {
+            return Err(format!("fat fractions sum to {sum:.1}% for «{food_name}»"));
+        }
+        Ok(())
+    })
+    .await?;
+
+    let profile = pessimise_dish_fat(v.sfa_pct, v.mufa_pct, v.pufa_pct);
+    leptos::logging::log!(
+        "жиры блюда «{food_name}»: модель {:.0}/{:.0}/{:.0} → НЖК {:.0} МНЖК {:.0} ПНЖК {:.0} \
+         EPA+DHA 0 ({})",
+        v.sfa_pct, v.mufa_pct, v.pufa_pct,
+        profile.sfa_pct, profile.mufa_pct, profile.pufa_pct,
+        v.reason_where_the_fat_comes_from
     );
     Ok(profile)
 }
@@ -2840,6 +3006,52 @@ mod tests {
             out.push_str(&f.push(chunk));
         }
         assert_eq!(out, "Your weight is trending down.");
+    }
+
+    // ── Пессимизация профиля блюда ──────────────────────────────────────────
+
+    use super::pessimise_dish_fat;
+
+    fn ratio(p: &api_types::FatProfile) -> f64 {
+        (p.mufa_pct + p.pufa_pct) / p.sfa_pct
+    }
+
+    /// Морские омега-3 блюду не засчитываются никогда: их источник в названии не
+    /// виден, а ошибка в плюс закрывает недельную норму рыбой, которой не было.
+    #[test]
+    fn dish_never_carries_epa_dha() {
+        let p = pessimise_dish_fat(20.0, 40.0, 30.0);
+        assert_eq!(p.epa_dha_pct, 0.0);
+    }
+
+    /// Слишком хороший ответ прижимается НИЖЕ нормы — планку блюдом не закрыть.
+    #[test]
+    fn dish_ratio_is_pushed_below_the_target() {
+        let p = pessimise_dish_fat(10.0, 50.0, 30.0); // отношение 8.0
+        assert!(ratio(&p) < crate::services::fats::UNSAT_TO_SAT_MIN,
+            "получилось {}", ratio(&p));
+    }
+
+    /// Ответ ХУЖЕ нормы остаётся нетронутым: пессимизм не значит «портить всё».
+    #[test]
+    fn dish_worse_than_target_is_left_alone() {
+        let p = pessimise_dish_fat(40.0, 20.0, 10.0); // отношение 0.75
+        assert_eq!((p.sfa_pct, p.mufa_pct, p.pufa_pct), (40.0, 20.0, 10.0));
+    }
+
+    /// Сумма кислот сохраняется: сдвигаются доли внутри неё, а не объём жира.
+    #[test]
+    fn dish_pessimism_keeps_the_total() {
+        let p = pessimise_dish_fat(10.0, 50.0, 30.0);
+        let total = p.sfa_pct + p.mufa_pct + p.pufa_pct;
+        assert!((total - 90.0).abs() < 1e-9, "сумма стала {total}");
+    }
+
+    /// Без насыщенных отношение не определено — делить не на что, ответ как есть.
+    #[test]
+    fn dish_without_saturated_is_left_alone() {
+        let p = pessimise_dish_fat(0.0, 60.0, 30.0);
+        assert_eq!((p.sfa_pct, p.mufa_pct, p.pufa_pct), (0.0, 60.0, 30.0));
     }
 }
 

@@ -560,7 +560,14 @@ pub fn DashboardPage() -> impl IntoView {
     // background errors OR a network problem. Network problems are shown in the
     // SAME list (ErrorsPanel) — no banner covering the interface.
     let errs = crate::services::errors::signal();
-    let has_errors = move || !errs.get().is_empty() || !net_problem_entries().is_empty();
+    // Незавершённая синхронизация ЗАЖИГАЕТ треугольник наравне с ошибками: сама по
+    // себе она ошибкой не считается (сеть пропала — обычное дело), но человеку надо
+    // попасть в панель, где про неё сказано и есть кнопка. Без этого предупреждение
+    // жило бы за дверью, которую нечем открыть.
+    let pending_sync = crate::services::sync::pending_count();
+    let has_errors = move || {
+        !errs.get().is_empty() || !net_problem_entries().is_empty() || pending_sync.get() > 0
+    };
 
     // Mail tile: a program-letters inbox that permanently occupies col 7. A red dot
     // marks unread letters. The version signal bumps when a letter is added/read.
@@ -1149,6 +1156,61 @@ fn PersonaEditor(
     }
 }
 
+/// Незавершённая синхронизация — первым, ДО списка ошибок.
+///
+/// Сетевой сбой сам по себе виден в журнале, но человеку он ничего не говорит о
+/// главном: часть его записей живёт только на этом телефоне, и потерять её можно
+/// вместе с телефоном. Поэтому здесь прямая фраза и кнопка, которая досылает
+/// очередь по требованию — а не «когда-нибудь в фоне».
+///
+/// Пусто, когда очередь пуста: молчание тут и означает «всё доехало».
+#[component]
+fn SyncPending() -> impl IntoView {
+    let pending = crate::services::sync::pending_count();
+    let busy = create_rw_signal(false);
+    // Итог последней ПОПЫТКИ, а не состояние очереди: неудача обязана быть
+    // названа, иначе нажатие выглядит как «ничего не произошло».
+    let failed = create_rw_signal(false);
+    let retry = move |_| {
+        busy.set(true);
+        failed.set(false);
+        spawn_local(async move {
+            let r = crate::services::sync::retry_pending().await;
+            if let Err(e) = &r {
+                leptos::logging::warn!("продолжить синхронизацию: {e}");
+            }
+            failed.set(r.is_err());
+            busy.set(false);
+        });
+    };
+    move || {
+        (pending.get() > 0).then(|| view! {
+            <div attr:data-testid="sync-pending"
+                 class="notification is-warning is-light"
+                 style="text-align: left; margin-bottom: 12px;">
+                <p class="is-size-6" style="line-height: 1.5;">
+                    {move || t("sync.pending_body")}
+                </p>
+                {move || failed.get().then(|| view! {
+                    <p attr:data-testid="sync-pending-failed" class="is-size-7 has-text-danger"
+                       style="margin-top: 8px;">
+                        {move || t("sync.pending_failed")}
+                    </p>
+                })}
+                <button
+                    attr:data-testid="sync-pending-retry"
+                    class="button is-link is-fullwidth"
+                    style="margin-top: 12px;"
+                    disabled=move || busy.get()
+                    on:click=retry
+                >
+                    {move || if busy.get() { t("sync.pending_sending") } else { t("sync.pending_retry") }}
+                </button>
+            </div>
+        })
+    }
+}
+
 /// Full-panel list of background errors. Each row is tappable to copy its text to
 /// the clipboard; a «clear» button empties the log.
 #[component]
@@ -1156,6 +1218,7 @@ fn ErrorsPanel() -> impl IntoView {
     let errs = crate::services::errors::signal();
     let copied = create_rw_signal(None::<usize>);
     view! {
+        <SyncPending />
         <p class="is-size-7 has-text-grey" style="margin: 0 0 10px;">{move || t("errors.hint")}</p>
         <div style="display: flex; flex-direction: column; gap: 8px;">
             {move || {

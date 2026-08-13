@@ -203,6 +203,10 @@ async fn prepare_network() {
 /// Без сессии или без связи не делает ничего.
 #[cfg(not(test))]
 async fn sync_at_launch() {
+    // Счётчик несинхронизированного — ДО всякой проверки связи. Очередь могла
+    // остаться с прошлого запуска, и человек обязан увидеть предупреждение даже
+    // если сейчас он офлайн и синк вообще не начнётся.
+    services::sync::refresh_pending_public().await;
     if !services::net::online_now() || services::auth::get_token().is_none() {
         return;
     }

@@ -455,6 +455,11 @@ async fn migration_days() -> std::collections::BTreeMap<String, Vec<serde_json::
 thread_local! {
     static MIGRATION_SIG: std::cell::RefCell<Option<leptos::RwSignal<Option<(u32, u32)>>>> =
         const { std::cell::RefCell::new(None) };
+    /// Сколько локальных изменений ещё не доехало до сервера. Обновляется после
+    /// каждой попытки синхронизации — по ней панель под треугольником решает,
+    /// говорить ли человеку, что его данные под угрозой.
+    static PENDING_SIG: std::cell::RefCell<Option<leptos::RwSignal<usize>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Create the migration-progress signal at the ROOT owner. Call once from
@@ -463,6 +468,38 @@ thread_local! {
 /// first.
 pub fn init() {
     MIGRATION_SIG.with(|c| *c.borrow_mut() = Some(leptos::create_rw_signal(None)));
+    PENDING_SIG.with(|c| *c.borrow_mut() = Some(leptos::create_rw_signal(0)));
+}
+
+/// Сколько локальных изменений ждёт отправки. Ноль — всё доехало.
+pub fn pending_count() -> leptos::RwSignal<usize> {
+    PENDING_SIG.with(|c| (*c.borrow()).expect("sync::init() must run first"))
+}
+
+/// Пересчитать очередь и обновить сигнал. Зовётся после каждой попытки синка:
+/// счётчик обязан отражать состояние ПОСЛЕ неё, а не намерение.
+///
+/// Публичный вариант — для запуска приложения: очередь могла остаться с прошлого
+/// раза, и предупреждение обязано появиться даже когда синк вообще не начнётся
+/// (нет связи, нет сессии).
+pub async fn refresh_pending_public() {
+    refresh_pending().await;
+}
+
+async fn refresh_pending() {
+    pending_count().set(db::count("_outbox").await as usize);
+}
+
+/// Досылать всё, что осталось в очереди, по требованию человека — кнопка
+/// «Продолжить синхронизацию» под треугольником.
+///
+/// Отличается от [`sync_now`] только тем, что ошибку ВОЗВРАЩАЕТ: фоновые пути
+/// её проглатывают (пишут в журнал и живут дальше), а здесь человек нажал сам и
+/// обязан узнать исход.
+pub async fn retry_pending() -> Result<(), String> {
+    let r = sync_cycle().await;
+    refresh_pending().await;
+    r
 }
 
 /// `(uploaded, total)` day-batches of an in-flight migration; `None` when no
@@ -597,6 +634,14 @@ async fn ensure_bootstrapped() -> Result<(), String> {
 /// then push from the fresh base. A CAS rejection (someone pushed in between)
 /// loops back through pull; bounded retries fail loudly.
 async fn sync_cycle() -> Result<(), String> {
+    let r = sync_cycle_inner().await;
+    // Счётчик обновляется В ЛЮБОМ исходе, включая ошибку: именно неудачный синк и
+    // оставляет очередь непустой, а человеку надо про это сказать.
+    refresh_pending().await;
+    r
+}
+
+async fn sync_cycle_inner() -> Result<(), String> {
     ensure_bootstrapped().await?;
     pull_v2().await?;
     for _ in 0..4 {

@@ -98,8 +98,29 @@ pub fn check_background() {
 /// Reload to the deployed build — the manual "Обновить" action. Navigations are
 /// network-first, so the reload pulls the new index.html/init.js/wasm.
 pub fn reload() {
+    // Взводим сторож ДО перезагрузки: `location.reload()` ходит в сеть и может
+    // застрять — и до навигации, и уже на сплэше новой страницы. Сторож живёт в
+    // index.html (обычным JS, не в WASM), потому что во втором случае никакого
+    // Rust ещё нет; отметка о начале лежит в sessionStorage и переживает переход.
+    // Через 15 секунд он показывает «обновление длится слишком долго» и кнопку.
+    call_js("__rnUpdateArm");
     if let Some(loc) = web_sys::window().map(|w| w.location()) {
         let _ = loc.reload();
+    }
+}
+
+/// Приложение поднялось — обновление состоялось, сторожить нечего.
+pub fn note_app_started() {
+    call_js("__rnUpdateDone");
+}
+
+/// Позвать функцию, объявленную в index.html. Её отсутствие не ошибка: страницу
+/// могли открыть из старого кэша, где этого сторожа ещё нет.
+fn call_js(name: &str) {
+    let Some(win) = web_sys::window() else { return };
+    let Ok(f) = js_sys::Reflect::get(&win, &JsValue::from_str(name)) else { return };
+    if let Ok(f) = f.dyn_into::<js_sys::Function>() {
+        let _ = f.call0(&JsValue::NULL);
     }
 }
 

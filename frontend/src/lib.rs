@@ -72,6 +72,9 @@ pub fn main() {
         {
             splash.remove();
         }
+        // Приложение поднялось — снимаем сторож зависшего обновления. Место
+        // единственно верное: ровно здесь мы впервые знаем, что запуск удался.
+        services::update::note_app_started();
 
         leptos::mount_to_body(app::App);
 

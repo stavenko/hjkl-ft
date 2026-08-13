@@ -202,6 +202,111 @@
     else document.addEventListener('DOMContentLoaded', paint);
 })();
 
+// ---- Сторож зависшего обновления -------------------------------------------
+//
+// Обновление — это `location.reload()`, а он ходит в сеть. Зависнуть он может в
+// двух разных местах, и человек в обоих видит одно: ничего не происходит.
+//   * ДО навигации — старая страница жива, крутится спиннер «Обновить»;
+//   * ПОСЛЕ — новая страница загрузилась наполовину и стоит на сплэше.
+//
+// Поэтому сторож живёт ЗДЕСЬ, а не в WASM: во втором случае никакого Rust ещё
+// нет. Отметка о начале обновления кладётся в sessionStorage и переживает
+// навигацию — единственное место, откуда её видно по обе стороны.
+//
+// Ровно один способ выйти: сбросить всё, что могло застрять (кэши + сервис-воркер),
+// и загрузиться заново — то же самое, что закрыть браузер и открыть снова.
+(function () {
+    var KEY = 'update_started_at';
+    var WAIT_MS = 15000;
+
+    window.__rnUpdateStarted = function () {
+        try { sessionStorage.setItem(KEY, String(Date.now())); } catch (e) {}
+    };
+    // Приложение поднялось — обновление состоялось, сторожить нечего.
+    window.__rnUpdateDone = function () {
+        try { sessionStorage.removeItem(KEY); } catch (e) {}
+    };
+
+    function hardReset() {
+        var done = function () {
+            try { sessionStorage.removeItem(KEY); } catch (e) {}
+            // `replace`, а не `reload`: перезагрузка могла и зависнуть, а переход по
+            // адресу начинает всё заново, без её очереди.
+            location.replace(location.pathname + location.search);
+        };
+        var jobs = [];
+        try {
+            if (window.caches && caches.keys) {
+                jobs.push(caches.keys().then(function (ks) {
+                    return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+                }));
+            }
+        } catch (e) {}
+        try {
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+                jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+                    return Promise.all(rs.map(function (r) { return r.unregister(); }));
+                }));
+            }
+        } catch (e) {}
+        // Ждём уборку, но НЕ бесконечно: застрявший сброс не должен запереть
+        // человека там же, откуда он выбирается.
+        Promise.race([
+            Promise.all(jobs),
+            new Promise(function (r) { setTimeout(r, 4000); })
+        ]).then(done, done);
+    }
+
+    function paint() {
+        if (document.getElementById('rn-stuck')) return;
+        var box = document.createElement('div');
+        box.id = 'rn-stuck';
+        box.setAttribute('data-testid', 'update-stuck');
+        box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;'
+            + 'align-items:center;justify-content:center;padding:32px 24px;text-align:center;'
+            + 'background:var(--sp-bg,#F1F4F9);color:var(--sp-text,#0E1630);'
+            + "font-family:'Golos Text',system-ui,sans-serif;";
+        box.innerHTML = ''
+            + '<div style="max-width:22rem;">'
+            + '<div style="font-size:19px;font-weight:800;line-height:1.3;margin-bottom:14px;">'
+            +   'Обновление длится слишком долго</div>'
+            + '<div style="font-size:15px;line-height:1.55;color:var(--sp-sub,#39425F);margin-bottom:22px;">'
+            +   'Возможно, произошло зависание из-за сетевых проблем.</div>'
+            + '<button id="rn-stuck-btn" data-testid="update-stuck-btn" style="width:100%;padding:16px;'
+            +   'border:none;border-radius:12px;background:#3b4cf5;color:#fff;font-size:17px;'
+            +   "font-weight:700;font-family:inherit;cursor:pointer;\">Перезагрузить приложение</button>"
+            + '</div>';
+        document.body.appendChild(box);
+        document.getElementById('rn-stuck-btn').addEventListener('click', hardReset);
+    }
+
+    function armFrom(startedAt) {
+        var left = WAIT_MS - (Date.now() - startedAt);
+        setTimeout(function () {
+            // Приложение успело подняться (сплэша нет) — значит обновление прошло.
+            if (!document.getElementById('splash') && !window.__rnUpdatePending) {
+                return;
+            }
+            paint();
+        }, left > 0 ? left : 0);
+    }
+
+    // Обновление начали в ПРОШЛОЙ жизни страницы: пережило навигацию, а мы стоим
+    // на сплэше. Отсчёт продолжается с той же отметки, а не с нуля.
+    try {
+        var started = parseInt(sessionStorage.getItem(KEY) || '', 10);
+        if (started) armFrom(started);
+    } catch (e) {}
+
+    // Обновление начинают ЗДЕСЬ И СЕЙЧАС (кнопка в настройках, автоприменение
+    // до входа): страница ещё старая, сплэша на ней нет — поэтому отдельный флаг.
+    window.__rnUpdateArm = function () {
+        window.__rnUpdatePending = true;
+        window.__rnUpdateStarted();
+        armFrom(Date.now());
+    };
+})();
+
 // Best-effort orientation lock (Android/installed PWA). iOS Safari throws
 // (no support / needs fullscreen) — caught; the CSS overlay handles iOS.
 try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('portrait').catch(function(){}); } catch (e) {}

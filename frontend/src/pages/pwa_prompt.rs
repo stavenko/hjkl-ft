@@ -493,6 +493,11 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
     let title = title_key(platform);
     let steps = render_steps(platform);
 
+    // Десктопная ветка: ни телефон, ни планшет. Она же ловит ТЕЛЕФОН с включённой
+    // «Версией для ПК» — браузер в этом режиме отдаёт десктопный User-Agent, и
+    // отличить его от компьютера мы честно не можем.
+    let is_desktop = !platform.starts_with("android") && !platform.starts_with("ios");
+
     let dismiss = move |_| {
         platform::dismiss_pwa_prompt();
         on_dismiss.call(());
@@ -686,14 +691,26 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
             <div style="max-width: 24rem;">
                 <img src="/icon-192.png" alt="re:Norma" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
                 <h1 class="title is-3" style="margin-bottom: 0.5rem;">"re:Norma"</h1>
-                <p class="has-text-grey mb-5" style="font-size: 1.05rem; line-height: 1.6;">
-                    {move || t("pwa.description")}
-                </p>
+                // На десктопе «поставьте на рабочий стол» — неверный совет: ставить
+                // это приложение на компьютер незачем, оно телефонное. Там свой
+                // текст, ниже.
+                {(!is_desktop).then(|| view! {
+                    <p class="has-text-grey mb-5" style="font-size: 1.05rem; line-height: 1.6;">
+                        {move || t("pwa.description")}
+                    </p>
+                })}
 
-                <div class="box" style="text-align: left; margin-bottom: 2rem;">
-                    <p class="has-text-weight-semibold mb-4">{t(title)}</p>
-                    {steps}
-                </div>
+                // Инструкции по установке — ТОЛЬКО для телефонов. На десктопе она
+                // и бессмысленна («приложение мобильное» и тут же «ставим на Mac»),
+                // и прямо вредна: эту же ветку видит ТЕЛЕФОН с включённой «Версией
+                // для ПК», и человек ищет у себя значок установки в адресной строке
+                // Safari, которого там нет.
+                {(!is_desktop).then(|| view! {
+                    <div class="box" style="text-align: left; margin-bottom: 2rem;">
+                        <p class="has-text-weight-semibold mb-4">{t(title)}</p>
+                        {steps}
+                    </div>
+                })}
 
                 // «Продолжить в браузере» есть только на десктопе. На телефоне
                 // приложение обязано стоять как PWA: браузерная вкладка на
@@ -706,7 +723,7 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
                 // честно не можем отличить его от компьютера. Поэтому здесь
                 // объясняем оба случая сразу — и человеку с телефона это самое
                 // важное, потому что решается одной галочкой.
-                {(!platform.starts_with("android") && !platform.starts_with("ios")).then(|| view! {
+                {is_desktop.then(|| view! {
                     <div style="text-align: left; margin-bottom: 1.25rem; line-height: 1.6;">
                         <p class="has-text-weight-semibold" style="margin-bottom: 8px;">
                             {move || t("pwa.desktop.mobile_first")}

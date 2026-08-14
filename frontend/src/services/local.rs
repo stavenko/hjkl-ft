@@ -137,12 +137,37 @@ pub async fn kcal_on(date: &str) -> f64 {
         .sum()
 }
 
-/// Average daily effective kcal over the last `window_days` calendar days,
-/// counting ONLY days that have diary entries. Per-day kcal is the sum of each
-/// entry's `effective_kcal() * (grams - waste_grams).max(0) / 100` — exactly how
-/// the diary/summary computes calories (honouring waste and the restaurant
-/// surcharge). Returns `None` when no day in the window has any diary entry.
+/// Average daily effective kcal over the last `window_days` days — see
+/// [`daily_kcal_totals`] for what counts as a day.
 pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
+    let totals = daily_kcal_totals(window_days).await;
+    if totals.is_empty() {
+        return None;
+    }
+    Some(totals.iter().sum::<f64>() / totals.len() as f64)
+}
+
+/// Средняя, максимальная и минимальная калорийность дня за окно — то, что письмо
+/// о первой планке показывает человеку. Считается по тем же дням, что и средняя:
+/// разойтись они не должны, иначе в письме будет максимум из дня, которого нет в
+/// расчёте планки.
+pub async fn daily_kcal_stats(window_days: i64) -> Option<(f64, f64, f64)> {
+    let totals = daily_kcal_totals(window_days).await;
+    if totals.is_empty() {
+        return None;
+    }
+    let avg = totals.iter().sum::<f64>() / totals.len() as f64;
+    let max = totals.iter().cloned().fold(f64::MIN, f64::max);
+    let min = totals.iter().cloned().fold(f64::MAX, f64::min);
+    Some((avg, max, min))
+}
+
+/// Per-day effective kcal over the last `window_days` calendar days, counting
+/// ONLY days that have diary entries. Per-day kcal is the sum of each entry's
+/// `effective_kcal() * (grams - waste_grams).max(0) / 100` — exactly how the
+/// diary/summary computes calories (honouring waste and the restaurant
+/// surcharge). Empty when no day in the window has any diary entry.
+pub async fn daily_kcal_totals(window_days: i64) -> Vec<f64> {
     let today = chrono::Local::now().date_naive();
     // Only COMPLETED days: today is still in progress (maybe just breakfast so
     // far), and averaging a partial day would drag the mean down. So the window
@@ -160,11 +185,11 @@ pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
         }
     }
     if diaries.is_empty() {
-        return None;
+        return Vec::new();
     }
     let foods = foods_by_ids(diaries.iter().flatten().map(|e| e.food_id.clone())).await;
 
-    let day_totals: Vec<f64> = diaries
+    diaries
         .iter()
         .map(|diary| {
             diary
@@ -176,10 +201,7 @@ pub async fn avg_daily_kcal(window_days: i64) -> Option<f64> {
                 })
                 .sum()
         })
-        .collect();
-
-    let sum: f64 = day_totals.iter().sum();
-    Some(sum / day_totals.len() as f64)
+        .collect()
 }
 
 // ── Careful calorie-planka control loop ──────────────────────────────────────
@@ -2057,6 +2079,30 @@ pub async fn record_protein_planka() {
     let protein = crate::services::profile::protein_target_from_profile(weight_kg).await;
     if protein > 0 {
         record_planka(PLANKA_PROTEIN, protein as f64).await;
+    }
+}
+
+/// Насколько вес изменился за последние `window_days` дней: последний замер минус
+/// первый, в килограммах. `None`, когда замеров в окне меньше двух — сравнивать не с
+/// чем.
+///
+/// Это НЕ тренд (`weight_trend`): тот оценивает наклон с доверием по всей истории и
+/// решает, двигать ли планку. Здесь нужно другое — то, что человек видит сам на
+/// весах за прошедшую неделю, чтобы письмо не разошлось с его собственным
+/// наблюдением.
+pub async fn weight_change_over(window_days: i64) -> Option<f64> {
+    let today = chrono::Local::now().date_naive();
+    let from = (today - chrono::Duration::days(window_days))
+        .format("%Y-%m-%d")
+        .to_string();
+    let entries: Vec<WeightEntry> = list_weight_entries()
+        .await
+        .into_iter()
+        .filter(|e| e.date >= from)
+        .collect();
+    match (entries.first(), entries.last()) {
+        (Some(a), Some(b)) if entries.len() >= 2 => Some(b.weight_kg - a.weight_kg),
+        _ => None,
     }
 }
 

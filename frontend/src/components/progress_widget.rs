@@ -33,6 +33,71 @@ const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 16px; \
     padding: 16px; box-sizing: border-box; \
     display: flex; flex-direction: column; gap: 12px;";
 
+/// Длина недели наблюдений в днях — окно, за которое письмо о первой планке
+/// считает калорийность и изменение веса. То же окно, что у самой планки
+/// (`calorie_planka_suggestion`).
+const OBSERVATION_DAYS: i64 = 7;
+
+/// Насколько вес должен измениться, чтобы об этом стоило говорить, кг.
+///
+/// Бытовые весы и суточные колебания воды дают до полукилограмма разницы на ровном
+/// месте. Ниже этого порога честный ответ — «практически не изменился», а не
+/// «вырос»: человек сверит письмо со своими весами, и приписанный рост подорвёт
+/// доверие ко всему остальному в нём.
+const WEIGHT_NOISE_KG: f64 = 0.3;
+
+/// Письмо о первой планке.
+///
+/// Числа собираются заново, а не берутся из виджета: письмо переживёт человека,
+/// закрывшего приложение, и должно говорить то же, что и расчёт.
+async fn first_planka_letter(planka_kcal: f64) -> String {
+    let mut body = String::from(
+        "Неделя наблюдений завершена, вы хорошо поработали. Теперь мы знаем примерную \
+         калорийность вашей еды.",
+    );
+    if let Some((avg, max, min)) = local::daily_kcal_stats(OBSERVATION_DAYS).await {
+        body.push_str(&format!(
+            " Средняя калорийность составила {avg:.0} ккал. Максимальная калорийность: \
+             {max:.0} ккал, минимальная калорийность была {min:.0} ккал.",
+        ));
+    }
+
+    // Про вес — только когда есть с чем сравнивать: пары замеров за неделю может и
+    // не быть, и выдумывать направление в этом случае нечем.
+    if let Some(delta) = local::weight_change_over(OBSERVATION_DAYS).await {
+        let phrase = if delta > WEIGHT_NOISE_KG {
+            "ваш вес вырос"
+        } else if delta < -WEIGHT_NOISE_KG {
+            "ваш вес снизился"
+        } else {
+            "ваш вес практически не изменился"
+        };
+        body.push_str(&format!("\n\nПо результатам недели {phrase}."));
+    }
+
+    body.push_str(&format!(
+        "\n\nЭто означает, что мы должны назначить вам первую планку по калориям в размере: \
+         {planka_kcal:.0} ккал.",
+    ));
+
+    // Планка по белку считается от калорийной, поэтому спрашивается ПОСЛЕ её
+    // установки. Ноль значит незаполненный профиль (рост, возраст, пол) — тогда
+    // строки про белок в письме просто нет, обещать нечего.
+    let weight_kg = local::list_weight_entries().await.last().map(|e| e.weight_kg);
+    if let Some(w) = weight_kg {
+        let protein = profile::protein_target_from_profile(w).await;
+        if protein > 0 {
+            body.push_str(&format!("\n\nТакже мы выдаём вам планку по белку: {protein} г."));
+        }
+    }
+
+    body.push_str(
+        "\n\nЧерез неделю посмотрим, какие у вас результаты, и, если потребуется, сделаем \
+         перерасчёт планок.",
+    );
+    body
+}
+
 // ── Nutrition indicators ─────────────────────────────────────────────────────
 // Seven line icons (Lucide, inlined — same line style as the nav) showing how the
 // user's food/drink is doing, coloured green / orange / red (grey = no data yet) by
@@ -395,11 +460,7 @@ pub fn ProgressWidget() -> impl IntoView {
                         crate::services::letters::add(crate::services::letters::Letter {
                             id: format!("planka-first-{}", chrono::Local::now().format("%Y-%m-%d")),
                             created_at: chrono::Local::now().to_rfc3339(),
-                            body: format!(
-                                "Неделя наблюдений завершена — мы рассчитали вашу первую планку по калориям: {n:.0} ккал.\n\n\
-                                 Старайтесь не выходить за неё: индикатор на главном экране показывает, сколько калорий осталось на сегодня. Каждую неделю мы будем пересчитывать планку автоматически.\n\n\
-                                 Это письмо — просто уведомление.",
-                            ),
+                            body: first_planka_letter(n).await,
                             read: false,
                         });
                     }

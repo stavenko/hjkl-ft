@@ -58,6 +58,7 @@ mod m010_drop_dead_flags;
 mod m011_recheck_fish_calcium;
 mod m012_reask_heme;
 mod m013_unjudge_days_before_planka;
+mod m014_unjudge_steps_protein;
 
 #[cfg(test)]
 mod tests;
@@ -149,6 +150,11 @@ const ALL: &[Migration] = &[
         version: m013_unjudge_days_before_planka::VERSION,
         description: m013_unjudge_days_before_planka::DESCRIPTION,
         script: || Box::pin(m013_unjudge_days_before_planka::script()),
+    },
+    Migration {
+        version: m014_unjudge_steps_protein::VERSION,
+        description: m014_unjudge_steps_protein::DESCRIPTION,
+        script: || Box::pin(m014_unjudge_steps_protein::script()),
     },
 ];
 

@@ -57,6 +57,7 @@ mod m009_protein_from_calories;
 mod m010_drop_dead_flags;
 mod m011_recheck_fish_calcium;
 mod m012_reask_heme;
+mod m013_unjudge_days_before_planka;
 
 #[cfg(test)]
 mod tests;
@@ -143,6 +144,11 @@ const ALL: &[Migration] = &[
         version: m012_reask_heme::VERSION,
         description: m012_reask_heme::DESCRIPTION,
         script: || Box::pin(m012_reask_heme::script()),
+    },
+    Migration {
+        version: m013_unjudge_days_before_planka::VERSION,
+        description: m013_unjudge_days_before_planka::DESCRIPTION,
+        script: || Box::pin(m013_unjudge_days_before_planka::script()),
     },
 ];
 

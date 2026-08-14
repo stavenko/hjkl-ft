@@ -33,6 +33,8 @@ fn demo_food(name: String, kcal: f64, protein: f64, fat: f64, carbs: f64) -> Foo
         is_veg_fruit: None,
         is_heme: None,
         is_milk_globule: None,
+        is_red_meat: None,
+        is_processed_meat: None,
         iron_mg: None,
         iron_absorption: None,
         fat_profile: None,

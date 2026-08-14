@@ -116,6 +116,11 @@ const IC_BEEF: &str = r#"<circle cx="12.5" cy="8.5" r="2.5"/><path d="M12.5 2a6.
 const IC_STEPS: &str = r#"<path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/>"#;
 /// Капля масла — качество жира: отношение (МНЖК+ПНЖК)/НЖК.
 const IC_OIL: &str = r#"<path d="M12 2v6"/><path d="M9 5h6"/><path d="M12 8c-3 3-5 5.5-5 8a5 5 0 0 0 10 0c0-2.5-2-5-5-8z"/>"#;
+/// Кусок мяса с прожилкой — красное мясо. Нарисован здесь, а не взят из набора:
+/// готовые мясные значки там уже заняты белком и гемом.
+const IC_STEAK: &str = r#"<path d="M4 10a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1a9 9 0 0 1-9 9h-1a6 6 0 0 1-6-6z"/><path d="M9 8c1.8 1.2 2.6 3 2.4 5.4"/>"#;
+/// Сосиска с насечками — мясо глубокой переработки.
+const IC_SAUSAGE: &str = r#"<path d="M18.6 2.8a3.1 3.1 0 0 1 4.4 4.4L7.2 23a3.1 3.1 0 0 1-4.4-4.4z"/><path d="m9 13 2 2"/><path d="m13 9 2 2"/>"#;
 
 /// (stroke, tint background) for an indicator state.
 pub fn state_colors(s: IndicatorState) -> (&'static str, &'static str) {
@@ -140,6 +145,11 @@ pub fn icon_for(k: &str) -> (&'static str, &'static str) {
         // Не капля, как у железа: два одинаковых значка рядом читаются как один
         // индикатор, продублированный по ошибке. Гем — про сам продукт, отсюда мясо.
         "heme" => (IC_HAM, "Гем"),
+        // Мясные ограничения. Гем рядом рисуется окороком, поэтому этим двум нужны
+        // СВОИ силуэты: три похожих мясных значка в ряд не различить. Красное мясо —
+        // кусок с прожилкой, переработанное — сосиска с насечками.
+        "red_meat" => (IC_STEAK, "Кр. мясо"),
+        "processed_meat" => (IC_SAUSAGE, "Колбасы"),
         "veg_fruit" => (IC_APPLE, "Фр/овощи"),
         "steps" => (IC_STEPS, "Шаги"),
         "fiber" => (IC_WHEAT, "Клетчатка"),
@@ -205,6 +215,7 @@ fn daily_gauges_grid(
     iron: Option<crate::services::iron::WeeklyIron>,
     heme: Option<crate::services::heme::WeeklyHeme>,
     fats: Option<crate::services::fats::WeeklyFats>,
+    red_meat: Option<crate::services::red_meat::WeeklyRedMeat>,
 ) -> impl IntoView {
     view! {
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 14px;">
@@ -228,6 +239,9 @@ fn daily_gauges_grid(
             // Жиры — три ячейки подряд, тоже вместе: «сколько морских омега-3»,
             // «сколько растительных» и «каков жир в целом».
             {fats.map(weekly_fat_gauges)}
+            // Красное мясо — единственная шкала-ОГРАНИЧЕНИЕ: полная означает не
+            // достижение, а перебор.
+            {red_meat.map(weekly_red_meat_gauge)}
         </div>
     }
 }
@@ -279,6 +293,39 @@ fn weekly_heme_gauge(w: crate::services::heme::WeeklyHeme) -> impl IntoView {
             color=bar.to_string()
             height=12.0
             decimals=2
+            pace=Some(pace)
+            value_color=val.map(String::from)/>
+    }
+}
+
+/// Недельная шкала красного мяса — ячейка той же сетки, но с ОБРАТНЫМ смыслом.
+///
+/// У всех соседних шкал полная полоса значит «получилось». Здесь наоборот: полная
+/// значит, что планка выбрана и дальше идёт перебор. Поэтому цвет берётся не из
+/// `at_least_colors`, а из самой недели — она знает и про темп: 350 г к третьему
+/// дню тревожны, а те же 350 г к воскресенью — нет.
+///
+/// Точки, как и у соседей, делят неделю на семь отрезков — здесь они показывают
+/// ровно тот темп, с которым планки хватит до конца недели.
+fn weekly_red_meat_gauge(w: crate::services::red_meat::WeeklyRedMeat) -> impl IntoView {
+    use indicators::IndicatorState;
+    let (bar, val) = match w.state() {
+        IndicatorState::Red => ("#e0304f", Some("#e0304f")),
+        IndicatorState::Orange => ("#f5a524", Some("#f5a524")),
+        _ => ("#20c997", None),
+    };
+    let pace = crate::components::gauge::GaugePace {
+        segments: 7,
+        passed: w.day_of_week.saturating_sub(1),
+    };
+    view! {
+        <crate::components::gauge::Gauge
+            value=w.grams target=w.limit
+            label="Кр. мясо/нед".to_string()
+            unit="г".to_string()
+            color=bar.to_string()
+            height=12.0
+            decimals=0
             pace=Some(pace)
             value_color=val.map(String::from)/>
     }
@@ -410,6 +457,10 @@ pub fn ProgressWidget() -> impl IntoView {
     let fat_week = create_local_resource(
         move || food_ver.get(),
         |_| async { crate::services::fats::weekly_progress().await },
+    );
+    let red_meat_week = create_local_resource(
+        move || (food_ver.get(), foods_ver.get()),
+        |_| async { crate::services::red_meat::weekly_progress().await },
     );
     let iron_week = create_local_resource(
         move || (food_ver.get(), foods_ver.get()),
@@ -548,7 +599,7 @@ pub fn ProgressWidget() -> impl IntoView {
                             view! {
                                 {calorie}
                                 // Daily-nutrient bars below the calorie one.
-                                {move || gauges_s().map(|g| daily_gauges_grid(g, iron_week.get().flatten(), heme_week.get().flatten(), fat_week.get().flatten()))}
+                                {move || gauges_s().map(|g| daily_gauges_grid(g, iron_week.get().flatten(), heme_week.get().flatten(), fat_week.get().flatten(), red_meat_week.get().flatten()))}
                             }.into_view()
                         },
                         // Before the first food entry: explain how to add food + «?».

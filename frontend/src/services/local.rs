@@ -451,6 +451,10 @@ pub enum FoodFlag {
     Heme,
     /// Жир заключён в целую молочно-жировую глобулу — см. `Food::is_milk_globule`.
     MilkGlobule,
+    /// Мышечная ткань млекопитающих и страуса — см. `Food::is_red_meat`.
+    RedMeat,
+    /// Мясо, консервированное ради хранения — см. `Food::is_processed_meat`.
+    ProcessedMeat,
 }
 
 /// Записать ОДИН признак продукта и толкнуть синк, чтобы он доехал до других
@@ -461,6 +465,8 @@ pub async fn cache_food_flag(id: &str, flag: FoodFlag, value: bool) {
         FoodFlag::VegFruit => food.is_veg_fruit = Some(value),
         FoodFlag::Heme => food.is_heme = Some(value),
         FoodFlag::MilkGlobule => food.is_milk_globule = Some(value),
+        FoodFlag::RedMeat => food.is_red_meat = Some(value),
+        FoodFlag::ProcessedMeat => food.is_processed_meat = Some(value),
     }
     food.updated_at = now();
     db::put("foods", &food).await;
@@ -1159,6 +1165,8 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
             is_restaurant: false,
             is_veg_fruit: None, is_heme: None,
             is_milk_globule: None,
+            is_red_meat: None,
+            is_processed_meat: None,
             iron_mg: None, iron_absorption: None,
             fat_profile: None,
             balance_fat_profile: None,
@@ -1240,6 +1248,8 @@ pub async fn add_detected_foods_to_diary(items: &[ResolvedFood]) -> Vec<DiaryEnt
             is_veg_fruit: None,
             is_heme: None,
             is_milk_globule: None,
+            is_red_meat: None,
+            is_processed_meat: None,
             iron_mg: None,
             iron_absorption: None,
             fat_profile: None,
@@ -1824,6 +1834,8 @@ pub async fn finish_recipe(recipe_id: &str, total_grams: f64) -> Option<Food> {
         is_veg_fruit: None,
         is_heme: None,
         is_milk_globule: None,
+        is_red_meat: None,
+        is_processed_meat: None,
         // Железо блюда — из состава, а не от модели по названию. `None` здесь
         // означает «у части ингредиентов оно ещё не выяснено»; пересчёт вернётся
         // сюда, когда выяснится.
@@ -2336,6 +2348,8 @@ mod tests {
                 is_veg_fruit: veg,
                 is_heme: heme,
                 is_milk_globule: None,
+                is_red_meat: None,
+                is_processed_meat: None,
                 iron_mg: None,
                 iron_absorption: None,
                 fat_profile: None,
@@ -2593,6 +2607,8 @@ mod recipe_tests {
             is_veg_fruit: None,
             is_heme: None,
             is_milk_globule: None,
+            is_red_meat: None,
+            is_processed_meat: None,
             iron_mg: iron.map(|(mg, _)| mg),
             iron_absorption: iron.map(|(_, a)| a),
             fat_profile: None,

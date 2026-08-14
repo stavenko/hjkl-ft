@@ -298,13 +298,20 @@ pub async fn weekly_series(which: Fat) -> indicators::IndicatorSeries {
 /// свойство всего рациона; требовать его сразу значило бы держать человека взаперти за
 /// то, что перестраивается месяцами, а не за то, что он сделал или не сделал на этой
 /// неделе. Баланс при этом никуда не девается: он виден, судится и остаётся целью.
-pub async fn week_closed() -> bool {
+/// `not_before` — якорь: неделя, ЗАКОНЧИВШАЯСЯ раньше него, не засчитывается. Без
+/// него правило «закрой неделю и дождись её конца» превращается в «когда-то
+/// закрывал», и человек с уже закрытой прошлой неделей получал бы следующую тему в
+/// секунду обновления. Та же защита стоит на гейте жиров.
+pub async fn week_closed(not_before: NaiveDate) -> bool {
     let today = local::today_date();
     let Some((cur_start, _)) = week_bounds(today) else {
         return false;
     };
     let s = cur_start - Duration::days(7);
     let e = s + Duration::days(6);
+    if e < not_before {
+        return false;
+    }
     let diary_days: std::collections::HashSet<String> =
         local::list_diary_dates().await.into_iter().collect();
     let logged = (0..7)

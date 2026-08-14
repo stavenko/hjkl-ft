@@ -1468,6 +1468,110 @@ pub async fn classify_milk_globule(names: &[String]) -> Result<Vec<bool>, String
     )
 }
 
+// ── Красное мясо ─────────────────────────────────────────────────────────────
+
+/// Обоснование первым — как у остальных признаков.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct RedMeatAnswer {
+    reason_why_this_product_classified_as_red_meat: Vec<String>,
+    verdict: Vec<bool>,
+}
+
+/// Красное мясо — мышечная ткань млекопитающих и страуса.
+///
+/// Промпт устроен как гемовый: перечень категорий и один вопрос о принадлежности.
+/// Отличие от гема — здесь считается ИМЕННО МЯСО, а не органы: печень и сердце в
+/// гем входят, а в недельные граммы красного мяса нет, и путать их нельзя.
+pub async fn classify_red_meat(names: &[String]) -> Result<Vec<bool>, String> {
+    let prompt = format!(
+        "For each food below decide whether it belongs to one of the categories listed. Food \
+         names may be in ANY language — judge by meaning, not by wording.\n\n\
+         THE CATEGORIES OF RED MEAT:\n\
+         — THE FLESH of MAMMALS: beef, veal, pork, lamb, mutton, goat, horse, rabbit, and the \
+         flesh of wild mammals — venison, elk, boar. Any cut, whole or ground, raw or cooked;\n\
+         — THE FLESH of the OSTRICH and other ratites;\n\
+         — FOOD MADE MAINLY OF SUCH FLESH: sausages, frankfurters, ham, bacon, salami, mince, \
+         meatballs, cutlets, stew, canned meat — whatever the flesh has been through.\n\n\
+         It is the FLESH — muscle — that belongs to these categories. INNER ORGANS do not: \
+         liver, heart, kidney, tongue, lung, tripe and dishes made mainly of them are outside, \
+         however red they look. Neither do BIRDS other than ratites — chicken, turkey, duck, \
+         goose — nor fish, seafood, eggs, dairy or anything from a plant.\n\n\
+         For EVERY food, first THINK IT THROUGH in the reason field: whose flesh is this, and \
+         is it flesh at all? Name the category, or say that none of them fits. One short \
+         sentence, at most 10 words. Then give the verdict: true if it belongs to a category, \
+         false if it does not.\n\n\
+         A composite dish belongs to a category only when such flesh is its MAIN part. Words \
+         about preparation, storage, packaging, cut, grade or country of origin never change \
+         what a food is.\n\n\
+         Foods (index. name):\n{list}\n\n\
+         Respond with ONLY a single minified JSON object: the reason array — one string per \
+         food — and \"verdict\" — one boolean per food, both in the SAME order as the foods \
+         above.",
+        list = numbered(names),
+    );
+    let v: RedMeatAnswer = generate(prompt, |_| {}).await?;
+    take_flags(
+        "красное мясо",
+        "flag.red_meat",
+        names,
+        v.verdict,
+        v.reason_why_this_product_classified_as_red_meat,
+    )
+}
+
+// ── Мясо глубокой переработки ────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ProcessedMeatAnswer {
+    reason_why_this_product_classified_as_processed_meat: Vec<String>,
+    verdict: Vec<bool>,
+}
+
+/// Мясо глубокой переработки — консервированное ради хранения, а не просто
+/// приготовленное.
+///
+/// Граница механическая, как у молочной глобулы: важно не «полуфабрикат ли это» и
+/// не «вредно ли», а прошло ли мясо КОНСЕРВАЦИЮ — засол с нитритом, копчение,
+/// вяление, ферментацию. Домашняя котлета из фарша её не проходила, магазинная
+/// сосиска проходила, и различие между ними именно в этом, а не в том, где куплено.
+pub async fn classify_processed_meat(names: &[String]) -> Result<Vec<bool>, String> {
+    let prompt = format!(
+        "Answer ONE yes/no question about each food below, and nothing else. Food names may be \
+         in ANY language — judge by meaning, not by wording.\n\n\
+         QUESTION: is this meat PRESERVED — cured, smoked, salted, dried or fermented for \
+         keeping?\n\n\
+         Meat is preserved when it has been through one of these: CURING with nitrite or \
+         nitrate salt, SMOKING, prolonged SALTING, AIR-DRYING, or FERMENTATION. Cooking is not \
+         preserving: boiling, frying, baking, stewing, grilling, mincing, freezing and \
+         packaging leave meat unpreserved, however industrial the process.\n\n\
+         PRESERVED, therefore TRUE: sausages and frankfurters, wieners, salami and other dry \
+         sausages, ham, bacon, gammon, pastrami, prosciutto and jamon, bresaola, basturma, \
+         smoked and cured brisket, liver sausage and pâté made with cure, hot dogs, corned \
+         beef, canned luncheon meat, jerky. Also a dish whose MAIN meat part is one of these — \
+         pizza with salami, pasta carbonara, sausage in a bun, solyanka.\n\n\
+         NOT PRESERVED, therefore FALSE: fresh and frozen meat of any kind, mince, cutlets and \
+         meatballs, home-made or shop-bought, boiled or baked meat, roast, stew, kebab, \
+         dumplings, canned meat that was merely boiled in the tin, poultry and fish that went \
+         through none of the treatments above.\n\n\
+         For EVERY food, first THINK IT THROUGH in the reason field: is there meat here, and \
+         was it preserved — by what treatment? One short sentence, at most 10 words. Then give \
+         the verdict.\n\n\
+         Foods (index. name):\n{list}\n\n\
+         Respond with ONLY a single minified JSON object: the reason array — one string per \
+         food — and \"verdict\" — one boolean per food, both in the SAME order as the foods \
+         above.",
+        list = numbered(names),
+    );
+    let v: ProcessedMeatAnswer = generate(prompt, |_| {}).await?;
+    take_flags(
+        "переработанное мясо",
+        "flag.processed_meat",
+        names,
+        v.verdict,
+        v.reason_why_this_product_classified_as_processed_meat,
+    )
+}
+
 // ── Support-chat: tools + agentic tool-use loop ──
 //
 // The chat is a real tool-use loop. The model can either call a registered

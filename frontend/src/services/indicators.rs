@@ -66,7 +66,10 @@ pub const N_FIBER: &str = "Клетчатка";
 // ── Pure state machines (unit-tested) ────────────────────────────────────────
 
 /// Daily-goal colour from the number of missed days out of the last 7.
-fn daily_state(misses: u32) -> IndicatorState {
+///
+/// Общее правило для всех дневных индикаторов, включая мясо глубокой переработки,
+/// где промах — это день, в который человек его ЕЛ.
+pub(crate) fn daily_state(misses: u32) -> IndicatorState {
     match misses {
         0 => IndicatorState::Green,
         1..=3 => IndicatorState::Orange,
@@ -229,6 +232,13 @@ pub fn displayed_indicators() -> Vec<&'static str> {
         v.push("epa_dha");
         v.push("fat_ratio");
     }
+    // Мясо — тоже пара, открывается целиком: сколько красного мяса за неделю и как
+    // часто оно приходит переработанным. Первые наши индикаторы про ОГРАНИЧЕНИЕ:
+    // зелёный тут значит «не перебрал», а не «набрал».
+    if crate::services::red_meat::unlocked() {
+        v.push("red_meat");
+        v.push("processed_meat");
+    }
     v
 }
 
@@ -348,6 +358,45 @@ pub async fn maybe_unlock_fat_week() -> bool {
     crate::services::app_flags::set_bool(fats::FAT_UNLOCKED_KEY, true);
     // У продуктов в дневнике профиля жира ещё нет — иначе первая неделя жира
     // мерилась бы по пустому множеству.
+    crate::services::classify::sweep_unprocessed().await;
+    true
+}
+
+/// Открыть НЕДЕЛЮ КРАСНОГО МЯСА, когда закрыта неделя жиров: поставить якорь своей
+/// недели, поднять флаг (шкала красного мяса и два индикатора появляются) и
+/// добрать признаки у уже заведённых продуктов.
+///
+/// Следующее звено той же цепочки: кальций → железо → жиры → красное мясо. Условие —
+/// ЗАКРЫТАЯ неделя жиров по омега-3 (`fats::week_closed`), то есть действие, которое
+/// зависит от человека целиком.
+///
+/// Идемпотентно и монотонно, как остальные гейты: за гардом «уже открыто» ничего не
+/// считается, а якорь не даёт получить открытие за уже прожитую неделю. Возвращает
+/// `true`, если открытие произошло именно сейчас — по этому признаку показывается
+/// история про красное мясо.
+pub async fn maybe_unlock_red_meat_week() -> bool {
+    use crate::services::{fats, red_meat};
+    if red_meat::unlocked() {
+        return false;
+    }
+    if !fats::unlocked() {
+        return false; // неделя жиров должна открыться первой
+    }
+    let today = crate::services::local::today_date();
+    let anchor = match red_meat::gate_anchor() {
+        Some(d) => d,
+        None => {
+            crate::services::app_flags::set(red_meat::RED_MEAT_GATE_ANCHOR_KEY, &fmt(today));
+            today
+        }
+    };
+    if !fats::week_closed(anchor).await {
+        return false; // неделя жиров ещё не закрыта после якоря
+    }
+    crate::services::app_flags::set(red_meat::RED_MEAT_WEEK_OPEN_KEY, &fmt(today));
+    crate::services::app_flags::set_bool(red_meat::RED_MEAT_UNLOCKED_KEY, true);
+    // Мясные признаки собираются с первого дня, но у кого-то из продуктов их может
+    // не быть — например, они заведены сборкой, где признаков ещё не существовало.
     crate::services::classify::sweep_unprocessed().await;
     true
 }
@@ -764,6 +813,14 @@ pub async fn indicator_state(key: &str) -> IndicatorState {
     if let Some(which) = fat_key(key) {
         return crate::services::fats::indicator_state(which).await;
     }
+    // Мясо: недельная планка граммов и дневная частота переработанного. Оба про
+    // ограничение и оба считают своё — мимо общего дневного пути.
+    if key == "red_meat" {
+        return crate::services::red_meat::indicator_state().await;
+    }
+    if key == "processed_meat" {
+        return crate::services::processed_meat::indicator_state().await;
+    }
     // Not evaluable yet (e.g. protein before the profile/weight is set).
     if target_for(key).await <= 0.0 {
         return IndicatorState::Unknown;
@@ -1019,6 +1076,16 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
         }
         if let Some(which) = fat_key(key) {
             out.push(crate::services::fats::weekly_series(which).await);
+            continue;
+        }
+        // Красное мясо — недельная планка, столбики недельные. Переработанное —
+        // дневное, но считается не через кэш вердиктов: величина там двоичная.
+        if key == "red_meat" {
+            out.push(crate::services::red_meat::weekly_series().await);
+            continue;
+        }
+        if key == "processed_meat" {
+            out.push(crate::services::processed_meat::daily_series().await);
             continue;
         }
         let mut days = Vec::with_capacity(dates.len());

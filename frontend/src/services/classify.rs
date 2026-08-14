@@ -93,8 +93,13 @@ pub fn init() {
 /// гейт, свой запрос и своя запись.
 ///
 /// Спрашивается ровно то, что кто-то ЧИТАЕТ: фрукты/овощи — дневная планка в
-/// виджете, гем — недельные порции. Перекус, яйца, красное мясо и жидкие калории
-/// не спрашиваются: их потребители ушли вместе с удалённой «Оценкой».
+/// виджете, гем — недельные порции, красное и переработанное мясо — свою неделю.
+/// Перекус, яйца и жидкие калории не спрашиваются: их потребители ушли вместе с
+/// удалённой «Оценкой».
+///
+/// Мясные признаки собираются С ПЕРВОГО ДНЯ, не дожидаясь своей недели, — по той же
+/// причине, что жиры и железо: иначе в день открытия вся съеденная за месяцы еда
+/// разом уходит к модели, а человек смотрит на пустую шкалу.
 const FLAGS: &[(
     &str,
     fn(&Food) -> bool,
@@ -103,6 +108,8 @@ const FLAGS: &[(
     ("фрукты/овощи", |f| f.is_veg_fruit.is_none(), local::FoodFlag::VegFruit),
     ("гем", |f| f.is_heme.is_none(), local::FoodFlag::Heme),
     ("молочная глобула", |f| f.is_milk_globule.is_none(), local::FoodFlag::MilkGlobule),
+    ("красное мясо", |f| f.is_red_meat.is_none(), local::FoodFlag::RedMeat),
+    ("переработанное мясо", |f| f.is_processed_meat.is_none(), local::FoodFlag::ProcessedMeat),
 ];
 
 /// Спросить у модели ровно этот признак.
@@ -112,6 +119,8 @@ async fn ask(flag: local::FoodFlag, name: &str) -> Result<bool, String> {
         local::FoodFlag::VegFruit => ai::classify_veg_fruit(&names).await?,
         local::FoodFlag::Heme => ai::classify_heme(&names).await?,
         local::FoodFlag::MilkGlobule => ai::classify_milk_globule(&names).await?,
+        local::FoodFlag::RedMeat => ai::classify_red_meat(&names).await?,
+        local::FoodFlag::ProcessedMeat => ai::classify_processed_meat(&names).await?,
     };
     v.into_iter().next().ok_or_else(|| "пустой ответ классификатора".to_string())
 }

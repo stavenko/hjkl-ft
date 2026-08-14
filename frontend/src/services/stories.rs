@@ -162,6 +162,8 @@ pub enum Appears {
     AfterIronWeek,
     /// Видна, когда открылись ЖИРЫ — то есть после закрытой недельной планки железа.
     AfterFatWeek,
+    /// Видна, когда открылась неделя КРАСНОГО МЯСА — после закрытой недели жиров.
+    AfterRedMeatWeek,
 }
 
 pub struct Story {
@@ -285,6 +287,7 @@ pub fn visible(
     calcium_unlocked: bool,
     iron_unlocked: bool,
     fat_unlocked: bool,
+    red_meat_unlocked: bool,
 ) -> Vec<&'static Story> {
     STORIES
         .iter()
@@ -295,6 +298,7 @@ pub fn visible(
             Appears::AfterCalciumWeek => calcium_unlocked,
             Appears::AfterIronWeek => iron_unlocked,
             Appears::AfterFatWeek => fat_unlocked,
+            Appears::AfterRedMeatWeek => red_meat_unlocked,
         })
         .collect()
 }
@@ -1228,6 +1232,102 @@ const S6: &[Frame] = &[
     // глава.
 ];
 
+// --- Story 7 «Неделя красного мяса» — открывается по ЗАКРЫТОЙ неделе жиров
+// (Appears::AfterRedMeatWeek).
+//
+// Русский текст авторский, перенесён дословно; правлена только типографика —
+// запятые, тире и «ё». Акцент амбровый, а не зелёный: это первая история про
+// ограничение, и цвет отличает её от предыдущих, где речь шла о целях.
+
+const S7: &[Frame] = &[
+    // 1 — поздравление: жиры позади. Как и в остальных историях, с хлопушкой.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Emoji("🎉"),
+        accent: AMBER,
+        kicker: Loc { en: "Red meat", ru: "Красное мясо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Congratulations, you have dealt with fats — the biggest subject of them all. \
+                 Ahead lies a shorter one, but no less important: the @red meat@ week.",
+            ru: "Поздравляем, вы справились с жирами — это была самая большая тема. Впереди \
+                 тема покороче, но не менее важная — @неделя красного мяса@.",
+        },
+    },
+    // 2 — сама планка и почему она есть.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Emoji("🥩"),
+        accent: AMBER,
+        kicker: Loc { en: "Red meat", ru: "Красное мясо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Red meat is associated with cancer. Across the world the recommendation is to \
+                 eat no more than 700 g a week. Above that figure the risks of cancer keep \
+                 rising.",
+            ru: "Красное мясо ассоциировано с онкологией. Во всём мире рекомендуют употреблять \
+                 не более 700 г в неделю. Выше этой цифры риски рака постоянно возрастают.",
+        },
+    },
+    // 3 — переработанное мясо: тот же разговор, но отдельный.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Emoji("🌭"),
+        accent: AMBER,
+        kicker: Loc { en: "Red meat", ru: "Красное мясо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Frankfurters, sausages and the other convenience foods we are used to buying \
+                 at the shop are also linked to cancer risks.",
+            ru: "Сосиски, колбасы и прочие полуфабрикаты, которые мы привыкли покупать в \
+                 магазине, также связаны с онкологическими рисками.",
+        },
+    },
+    // 4 — почему мы ничего не запрещаем.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Emoji("🎂"),
+        accent: AMBER,
+        kicker: Loc { en: "Red meat", ru: "Красное мясо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Banning frankfurters and sausages is the wrong thing to do. We are all human, \
+                 we like eating them. We like them on holidays. We know that medicine differs \
+                 from poison by the dose.",
+            ru: "Запрещать сосиски, колбасы — это неправильно. Все мы люди, мы любим это есть. \
+                 Мы любим это на праздники. Мы знаем, что лекарство от яда отличается дозой.",
+        },
+    },
+    // 5 — что мы делаем вместо запрета.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Emoji("📊"),
+        accent: AMBER,
+        kicker: Loc { en: "Red meat", ru: "Красное мясо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "So we simply give you an indicator. It will honestly show you that you are \
+                 taking a risk. Your task is to learn to follow it.",
+            ru: "Поэтому мы просто вводим индикатор. Он честно покажет вам, что вы рискуете. \
+                 Ваша задача — научиться ему следовать.",
+        },
+    },
+    // 6 — задание недели, по которому откроется следующая глава.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::Emoji("🎯"),
+        accent: AMBER,
+        kicker: Loc { en: "Red meat", ru: "Красное мясо" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "This week, try to eat red meat so that you stay within your limit. After that \
+                 the progress will carry on.",
+            ru: "На этой неделе постарайтесь съесть красного мяса так, чтобы уложиться в вашу \
+                 планку. После этого прогресс пойдёт дальше.",
+        },
+    },
+];
+
 static STORIES: &[Story] = &[
     Story {
         id: "welcome",
@@ -1270,5 +1370,11 @@ static STORIES: &[Story] = &[
         appears: Appears::AfterFatWeek,
         badge: Loc { en: "6", ru: "6" },
         frames: S6,
+    },
+    Story {
+        id: "week7",
+        appears: Appears::AfterRedMeatWeek,
+        badge: Loc { en: "7", ru: "7" },
+        frames: S7,
     },
 ];

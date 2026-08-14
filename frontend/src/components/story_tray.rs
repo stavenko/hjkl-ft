@@ -388,6 +388,13 @@ fn FrameView(frame: Frame) -> impl IntoView {
             <div style="position: absolute; inset: 0; \
                         background: radial-gradient(120% 80% at 50% 15%, #14314a 0%, #0b1622 60%, #070d14 100%);" />
         }.into_view(),
+        // Тот же рисунок градиента, что у Dark, но по мясу: тёплый бордовый в
+        // подсвеченной верхушке, винная середина, почти чёрный низ — чтобы белый
+        // текст с тенью читался так же, как на синем.
+        Bg::Meat => view! {
+            <div style="position: absolute; inset: 0; \
+                        background: radial-gradient(120% 80% at 50% 15%, #5c1524 0%, #2a0a12 60%, #140609 100%);" />
+        }.into_view(),
         Bg::Photo(p) => view! {
             <img src=format!("/story-img/{p}")
                 style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;" />

@@ -36,6 +36,10 @@ impl Loc {
 pub enum Bg {
     /// Dark gradient backdrop (used behind the chart and screenshot cards).
     Dark,
+    /// Тёмно-мясной градиент — фон недели красного мяса. Тот же рисунок, что у
+    /// `Dark`, но в бордово-винных тонах: тема узнаётся до того, как прочитан
+    /// первый кадр, и не путается с предыдущими главами.
+    Meat,
     /// Full-bleed photo — asset path served under `/story-img/`.
     Photo(&'static str),
 }
@@ -95,6 +99,7 @@ impl Frame {
         s.push('|');
         match self.bg {
             Bg::Dark => s.push_str("dark"),
+            Bg::Meat => s.push_str("meat"),
             Bg::Photo(p) => {
                 s.push_str("photo:");
                 s.push_str(p);
@@ -1242,7 +1247,7 @@ const S6: &[Frame] = &[
 const S7: &[Frame] = &[
     // 1 — поздравление: жиры позади. Как и в остальных историях, с хлопушкой.
     Frame {
-        bg: Bg::Dark,
+        bg: Bg::Meat,
         media: Media::Emoji("🎉"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1256,7 +1261,7 @@ const S7: &[Frame] = &[
     },
     // 2 — сама планка и почему она есть.
     Frame {
-        bg: Bg::Dark,
+        bg: Bg::Meat,
         media: Media::Emoji("🥩"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1271,7 +1276,7 @@ const S7: &[Frame] = &[
     },
     // 3 — переработанное мясо: тот же разговор, но отдельный.
     Frame {
-        bg: Bg::Dark,
+        bg: Bg::Meat,
         media: Media::Emoji("🌭"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1285,7 +1290,7 @@ const S7: &[Frame] = &[
     },
     // 4 — почему мы ничего не запрещаем.
     Frame {
-        bg: Bg::Dark,
+        bg: Bg::Meat,
         media: Media::Emoji("🎂"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1300,7 +1305,7 @@ const S7: &[Frame] = &[
     },
     // 5 — что мы делаем вместо запрета.
     Frame {
-        bg: Bg::Dark,
+        bg: Bg::Meat,
         media: Media::Emoji("📊"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1314,7 +1319,7 @@ const S7: &[Frame] = &[
     },
     // 6 — задание недели, по которому откроется следующая глава.
     Frame {
-        bg: Bg::Dark,
+        bg: Bg::Meat,
         media: Media::Emoji("🎯"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },

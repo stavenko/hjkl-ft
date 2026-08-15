@@ -819,7 +819,8 @@ pub fn DashboardPage() -> impl IntoView {
                                 }
                             });
                             let detail = d.series.iter().map(|s| {
-                                let (paths, name) = progress_widget::icon_for(s.key);
+                                let icon = progress_widget::icon_for(s.key);
+                                let (paths, name) = (icon.paths, icon.label);
                                 let (stroke, tint) = progress_widget::state_colors(s.state);
                                 let body = d.bodies.get(s.key).map(String::as_str).unwrap_or("");
                                 let reason = indicator_reason(s.key, s.state, s.missed, body);
@@ -835,8 +836,11 @@ pub fn DashboardPage() -> impl IntoView {
                                         <div style="display: flex; align-items: center; gap: 8px;">
                                             <div style=format!("width: 28px; height: 28px; min-width: 28px; border-radius: 50%; \
                                                     background: {tint}; display: flex; align-items: center; justify-content: center;")>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                                                    fill="none" stroke=stroke stroke-width="2" stroke-linecap="round"
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox=icon.view_box
+                                                    fill=if icon.filled { stroke } else { "none" }
+                                                    stroke=if icon.filled { "none" } else { stroke }
+                                                    stroke-width=if icon.filled { "0" } else { "2" }
+                                                    stroke-linecap="round"
                                                     stroke-linejoin="round" inner_html=paths></svg>
                                             </div>
                                             <span class="has-text-weight-semibold" style="flex: 1; min-width: 0;">{name}</span>

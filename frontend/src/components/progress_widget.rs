@@ -119,9 +119,9 @@ const IC_OIL: &str = r#"<path d="M12 2v6"/><path d="M9 5h6"/><path d="M12 8c-3 3
 /// Кусок мяса с прожилкой — красное мясо. Нарисован здесь, а не взят из набора:
 /// готовые мясные значки там уже заняты белком и гемом.
 const IC_STEAK: &str = r#"<path d="M4 10a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1a9 9 0 0 1-9 9h-1a6 6 0 0 1-6-6z"/><path d="M9 8c1.8 1.2 2.6 3 2.4 5.4"/>"#;
-/// Сосиска — мясо глубокой переработки. Перерисована по авторскому образцу:
-/// диагональная капсула с торчащими концами оболочки и тремя дуговыми насечками.
-const IC_SAUSAGE: &str = r#"<path d="M6.1 17.9a4.1 4.1 0 0 1 0-5.8l6-6a4.1 4.1 0 0 1 5.8 5.8l-6 6a4.1 4.1 0 0 1-5.8 0Z"/><path d="m3 21 2.2-2.2"/><path d="M18.8 5.2 21 3"/><path d="M7.6 15.4a2.6 2.6 0 0 0-1.9-2.2"/><path d="M11 12a2.6 2.6 0 0 0-1.9-2.2"/><path d="M14.4 8.6a2.6 2.6 0 0 0-1.9-2.2"/>"#;
+/// Сосиска — мясо глубокой переработки. Из набора gastronomy: контур там уже
+/// превращён в залитую фигуру, поэтому значок рисуется заливкой (см. `glyph`).
+const IC_SAUSAGE: &str = r##"<path d="M115.7,94.39l-8.421.9a15.907,15.907,0,0,0-9.026-11.734C73.31,72.1,55.616,54.406,44.164,29.459a15.811,15.811,0,0,0-10.626-8.8l.982-9.278a5.03,5.03,0,0,0-8.5-4.141L23.6,9.585a9.163,9.163,0,0,1-7.926,2.45l-3.328-.57a5.027,5.027,0,0,0-4.68,8.209l7.855,9.238a15.886,15.886,0,0,0-.285,13.828,141.627,141.627,0,0,0,28.44,41.3,141.612,141.612,0,0,0,41.3,28.439,15.815,15.815,0,0,0,12.5.314l9.938,8.451a5.031,5.031,0,0,0,8.208-4.69l-.57-3.321a9.192,9.192,0,0,1,2.453-7.927l2.339-2.419A5.028,5.028,0,0,0,115.7,94.39ZM10.333,17.407a1.525,1.525,0,0,1,1.422-2.492l3.328.569A12.673,12.673,0,0,0,26.037,12.1l2.42-2.341a1.53,1.53,0,0,1,2.583,1.259L30.067,20.2a15.767,15.767,0,0,0-12.535,5.675Zm76.1,91.891A138.145,138.145,0,0,1,46.151,81.565,138.144,138.144,0,0,1,18.419,41.28,12.414,12.414,0,1,1,40.982,30.92c.614,1.336,1.255,2.639,1.9,3.934l-7.332,4.218A1.75,1.75,0,0,0,37.3,42.106l7.207-4.146a114.309,114.309,0,0,0,10.317,16l-7.657,6.4a1.75,1.75,0,0,0,2.244,2.686l7.583-6.335a104.865,104.865,0,0,0,14,14l-6.537,7.833a1.75,1.75,0,0,0,2.687,2.243l6.6-7.906A114.128,114.128,0,0,0,89.737,83.2L85.6,90.4a1.75,1.75,0,0,0,3.035,1.744l4.212-7.326c1.3.651,2.612,1.3,3.954,1.912A12.414,12.414,0,0,1,86.437,109.3Zm30.895-8.844-2.34,2.419a12.71,12.71,0,0,0-3.387,10.953l.571,3.321a1.529,1.529,0,0,1-2.492,1.43l-8.9-7.567A15.8,15.8,0,0,0,107.5,98.783l8.57-.913A1.528,1.528,0,0,1,117.332,100.454Z"/>"##;
 
 /// (stroke, tint background) for an indicator state.
 pub fn state_colors(s: IndicatorState) -> (&'static str, &'static str) {
@@ -133,42 +133,74 @@ pub fn state_colors(s: IndicatorState) -> (&'static str, &'static str) {
     }
 }
 
-/// (icon svg paths, short label) for an indicator key.
-pub fn icon_for(k: &str) -> (&'static str, &'static str) {
+/// Значок индикатора: фигуры, подпись и то, КАК их рисовать.
+#[derive(Clone, Copy)]
+pub struct Icon {
+    pub paths: &'static str,
+    pub label: &'static str,
+    /// Своя система координат у каждого набора: у Lucide 24, у gastronomy 128.
+    pub view_box: &'static str,
+    /// `true` — фигура ЗАЛИТАЯ (контур уже превращён в форму), `false` — линия,
+    /// которую надо обвести.
+    pub filled: bool,
+}
+
+/// Значок-линия из Lucide — тем же способом, что рисуется вся навигация.
+const fn stroked(paths: &'static str, label: &'static str) -> Icon {
+    Icon { paths, label, view_box: "0 0 24 24", filled: false }
+}
+
+/// Значок из набора gastronomy: тот же контурный вид, но фигура залитая.
+const fn glyph(paths: &'static str, label: &'static str) -> Icon {
+    Icon { paths, label, view_box: "0 0 128 128", filled: true }
+}
+
+/// Значок и подпись для ключа индикатора.
+pub fn icon_for(k: &str) -> Icon {
     match k {
-        "calories" => (IC_FLAME, "Калории"),
-        "protein" => (IC_BEEF, "Белок"),
-        "calcium" => (IC_BONE, "Кальций"),
+        "calories" => stroked(IC_FLAME, "Калории"),
+        "protein" => stroked(IC_BEEF, "Белок"),
+        "calcium" => stroked(IC_BONE, "Кальций"),
         // Два жировых: EPA+DHA — рыба (единственный их источник), баланс — капля масла.
-        "epa_dha" => (IC_FISH, "Омега-3"),
-        "fat_ratio" => (IC_OIL, "Баланс"),
-        "iron" => (IC_DROPLET, "Железо"),
+        "epa_dha" => stroked(IC_FISH, "Омега-3"),
+        "fat_ratio" => stroked(IC_OIL, "Баланс"),
+        "iron" => stroked(IC_DROPLET, "Железо"),
         // Не капля, как у железа: два одинаковых значка рядом читаются как один
         // индикатор, продублированный по ошибке. Гем — про сам продукт, отсюда мясо.
-        "heme" => (IC_HAM, "Гем"),
+        "heme" => stroked(IC_HAM, "Гем"),
         // Мясные ограничения. Гем рядом рисуется окороком, поэтому этим двум нужны
-        // СВОИ силуэты: три похожих мясных значка в ряд не различить. Красное мясо —
-        // кусок с прожилкой, переработанное — сосиска с насечками.
-        "red_meat" => (IC_STEAK, "Кр. мясо"),
-        "processed_meat" => (IC_SAUSAGE, "Колбасы"),
-        "veg_fruit" => (IC_APPLE, "Фр/овощи"),
-        "steps" => (IC_STEPS, "Шаги"),
-        "fiber" => (IC_WHEAT, "Клетчатка"),
+        // СВОИ силуэты: три похожих мясных значка в ряд не различить.
+        "red_meat" => stroked(IC_STEAK, "Кр. мясо"),
+        "processed_meat" => glyph(IC_SAUSAGE, "Колбасы"),
+        "veg_fruit" => stroked(IC_APPLE, "Фр/овощи"),
+        "steps" => stroked(IC_STEPS, "Шаги"),
+        "fiber" => stroked(IC_WHEAT, "Клетчатка"),
         // No silent fallback: an unmapped key is a bug (e.g. a new indicator added
         // without an icon), so fail loudly instead of mislabeling it as fiber.
         _ => panic!("icon_for: no icon/label for indicator key {k:?}"),
     }
 }
 
-fn indicator(paths: &'static str, label: &'static str, state: IndicatorState) -> impl IntoView {
+fn indicator(icon: Icon, state: IndicatorState) -> impl IntoView {
     let (color, tint) = state_colors(state);
+    let label = icon.label;
+    // Два разных способа нарисовать одну и ту же по виду линию. Наши значки —
+    // ОБВОДКА пути (Lucide, 24×24, толщина 2). Значки из набора gastronomy —
+    // ЗАЛИВКА контура (128×128): линия там уже превращена в замкнутую фигуру, и
+    // обводить её нельзя, иначе получится двойной контур. Отсюда и развилка.
+    let (fill, stroke, width) = if icon.filled {
+        (color, "none", "0")
+    } else {
+        ("none", color, "2")
+    };
     view! {
         <div attr:data-ind=label style="display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; min-width: 0;">
             <div style=format!("width: 38px; height: 38px; border-radius: 50%; background: {tint}; \
                     display: flex; align-items: center; justify-content: center;")>
-                <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none"
-                    stroke=color stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                    inner_html=paths></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox=icon.view_box
+                    fill=fill stroke=stroke stroke-width=width
+                    stroke-linecap="round" stroke-linejoin="round"
+                    inner_html=icon.paths></svg>
             </div>
             <span style="font-size: 0.55rem; line-height: 1.1; text-align: center; color: var(--bulma-text-weak);">{label}</span>
         </div>
@@ -188,8 +220,7 @@ fn indicators_row(states: Vec<(&'static str, IndicatorState)>) -> impl IntoView 
     view! {
         <div style="display: flex; gap: 4px; justify-content: space-between;">
             {states.into_iter().map(|(k, st)| {
-                let (paths, label) = icon_for(k);
-                indicator(paths, label, st)
+                indicator(icon_for(k), st)
             }).collect_view()}
         </div>
     }
@@ -690,7 +721,7 @@ pub fn ProgressWidget() -> impl IntoView {
                             IndicatorState::Unknown => 3,
                         };
                         row.sort_by(|a, b| {
-                            rank(a.1).cmp(&rank(b.1)).then_with(|| icon_for(a.0).1.cmp(icon_for(b.0).1))
+                            rank(a.1).cmp(&rank(b.1)).then_with(|| icon_for(a.0).label.cmp(icon_for(b.0).label))
                         });
                         row.truncate(7);
                         // "Keep them green" gate caption, right before the indicators.

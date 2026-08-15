@@ -314,6 +314,13 @@ pub async fn weekly_series(which: Fat) -> indicators::IndicatorSeries {
 pub async fn week_closed_since_open() -> bool {
     let today = local::today_date();
     let (Some(open), Some((cur_start, _))) = (week_open_date(), week_bounds(today)) else {
+        // Отказ по отсутствию даты открытия — не «человек не справился», а поломка
+        // состояния, и молчать о ней нельзя: гейт тогда закрыт навсегда.
+        crate::services::telemetry::report_internal(
+            "gate.fats_week_closed",
+            "",
+            &format!("нет данных: open={:?}", week_open_date()),
+        );
         return false;
     };
     let diary_days: std::collections::HashSet<String> =
@@ -321,15 +328,33 @@ pub async fn week_closed_since_open() -> bool {
     // От первой недели темы до последней ЗАВЕРШЁННОЙ. Текущая не судится: «ещё не
     // набрал» — не провал.
     let mut s = open;
+    let mut seen = 0u32;
+    let mut best = 0.0_f64;
     while s < cur_start {
         let e = s + Duration::days(6);
         let logged = (0..7)
             .any(|d| diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string()));
-        if logged && Fat::EpaDha.met(&fatty_acids_between(s, e).await) {
-            return true;
+        let acids = fatty_acids_between(s, e).await;
+        if logged {
+            seen += 1;
+            best = best.max(acids.epa_dha_g);
+            if Fat::EpaDha.met(&acids) {
+                return true;
+            }
         }
         s += Duration::days(7);
     }
+    // Дошли до конца, не найдя ни одной закрытой недели. Отчёт — чтобы «у меня не
+    // открылось» разбиралось по числам, а не по догадкам.
+    crate::services::telemetry::report_internal(
+        "gate.fats_week_closed",
+        "",
+        &format!(
+            "закрытых недель нет: открыто {open}, текущая с {cur_start}, недель с дневником \
+             {seen}, лучший EPA+DHA за неделю {best:.2} при норме {:.2}",
+            EPA_DHA_PER_WEEK_G
+        ),
+    );
     false
 }
 

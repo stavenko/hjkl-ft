@@ -192,7 +192,12 @@ const readColors = (p) => p.evaluate(() => {
     if (t !== "Кр. мясо" && t !== "Колбасы") continue;
     const svg = el.parentElement?.querySelector("svg") ||
       el.previousElementSibling?.querySelector("svg");
-    if (svg) out[t] = svg.getAttribute("stroke");
+    // Значки рисуются двумя способами: наши — обводкой (цвет в stroke), значки из
+    // набора gastronomy — заливкой (цвет в fill, а stroke="none").
+    if (svg) {
+      const s = svg.getAttribute("stroke");
+      out[t] = s && s !== "none" ? s : svg.getAttribute("fill");
+    }
   }
   return out;
 });

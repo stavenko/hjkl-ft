@@ -1308,7 +1308,7 @@ const S7: &[Frame] = &[
     // и будет судить.
     Frame {
         bg: Bg::Meat,
-        media: Media::Shot("red-meat-indicator.png"),
+        media: Media::Shot("red-meat-highlight.gif"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
         title: Loc { en: "", ru: "" },

@@ -854,9 +854,6 @@ pub fn DashboardPage() -> impl IntoView {
                                                 "epa_dha" => "г",
                                                 "fat_ratio" => "",
                                                 "steps" => "",
-                                                // Двоичный ряд: столбик значит «ел»,
-                                                // подписывать его единицей нечем.
-                                                "processed_meat" => "",
                                                 _ => "г",
                                             }.to_string()}
                                             miss_color=stroke.to_string()
@@ -865,7 +862,7 @@ pub fn DashboardPage() -> impl IntoView {
                                             // середины, как и шкала в виджете.
                                             signed=s.key == "fat_ratio"
                                             decimals=if s.key == "fat_ratio" { 2 }
-                                                else if s.key == "red_meat" { 0 } else { 1 }
+                                                else if s.key == "red_meat" || s.key == "processed_meat" { 0 } else { 1 }
                                             met=s.met_days.clone()/>
                                     </div>
                                 }

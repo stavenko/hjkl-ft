@@ -33,13 +33,20 @@ pub fn unlocked() -> bool {
     super::red_meat::unlocked()
 }
 
-/// Ел ли человек переработанное мясо в этот день.
+/// Сколько ГРАММОВ переработанного мяса съедено в этот день.
 ///
-/// Мера — белок, как и у соседних мясных счётчиков: он один умеет раскрывать блюда
-/// по составу (пицца с салями засчитывается салями, а не всей пиццей). Сколько
-/// именно, здесь не важно — важен сам факт.
+/// Вердикт от количества не зависит — важен сам факт, — но человеку показывать
+/// «было/не было» бессмысленно: столбики одинаковой высоты не говорят ничего.
+/// Сотня граммов ветчины и палка салями — разные дни, и разница должна быть видна.
+///
+/// Блюда раскрываются по составу: в пицце засчитывается салями, а не вся пицца.
+pub async fn grams_on(date: &str) -> f64 {
+    local::food_tag_grams_on(date, counts).await
+}
+
+/// Ел ли человек переработанное мясо в этот день. Любое количество выше нуля — да.
 pub async fn eaten_on(date: &str) -> bool {
-    local::tag_protein_g_on(date, counts).await > 0.0
+    grams_on(date).await > 0.0
 }
 
 /// Цвет индикатора по последним семи ЗАВЕРШЁННЫМ дням.
@@ -82,9 +89,9 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
 
 /// Ряд последних семи завершённых дней — для панели индикатора.
 ///
-/// В отличие от остальных дневных рядов, величина здесь двоичная: столбик либо
-/// есть (ел), либо нет. День без дневника идёт без доли — столбика нет, вердикта
-/// нет, подпись остаётся.
+/// Столбик — ГРАММЫ съеденного, а вердикт по-прежнему двоичный: любой день с
+/// колбасой промах, независимо от веса. День без дневника идёт без доли — столбика
+/// нет, вердикта нет, подпись остаётся.
 pub async fn daily_series() -> super::indicators::IndicatorSeries {
     let today = local::today_date();
     let diary_days: std::collections::HashSet<String> =
@@ -96,8 +103,11 @@ pub async fn daily_series() -> super::indicators::IndicatorSeries {
         let d = today - Duration::days(back);
         let date = d.format("%Y-%m-%d").to_string();
         let logged = diary_days.contains(&date);
-        let ate = logged && eaten_on(&date).await;
-        points.push((date, if ate { 1.0 } else { 0.0 }, logged.then_some(if ate { 1.0 } else { 0.0 })));
+        let grams = if logged { grams_on(&date).await } else { 0.0 };
+        let ate = grams > 0.0;
+        // Доля здесь — не «сколько от нормы»: нормы нет. Она несёт ровно вердикт
+        // дня, по которому столбик красится: 0 — чисто, 1 — колбаса была.
+        points.push((date, grams, logged.then_some(if ate { 1.0 } else { 0.0 })));
         labels.push(d.format("%d.%m").to_string());
         met.push(logged.then_some(!ate));
     }

@@ -44,6 +44,17 @@ const CASES = [
   ["Яйцо куриное", false, "не мясо и не субпродукт"],
 ];
 
+// ONLY=подстрока[,подстрока] — прогнать прицельно по одной больной позиции,
+// не гоняя весь набор. Соседи по запросу влияют на ответ, поэтому число из
+// такого прогона сравнимо только с таким же прогоном, не с полным набором.
+if (process.env.ONLY) {
+  const want = process.env.ONLY.split(",").map((s) => s.trim().toLowerCase());
+  const kept = CASES.filter(([n]) => want.some((w) => n.toLowerCase().includes(w)));
+  if (!kept.length) throw new Error(`ONLY=${process.env.ONLY} не совпал ни с одним продуктом`);
+  CASES.length = 0;
+  CASES.push(...kept);
+}
+
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 const uid = `heme-${Date.now()}`;
 const now = Math.floor(Date.now() / 1000);
@@ -61,6 +72,14 @@ await fetch(`${PAY}/claim`, { method: "POST",
 const b = await chromium.launch({ headless: true });
 const ctx = await b.newContext({ viewport: { width: 430, height: 932 }, serviceWorkers: "block" });
 const page = await ctx.newPage();
+// Приложение печатает по каждому продукту вердикт, счёт голосов и причину —
+// без этого замер показывает только «мимо», но не ЧЕМ модель это объяснила.
+const said = new Map();
+page.on("console", (m) => {
+  const t = m.text();
+  const g = t.match(/^гем «(.+?)»: (.+)$/);
+  if (g) said.set(g[1], g[2]);
+});
 await page.goto(BASE, { waitUntil: "domcontentloaded" });
 await page.evaluate(({ uid, token }) => {
   localStorage.clear();
@@ -146,6 +165,7 @@ for (const [name, want, why] of CASES) {
   if (!ok) bad++;
   const s = (x) => (x === true ? "да " : x === false ? "нет" : " — ");
   console.log(`${ok ? "OK  " : "MISS"} ${name.padEnd(30)} ${s(v)}   ${s(want)}   ${why}`);
+  if (!ok) console.log(`     модель: ${said.get(name) ?? "(в консоль ничего не пришло)"}`);
 }
 console.log(`\nпопаданий: ${CASES.length - bad}/${CASES.length}`);
 

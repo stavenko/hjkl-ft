@@ -837,6 +837,10 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                 let cmd_token = q.split_whitespace().next().unwrap_or("").to_string();
                 let show_planka = "/set-calorie-limit".starts_with(&cmd_token)
                     || cmd_token.starts_with("/set-calorie-limit");
+                // То же и для открытия темы: пункт остаётся видимым, пока админ
+                // дописывает номер («/open-week 7»).
+                let show_open_week = "/open-week".starts_with(&cmd_token)
+                    || cmd_token.starts_with("/open-week");
                 view! {
                     <div attr:data-testid="slash-menu"
                          style="position:sticky; bottom:0; margin:0 16px; background:var(--surface); \
@@ -851,6 +855,18 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                                 on:click=move |_| draft.set("/set-calorie-limit ".to_string())>
                                 <span style="font-weight:600;">"Установить планку калорий"</span>
                                 <span class="mono row__meta">"/set-calorie-limit <ккал>"</span>
+                            </button>
+                        })}
+                        {show_open_week.then(|| view! {
+                            <button attr:data-testid="slash-item"
+                                style="display:flex; flex-direction:column; align-items:flex-start; gap:2px; \
+                                       width:100%; text-align:left; padding:10px 14px; \
+                                       border-bottom:1px solid var(--line-soft);"
+                                on:click=move |_| draft.set("/open-week ".to_string())>
+                                <span style="font-weight:600;">"Открыть тему"</span>
+                                <span class="mono row__meta">
+                                    "/open-week <3 активность · 4 кальций · 5 железо · 6 жиры · 7 красное мясо>"
+                                </span>
                             </button>
                         })}
                         {SLASH_COMMANDS.iter()

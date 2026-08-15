@@ -63,6 +63,36 @@ pub fn LiveBubble(
         .into_view();
     }
 
+    // Директива открытия темы — так же системной запиской: применяет её
+    // приложение, отвечать здесь не на что.
+    if msg.kind == "open_week" {
+        let week = msg
+            .payload
+            .as_deref()
+            .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+            .and_then(|v| v.get("week").and_then(|w| w.as_u64()));
+        let what = match week {
+            Some(3) => "активность и шаги",
+            Some(4) => "кальций",
+            Some(5) => "железо",
+            Some(6) => "жиры",
+            Some(7) => "красное мясо",
+            _ => "следующая тема",
+        };
+        let text = format!("Куратор открыл вам новую тему — {what}");
+        let note_style = "background: #EEF6FF; color: #1E4E79; border: 1px solid #CFE2F7; \
+                          border-radius: 10px; padding: 8px 14px; max-width: 88%; text-align: center;";
+        return view! {
+            <div attr:data-testid="live-message" attr:data-role="system"
+                style="display: flex; justify-content: center; margin-bottom: 10px;">
+                <div style=note_style>
+                    <p class="is-size-7" style="margin: 0;">{text}</p>
+                </div>
+            </div>
+        }
+        .into_view();
+    }
+
     let is_user = msg.sender == "user";
     // re:Norma palette: the user bubble is the soft-emerald brand tint (not the
     // stock nuclear-blue link); the curator bubble is a white surface. Both carry

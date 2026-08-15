@@ -265,6 +265,18 @@ pub async fn maybe_unlock_activity_week() {
     if green_gate_progress().await < GREEN_GATE_DAYS {
         return; // week-2 gate not cleared yet
     }
+    open_activity_week().await;
+}
+
+/// САМО открытие недели активности, без проверки условия.
+///
+/// Вынесено из гейта, чтобы кураторская директива «открыть тему» делала ровно то
+/// же, что честный путь, а не поднимала один флаг: тема — это ещё и планка шагов, и
+/// якорь её собственного гейта.
+pub async fn open_activity_week() {
+    if activity_unlocked() {
+        return;
+    }
     let Some(planka) = local::steps_planka_from_history().await else {
         return; // no step history yet → can't set a planka; wait for data
     };
@@ -290,6 +302,14 @@ pub async fn maybe_unlock_calcium_week() {
     if steps_gate_progress().await < GREEN_GATE_DAYS {
         return; // steps gate not cleared yet
     }
+    open_calcium_week().await;
+}
+
+/// САМО открытие недели кальция, без проверки условия (см. `open_activity_week`).
+pub async fn open_calcium_week() {
+    if calcium_unlocked() {
+        return;
+    }
     local::set_calcium_goal(CALCIUM_PER_DAY_MG).await;
     let today = crate::services::local::today_date();
     crate::services::app_flags::set(CALCIUM_GATE_OPEN_KEY, &fmt(today));
@@ -311,6 +331,15 @@ pub async fn maybe_unlock_iron_week() {
     }
     if calcium_gate_progress().await < GREEN_GATE_DAYS {
         return; // calcium gate not cleared yet
+    }
+    open_iron_week().await;
+}
+
+/// САМО открытие недели железа, без проверки условия (см. `open_activity_week`).
+pub async fn open_iron_week() {
+    use crate::services::iron;
+    if iron::unlocked() {
+        return;
     }
     let today = crate::services::local::today_date();
     crate::services::app_flags::set(iron::IRON_WEEK_OPEN_KEY, &fmt(today));
@@ -353,13 +382,22 @@ pub async fn maybe_unlock_fat_week() -> bool {
     if !iron::planka_closed(anchor).await {
         return false; // планка железа ещё не закрыта после якоря
     }
+    open_fat_week().await;
+    true
+}
+
+/// САМО открытие недели жиров, без проверки условия (см. `open_activity_week`).
+pub async fn open_fat_week() {
+    use crate::services::fats;
+    if fats::unlocked() {
+        return;
+    }
     let today = crate::services::local::today_date();
     crate::services::app_flags::set(fats::FAT_WEEK_OPEN_KEY, &fmt(today));
     crate::services::app_flags::set_bool(fats::FAT_UNLOCKED_KEY, true);
     // У продуктов в дневнике профиля жира ещё нет — иначе первая неделя жира
     // мерилась бы по пустому множеству.
     crate::services::classify::sweep_unprocessed().await;
-    true
 }
 
 /// Открыть НЕДЕЛЮ КРАСНОГО МЯСА, когда закрыта неделя жиров: поставить якорь своей
@@ -392,12 +430,22 @@ pub async fn maybe_unlock_red_meat_week() -> bool {
     if !fats::week_closed_since_open().await {
         return false; // ни одной закрытой недели жиров с начала темы
     }
+    open_red_meat_week().await;
+    true
+}
+
+/// САМО открытие недели красного мяса, без проверки условия (см. `open_activity_week`).
+pub async fn open_red_meat_week() {
+    use crate::services::red_meat;
+    if red_meat::unlocked() {
+        return;
+    }
+    let today = crate::services::local::today_date();
     crate::services::app_flags::set(red_meat::RED_MEAT_WEEK_OPEN_KEY, &fmt(today));
     crate::services::app_flags::set_bool(red_meat::RED_MEAT_UNLOCKED_KEY, true);
     // Мясные признаки собираются с первого дня, но у кого-то из продуктов их может
     // не быть — например, они заведены сборкой, где признаков ещё не существовало.
     crate::services::classify::sweep_unprocessed().await;
-    true
 }
 
 // ── Per-indicator per-day cache ──────────────────────────────────────────────

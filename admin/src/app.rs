@@ -630,6 +630,38 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
             }
             return;
         }
+        // Slash ACTION: `/open-week <номер>` открывает клиенту тему — те же номера,
+        // что у историй в ленте. Нужна, когда гейт не может открыть её сам.
+        if let Some(rest) = text.strip_prefix("/open-week") {
+            match rest.trim().parse::<u32>().ok().filter(|w| (3..=7).contains(w)) {
+                Some(week) => {
+                    sending.set(true);
+                    let uid = uid_send.clone();
+                    spawn_local(async move {
+                        match api::open_week(&uid, week).await {
+                            Ok(_seq) => {
+                                draft.set(String::new());
+                                error.set(None);
+                                notice.set(Some(format!("✓ Тема №{week} отправлена клиенту")));
+                                load.call(());
+                            }
+                            Err(e) if e.is_auth() => {
+                                auth::logout();
+                                view.set(View::Login);
+                            }
+                            Err(e) => error.set(Some(e.message().to_string())),
+                        }
+                        sending.set(false);
+                    });
+                }
+                None => error.set(Some(
+                    "Номер темы от 3 до 7: 3 активность, 4 кальций, 5 железо, 6 жиры, \
+                     7 красное мясо. Например: /open-week 7"
+                        .to_string(),
+                )),
+            }
+            return;
+        }
         sending.set(true);
         let uid = uid_send.clone();
         spawn_local(async move {
@@ -762,6 +794,22 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                                      class=format!("bubble {side_cls}")
                                      style="opacity:.9; font-size:.9rem;">
                                     <span class="mono">"⤴ планка: "</span>{amt}
+                                </div>
+                            }.into_view()
+                        }
+                        // Директива открытия темы — тоже компактной плашкой:
+                        // применяет её само приложение.
+                        "open_week" => {
+                            let week = m.payload.as_deref()
+                                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                                .and_then(|v| v.get("week").and_then(|w| w.as_u64()))
+                                .map(|w| format!("№{w}"))
+                                .unwrap_or_else(|| "—".to_string());
+                            view! {
+                                <div attr:data-testid="msg" attr:data-sender=m.sender.clone()
+                                     class=format!("bubble {side_cls}")
+                                     style="opacity:.9; font-size:.9rem;">
+                                    <span class="mono">"⤴ открыта тема: "</span>{week}
                                 </div>
                             }.into_view()
                         }

@@ -254,6 +254,30 @@ pub async fn set_planka(user_id: &str, amount: f64) -> Result<u64, ApiError> {
         .ok_or_else(|| ApiError::Other("set_planka: missing seq".to_string()))
 }
 
+/// Открыть клиенту ТЕМУ по номеру — директива kind="open_week", payload={week}.
+///
+/// Как и планка, применяется САМИМ приложением: сервер данных пользователя не
+/// трогает. Нужна там, где гейт не может открыть тему сам, — например, дата
+/// открытия предыдущей темы потерялась, и человек с честно закрытыми неделями
+/// стоит перед закрытой дверью.
+pub async fn open_week(user_id: &str, week: u32) -> Result<u64, ApiError> {
+    let client_id = uuid::Uuid::now_v7().to_string();
+    let payload = serde_json::json!({ "week": week }).to_string();
+    let text = format!("Куратор открыл вам следующую тему (№{week})");
+    let body = serde_json::to_string(&ReplyReq {
+        client_id: &client_id,
+        text: &text,
+        kind: Some("open_week"),
+        payload: Some(payload),
+    })
+    .map_err(|e| ApiError::Other(e.to_string()))?;
+    let v: serde_json::Value =
+        request("POST", &format!("/conversations/{user_id}/reply"), Some(body)).await?;
+    v.get("seq")
+        .and_then(|s| s.as_u64())
+        .ok_or_else(|| ApiError::Other("open_week: missing seq".to_string()))
+}
+
 /// Send a typed data_request to the user: kind="data_request",
 /// payload={"dataset": …}, text = the human-readable RU fallback. Returns the seq.
 pub async fn reply_data_request(user_id: &str, dataset: &str, text: &str) -> Result<u64, ApiError> {

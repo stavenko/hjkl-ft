@@ -324,6 +324,7 @@ async fn poll_inner(first_wait: u32) -> Result<(), String> {
         // A curator `set_planka` directive is applied by THE APP here — the server
         // never writes the user's data. Idempotent (by seq).
         apply_planka_directives(&r.messages).await;
+        apply_week_directives(&r.messages).await;
         store_cursor(r.next_after_seq).await;
         if !r.has_more {
             break;
@@ -376,6 +377,97 @@ async fn apply_planka_directives(msgs: &[LiveMessage]) {
             ),
             read: false,
         });
+    }
+}
+
+// ── Директива «открыть тему» ─────────────────────────────────────────────────
+//
+// Темы открываются гейтами — по заслугам, и это правильный порядок. Но иногда
+// открыть надо руками: гейт опирается на дату открытия предыдущей темы, а её
+// может не оказаться (стёрлась старой миграцией, приехала с другого устройства), и
+// тогда человек с честно закрытыми неделями стоит перед закрытой дверью. Плюс
+// автор ведёт истории впереди собственного прогресса.
+//
+// Применяет директиву САМ КЛИЕНТ, как и `set_planka`: сервер не пишет данные
+// пользователя. Открытие идёт теми же функциями, что и у гейта, — тема это не один
+// флаг, а ещё планка шагов, цель кальция, якорь своей недели и постановка еды в
+// очередь на разбор.
+
+/// App-flag: наибольший `seq` уже применённой директивы открытия — чтобы одна и та
+/// же не применялась дважды между опросами и перезапусками.
+const WEEK_DIRECTIVE_SEQ_KEY: &str = "week_directive_seq";
+
+/// Номер темы, как её видит человек в ленте историй, и что он получит.
+fn week_title(week: u32) -> Option<&'static str> {
+    match week {
+        3 => Some("активность и шаги"),
+        4 => Some("кальций"),
+        5 => Some("железо"),
+        6 => Some("жиры"),
+        7 => Some("красное мясо"),
+        _ => None,
+    }
+}
+
+/// Открыть тему по номеру. Номера — те же, что у историй в ленте.
+///
+/// Первые две ничего не открывают: приложение и так начинается с них, а планка по
+/// калориям выдаётся расчётом, а не флагом.
+async fn open_week(week: u32) {
+    use crate::services::indicators;
+    match week {
+        3 => indicators::open_activity_week().await,
+        4 => indicators::open_calcium_week().await,
+        5 => indicators::open_iron_week().await,
+        6 => indicators::open_fat_week().await,
+        7 => indicators::open_red_meat_week().await,
+        _ => {}
+    }
+}
+
+/// Применить новые директивы `open_week` из пришедшей пачки.
+///
+/// В отличие от планки, здесь применяются ВСЕ новые, а не только последняя: темы
+/// накапливаются, и две директивы подряд означают две открытые темы, а не одну.
+async fn apply_week_directives(msgs: &[LiveMessage]) {
+    let last = crate::services::app_flags::get(WEEK_DIRECTIVE_SEQ_KEY)
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let mut applied = last;
+    let mut ordered: Vec<(u64, u32)> = Vec::new();
+    for m in msgs {
+        if m.kind != "open_week" || m.seq <= last {
+            continue;
+        }
+        let Some(payload) = m.payload.as_deref() else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) else { continue };
+        let Some(week) = v.get("week").and_then(|w| w.as_u64()) else { continue };
+        let week = week as u32;
+        if week_title(week).is_none() {
+            leptos::logging::warn!("директива open_week: нет темы с номером {week}");
+            continue;
+        }
+        ordered.push((m.seq, week));
+    }
+    ordered.sort_by_key(|(seq, _)| *seq);
+    for (seq, week) in ordered {
+        open_week(week).await;
+        applied = applied.max(seq);
+        let title = week_title(week).unwrap_or_default();
+        crate::services::letters::add(crate::services::letters::Letter {
+            id: format!("week-open-{seq}"),
+            created_at: chrono::Local::now().to_rfc3339(),
+            body: format!(
+                "Ваш куратор открыл вам следующую тему — {title}.\n\n\
+                 Новые шкалы и значки уже на главном экране, а история про эту тему \
+                 ждёт вас в ленте наверху."
+            ),
+            read: false,
+        });
+    }
+    if applied > last {
+        crate::services::app_flags::set(WEEK_DIRECTIVE_SEQ_KEY, &applied.to_string());
+        crate::services::sync::push_background();
     }
 }
 

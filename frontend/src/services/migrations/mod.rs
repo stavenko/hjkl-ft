@@ -60,6 +60,7 @@ mod m012_reask_heme;
 mod m013_unjudge_days_before_planka;
 mod m014_unjudge_steps_protein;
 mod m015_recompute_indicators;
+mod m016_reask_heme_again;
 
 #[cfg(test)]
 mod tests;
@@ -161,6 +162,11 @@ const ALL: &[Migration] = &[
         version: m015_recompute_indicators::VERSION,
         description: m015_recompute_indicators::DESCRIPTION,
         script: || Box::pin(m015_recompute_indicators::script()),
+    },
+    Migration {
+        version: m016_reask_heme_again::VERSION,
+        description: m016_reask_heme_again::DESCRIPTION,
+        script: || Box::pin(m016_reask_heme_again::script()),
     },
 ];
 

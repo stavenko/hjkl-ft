@@ -1330,6 +1330,15 @@ struct HemeAnswer {
 /// выбором между двумя знакомыми словами — «печень или курица», — и на границе
 /// («бедро куриное печёное») она выбирала слово, а не признак. Категории заданы
 /// положительно; всё, что в них не попало, не попало — перечислять это незачем.
+///
+/// Про рыбу в промпте нет НИ ОДНОГО названия: категории лишь говорят, куда рыбу
+/// отнести, если модель её узнает (печень — да, филе — нет). Опознание целиком на
+/// модели, и на редких промысловых названиях она его проваливала: «Голец» она
+/// сочла органом рыбы, отсюда и гем. Лечится не правилом, а рамкой — оговоркой,
+/// что слово взято из ДНЕВНИКА ПИТАНИЯ и потому означает съеденное, а не материал,
+/// прибор или термин чужого ремесла. Замер живым путём: набор редких рыб 1/10 → 10/10,
+/// основной набор не пострадал (старая формулировка 21/20/20, новая 21/20/19 из 22 —
+/// разница меньше разброса между прогонами одной и той же версии).
 pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
     let prompt = format!(
         "For each food below decide whether it belongs to one of the categories listed. Food \
@@ -1347,10 +1356,11 @@ pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
          whelks, winkles. The category is these kinds, not the zoological class: a mollusc of \
          another kind does not belong to it.\n\n\
          For EVERY food, first THINK IT THROUGH in the reason field, in TWO steps. Step one: \
-         say WHAT THIS FOOD IS — which animal, bird, fish or plant it comes from, and whether \
-         it is that creature's FLESH, an ORGAN, or something else entirely. Do this even when \
-         the name is unfamiliar: an unknown word is a name of some food, and naming what kind \
-         it is comes before judging it. Step two: name the ONE category that fits what \
+         say what this food MOST LIKELY IS. Every name here was typed by a person into their \
+         FOOD DIARY, so it always names something eaten — never a material, a device or a \
+         term from another trade, however much the word may look like one. Name which animal, \
+         bird, fish or plant it comes from, and whether it is that creature's FLESH, an ORGAN, \
+         or something else entirely. Step two: name the ONE category that fits what \
          you have just named, or say that none fits. Name only the category that FITS — never \
          list the ones that do not: running through them turns into denying them all, the \
          right one included. Both steps go into ONE string — the reason array holds exactly one \

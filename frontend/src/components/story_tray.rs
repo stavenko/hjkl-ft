@@ -448,6 +448,18 @@ fn FrameView(frame: Frame) -> impl IntoView {
                            box-shadow: 0 18px 50px rgba(0,0,0,0.5); transform: translateY(-{up}%);") />
             </div>
         }.into_view(),
+        // Снимок, ПРИЖАТЫЙ К ВЕРХУ кадра. `Shot` ставит картинку по центру своей
+        // области, и под длинным текстом она съезжает вниз, к самой подписи. Здесь
+        // картинка идёт вверх, оставляя воздух между собой и текстом; ничего не
+        // обрезается — окно только меняет выравнивание.
+        Media::ShotTop(p) => view! {
+            <div style="position: absolute; top: 7%; left: 0; right: 0; bottom: 34%; z-index: 1; \
+                        display: flex; align-items: flex-start; justify-content: center; padding: 0 12px;">
+                <img src=format!("/story-img/{p}")
+                    style="max-width: 100%; max-height: 100%; border-radius: 18px; \
+                           box-shadow: 0 18px 50px rgba(0,0,0,0.5);" />
+            </div>
+        }.into_view(),
         // Full-bleed topic photo: anchored to the top, no rounded corners, scaled
         // slightly past the screen edges. Its reading gradient (below) starts at the
         // kicker line so the copy stays legible over the lower part of the image.

@@ -54,6 +54,10 @@ pub enum Media {
     /// GIF whose highlight sits lower in the frame is panned up to a shared
     /// focal point across a run of frames (same widget, different framing).
     ShotUp(&'static str, u8),
+    /// Снимок, ПРИЖАТЫЙ К ВЕРХУ кадра. `Shot` центрирует картинку в своей области,
+    /// и под длинным текстом она съезжает вниз, к самой подписи; здесь она уходит
+    /// вверх и оставляет воздух между собой и текстом.
+    ShotTop(&'static str),
     /// Узкая ПОЛОСА снимка (подсветка и её ближайшее окружение), а не карточка
     /// целиком. Для кадров с длинным текстом: высокая карточка в оставшееся над
     /// текстом место влезает только нечитаемо мелкой, а не уменьшенная — уходит
@@ -117,6 +121,10 @@ impl Frame {
                 s.push_str(p);
                 s.push(':');
                 s.push_str(&up.to_string());
+            }
+            Media::ShotTop(p) => {
+                s.push_str("shottop:");
+                s.push_str(p);
             }
             Media::ShotBand(p) => {
                 s.push_str("shotband:");
@@ -318,7 +326,7 @@ fn all_image_paths() -> Vec<String> {
     for story in STORIES {
         for f in story.frames {
             match f.media {
-                Media::Shot(p) | Media::ShotUp(p, _) | Media::ShotBand(p) | Media::Cover(p) => {
+                Media::Shot(p) | Media::ShotUp(p, _) | Media::ShotTop(p) | Media::ShotBand(p) | Media::Cover(p) => {
                     set.insert(format!("/story-img/{p}"));
                 }
                 Media::Chart => {
@@ -1323,7 +1331,7 @@ const S7: &[Frame] = &[
     // подсветка своя: у предыдущего кадра шкалы нет и быть не может.
     Frame {
         bg: Bg::Meat,
-        media: Media::Shot("red-meat-highlight.gif"),
+        media: Media::ShotTop("red-meat-highlight.gif"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
         title: Loc { en: "", ru: "" },

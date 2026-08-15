@@ -59,7 +59,7 @@ const seed = async (page, uid, opts) => {
       created_at: nowIso, updated_at: nowIso }];
     const goals = [
       { id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
-        amount: 2400, unit: "Kcal", period: "Day", created_at: nowIso, updated_at: nowIso },
+        amount: 3000, unit: "Kcal", period: "Day", created_at: nowIso, updated_at: nowIso },
       { id: "g-ca", nutrient: "Кальций", key: "calcium", direction: "AtLeast",
         amount: 1000, unit: "Mg", period: "Day", created_at: nowIso, updated_at: nowIso },
     ];
@@ -129,7 +129,7 @@ const seed = async (page, uid, opts) => {
       computed_at: nowIso });
     const ind_calories = [], ind_protein = [], ind_veg_fruit = [], ind_steps = [];
     for (let i = 1; i <= 7; i++) {
-      ind_calories.push(indDay(ymd(i), 2400));
+      ind_calories.push(indDay(ymd(i), 3000));
       ind_protein.push(indDay(ymd(i), 180));
       ind_veg_fruit.push(indDay(ymd(i), 800));
       ind_steps.push(indDay(ymd(i), 11000));

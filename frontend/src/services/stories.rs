@@ -1262,7 +1262,7 @@ const S7: &[Frame] = &[
     // 2 — сама планка и почему она есть.
     Frame {
         bg: Bg::Meat,
-        media: Media::Emoji("🥩"),
+        media: Media::Cover("meat-steaks.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
         title: Loc { en: "", ru: "" },

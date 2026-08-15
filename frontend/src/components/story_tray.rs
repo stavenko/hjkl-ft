@@ -487,14 +487,26 @@ fn FrameView(frame: Frame) -> impl IntoView {
     // The reading scrim under the text. For a full-bleed Cover photo the gradient
     // is taller and its translucency starts up at the kicker line, so the copy sits
     // on a darkened band while the top of the image stays clear.
+    //
+    // Цвет затемнения — НИЗ ФОНА этого кадра, а не всегда синий: шторка обязана
+    // сойтись с фоном, иначе под фотографией видна граница чужого цвета.
+    let (r, g, bl, solid) = match frame.bg {
+        Bg::Meat => (20, 6, 9, "#140609"),
+        _ => (7, 13, 20, "#070d14"),
+    };
     let scrim = if matches!(frame.media, Media::Cover(_)) {
-        "position: absolute; left: 0; right: 0; bottom: 0; height: 66%; z-index: 1; \
-         pointer-events: none; background: linear-gradient(180deg, \
-         rgba(7,13,20,0) 0%, rgba(7,13,20,0.5) 22%, rgba(7,13,20,0.88) 46%, #070d14 74%);"
+        format!(
+            "position: absolute; left: 0; right: 0; bottom: 0; height: 66%; z-index: 1; \
+             pointer-events: none; background: linear-gradient(180deg, \
+             rgba({r},{g},{bl},0) 0%, rgba({r},{g},{bl},0.5) 22%, rgba({r},{g},{bl},0.88) 46%, \
+             {solid} 74%);"
+        )
     } else {
-        "position: absolute; left: 0; right: 0; bottom: 0; height: 60%; z-index: 1; \
-         pointer-events: none; background: linear-gradient(180deg, \
-         rgba(7,13,20,0) 0%, rgba(7,13,20,0.75) 32%, #070d14 58%, #070d14 100%);"
+        format!(
+            "position: absolute; left: 0; right: 0; bottom: 0; height: 60%; z-index: 1; \
+             pointer-events: none; background: linear-gradient(180deg, \
+             rgba({r},{g},{bl},0) 0%, rgba({r},{g},{bl},0.75) 32%, {solid} 58%, {solid} 100%);"
+        )
     };
 
     view! {

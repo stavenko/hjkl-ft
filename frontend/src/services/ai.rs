@@ -1317,8 +1317,14 @@ pub async fn classify_veg_fruit(names: &[String]) -> Result<Vec<bool>, String> {
 // ── Источник гемового железа ─────────────────────────────────────────────────
 
 /// Обоснование стоит ПЕРВЫМ — см. замер в шапке раздела.
+///
+/// Опознание вынесено в СВОЁ поле. Раньше оно писалось в графу «почему продукт
+/// отнесён к источникам гема»: имя поля модель видит в json_schema, то есть оно
+/// работает как часть промпта — и заставляло записывать «что это за еда» в графу,
+/// само название которой уже утверждает вывод, причём в одну сторону.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct HemeAnswer {
+    what_the_person_most_likely_ate: Vec<String>,
     reason_why_this_product_classified_as_gem_source: Vec<String>,
     verdict: Vec<bool>,
 }
@@ -1355,25 +1361,26 @@ pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
          — MOLLUSCS OF THESE KINDS ONLY: mussels, oysters, clams and vongole, cockles, octopus, \
          whelks, winkles. The category is these kinds, not the zoological class: a mollusc of \
          another kind does not belong to it.\n\n\
-         For EVERY food, first THINK IT THROUGH in the reason field, in TWO steps. Step one: \
-         say what this food MOST LIKELY IS. Every name here was typed by a person into their \
-         FOOD DIARY, so it always names something eaten — never a material, a device or a \
-         term from another trade, however much the word may look like one. Name which animal, \
-         bird, fish or plant it comes from, and whether it is that creature's FLESH, an ORGAN, \
-         or something else entirely. Step two: name the ONE category that fits what \
-         you have just named, or say that none fits. Name only the category that FITS — never \
-         list the ones that do not: running through them turns into denying them all, the \
-         right one included. Both steps go into ONE string — the reason array holds exactly one \
-         item per food, never more. Then give the verdict: true if it belongs to a category, \
-         false if it does not.\n\n\
+         For EVERY food, answer in THREE fields, in this order.\n\
+         First, in \"what_the_person_most_likely_ate\": say what this food MOST LIKELY IS, \
+         WITHOUT yet thinking about heme iron or the categories at all. Every name here was \
+         typed by a person into their FOOD DIARY, so it always names something eaten — never \
+         a material, a device or a term from another trade, however much the word may look \
+         like one. Name which animal, bird, fish or plant it comes from, and whether it is \
+         that creature's FLESH, an ORGAN, or something else entirely.\n\
+         Second, in the reason field: name the ONE category that fits what you have just \
+         named, or say that none fits. Name only the category that FITS — never list the ones \
+         that do not: running through them turns into denying them all, the right one \
+         included.\n\
+         Third, the verdict: true if it belongs to a category, false if it does not. Each \
+         array holds exactly one item per food, never more.\n\n\
          Do not reason about how many milligrams of iron a food holds — you do not know those \
          numbers, and the categories already account for them. A composite dish belongs to a \
          category only when such an ingredient is its MAIN part. Words about preparation, \
          storage, packaging, cut, grade or country of origin never change what a food is.\n\n\
          Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object: the reason array — one string per \
-         food — and \"verdict\" — one boolean per food, both in the SAME order as the foods \
-         above.",
+         Respond with ONLY a single minified JSON object: the three arrays described above — \
+         one item per food in each — all in the SAME order as the foods above.",
         list = numbered(names),
     );
     // ТРИ ответа и большинство, а не один ответ.
@@ -1390,6 +1397,13 @@ pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
     let mut last_reason: Vec<String> = vec![String::new(); names.len()];
     for _ in 0..3 {
         let v: HemeAnswer = generate(prompt.clone(), |_| {}).await?;
+        if v.what_the_person_most_likely_ate.len() != names.len() {
+            return Err(format!(
+                "гем: length mismatch for {} foods — what_ate={}",
+                names.len(),
+                v.what_the_person_most_likely_ate.len()
+            ));
+        }
         let verdict = take_flags(
             "гем",
             "", // в аналитику уйдёт ИТОГ голосования, а не каждый голос
@@ -1399,7 +1413,14 @@ pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
         )?;
         for (i, yes) in verdict.into_iter().enumerate() {
             votes[i][usize::from(yes)] += 1;
-            last_reason[i] = v.reason_why_this_product_classified_as_gem_source[i].clone();
+            // Опознание хранится вместе с обоснованием: именно оно объясняет
+            // промахи вроде «Голец → печень рыбы», а по одной категории этого
+            // не видно.
+            last_reason[i] = format!(
+                "{} → {}",
+                v.what_the_person_most_likely_ate[i],
+                v.reason_why_this_product_classified_as_gem_source[i]
+            );
         }
     }
     let verdict: Vec<bool> = votes.iter().map(|v| v[1] > v[0]).collect();

@@ -220,6 +220,12 @@ pub async fn daily_kcal_totals(window_days: i64) -> Vec<f64> {
 //   • probably-but-not-confidently losing → HOLD, gather another week;
 //   • flat / gaining → −5% (induce a deficit);
 //   • no usable trend yet (week 1 / too few weigh-ins) → HOLD (baseline = average).
+//
+// И ПОВЕРХ ЭТОГО — второй контур, `calorie_planka_weekly`: шаг, к которому зовёт
+// вес, разрешается только если человек планку ИСПОЛНЯЛ. Один лишь вес образует
+// положительную обратную связь — недоедание разгоняет похудение, похудение поднимает
+// планку, планка отдаляется от того, что человек ест, и так по кругу с растущим
+// разрывом. Подробный разбор петли — в доке к `calorie_planka_weekly`.
 
 /// Comfortable weekly weight-loss rate, as a FRACTION of body weight.
 const COMFORT_LOSS_MIN: f64 = 0.003; // 0.3 %/week
@@ -272,6 +278,80 @@ pub fn calorie_planka(
     weight_kg: f64,
 ) -> f64 {
     ((avg_kcal * planka_factor(trend, weight_kg)) / 50.0).round() * 50.0
+}
+
+/// Как человек ПРОЖИЛ неделю относительно своей планки.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Adherence {
+    /// Ел меньше планки.
+    Under,
+    /// Ел больше планки.
+    Over,
+    /// Держался планки — в пределах той же погрешности, по которой день считается
+    /// зелёным.
+    OnTarget,
+}
+
+/// Куда человек отклонился от планки за неделю: средняя дневная калорийность
+/// против планки, порог — тот же `band`, что делает день зелёным (±50 ккал).
+pub fn adherence(avg_kcal: f64, planka: f64, band: f64) -> Adherence {
+    if avg_kcal < planka - band {
+        Adherence::Under
+    } else if avg_kcal > planka + band {
+        Adherence::Over
+    } else {
+        Adherence::OnTarget
+    }
+}
+
+/// Недельный пересчёт планки: прежняя планка, сдвинутая трендом веса, НО с оглядкой
+/// на то, исполнялась ли она.
+///
+/// # Зачем это правило
+///
+/// Планка, которую двигает ОДИН ТОЛЬКО вес, образует положительную обратную связь —
+/// петлю, которая сама себя разгоняет:
+///
+/// 1. человек ест заметно меньше планки (тревожная неделя, болезнь, стресс, просто
+///    не до еды);
+/// 2. вес от этого падает быстро — быстрее комфортной полосы;
+/// 3. правило по весу читает это как «слишком быстро худеет» и ПОДНИМАЕТ планку,
+///    чтобы поберечь мышцы;
+/// 4. человек ест столько же, сколько ел, — то есть теперь ещё дальше от планки;
+/// 5. вес продолжает падать так же быстро → планка поднимается снова.
+///
+/// С каждой неделей разрыв между тем, что человек ест, и тем, что ему предписано,
+/// РАСТЁТ, и планка тем безумнее, чем хуже человеку. Никакой обратной силы, которая
+/// вернула бы её к реальности, в этой петле нет: вес подтверждает подъём на каждом
+/// круге. То же самое зеркально — перебор при стоящем весе тянет планку вниз, к
+/// цифре, которую человек и не пробовал выполнять, и невыполнимость только растёт.
+///
+/// Разорвать петлю можно ровно в одном месте: перестать двигать планку туда, куда
+/// зовёт вес, когда причина движения веса — НЕИСПОЛНЕНИЕ планки, а не её величина.
+/// Пока человек не ест по планке, вес не говорит о планке ничего: он говорит о том,
+/// сколько человек ест на самом деле.
+///
+/// # Как именно
+///
+/// Исполнение работает СТОПОРОМ, а не ещё одним слагаемым: недоедающему планку не
+/// поднимаем, переедающему не опускаем. Стопор односторонний — в противоположную
+/// сторону планка ходит свободно: недоедающему её МОЖНО опустить (если вес стоит
+/// даже при недоедании, дело не в дисциплине), переедающему — поднять.
+///
+/// Держать на месте можно всегда: это единственное решение, которое не требует от
+/// человека того, чего он на прошлой неделе не делал.
+pub fn calorie_planka_weekly(
+    previous: f64,
+    trend: &crate::services::weight_trend::WeightTrend,
+    weight_kg: f64,
+    adherence: Adherence,
+) -> f64 {
+    let factor = match adherence {
+        Adherence::Under => planka_factor(trend, weight_kg).min(1.0),
+        Adherence::Over => planka_factor(trend, weight_kg).max(1.0),
+        Adherence::OnTarget => planka_factor(trend, weight_kg),
+    };
+    ((previous * factor) / 50.0).round() * 50.0
 }
 
 /// The suggested daily calorie planka shown (and accepted) in ch3: average intake
@@ -2323,8 +2403,70 @@ pub async fn list_progress_photos() -> Vec<ProgressPhoto> {
 #[cfg(test)]
 mod tests {
     use super::steps_planka_for_avg;
-    use super::{calorie_planka, planka_factor, PLANKA_STEP};
+    use super::{adherence, calorie_planka, calorie_planka_weekly, planka_factor, Adherence, PLANKA_STEP};
     use crate::services::weight_trend::{Direction, WeightTrend};
+
+    // ── Исполнение планки как стопор недельного пересчёта ────────────────────
+
+    /// Уверенное быстрое похудение — тот случай, когда правило зовёт ПОДНЯТЬ планку.
+    fn losing_fast() -> WeightTrend {
+        WeightTrend::Estimated {
+            direction: Direction::Down,
+            confidence: 0.99,
+            slope_kg_per_week: -1.2, // при 80 кг это 1.5 %/нед — сильно выше комфортных 0.7
+            days: 14,
+        }
+    }
+
+    /// Вес стоит — правило зовёт ОПУСТИТЬ планку.
+    fn flat() -> WeightTrend {
+        WeightTrend::Estimated {
+            direction: Direction::Up,
+            confidence: 0.9,
+            slope_kg_per_week: 0.05,
+            days: 14,
+        }
+    }
+
+    #[test]
+    fn otklonenie_ot_planki_po_koridoru() {
+        assert_eq!(adherence(2400.0, 2400.0, 50.0), Adherence::OnTarget);
+        assert_eq!(adherence(2360.0, 2400.0, 50.0), Adherence::OnTarget); // в пределах
+        assert_eq!(adherence(2000.0, 2400.0, 50.0), Adherence::Under);
+        assert_eq!(adherence(2600.0, 2400.0, 50.0), Adherence::Over);
+    }
+
+    /// Боевой случай: тревожная неделя, человек ест сильно меньше планки и быстро
+    /// худеет. Без стопора планка поехала бы ВВЕРХ — и отрывалась бы дальше каждую
+    /// неделю, потому что есть человек больше не станет.
+    #[test]
+    fn nedoedaet_planku_ne_podnimaem() {
+        let base = 2400.0;
+        // Само правило по весу зовёт вверх.
+        assert!(planka_factor(&losing_fast(), 80.0) > 1.0);
+        assert_eq!(calorie_planka_weekly(base, &losing_fast(), 80.0, Adherence::Under), base);
+        // А тому, кто планку держал, поднимаем как и раньше.
+        assert!(calorie_planka_weekly(base, &losing_fast(), 80.0, Adherence::OnTarget) > base);
+    }
+
+    /// Обратная сторона: перебор при стоящем весе. Опускать планку тому, кто её и
+    /// не пробовал выполнять, бессмысленно — сначала пусть удержится в этой.
+    #[test]
+    fn pereedaet_planku_ne_ponizhaem() {
+        let base = 2400.0;
+        assert!(planka_factor(&flat(), 80.0) < 1.0);
+        assert_eq!(calorie_planka_weekly(base, &flat(), 80.0, Adherence::Over), base);
+        assert!(calorie_planka_weekly(base, &flat(), 80.0, Adherence::OnTarget) < base);
+    }
+
+    /// Стопор односторонний: недоедающему планку МОЖНО опустить (вес не падает —
+    /// значит и эта планка велика), переедающему — поднять.
+    #[test]
+    fn stopor_ne_meshaet_dvizheniyu_v_druguyu_storonu() {
+        let base = 2400.0;
+        assert!(calorie_planka_weekly(base, &flat(), 80.0, Adherence::Under) < base);
+        assert!(calorie_planka_weekly(base, &losing_fast(), 80.0, Adherence::Over) > base);
+    }
 
     mod recipe_flags {
         use super::super::{recipe_flags, recipe_nutrition, RecipeIngredient};

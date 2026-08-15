@@ -80,7 +80,7 @@ pub(crate) fn daily_state(misses: u32) -> IndicatorState {
 /// The CALORIE indicator's success band: a day is green when intake landed
 /// STRICTLY within ±50 kcal of that day's planka (planka 3000 → 2951…3049 is
 /// green; 2950/3050 already miss). Indicator/gate semantics ONLY.
-const CALORIE_BAND_KCAL: f64 = 50.0;
+pub const CALORIE_BAND_KCAL: f64 = 50.0;
 
 /// Green-day test for one indicator from its frozen `(value, ratio)` pair.
 /// Calories: within the ±band of the day's planka (reconstructed as

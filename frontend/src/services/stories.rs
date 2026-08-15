@@ -1291,7 +1291,7 @@ const S7: &[Frame] = &[
     // 4 — почему мы ничего не запрещаем.
     Frame {
         bg: Bg::Meat,
-        media: Media::Emoji("🎂"),
+        media: Media::Cover("meat-feast.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
         title: Loc { en: "", ru: "" },
@@ -1304,11 +1304,11 @@ const S7: &[Frame] = &[
         },
     },
     // 5 — что мы делаем вместо запрета. Кадр про сам индикатор, поэтому здесь не
-    // метафора, а снимок дашборда: шкала недели и ряд значков, по которым человек
-    // и будет судить.
+    // метафора, а снимок дашборда. Индикатор ИМЕННО КОЛБАС: у него нет шкалы, он
+    // про частоту, — поэтому подсвечен один значок в ряду.
     Frame {
         bg: Bg::Meat,
-        media: Media::Shot("red-meat-highlight.gif"),
+        media: Media::Shot("processed-meat-highlight.gif"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
         title: Loc { en: "", ru: "" },
@@ -1319,18 +1319,23 @@ const S7: &[Frame] = &[
                  Ваша задача — научиться ему следовать.",
         },
     },
-    // 6 — задание недели, по которому откроется следующая глава.
+    // 6 — второй индикатор, недельный, и задание недели. Здесь ШКАЛА, поэтому и
+    // подсветка своя: у предыдущего кадра шкалы нет и быть не может.
     Frame {
         bg: Bg::Meat,
-        media: Media::Emoji("🎯"),
+        media: Media::Shot("red-meat-highlight.gif"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
         title: Loc { en: "", ru: "" },
         body: Loc {
-            en: "This week, try to eat red meat so that you stay within your limit. After that \
-                 the progress will carry on.",
-            ru: "На этой неделе постарайтесь съесть красного мяса так, чтобы уложиться в вашу \
-                 планку. После этого прогресс пойдёт дальше.",
+            en: "We also give you an indicator and your weekly progress bar for red meat. Red \
+                 meat is an excellent source of heme iron, but it should not be overdone. In \
+                 the long run it is better to keep to moderate amounts. Keep this indicator \
+                 green until the end of this week.",
+            ru: "Также мы даём индикатор и ваш недельный прогресс-бар на красное мясо. Красное \
+                 мясо — это отличный источник гема, но злоупотреблять им не стоит. В \
+                 долгосрочной перспективе лучше придерживаться умеренного потребления. Этот \
+                 индикатор надо выдержать зелёным до конца этой недели.",
         },
     },
 ];

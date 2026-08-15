@@ -19,9 +19,11 @@ import path from "node:path";
 const BASE = process.env.FE || DEFAULT_URL;
 const ROOT = path.resolve(import.meta.dirname, "..");
 const OUT = process.env.OUT || path.join(ROOT, "frontend/story-img/red-meat-highlight.gif");
+const OUT_PROCESSED = process.env.OUT_PROCESSED
+  || path.join(ROOT, "frontend/story-img/processed-meat-highlight.gif");
 
-const seed = async (page, uid) => {
-  await page.evaluate(async ({ uid }) => {
+const seed = async (page, uid, opts) => {
+  await page.evaluate(async ({ uid, opts }) => {
     const db = await new Promise((res, rej) => {
       const r = indexedDB.open(`hjkl-ft-${uid}`);
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
@@ -87,10 +89,12 @@ const seed = async (page, uid) => {
         { is_milk_globule: true, nutrients: { "Кальций": 160, "Клетчатка": 0 } }),
       food("veg", "Овощи", 30, 1, 0.2,
         { sfa_pct: 0, mufa_pct: 0, pufa_pct: 0, epa_dha_pct: 0 }, { is_veg_fruit: true }),
-      // Тот самый перебор, о котором кадр.
       food("beef", "Говядина тушёная", 250, 27, 15,
         { sfa_pct: 43, mufa_pct: 45, pufa_pct: 4, epa_dha_pct: 0 },
         { is_red_meat: true, is_heme: true, iron_mg: 2.6, iron_absorption: 0.25 }),
+      food("sausage", "Сосиски молочные", 260, 11, 24,
+        { sfa_pct: 40, mufa_pct: 45, pufa_pct: 8, epa_dha_pct: 0 },
+        { is_red_meat: true, is_processed_meat: true, iron_mg: 1.2, iron_absorption: 0.2 }),
     ];
 
     const diary = [], weight_entries = [], step_entries = [];
@@ -106,12 +110,17 @@ const seed = async (page, uid) => {
       add("dv", "veg", 850);
       add("dl", "liver", 120);
       add("do", "oil", 40);
-      add("dc", "curd", 300);
+      add("dc", "curd", 520);
       if (i % 3 === 0) add("dm", "mack", 200);
-      // Мясо: и в текущей неделе (перебор шкалы), и в прошлой (красный вердикт).
-      // Мясо в КАЖДОЙ неделе: иначе прошлые недели закрываются, и вердикт выходит
-      // оранжевым там, где кадр говорит «вы рискуете».
-      if (i % 3 === 0) add("db", "beef", 300);
+      // Мясо: «over» — в каждой неделе с перебором (иначе прошлые недели
+      // закрываются и вердикт выходит оранжевым там, где кадр говорит «вы
+      // рискуете»); «ok» — вдвое меньше, планка держится и шкала зелёная.
+      if (i % 3 === 0) add("db", "beef", opts.meat === "over" ? 300 : 80);
+      // Колбаса: «often» — четыре дня из последних семи, это красный по правилу
+      // 1–3 оранжевый / 4+ красный. «none» — её нет вовсе, значок зелёный.
+      if (opts.sausage === "often" && [1, 2, 4, 6, 8, 9, 11, 13].includes(i)) {
+        add("ds", "sausage", 100);
+      }
     }
 
     // Вердикты дневных индикаторов за последние 7 завершённых дней — закрытые.
@@ -137,31 +146,47 @@ const seed = async (page, uid) => {
       });
     }
     db.close();
-  }, { uid });
+  }, { uid, opts });
 };
 
+// Две гифки за прогон, по кадру истории на каждую, и у каждой СВОЁ состояние:
+// на кадре подсвечено ровно одно тревожное место, всё остальное зелёное.
+//
+//   red-meat-highlight.gif       — шкала недели и значок «Кр. мясо»: планка
+//                                  перебрана (810 из 700), колбас человек не ел;
+//   processed-meat-highlight.gif — значок «Колбасы»: шкалы у него нет и быть не
+//                                  может, он про частоту. Мясо здесь в норме,
+//                                  а колбаса была четыре дня из семи.
 const b = await chromium.launch({ headless: true });
-const { context, page } = await openSeeded(b, {
-  baseUrl: BASE,
-  context: { serviceWorkers: "block", deviceScaleFactor: 2 },
-  uid: `redmeat-hl-${Math.floor(Math.random() * 1e6)}`,
-  seed,
-});
-await page.reload({ waitUntil: "domcontentloaded" });
-await page.waitForTimeout(4000);
-await page.setViewportSize({ width: 440, height: 1200 });
-await page.waitForTimeout(3000); // дать полосам доиграть анимацию заполнения
 
-console.log("шкалы:", await page.$$eval("[data-gauge]", (els) => els.map((e) => e.getAttribute("data-gauge"))));
-console.log("индикаторы:", await page.$$eval("[data-ind]", (els) => els.map((e) => e.getAttribute("data-ind"))));
-console.log("мясо:", (await page.locator('[data-gauge="Кр. мясо/нед"]').innerText()).replace(/\s+/g, " "));
-await page.locator('[data-testid="progress-widget"]').screenshot({
-  path: process.env.SHOT || "/tmp/red-meat-highlight-widget.png",
-});
+const run = async (label, opts, sparks, out, shot) => {
+  const { context, page } = await openSeeded(b, {
+    baseUrl: BASE,
+    context: { serviceWorkers: "block", deviceScaleFactor: 2 },
+    uid: `${label}-hl-${Math.floor(Math.random() * 1e6)}`,
+    seed: (p, u) => seed(p, u, opts),
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(4000);
+  await page.setViewportSize({ width: 440, height: 1200 });
+  await page.waitForTimeout(3000); // дать полосам доиграть анимацию заполнения
 
-await makeWidgetGif(page, ['[data-ind="Кр. мясо"] > div', '[data-gauge="Кр. мясо/нед"]'], OUT,
-  {});
-console.log("готово:", OUT);
+  console.log(`\n[${label}] индикаторы:`,
+    await page.$$eval("[data-ind]", (els) => els.map((e) => e.getAttribute("data-ind"))));
+  console.log(`[${label}] мясо:`,
+    (await page.locator('[data-gauge="Кр. мясо/нед"]').innerText()).replace(/\s+/g, " "));
+  await page.locator('[data-testid="progress-widget"]').screenshot({ path: shot });
+  await makeWidgetGif(page, sparks, out, {});
+  console.log(`[${label}] готово:`, out);
+  await context.close();
+};
 
-await context.close();
+await run("redmeat", { meat: "over", sausage: "none" },
+  ['[data-ind="Кр. мясо"] > div', '[data-gauge="Кр. мясо/нед"]'],
+  OUT, "/tmp/red-meat-highlight-widget.png");
+
+await run("processed", { meat: "ok", sausage: "often" },
+  ['[data-ind="Колбасы"] > div'],
+  OUT_PROCESSED, "/tmp/processed-meat-highlight-widget.png");
+
 await b.close();

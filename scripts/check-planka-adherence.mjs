@@ -120,8 +120,9 @@ console.log("письмо:\n" + letter.split("\n").filter(Boolean).map((s) => " 
 check("пересчёт состоялся", !!letter);
 check("планка НЕ выросла", state.planka !== null && state.planka <= PLANKA,
   `было ${PLANKA}, стало ${state.planka}`);
-check("письмо называет причину", letter.includes("меньше своей планки"));
-check("письмо зовёт в поддержку", letter.includes("поддержку"));
+check("письмо называет причину", letter.includes("вы недоедали"));
+check("письмо называет, куда звал расчёт", letter.includes("необходимо поднять планку"));
+check("письмо требует держаться планки", letter.includes("чётко следовать вашей планке"));
 
 await b.close();
 console.log(fail ? `\n${fail} провалов` : "\nвсё сошлось");

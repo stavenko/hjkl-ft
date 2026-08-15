@@ -1346,10 +1346,16 @@ pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
          — MOLLUSCS OF THESE KINDS ONLY: mussels, oysters, clams and vongole, cockles, octopus, \
          whelks, winkles. The category is these kinds, not the zoological class: a mollusc of \
          another kind does not belong to it.\n\n\
-         For EVERY food, first THINK IT THROUGH in the reason field: does this food belong to \
-         one of the categories above, and to which one? Name the category, or say that none of \
-         them fits. One short sentence, at most 10 words. Then give the verdict: true if it \
-         belongs to a category, false if it does not.\n\n\
+         For EVERY food, first THINK IT THROUGH in the reason field, in TWO steps. Step one: \
+         say WHAT THIS FOOD IS — which animal, bird, fish or plant it comes from, and whether \
+         it is that creature's FLESH, an ORGAN, or something else entirely. Do this even when \
+         the name is unfamiliar: an unknown word is a name of some food, and naming what kind \
+         it is comes before judging it. Step two: name the ONE category that fits what \
+         you have just named, or say that none fits. Name only the category that FITS — never \
+         list the ones that do not: running through them turns into denying them all, the \
+         right one included. Both steps go into ONE string — the reason array holds exactly one \
+         item per food, never more. Then give the verdict: true if it belongs to a category, \
+         false if it does not.\n\n\
          Do not reason about how many milligrams of iron a food holds — you do not know those \
          numbers, and the categories already account for them. A composite dish belongs to a \
          category only when such an ingredient is its MAIN part. Words about preparation, \

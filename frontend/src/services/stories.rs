@@ -1277,7 +1277,7 @@ const S7: &[Frame] = &[
     // 3 — переработанное мясо: тот же разговор, но отдельный.
     Frame {
         bg: Bg::Meat,
-        media: Media::Emoji("🌭"),
+        media: Media::Cover("meat-sausages.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
         title: Loc { en: "", ru: "" },

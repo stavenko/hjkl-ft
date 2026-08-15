@@ -1345,6 +1345,20 @@ struct HemeAnswer {
 /// прибор или термин чужого ремесла. Замер живым путём: набор редких рыб 1/10 → 10/10,
 /// основной набор не пострадал (старая формулировка 21/20/20, новая 21/20/19 из 22 —
 /// разница меньше разброса между прогонами одной и той же версии).
+///
+/// Категория названа МЯСОМ МЛЕКОПИТАЮЩИХ, а не красным мясом, хотя означает ровно
+/// его. С прежним названием «бедро куриное печёное» уходило в неё единогласно —
+/// дословно «Chicken thigh → RED MEAT», 3:0, то есть голосование тут не спасает.
+/// Оговорка про MAMMALS в теле правила стояла и тогда, но проигрывала внешнему
+/// знанию, где тёмное мясо птицы сплошь и рядом зовут красным. С названием
+/// категории это знание спорит, с определением внутри неё — нет, поэтому заменено
+/// именно название: под «мясо млекопитающих» курица не подходит никак.
+///
+/// Колбаса, сосиски и ветчина названы в категории прямо. Гем в них ЕСТЬ — по ГОСТ
+/// мясо занимает почти весь батон, — и признак говорит об этом честно: съевшему
+/// колбасы незачем добирать гем отдельно. Индикаторы существуют не затем, чтобы
+/// быть зелёными. То, что это ПРИ ЭТОМ мясо глубокой переработки, говорит свой
+/// индикатор — [`super::processed_meat`]; это разные разговоры и разные признаки.
 pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
     let prompt = format!(
         "For each food below decide whether it belongs to one of the categories listed. Food \
@@ -1355,9 +1369,11 @@ pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
          — OTHER INNER ORGANS themselves — hearts, kidneys, tongues, gizzards, lungs, blood \
          sausage — of any animal, bird or fish. It is the ORGAN that belongs to this category, \
          never the animal's flesh: a fish fillet, a bird's breast or leg is not an organ;\n\
-         — RED MEAT: beef, veal, pork, lamb, mutton, goat, and the meat of other farmed or wild \
-         MAMMALS — venison, elk, boar, horse, rabbit — in any cut, ground or whole, raw or \
-         cooked;\n\
+         — MEAT OF MAMMALS: beef, veal, pork, lamb, mutton, goat, and the meat of other farmed \
+         or wild mammals — venison, elk, boar, horse, rabbit — in any cut, ground or whole, raw \
+         or cooked, and food made mainly of such meat: sausage, frankfurters, ham, bacon, \
+         salami, mince, meatballs, cutlets, stew, canned meat. A creature that is not a mammal \
+         has no meat in this category;\n\
          — MOLLUSCS OF THESE KINDS ONLY: mussels, oysters, clams and vongole, cockles, octopus, \
          whelks, winkles. The category is these kinds, not the zoological class: a mollusc of \
          another kind does not belong to it.\n\n\

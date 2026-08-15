@@ -19,7 +19,7 @@
 //!
 //! **Переработанное мясо тратит те же граммы.** Колбаса — красное мясо, как бы её
 //! ни переработали, и на недельный счёт она идёт наравне со стейком. Отдельно от
-//! неё живёт свой индикатор — [`super::processed_meat`], который меряет не
+//! неё живёт свой индикатор — [`uper::processed_meat`], который меряет не
 //! количество, а частоту.
 
 use chrono::{Duration, NaiveDate};
@@ -32,14 +32,6 @@ pub const RED_MEAT_UNLOCKED_KEY: &str = "red_meat_week_unlocked";
 
 /// App-flag: день, от которого катится сетка недель красного мяса.
 pub const RED_MEAT_WEEK_OPEN_KEY: &str = "red_meat_week_opened_at";
-
-/// App-flag: день, С КОТОРОГО недели жиров засчитываются в гейт красного мяса.
-///
-/// Ровно та же защита, что у гейта жиров: без якоря человек с уже закрытой прошлой
-/// неделей получал бы следующую тему в ту же секунду, что и обновление, ничего для
-/// этого не сделав. Правило — «закрой неделю и дождись её конца», а не «когда-то
-/// закрывал».
-pub const RED_MEAT_GATE_ANCHOR_KEY: &str = "red_meat_gate_anchor";
 
 /// Недельная планка в граммах СЫРОГО мяса.
 pub const WEEKLY_LIMIT_RAW_G: f64 = 700.0;
@@ -70,12 +62,6 @@ pub fn counts(food: &Food) -> bool {
 /// Открыта ли неделя красного мяса.
 pub fn unlocked() -> bool {
     app_flags::get_bool(RED_MEAT_UNLOCKED_KEY)
-}
-
-/// День, с которого считается гейт. `None` — якорь ещё не поставлен.
-pub fn gate_anchor() -> Option<NaiveDate> {
-    app_flags::get(RED_MEAT_GATE_ANCHOR_KEY)
-        .and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
 }
 
 /// День, с которого началась тема.

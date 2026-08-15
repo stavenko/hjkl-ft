@@ -51,8 +51,6 @@ const seed = async (page, uid) => {
       { key: "iron_week_opened_at", value: ymd(35) },
       { key: "fat_week_unlocked", value: "true" },
       { key: "fat_week_opened_at", value: ymd(21) },
-      // Якорь гейта в прошлом: неделя жиров, закончившаяся вчера, засчитывается.
-      { key: "red_meat_gate_anchor", value: ymd(20) },
     ]);
     await put("profile", [{
       key: "profile", sex: "male", height_cm: 180, birth_year: 1985,
@@ -91,12 +89,22 @@ const seed = async (page, uid) => {
         balance_fat_profile: null, created_at: nowIso, updated_at: nowIso },
     ]);
 
-    // Дневник за 14 дней. Рыба каждый день — омега-3 закрывается с запасом.
+    // Дневник за 21 день. Рыба — ТОЛЬКО в первую неделю темы жиров: она закрыта, а
+    // последняя завершённая сорвана. Это и есть боевой случай — человек давно
+    // прошёл жиры, но на этой неделе рыбы не ел; тема мяса всё равно обязана
+    // открыться, потому что засчитывается ЛЮБАЯ закрытая неделя с начала темы.
     const diary = [];
-    for (let i = 1; i <= 14; i++) {
-      diary.push({ id: `f${i}`, date: ymd(i), food_id: "fish", time: "13:00",
-        grams: 150, waste_grams: 0, meal_label: "Обед", deleted: false,
-        created_at: nowIso, updated_at: nowIso });
+    for (let i = 1; i <= 21; i++) {
+      if (i >= 15) {
+        diary.push({ id: `f${i}`, date: ymd(i), food_id: "fish", time: "13:00",
+          grams: 150, waste_grams: 0, meal_label: "Обед", deleted: false,
+          created_at: nowIso, updated_at: nowIso });
+      } else {
+        // Дневник ведётся, но без рыбы — недели идут, омега-3 не закрывается.
+        diary.push({ id: `f${i}`, date: ymd(i), food_id: "beef", time: "13:00",
+          grams: 100, waste_grams: 0, meal_label: "Обед", deleted: false,
+          created_at: nowIso, updated_at: nowIso });
+      }
     }
     // Говядина восемь дней подряд из последней недели — планка перебрана.
     for (let i = 1; i <= 8; i++) {
@@ -205,15 +213,29 @@ const colorsNow = await readColors(page);
 // Прошлая неделя перебрана (8 × 200 г говядины ≈ 1080 г при планке 700) → красный.
 check("красное мясо судится сразу, по прошлым неделям", colorsNow["Кр. мясо"] === "#e0304f",
   colorsNow["Кр. мясо"] ?? "не найдено");
-// Сосиски в трёх днях из семи → оранжевый по правилу 1–3.
-check("колбасы судятся сразу, по прошлым дням", colorsNow["Колбасы"] === "#e8850d",
-  colorsNow["Колбасы"] ?? "не найдено");
+
 
 // История: седьмая должна появиться в ленте.
 const stories = await page.locator('[data-testid="story-circle"]').count();
 check("истории есть", stories > 0, `кругов ${stories}`);
 const badges = await page.locator('[data-testid="story-circle"]').allInnerTexts().catch(() => []);
 check("седьмая история появилась", badges.some((t) => t.trim() === "7"), badges.join("|"));
+
+
+// Колбасы проверяем НЕ в ряду: там семь мест по важности, и оранжевый значок
+// вытесняется красными. На развёрнутой панели видны все индикаторы.
+await page.locator('[data-testid="progress-widget"]').click();
+await page.waitForTimeout(4000);
+const panelColor = await page.evaluate(() => {
+  const p = document.querySelector('[data-ind-panel="processed_meat"]');
+  const svg = p?.querySelector("svg");
+  if (!svg) return null;
+  const s = svg.getAttribute("stroke");
+  return s && s !== "none" ? s : svg.getAttribute("fill");
+});
+// Сосиски в трёх днях из семи → оранжевый по правилу 1–3.
+check("колбасы судятся сразу, по прошлым дням", panelColor === "#e8850d",
+  panelColor ?? "панель не найдена");
 
 await page.screenshot({ path: "/tmp/red-meat-week.png", fullPage: true });
 

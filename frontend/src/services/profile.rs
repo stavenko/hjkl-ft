@@ -227,12 +227,25 @@ pub fn get_age_years() -> Option<i32> {
     get_birth_year().map(|by| current_year - by)
 }
 
-/// Доля калорийной планки, которую отдаём белку. Рекомендации для похудения
-/// называют 25–35 % калорий из белка; берём середину. Смысл планки — не «покрыть
-/// потребность» (её закрывают куда меньшие цифры), а НАСЫТИТЬ: белок утоляет
-/// голод лучше остальных макронутриентов, и заниженная планка делает показатель
-/// бесполезным.
-pub const PROTEIN_KCAL_SHARE: f64 = 0.30;
+/// Точка перегиба: до неё белок берётся постоянной долей калорий, после — растёт
+/// медленнее калорий.
+pub const PROTEIN_ANCHOR_KCAL: f64 = 1800.0;
+/// Сколько граммов белка приходится на точку перегиба. 135 г = ровно 30 % от 1800
+/// ккал: рекомендации для похудения называют 25–35 % калорий из белка, и на
+/// умеренном калораже мы берём середину. Смысл планки — не «покрыть потребность»
+/// (её закрывают куда меньшие цифры), а НАСЫТИТЬ: белок утоляет голод лучше
+/// остальных макронутриентов, и заниженная планка делает показатель бесполезным.
+pub const PROTEIN_ANCHOR_G: f64 = 135.0;
+/// Показатель степени, с которой ДОЛЯ белка убывает после точки перегиба.
+///
+/// Считается из пары якорей: `k = ln(p1/p0) / ln(E1/E0)`. Здесь — из 30 % при 1800
+/// ккал и 20 % при 3600: `ln(0.20/0.30) / ln(3600/1800) = −0.5850`.
+///
+/// Допустимый диапазон — `−1 ≤ k < 0`, и он не формальность, а условие
+/// осмысленности: при `k = 0` доля постоянна, при `k = −1` граммы перестают расти
+/// вовсе, а при `k < −1` они бы УБЫВАЛИ с ростом калоража. Проверяется тестом
+/// [`tests::pokazatel_v_dopustimom_diapazone`].
+pub const PROTEIN_CURVE_K: f64 = -0.5850;
 /// Калорийность белка.
 const KCAL_PER_G_PROTEIN: f64 = 4.0;
 /// Нижняя граница: столько граммов на кг БЕЗЖИРОВОЙ массы. Страхует случай
@@ -268,11 +281,52 @@ pub fn fat_free_mass_kg(weight_kg: f64, height_cm: f64, age_years: i32, sex: Sex
     Some(weight_kg * (1.0 - bf_pct / 100.0))
 }
 
-/// Дневная планка по белку (граммы) — ДОЛЯ КАЛОРИЙНОЙ ПЛАНКИ, зажатая между двумя
-/// границами, считающимися от тела:
+/// Сколько граммов белка полагается на калорийную планку `kcal` — БЕЗ поправок на
+/// тело.
 ///
 /// ```text
-/// база   = 0.30 · планка_ккал / 4
+/// база = P0 · kcal / E0                     при kcal ≤ E0
+/// база = P0 · (kcal / E0)^(1 + k)           при kcal >  E0
+/// ```
+///
+/// Постоянная доля ломается на краях: на низком калораже 30 % дают завышенные
+/// граммы, а если долю просто снижать ступенями, граммы становятся НЕмонотонными —
+/// человек с бо́льшим калоражем получает меньше белка. Причина арифметическая:
+/// граммы равны `E · доля / 4`, и стоит доле убывать быстрее, чем `1/E`, как
+/// произведение начинает падать.
+///
+/// Отсюда степенная зависимость: доля убывает, а граммы всё равно растут — ровно
+/// пока `k` лежит в `[−1, 0)`. Ниже точки перегиба доля постоянна (`P0/E0 · 4` =
+/// 30 %), выше — падает до 20 % к 3600 ккал.
+///
+/// В самой точке перегиба ветви сходятся: обе дают `P0`. Излом первой производной
+/// там остаётся (плато переходит в спад) — на цифры он не влияет, сглаживание
+/// отдельной задачей, если понадобится.
+pub fn protein_from_kcal(kcal: f64) -> f64 {
+    if kcal <= PROTEIN_ANCHOR_KCAL {
+        PROTEIN_ANCHOR_G * kcal / PROTEIN_ANCHOR_KCAL
+    } else {
+        PROTEIN_ANCHOR_G * (kcal / PROTEIN_ANCHOR_KCAL).powf(1.0 + PROTEIN_CURVE_K)
+    }
+}
+
+/// Какой ДОЛЕЙ калорийной планки оказалась планка по белку, в процентах.
+///
+/// Величина производная: доля больше не задана числом, а получается из граммов.
+/// Нужна, чтобы объяснение на дашборде называло тот процент, который вышел на
+/// самом деле, а не заученные 30 %.
+pub fn protein_share_pct(kcal: f64) -> f64 {
+    if kcal <= 0.0 {
+        return 0.0;
+    }
+    KCAL_PER_G_PROTEIN * 100.0 * protein_from_kcal(kcal) / kcal
+}
+
+/// Дневная планка по белку (граммы) — от КАЛОРИЙНОЙ ПЛАНКИ по кривой
+/// [`protein_from_kcal`], зажатая между двумя границами, считающимися от тела:
+///
+/// ```text
+/// база   = protein_from_kcal(планка_ккал)
 /// пол    = 1.6 · FFM          (безжировая масса, Deurenberg)
 /// потолок = 2.2 · вес
 /// target = round(clamp(база, пол, потолок))
@@ -297,7 +351,7 @@ pub fn protein_target_g(
     let floor = PROTEIN_MIN_PER_KG_FFM * ffm;
     let ceiling = PROTEIN_MAX_PER_KG_BW * weight_kg;
     let base = match kcal_planka {
-        Some(k) if k > 0.0 => PROTEIN_KCAL_SHARE * k / KCAL_PER_G_PROTEIN,
+        Some(k) if k > 0.0 => protein_from_kcal(k),
         _ => floor,
     };
     Some(base.clamp(floor, ceiling).round() as u32)
@@ -347,24 +401,25 @@ mod tests {
 
     #[test]
     fn protein_is_thirty_percent_of_the_calorie_planka() {
-        // Женщина 42 г., 180 см, 64.5 кг при планке 1800 ккал: 30 % — это 135 г,
-        // ВЫШЕ пола (74 г) и НИЖЕ потолка (2.2·64.5 ≈ 142 г). Берётся ровно доля.
+        // Женщина 42 г., 180 см, 64.5 кг при планке 1800 ккал — это ровно точка
+        // перегиба: 30 % от неё, 135 г. ВЫШЕ пола (74 г) и НИЖЕ потолка
+        // (2.2·64.5 ≈ 142 г), так что берётся сама кривая.
         let g = protein_target_g(Some(1800.0), 64.5, 180.0, 42, Sex::Female).unwrap();
         assert_eq!(g, 135);
     }
 
     #[test]
     fn low_calorie_planka_cannot_push_protein_below_the_ffm_floor() {
-        // Экстремально низкая планка: 30 % от 900 ккал — это 68 г, ниже пола.
+        // Экстремально низкая планка: кривая даёт от 900 ккал 68 г, ниже пола.
         let target = protein_target_g(Some(900.0), 64.5, 180.0, 42, Sex::Female).unwrap();
         let floor = protein_target_g(None, 64.5, 180.0, 42, Sex::Female).unwrap();
         assert_eq!(target, floor);
-        assert!((0.30 * 900.0 / 4.0) < floor as f64, "проверка должна упираться в пол");
+        assert!(protein_from_kcal(900.0) < floor as f64, "проверка должна упираться в пол");
     }
 
     #[test]
     fn high_calorie_planka_cannot_push_protein_above_the_bodyweight_ceiling() {
-        // Крупная планка у некрупного человека: 30 % от 3000 ккал — это 225 г,
+        // Крупная планка у некрупного человека: кривая даёт от 3000 ккал 167 г,
         // выше потолка 2.2 г на кг полного веса.
         let target = protein_target_g(Some(3000.0), 64.5, 180.0, 42, Sex::Female).unwrap();
         assert_eq!(target, (2.2 * 64.5_f64).round() as u32);
@@ -386,5 +441,85 @@ mod tests {
                 "пол выше потолка при {w} кг / {h} см"
             );
         }
+    }
+
+    /// Шаг обхода диапазона: монотонность проверяется сплошь, а не по контрольным
+    /// точкам — на них немонотонность как раз и не видна.
+    const STEP_KCAL: f64 = 10.0;
+
+    #[test]
+    fn grammy_ne_ubyvayut_na_vsyom_diapazone() {
+        let mut kcal = 1200.0;
+        let mut prev = protein_from_kcal(kcal);
+        while kcal <= 4000.0 {
+            let g = protein_from_kcal(kcal);
+            assert!(g >= prev, "белок упал при {kcal} ккал: {prev} → {g}");
+            prev = g;
+            kcal += STEP_KCAL;
+        }
+    }
+
+    #[test]
+    fn dolya_ne_vozrastaet_na_vsyom_diapazone() {
+        let mut kcal = 1200.0;
+        let mut prev = protein_share_pct(kcal);
+        while kcal <= 4000.0 {
+            let p = protein_share_pct(kcal);
+            // Плато до точки перегиба — это тоже «не возрастает»; допуск покрывает
+            // накопленную ошибку f64 на плоском участке.
+            assert!(p <= prev + 1e-9, "доля выросла при {kcal} ккал: {prev} → {p}");
+            prev = p;
+            kcal += STEP_KCAL;
+        }
+    }
+
+    #[test]
+    fn kontrolnye_tochki_krivoy() {
+        for &(kcal, want_g, want_pct) in &[
+            (1600.0, 120.0, 30.0),
+            (1800.0, 135.0, 30.0),
+            (2000.0, 141.0, 28.2),
+            (2400.0, 152.0, 25.4),
+            (2800.0, 162.0, 23.2),
+            (3600.0, 180.0, 20.0),
+        ] {
+            let g = protein_from_kcal(kcal);
+            assert!((g - want_g).abs() <= 1.0, "{kcal} ккал: белок {g}, ждали {want_g}");
+            let pct = protein_share_pct(kcal);
+            assert!((pct - want_pct).abs() <= 0.1, "{kcal} ккал: доля {pct}, ждали {want_pct}");
+        }
+    }
+
+    #[test]
+    fn vetvi_shodyatsya_v_tochke_peregiba() {
+        // Ниже перегиба — прямая, выше — степень; в самой точке обе дают P0.
+        let below = PROTEIN_ANCHOR_G * PROTEIN_ANCHOR_KCAL / PROTEIN_ANCHOR_KCAL;
+        let above = PROTEIN_ANCHOR_G
+            * (PROTEIN_ANCHOR_KCAL / PROTEIN_ANCHOR_KCAL).powf(1.0 + PROTEIN_CURVE_K);
+        assert!((below - PROTEIN_ANCHOR_G).abs() < 1e-9);
+        assert!((above - PROTEIN_ANCHOR_G).abs() < 1e-9);
+        assert!((protein_from_kcal(PROTEIN_ANCHOR_KCAL) - PROTEIN_ANCHOR_G).abs() < 1e-9);
+        // И подходя к точке с обеих сторон вплотную — без скачка.
+        let eps = 1e-6;
+        let l = protein_from_kcal(PROTEIN_ANCHOR_KCAL - eps);
+        let r = protein_from_kcal(PROTEIN_ANCHOR_KCAL + eps);
+        assert!((l - r).abs() < 1e-6, "разрыв в точке перегиба: {l} против {r}");
+    }
+
+    #[test]
+    fn pokazatel_v_dopustimom_diapazone() {
+        // При k = 0 доля постоянна, при k = −1 граммы перестают расти, при k < −1
+        // они бы убывали. Кривая осмысленна строго внутри.
+        assert!(
+            (-1.0..0.0).contains(&PROTEIN_CURVE_K),
+            "k = {PROTEIN_CURVE_K} вне [−1, 0)"
+        );
+    }
+
+    #[test]
+    fn pokazatel_vyveden_iz_yakorey() {
+        // k = ln(p1/p0) / ln(E1/E0) для якорей 30 % при 1800 и 20 % при 3600.
+        let k = (0.20_f64 / 0.30).ln() / (3600.0_f64 / PROTEIN_ANCHOR_KCAL).ln();
+        assert!((k - PROTEIN_CURVE_K).abs() < 5e-5, "из якорей выходит {k}");
     }
 }

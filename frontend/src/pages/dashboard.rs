@@ -118,17 +118,20 @@ async fn protein_hint_text() -> String {
         return "Заполните профиль (рост, вес, возраст, пол), чтобы рассчитать норму белка."
             .to_string();
     }
-    let share_pct = (profile::PROTEIN_KCAL_SHARE * 100.0).round();
     let why = "Белок насыщает лучше жиров и углеводов: высокая планка по белку — это \
                инструмент против голода, а не формальная «потребность».";
     let Some(kcal) = local::calorie_goal_amount().await.filter(|k| *k > 0.0) else {
         return format!(
-            "Планка по белку — {share_pct:.0} % вашей калорийной планки, но она ещё не \
-             установлена. Пока держим нижнюю границу — 1,6 г на кг безжировой массы тела.\n\n\
+            "Планка по белку считается от вашей калорийной планки, но она ещё не установлена. \
+             Пока держим нижнюю границу — 1,6 г на кг безжировой массы тела.\n\n\
              Ваша планка по белку: {target} г.\n\n{why}"
         );
     };
-    let from_kcal = profile::PROTEIN_KCAL_SHARE * kcal / 4.0;
+    let from_kcal = profile::protein_from_kcal(kcal);
+    // Доля больше не постоянна: чем выше калораж, тем она ниже — значит и называть
+    // её надо той, что вышла у этого человека. Десятая доля процента здесь не
+    // информация, а шум: округляем до целых.
+    let share_pct = profile::protein_share_pct(kcal).round();
     // Какая из границ сработала — это и есть содержательная часть ответа.
     let derivation = if (from_kcal.round() as u32) < target {
         let ffm = target as f64 / profile::PROTEIN_MIN_PER_KG_FFM;

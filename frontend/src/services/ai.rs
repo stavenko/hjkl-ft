@@ -1688,20 +1688,25 @@ pub async fn classify_processed_meat(names: &[String]) -> Result<Vec<bool>, Stri
         "Answer ONE yes/no question about each food below, and nothing else. Food names may be \
          in ANY language — judge by meaning, not by wording.\n\n\
          QUESTION: is this meat PRESERVED — cured, smoked, salted, dried or fermented for \
-         keeping?\n\n\
+         keeping? Meat here is the flesh of a MAMMAL or a BIRD.\n\n\
          Meat is preserved when it has been through one of these: CURING with nitrite or \
          nitrate salt, SMOKING, prolonged SALTING, AIR-DRYING, or FERMENTATION. Cooking is not \
          preserving: boiling, frying, baking, stewing, grilling, mincing, freezing and \
          packaging leave meat unpreserved, however industrial the process.\n\n\
          PRESERVED, therefore TRUE: sausages and frankfurters, wieners, salami and other dry \
-         sausages, ham, bacon, gammon, pastrami, prosciutto and jamon, bresaola, basturma, \
+         sausages — fuet, chorizo, sobrassada, soppressata, sujuk, kabanos, landjäger, \
+         pepperoni, whatever else they are called abroad — ham, bacon, gammon, pastrami, \
+         prosciutto and jamon, bresaola, basturma, \
          smoked and cured brisket, liver sausage and pâté made with cure, hot dogs, corned \
          beef, canned luncheon meat, jerky. Also a dish whose MAIN meat part is one of these — \
          pizza with salami, pasta carbonara, sausage in a bun, solyanka.\n\n\
          NOT PRESERVED, therefore FALSE: fresh and frozen meat of any kind, mince, cutlets and \
          meatballs, home-made or shop-bought, boiled or baked meat, roast, stew, kebab, \
-         dumplings, canned meat that was merely boiled in the tin, poultry and fish that went \
-         through none of the treatments above.\n\n\
+         dumplings, canned meat that was merely boiled in the tin, poultry that went through \
+         none of the treatments above. FISH, SEAFOOD AND ROE are false ALWAYS, however they \
+         were treated: smoked mackerel, salted herring, lightly salted salmon, dried cod, \
+         canned sprats, caviar — a fish that was smoked is a smoked fish, never a preserved \
+         meat.\n\n\
          For EVERY food, first THINK IT THROUGH in the reason field: is there meat here, and \
          was it preserved — by what treatment? One short sentence, at most 10 words. Then give \
          the verdict.\n\n\

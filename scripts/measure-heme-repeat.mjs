@@ -18,8 +18,12 @@ const run = (i) =>
     let out = "";
     p.stdout.on("data", (d) => { out += d; });
     p.stderr.on("data", (d) => process.stderr.write(d));
-    p.on("close", (code) => {
-      if (code !== 0) return rej(new Error(`прогон ${i}: measure-heme.mjs вышел с ${code}`));
+    // Ненулевой код у measure-heme.mjs значит «были промахи» — это данные, а не
+    // сбой. Сбоем считаем невозможность их прочесть: нет итоговой строки.
+    p.on("close", () => {
+      if (!/попаданий: \d+\/\d+/.test(out)) {
+        return rej(new Error(`прогон ${i}: замер не дошёл до итога\n${out.slice(-500)}`));
+      }
       res(out);
     });
   });

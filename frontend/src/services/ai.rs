@@ -1280,48 +1280,141 @@ fn take_flags(
 
 // ── Овощ или фрукт ───────────────────────────────────────────────────────────
 
-/// Имя поля обоснования ДЛИННОЕ намеренно: модель читает схему, и по имени
-/// понимает, чего от неё хотят, вернее, чем по отдельному абзацу.
+// ВНИМАНИЕ: у структур ответа комментарии обычные, а НЕ доковые (///).
+//
+// schemars кладёт док-комментарий в json_schema как "description", модель читает
+// его наравне с полями и начинает возвращать в ответе. Длинное русское пояснение
+// над этой структурой ровно так и уронило разбор: модель отвечала
+// {"description":"Имя поля обоснования ДЛИННОЕ намеренно…"} вместо данных, и
+// признак оставался пустым. Пояснения — в док функции, схема остаётся голой.
+//
+// Опознание — своим полем и ПЕРВЫМ: порядок полей есть порядок генерации, и «что
+// это за еда» не должно писаться в графу, чьё имя уже утверждает вывод.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct VegFruitAnswer {
-    reason_why_this_product_classified_as_vegetable_or_fruit: Vec<String>,
-    verdict: Vec<bool>,
+    what_the_person_most_likely_ate: Vec<String>,
+    category_that_fits: Vec<String>,
+}
+
+/// Категория из ответа → «да/нет».
+///
+/// Вердикта модель больше НЕ ставит, и это главная поправка. Пока он был отдельным
+/// булевым массивом, он мог противоречить только что названной категории — замер
+/// ловил «Мороженая вишня → FRUITS» с вердиктом `false` в двух прогонах из трёх.
+/// Теперь «да» выводится из названного, и рассогласоваться нечему.
+///
+/// Неизвестное слово — ОШИБКА, а не тихое «нет»: [`generate_validated`] потратит на
+/// это попытку и переспросит. Молча ронять непонятый ответ в `false` значит снова
+/// разрешить признаку врать.
+fn veg_fruit_from_category(category: &str) -> Result<bool, String> {
+    let c = category.trim().to_ascii_uppercase();
+    if c.starts_with("NONE") {
+        return Ok(false);
+    }
+    if c.contains("VEGETABLE") || c.contains("FRUIT") || c.contains("BERR") || c.contains("DISH") {
+        return Ok(true);
+    }
+    Err(format!("фрукты/овощи: неизвестная категория «{category}»"))
 }
 
 /// Овощ или фрукт — свежий, приготовленный или очевидное овощное/фруктовое блюдо.
+///
+/// Прежний промпт был вопросом «да/нет» с отрицательным перечнем в хвосте, и он
+/// НЕ РАБОТАЛ: модель писала верную причину и ставила противоположный вердикт —
+/// «Яблоко → false, apple is a fruit», «Огурец → false, it is a cucumber». Замер
+/// живым путём давал 9/22, причём мимо шли самые обыкновенные яблоко с огурцом, а
+/// не спорные случаи. Виновата тощая форма: причина ограничивалась десятью словами
+/// и вырождалась в метку («apple»), вердикт рождался отдельным массивом, и следовать
+/// ему было не за чем.
+///
+/// Теперь та же форма, что у гема, где она даёт 22/22: опознание отдельным полем,
+/// категории заданы ПОЛОЖИТЕЛЬНО, причина называет подошедшую категорию.
+///
+/// Ягоды названы прямо. Именно на них сломался исходный случай — «Мороженая вишня»:
+/// модель опознавала её верно («frozen cherry»), но в вопросе «vegetable or fruit»
+/// ягоде места не находилось. Слова о заморозке и готовке сути продукта не меняют —
+/// сказано отдельно, как и в геме.
 pub async fn classify_veg_fruit(names: &[String]) -> Result<Vec<bool>, String> {
     let prompt = format!(
-        "Answer ONE yes/no question about each food below, and nothing else. Food names may be \
-         in ANY language — judge by meaning, not by wording.\n\n\
-         QUESTION: is this food a vegetable or a fruit — fresh, cooked, or an obvious \
-         vegetable/fruit dish (salad, stewed vegetables, fruit)? NOT: cereals, grains, bread, \
-         meat, fish, dairy, sweets, or drinks.\n\n\
-         For EVERY food fill the reason field FIRST — one short sentence, at most 10 words — \
-         and let the verdict follow from it.\n\n\
+        "For each food below decide whether it belongs to one of the categories listed. Food \
+         names may be in ANY language — judge by meaning, not by wording.\n\n\
+         THE CATEGORIES:\n\
+         — VEGETABLES: any plant part eaten as a vegetable — roots, tubers, leaves, stalks, \
+         cabbages, squashes, onions, garlic, tomatoes, cucumbers, peppers, green beans, peas, \
+         mushrooms. A GRAIN is not a vegetable, whatever it was cooked into;\n\
+         — FRUITS, and BERRIES COUNT AS FRUITS: apples, pears, citrus, bananas, grapes, melons, \
+         and berries such as cherries, sour cherries, strawberries, raspberries, blueberries, \
+         currants, cranberries;\n\
+         — DISHES MADE MAINLY OF THEM: salads, stewed or roasted vegetables, vegetable soups, \
+         fruit salads.\n\n\
+         For EVERY food, answer in THREE fields, in this order.\n\
+         First, in \"what_the_person_most_likely_ate\": say what this food MOST LIKELY IS, \
+         WITHOUT yet thinking about the categories at all. Every name here was typed by a person \
+         into their FOOD DIARY, so it always names something eaten — never a material, a device \
+         or a term from another trade, however much the word may look like one. Say it in \
+         ENGLISH and say WHAT KIND of thing it is — \"cherry, a berry\", \"buckwheat, a grain\", \
+         \"cod, a fish\". Never merely repeat the name back: a name copied out is not an answer. \
+         And name it WHOLE — whatever the name says was added to it or made of it, syrup, sugar, \
+         batter, juice, belongs in your answer too, not just the main word.\n\
+         Second, in \"category_that_fits\": write the ONE word naming the category that fits \
+         what you have just named — VEGETABLES, FRUITS or DISH — or the word NONE if no category \
+         fits. Nothing else, one word. Never list the categories that do not fit: running \
+         through them turns into denying them all, the right one included.\n\
+         Each array holds exactly one item per food, never more.\n\n\
+         Sugar changes what a food is: jam, preserves, fruit in syrup, candied fruit and juices \
+         belong to none of the categories, however much fruit went into them. A composite dish \
+         belongs to a category only when vegetables or fruit are its MAIN part. Words about \
+         preparation, storage, freezing, packaging, cut, grade or country of origin never \
+         change what a food is — frozen, dried and cooked produce stays produce.\n\n\
          Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object: the reason array — one string per \
-         food — and \"verdict\" — one boolean per food, both in the SAME order as the foods \
-         above.",
+         Respond with ONLY a single minified JSON object: the two arrays described above — \
+         one item per food in each — both in the SAME order as the foods above.",
         list = numbered(names),
     );
-    let v: VegFruitAnswer = generate(prompt, |_| {}).await?;
-    take_flags(
-        "фрукты/овощи",
-        "flag.veg_fruit",
-        names,
-        v.verdict,
-        v.reason_why_this_product_classified_as_vegetable_or_fruit,
-    )
+    let n = names.len();
+    // Проверка ПЕРЕД разбором ответа: кривые длины и незнакомая категория стоят
+    // попытки и переспрашиваются, а не превращаются в тихое «нет».
+    let v: VegFruitAnswer = generate_validated(prompt, |_| {}, 3, move |a: &VegFruitAnswer| {
+        if a.what_the_person_most_likely_ate.len() != n || a.category_that_fits.len() != n {
+            return Err(format!(
+                "фрукты/овощи: length mismatch for {n} foods — what_ate={}, category={}",
+                a.what_the_person_most_likely_ate.len(),
+                a.category_that_fits.len()
+            ));
+        }
+        for c in &a.category_that_fits {
+            veg_fruit_from_category(c)?;
+        }
+        Ok(())
+    })
+    .await?;
+    let verdict = v
+        .category_that_fits
+        .iter()
+        .map(|c| veg_fruit_from_category(c))
+        .collect::<Result<Vec<bool>, String>>()?;
+    // Опознание идёт в лог и телеметрию вместе с категорией: именно оно объясняет
+    // промахи — по одной категории не видно, за что модель приняла продукт.
+    let reason = v
+        .what_the_person_most_likely_ate
+        .iter()
+        .zip(v.category_that_fits.iter())
+        .map(|(ate, cat)| format!("{ate} → {cat}"))
+        .collect();
+    take_flags("фрукты/овощи", "flag.veg_fruit", names, verdict, reason)
 }
 
 // ── Источник гемового железа ─────────────────────────────────────────────────
 
-/// Обоснование стоит ПЕРВЫМ — см. замер в шапке раздела.
-///
-/// Опознание вынесено в СВОЁ поле. Раньше оно писалось в графу «почему продукт
-/// отнесён к источникам гема»: имя поля модель видит в json_schema, то есть оно
-/// работает как часть промпта — и заставляло записывать «что это за еда» в графу,
-/// само название которой уже утверждает вывод, причём в одну сторону.
+// Комментарии обычные, а НЕ доковые: см. предупреждение над `VegFruitAnswer` —
+// док-комментарий уезжает в json_schema как "description" и возвращается моделью
+// вместо данных.
+//
+// Обоснование стоит ПЕРВЫМ — см. замер в шапке раздела. Опознание вынесено в СВОЁ
+// поле: раньше оно писалось в графу «почему продукт отнесён к источникам гема», а
+// имя поля модель видит в схеме, то есть оно работает как часть промпта — и
+// заставляло записывать «что это за еда» в графу, само название которой уже
+// утверждает вывод, причём в одну сторону.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct HemeAnswer {
     what_the_person_most_likely_ate: Vec<String>,

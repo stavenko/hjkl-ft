@@ -1306,7 +1306,7 @@ struct VegFruitAnswer {
 /// Неизвестное слово — ОШИБКА, а не тихое «нет»: [`generate_validated`] потратит на
 /// это попытку и переспросит. Молча ронять непонятый ответ в `false` значит снова
 /// разрешить признаку врать.
-fn veg_fruit_from_category(category: &str) -> Result<bool, String> {
+pub(crate) fn veg_fruit_from_category(category: &str) -> Result<bool, String> {
     let c = category.trim().to_ascii_uppercase();
     if c.starts_with("NONE") {
         return Ok(false);
@@ -1638,13 +1638,12 @@ pub async fn classify_red_meat(names: &[String]) -> Result<Vec<bool>, String> {
          THE CATEGORIES OF RED MEAT:\n\
          — THE FLESH of MAMMALS: beef, veal, pork, lamb, mutton, goat, horse, rabbit, and the \
          flesh of wild mammals — venison, elk, boar. Any cut, whole or ground, raw or cooked;\n\
-         — THE FLESH of the OSTRICH and other ratites;\n\
          — FOOD MADE MAINLY OF SUCH FLESH: sausages, frankfurters, ham, bacon, salami, mince, \
          meatballs, cutlets, stew, canned meat — whatever the flesh has been through.\n\n\
          It is the FLESH — muscle — that belongs to these categories. INNER ORGANS do not: \
          liver, heart, kidney, tongue, lung, tripe and dishes made mainly of them are outside, \
-         however red they look. Neither do BIRDS other than ratites — chicken, turkey, duck, \
-         goose — nor fish, seafood, eggs, dairy or anything from a plant.\n\n\
+         however red they look. Neither do BIRDS — chicken, turkey, duck, goose — nor fish, \
+         seafood, eggs, dairy or anything from a plant.\n\n\
          For EVERY food, first THINK IT THROUGH in the reason field: whose flesh is this, and \
          is it flesh at all? Name the category, or say that none of them fits. One short \
          sentence, at most 10 words. Then give the verdict: true if it belongs to a category, \

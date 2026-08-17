@@ -112,6 +112,11 @@ const FLAGS: &[(
     ("переработанное мясо", |f| f.is_processed_meat.is_none(), local::FoodFlag::ProcessedMeat),
 ];
 
+/// Спрашивать признаки КОНВЕЙЕРОМ (опознание → пять вердиктов) вместо пяти
+/// отдельных запросов. Пока эксперимент: обе дороги живут рядом, чтобы мерить, а не
+/// спорить. `false` возвращает прежнее поведение целиком.
+const USE_PIPELINE: bool = true;
+
 /// Спросить у модели ровно этот признак.
 async fn ask(flag: local::FoodFlag, name: &str) -> Result<bool, String> {
     let names = [name.to_string()];
@@ -164,10 +169,56 @@ async fn run_worker() {
         // Load the food; skip if gone. Один последовательный проход добирает и
         // признаки, и нутриенты, и железо — по запросу на каждую недостающую вещь,
         // строго по очереди, чтобы модель не получала их пачкой.
-        let Some(food) = db::get::<Food>("foods", &id).await else { continue };
+        let Some(mut food) = db::get::<Food>("foods", &id).await else { continue };
         // То же и здесь: в очередь блюдо могло попасть напрямую через `enqueue`.
         if food.is_recipe {
             continue;
+        }
+
+        // ЭКСПЕРИМЕНТ: конвейер вместо пяти отдельных запросов.
+        //
+        // Пять запросов опознают продукт пять раз, каждый в тон своему вопросу, —
+        // отсюда «Голец → horse meat» в вопросе про мясо. Конвейер опознаёт один раз
+        // и отдаёт опознание готовым (см. `flags_pipeline`). Схема данных та же:
+        // наружу выходят те же пять признаков и ложатся в те же поля.
+        //
+        // Старый путь оставлен рядом и включается этой константой — чтобы можно было
+        // померить оба на одном наборе, а не рассуждать о них.
+        if USE_PIPELINE && needs_classification(&food) {
+            let name = food.name.clone();
+            if let Some(f) = with_retries(
+                move || {
+                    let n = name.clone();
+                    async move { super::flags_pipeline::classify_all(&n).await }
+                },
+                errors::FoodAspect::Kind,
+                &food.name,
+            )
+            .await
+            {
+                // Записывается только выясненное. Неполученный признак остаётся
+                // пустым и будет переспрошен в другой раз — записать его наугад
+                // значило бы соврать молча.
+                for (flag, value) in [
+                    (local::FoodFlag::VegFruit, f.veg_fruit),
+                    (local::FoodFlag::Heme, f.heme),
+                    (local::FoodFlag::MilkGlobule, f.milk_globule),
+                    (local::FoodFlag::RedMeat, f.red_meat),
+                    (local::FoodFlag::ProcessedMeat, f.processed_meat),
+                ] {
+                    if let Some(v) = value {
+                        local::cache_food_flag(&id, flag, v).await;
+                    }
+                }
+                // Копия в памяти ОБЯЗАНА догнать базу: гейт ниже смотрит на `food`, и
+                // без этого прежний путь переспрашивал всё заново и затирал ответы
+                // конвейера своими — замер тогда мерит не то, что думает.
+                food.is_veg_fruit = f.veg_fruit.or(food.is_veg_fruit);
+                food.is_heme = f.heme.or(food.is_heme);
+                food.is_milk_globule = f.milk_globule.or(food.is_milk_globule);
+                food.is_red_meat = f.red_meat.or(food.is_red_meat);
+                food.is_processed_meat = f.processed_meat.or(food.is_processed_meat);
+            }
         }
 
         // Каждый признак — сам за себя: спрашивается только тот, которого нет, и

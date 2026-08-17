@@ -531,7 +531,7 @@ pub enum FoodFlag {
     Heme,
     /// Жир заключён в целую молочно-жировую глобулу — см. `Food::is_milk_globule`.
     MilkGlobule,
-    /// Мышечная ткань млекопитающих и страуса — см. `Food::is_red_meat`.
+    /// Мышечная ткань млекопитающих — см. `Food::is_red_meat`.
     RedMeat,
     /// Мясо, консервированное ради хранения — см. `Food::is_processed_meat`.
     ProcessedMeat,
@@ -2504,7 +2504,7 @@ mod tests {
                 is_milk_globule: None,
                 is_red_meat: None,
                 is_processed_meat: None,
-                iron_mg: None,
+                    iron_mg: None,
                 iron_absorption: None,
                 fat_profile: None,
                 balance_fat_profile: None,

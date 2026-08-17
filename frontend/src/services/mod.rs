@@ -11,6 +11,7 @@ pub mod db;
 pub mod enrich;
 pub mod errors;
 pub mod fats;
+pub mod flags_pipeline;
 pub mod diag;
 pub mod i18n;
 pub mod heme;

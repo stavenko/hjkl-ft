@@ -313,6 +313,8 @@ struct PlantAnswer {
     is_legume: bool,
     /// A grain: wheat, rye, spelt, buckwheat, rice, oats, and bread made of them.
     is_grain: bool,
+    /// The name of the FIBRE REFERENCE entry this food matches, copied exactly, or NONE.
+    fibre_reference_key: String,
     /// Dietary fibre in grams per 100 g. Zero is a valid answer.
     fibre_g_per_100g: f64,
 }
@@ -747,11 +749,18 @@ impl Prompt for FlagPrompt {
                  answer which part of the plant it is — a root or tuber, a leaf or stalk, a \
                  fruit or berry, a seed or nut, a legume, a grain. If the food is not from a \
                  plant, every part field is false.\n\n\
-                 Then give the dietary FIBRE of this food in grams per 100 g, as you know it. \
-                 Zero is a valid answer for food that has none.\n\n\
+                 Then give the dietary FIBRE of this food, in grams per 100 g. FIRST look for \
+                 the food in the REFERENCE below and put its entry name into \
+                 \"fibre_reference_key\", copied exactly — we take the number ourselves. THE \
+                 FORM IS PART OF THE ENTRY: dry grains and boiled ones are separate, and \
+                 picking the wrong one is worse than picking none. Answer NONE when no entry \
+                 is the same food, and give the grams as you know them. Zero is a valid \
+                 answer for food that has none.\n\n\
+                 {fibre_reference}\n\n\
                  Respond with ONLY a minified JSON object and nothing else.",
                 name = self.food_name,
                 given = self.given,
+                fibre_reference = crate::services::ai::fibre_reference_table(),
             );
         }
         if self.step.as_egg() {
@@ -812,7 +821,15 @@ impl Prompt for FlagPrompt {
                         && !a.is_grain
                         && !a.is_seed;
                     self.step.set(&mut ctx.flags, veg);
-                    ctx.fibre_g = Some(a.fibre_g_per_100g.max(0.0));
+                    // Клетчатка из СПРАВОЧНИКА берётся как есть: числа модель помнит
+                    // плохо — варёной чечевице давала 3.8 г против справочных 7.9.
+                    // Её работа — узнать продукт и назвать запись.
+                    let (fibre, fibre_src) =
+                        match crate::services::ai::fibre_reference_hit(&a.fibre_reference_key) {
+                            Some((name, g)) => (*g, format!("справочник «{name}»")),
+                            None => (a.fibre_g_per_100g.max(0.0), "своё знание".to_string()),
+                        };
+                    ctx.fibre_g = Some(fibre);
                     let part = if a.is_root { "корень" }
                         else if a.is_leaf { "лист" }
                         else if a.is_fruit { "плод" }
@@ -823,9 +840,8 @@ impl Prompt for FlagPrompt {
                     ctx.reasons.push(format!("растение: {part}"));
                     ctx.last_error = None;
                     leptos::logging::log!(
-                        "фрукты/овощи «{}»: {veg} — {part}, клетчатка {} г",
+                        "фрукты/овощи «{}»: {veg} — {part}, клетчатка {fibre} г [{fibre_src}]",
                         ctx.food_name,
-                        a.fibre_g_per_100g
                     );
                     crate::services::telemetry::report_detection(
                         self.step.kind(),
@@ -835,7 +851,7 @@ impl Prompt for FlagPrompt {
                             "{} → {part}",
                             ctx.identity.clone().unwrap_or_else(|| "(не опознано)".to_string())
                         ),
-                        &[a.fibre_g_per_100g],
+                        &[fibre],
                     );
                 }
                 Err(e) => {

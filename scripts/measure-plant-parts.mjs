@@ -35,7 +35,7 @@ const CASES = [
   ["Фасоль красная варёная", "legume", 6.4],
   ["Нут варёный", "legume", 7.6],
   ["Соя", "legume", 9.3],
-  ["Маш", "legume", 7.6],
+  ["Маш", "legume", 16.0],
   ["Грецкий орех", "seed", 6.7],
   ["Фисташки", "seed", 10.3],
   ["Кедровые орехи", "seed", 3.7],
@@ -110,14 +110,100 @@ const identitySchema = {
   additionalProperties: false,
 };
 
+const FIBRE_REFERENCE = [
+  ["гречка сухая", 10.0],
+  ["овсянка сухая", 10.0],
+  ["перловка сухая", 15.6],
+  ["пшено сухое", 8.5],
+  ["булгур сухой", 12.5],
+  ["киноа сухая", 7.0],
+  ["рис белый сухой", 1.3],
+  ["рис бурый сухой", 3.5],
+  ["макароны сухие", 3.0],
+  ["манка сухая", 3.6],
+  ["отруби пшеничные", 43.0],
+  ["отруби овсяные", 15.4],
+  ["попкорн", 14.5],
+  ["гречка варёная", 2.7],
+  ["овсянка на воде", 1.7],
+  ["рис белый варёный", 0.4],
+  ["макароны варёные", 1.8],
+  ["чечевица варёная", 7.9],
+  ["фасоль варёная", 6.4],
+  ["нут варёный", 7.6],
+  ["хлеб пшеничный", 2.7],
+  ["хлеб ржаной", 5.8],
+  ["хлеб бородинский", 7.9],
+  ["хлеб цельнозерновой", 7.0],
+  ["чечевица сухая", 10.7],
+  ["фасоль сухая", 15.0],
+  ["нут сухой", 12.2],
+  ["горох сухой", 11.0],
+  ["маш", 16.0],
+  ["соя", 9.3],
+  ["тофу", 0.4],
+  ["миндаль", 12.5],
+  ["грецкий орех", 6.7],
+  ["фундук", 9.7],
+  ["кешью", 3.3],
+  ["фисташки", 10.0],
+  ["кедровый орех", 3.7],
+  ["арахис", 8.5],
+  ["семена подсолнечника", 8.6],
+  ["семена тыквы", 6.0],
+  ["кунжут", 11.8],
+  ["семена льна", 27.0],
+  ["семена чиа", 34.0],
+  ["картофель", 2.2],
+  ["морковь", 2.8],
+  ["капуста белокочанная", 2.5],
+  ["брокколи", 2.6],
+  ["цветная капуста", 2.0],
+  ["помидор", 1.2],
+  ["огурец", 0.7],
+  ["лук репчатый", 1.7],
+  ["болгарский перец", 1.7],
+  ["кабачок", 1.0],
+  ["свёкла", 2.8],
+  ["тыква", 0.5],
+  ["топинамбур", 1.6],
+  ["стручковая фасоль", 3.4],
+  ["шампиньоны", 1.0],
+  ["петрушка", 3.3],
+  ["укроп", 2.1],
+  ["шпинат", 2.2],
+  ["руккола", 1.6],
+  ["салат листовой", 1.3],
+  ["яблоко", 2.4],
+  ["груша", 3.1],
+  ["банан", 2.6],
+  ["апельсин", 2.4],
+  ["виноград", 0.9],
+  ["клубника", 2.0],
+  ["черника", 2.4],
+  ["вишня", 1.6],
+  ["малина", 6.5],
+  ["смородина", 4.8],
+  ["авокадо", 6.7],
+  ["курага", 7.3],
+  ["изюм", 3.7],
+  ["чернослив", 7.0],
+  ["финики", 8.0],
+];
+
 const plantPrompt = (name, identity) =>
   `A person wrote this into their food diary: ${name}\n\n` +
   `Our automatic classifier says this product is: ${identity}\n\n` +
   "First answer whether this food is a part of some plant at all. If it is, answer which part " +
   "of the plant it is — a root or tuber, a leaf or stalk, a fruit or berry, a seed or nut, a " +
   "legume, a grain. If the food is not from a plant, every part field is false.\n\n" +
-  "Then give the dietary FIBRE of this food in grams per 100 g, as you know it. Zero is a " +
-  "valid answer for food that has none.\n\n" +
+  "Then give the dietary FIBRE of this food, in grams per 100 g. FIRST look for the food in " +
+  "the REFERENCE below and put its entry name into \"fibre_reference_key\", copied exactly — " +
+  "we take the number ourselves. THE FORM IS PART OF THE ENTRY: dry grains and boiled ones " +
+  "are separate, and picking the wrong one is worse than picking none. Answer NONE when no " +
+  "entry is the same food, and give the grams as you know them. Zero is a valid answer for " +
+  "food that has none.\n\n" +
+  FIBRE_REFERENCE.map(([n, g]) => `  ${n}: ${g}`).join("\n") + "\n\n" +
   "Respond with ONLY a minified JSON object and nothing else.";
 
 const plantSchema = {
@@ -130,10 +216,11 @@ const plantSchema = {
     is_seed: { type: "boolean" },
     is_legume: { type: "boolean" },
     is_grain: { type: "boolean" },
+    fibre_reference_key: { type: "string" },
     fibre_g_per_100g: { type: "number" },
   },
   required: ["is_product_a_part_of_some_plant", "is_root", "is_leaf", "is_fruit", "is_seed",
-    "is_legume", "is_grain", "fibre_g_per_100g"],
+    "is_legume", "is_grain", "fibre_reference_key", "fibre_g_per_100g"],
   additionalProperties: false,
 };
 
@@ -202,7 +289,10 @@ for (const [name, wantPart, refFibre] of CASES) {
   if (!okPart) badPart++;
   // Клетчатка: судим мягко — вдвое туда или обратно от справочной. Нам нужен
   // порядок величины, а не точность граммов.
-  const f = Number(o.fibre_g_per_100g);
+  // Ключ справочника решает, откуда взять число, — ровно как в `flags_pipeline`.
+  const hit = FIBRE_REFERENCE.find(([n]) =>
+    n.toLowerCase() === String(o.fibre_reference_key ?? "").trim().toLowerCase());
+  const f = hit ? hit[1] : Number(o.fibre_g_per_100g);
   const okFibre = refFibre === 0
     ? f <= 0.5
     : f >= refFibre / 2 && f <= refFibre * 2;

@@ -148,7 +148,8 @@ const CALCIUM_ROWS = [
 
 if (process.env.ONLY) {
   const want = process.env.ONLY.split(",").map((x) => x.trim().toLowerCase());
-  const kept = CASES.filter(([n]) => want.some((w) => n.toLowerCase().includes(w)));
+  // В наборе кальция первый элемент — ГРУППА, название второе.
+  const kept = CASES.filter((c) => want.some((w) => String(c[1]).toLowerCase().includes(w)));
   if (!kept.length) throw new Error(`ONLY=${process.env.ONLY} не совпал ни с одним продуктом`);
   CASES.length = 0;
   CASES.push(...kept);
@@ -208,37 +209,48 @@ const identitySchema = {
   additionalProperties: false,
 };
 
+// Копия запроса кальция из `ai::lookup_calcium`.
 const calciumPrompt = (name, identity) =>
   `A person wrote this into their food diary: ${name}\n\n` +
   `Our automatic classifier says this product is: ${identity}\n\n` +
-  "How much CALCIUM does it hold per 100 grams, in milligrams?\n\n" +
-  "FIRST look for this food in the REFERENCE below. If the food is there — or is plainly the " +
-  "same food under another name, in another grammatical case or with a fat percentage " +
-  "attached — take the number FROM THE REFERENCE and do not invent your own.\n\n" +
+  "How much CALCIUM does this food hold per 100 grams, in milligrams?\n\n" +
+  "FIRST look for it in the REFERENCE below. If it is there — or is plainly the same food " +
+  "under another name, in another grammatical case or with a fat percentage attached — put " +
+  "that entry's name into \"reference_key\", copied exactly.\n\n" +
   CALCIUM_REFERENCE.map(([n, mg]) => `  ${n}: ${mg}`).join("\n") + "\n\n" +
-  "If the food is NOT in the reference, place it in ONE row of this table and give a value " +
-  "inside that row's range.\n\n" +
-  CALCIUM_ROWS.map(([k, , , ex]) => `  ${k}: ${ex}`).join("\n") + "\n\n" +
-  "Cheese goes by HARDNESS: hard and dry to cheese_hard, semi-hard and brined to cheese_semi, " +
-  "soft and fresh to cheese_soft, melted to cheese_processed. A plant drink counts as " +
-  "fortified ONLY if the name says so. Canned fish counts as fish_with_bones only when the " +
-  "bones are eaten.\n" +
-  "The examples in a row are EXAMPLES, not the whole row. A food not named there still " +
-  "belongs to the row it is closest to. Answer other_none ONLY when the food genuinely " +
-  "carries no calcium worth counting — meat, eggs, cereals, bread, oil, sugar, water, tea, " +
-  "coffee. Never answer other_none merely because the name is missing from the examples. " +
-  "Dairy is NEVER other_none, and vegetables are never other_none.\n\n" +
-  "Fill \"reason\" FIRST — one short sentence — then the row key, then the milligrams.\n\n" +
+  "Whether or not you found it, ALSO place the food in one row of the table below and answer " +
+  "with that row's key. If the reference had nothing, answer \"reference_key\" with NONE and " +
+  "give a value that fits the row.\n\n" +
+  CALCIUM_ROWS.map(([k, , , ex]) => `  ${k.padEnd(20)} — ${ex}`).join("\n") + "\n\n" +
+  "For raw or dry as-sold products (grains, seeds, legumes, flour) use the RAW value unless " +
+  "the name says cooked, boiled or soaked.\n\n" +
+  "Rules for choosing the row:\n" +
+  "- Cheese goes by HARDNESS: hard and dry → cheese_hard, semi-hard and brined → cheese_semi, " +
+  "soft and fresh → cheese_soft, melted/processed → cheese_processed.\n" +
+  "- A plant drink counts as fortified ONLY if the name says so («обогащённое», «с кальцием», " +
+  "«fortified»). Otherwise it is plant_milk_plain, which has very little.\n" +
+  "- Canned fish counts as fish_with_bones only when the bones are eaten (sardines, sprats, " +
+  "canned salmon). Fillet without bones is other_none.\n" +
+  "- The examples in a row are EXAMPLES, not the whole row. A food that is not named there " +
+  "still belongs to the row it is closest to: скир goes with yogurts, мороженое with cream, " +
+  "айран with milk, любой сыр — to the cheese row that matches its hardness. Answer " +
+  "other_none ONLY when the food genuinely carries no calcium worth counting — meat, eggs, " +
+  "cereals, bread, oil, sugar, water, tea, coffee. Never answer other_none merely because the " +
+  "name is missing from the examples.\n" +
+  "- Dairy is NEVER other_none: every milk product belongs to one of the dairy rows. " +
+  "Vegetables are never other_none either: they go to vegetables_other or greens_leafy.\n\n" +
+  "Fill \"reason\" FIRST, then the two keys, then the milligrams.\n\n" +
   "Respond with ONLY a minified JSON object and nothing else.";
 
 const calciumSchema = {
   type: "object",
   properties: {
     reason: { type: "string" },
-    verdict: { type: "string" },
-    calcium_mg_per_100g: { type: "number" },
+    reference_key: { type: "string" },
+    category: { type: "string" },
+    calcium_mg: { type: "number" },
   },
-  required: ["reason", "verdict", "calcium_mg_per_100g"],
+  required: ["reason", "reference_key", "category", "calcium_mg"],
   additionalProperties: false,
 };
 
@@ -297,11 +309,14 @@ for (const [g, name, wantRow, refMg] of CASES) {
   const r = await ask(calciumPrompt(name, top.definition),
     calciumSchema, "calcium");
   if (r.err) { badRow++; console.log(`FAIL ${name.padEnd(26)} кальций: ${r.err} ${r.raw ?? ""}`); continue; }
-  const row = String(r.obj.verdict).trim();
-  const rawMg = Number(r.obj.calcium_mg_per_100g);
+  const row = String(r.obj.category).trim();
+  const rawMg = Number(r.obj.calcium_mg);
   const rowDef = CALCIUM_ROWS.find(([k]) => k === row);
-  const fromRef = CALCIUM_REFERENCE.some(([, v]) => Math.abs(v - rawMg) < 1e-9);
-  const mg = fromRef || !rowDef ? rawMg : Math.min(Math.max(rawMg, rowDef[1]), rowDef[2]);
+  // Ключ справочника решает, откуда взять число: нашлась запись — её миллиграммы,
+  // иначе зажим границами строки. Ровно как в `ai::lookup_calcium`.
+  const hit = CALCIUM_REFERENCE.find(([n]) =>
+    n.toLowerCase() === String(r.obj.reference_key).trim().toLowerCase());
+  const mg = hit ? hit[1] : (!rowDef ? rawMg : Math.min(Math.max(rawMg, rowDef[1]), rowDef[2]));
   const okRow = row === wantRow;
   // Величина: считаем годной, если она в коридоре ±50 % от справочной. Нам нужен
   // порядок, а не точность до миллиграмма.

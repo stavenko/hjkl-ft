@@ -542,62 +542,74 @@ fn calcium_reference_table() -> String {
         .join("\n")
 }
 
-fn calcium_category_table() -> String {
+/// Строки таблицы БЕЗ ЧИСЕЛ. Диапазоны нужны нам, чтобы поджать ответ, но показывать
+/// их модели вредно: увидев числа, она начинает ими отвечать вместо величины
+/// продукта — так же, как это было у железа.
+fn calcium_category_keys() -> String {
     CALCIUM_CATEGORIES
         .iter()
-        .map(|c| {
-            format!(
-                "  {key:<20} {min}–{max} мг — {ex}",
-                key = c.key, min = c.mg_min, max = c.mg_max, ex = c.examples
-            )
-        })
+        .map(|c| format!("  {key:<20} — {ex}", key = c.key, ex = c.examples))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-// Модель называет строку и величину внутри неё. `///` здесь читается моделью —
-// developer-пояснения держим в `//`, как и у железа.
+// Комментарии у полей — доковые: они уезжают в json_schema и работают инструкцией.
+// Пояснения для читателя кода держим в `//`, иначе док СТРУКТУРЫ уедет в схему как
+// `description` объекта и модель вернёт его вместо данных.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct CalciumDetail {
-    /// The category key from the table, copied EXACTLY as written there.
-    category: String,
-    /// What this product actually is, in two or three words.
-    food_type: String,
-    /// CALCIUM CONTENT per 100 g, in milligrams.
-    recommended: f64,
-    /// True when the value was taken FROM THE REFERENCE table, false when it was
-    /// worked out from the category row.
-    #[serde(default)]
-    from_reference: bool,
-    /// One short sentence: why this category and this amount. Keep it under 20 words.
+struct CalciumAnswer {
+    /// One short sentence: which reference entry or which category, and why.
     reason: String,
+    /// The name of the REFERENCE entry this food matches, copied exactly, or NONE.
+    reference_key: String,
+    /// The category row key from the table, copied exactly.
+    category: String,
+    /// Calcium per 100 g, in milligrams.
+    calcium_mg: f64,
 }
 
-/// Сколько кальция в продукте, мг на 100 г. Строку выбирает модель, величину
-/// ограничивает наша таблица; продукт, не попавший ни в одну строку, даёт 0.
-pub async fn lookup_calcium(food_name: &str) -> Result<f64, String> {
-    let lang = match crate::services::i18n::get_lang() {
-        crate::services::i18n::Lang::Ru => "Russian",
-        crate::services::i18n::Lang::En => "English",
+/// Запись справочника по ключу, который назвала модель.
+fn calcium_reference_hit(key: &str) -> Option<&'static (&'static str, f64)> {
+    let key = key.trim();
+    if key.is_empty() || key.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    CALCIUM_REFERENCE.iter().find(|(name, _)| name.eq_ignore_ascii_case(key))
+}
+
+/// Сколько кальция в продукте, мг на 100 г.
+///
+/// Форма запроса — общая с железом, и это не подражание, а вывод из замеров: строку
+/// таблицы модель выбирает хорошо, а числа помнит плохо (13 из 30 до справочника,
+/// 30 из 30 после). Порядок частей:
+///
+///   1. что человек записал в дневник и что об этом сказало ОПОЗНАНИЕ;
+///   2. СПРАВОЧНИК «продукт → миллиграммы»: нашёлся — назови его ключ;
+///   3. ТАБЛИЦА СТРОК — для всего, чего в справочнике нет;
+///   4. правила выбора строки — они ловят промахи, которые видны в замерах;
+///   5. один ответ.
+///
+/// `identity` — готовое опознание из конвейера признаков; пустая строка допустима
+/// (продукт, у которого все признаки уже собраны, конвейер не гоняет).
+pub async fn lookup_calcium(food_name: &str, identity: &str) -> Result<f64, String> {
+    let known = if identity.trim().is_empty() {
+        String::new()
+    } else {
+        format!("Our automatic classifier says this product is: {identity}\n\n")
     };
     let prompt = format!(
-        "You are a nutritional database. For the food item \"{food_name}\", report how much \
-         CALCIUM it contains per 100 grams, in MILLIGRAMS.\n\n\
-         For raw/dry as-sold products (grains, seeds, legumes, flour) use the RAW value unless \
-         the name says cooked/boiled/soaked.\n\n\
-         FIRST look for this food in the REFERENCE below. It lists milligrams per 100 g for \
-         foods people eat often. If the food is there — or is plainly the same food under \
-         another name, in another grammatical case or with a fat percentage attached — take \
-         the number FROM THE REFERENCE and do not invent your own.\n\n\
+        "A person wrote this into their food diary: {food_name}\n\n{known}\
+         How much CALCIUM does this food hold per 100 grams, in milligrams?\n\n\
+         FIRST look for it in the REFERENCE below. If it is there — or is plainly the same food \
+         under another name, in another grammatical case or with a fat percentage attached — \
+         put that entry's name into \"reference_key\", copied exactly.\n\n\
          {reference}\n\n\
-         If the food is NOT in the reference, place it in ONE row of this table and give a \
-         value INSIDE that row's range:\n\n\
+         Whether or not you found it, ALSO place the food in one row of the table below and \
+         answer with that row's key. If the reference had nothing, answer \"reference_key\" \
+         with NONE and give a value that fits the row.\n\n\
          {table}\n\n\
-         Report:\n\
-         - category: the row key, copied EXACTLY as written above\n\
-         - food_type: what this product is, in two or three words, in {lang}\n\
-         - min_value / max_value / recommended: milligrams per 100 g, min ≤ recommended ≤ max\n\
-         - reason: ONE short sentence (under 20 words) in {lang} — why this row and this amount\n\n\
+         For raw or dry as-sold products (grains, seeds, legumes, flour) use the RAW value \
+         unless the name says cooked, boiled or soaked.\n\n\
          Rules for choosing the row:\n\
          - Cheese goes by HARDNESS: hard and dry → cheese_hard, semi-hard and brined → \
            cheese_semi, soft and fresh → cheese_soft, melted/processed → cheese_processed.\n\
@@ -614,11 +626,10 @@ pub async fn lookup_calcium(food_name: &str) -> Result<f64, String> {
          - Dairy is NEVER other_none: every milk product belongs to one of the dairy rows. \
            Vegetables are never other_none either: they go to vegetables_other or \
            greens_leafy.\n\n\
-         Base the answer only on the food name \"{food_name}\". Respond with ONLY a single \
-         minified JSON object and nothing else — no markdown, no prose.",
+         Fill \"reason\" FIRST, then the two keys, then the milligrams.\n\n\
+         Respond with ONLY a minified JSON object and nothing else.",
         reference = calcium_reference_table(),
-        table = calcium_category_table(),
-        lang = lang,
+        table = calcium_category_keys(),
     );
 
     // Единственное, что осталось проверкой: строка обязана существовать. Она хранится
@@ -628,7 +639,10 @@ pub async fn lookup_calcium(food_name: &str) -> Result<f64, String> {
     // попытки: модель по три раза подряд предлагала мороженому 12–22 мг при коридоре
     // 50–150, и все три уходили впустую. Отвергать бессмысленно, когда подставить
     // нечего; теперь есть что — справочник.
-    let v: CalciumDetail = generate_validated(prompt, |_| {}, 3, |v: &CalciumDetail| {
+    let v: CalciumAnswer = generate_validated(prompt, |_| {}, 3, |v: &CalciumAnswer| {
+        if calcium_reference_hit(&v.reference_key).is_some() {
+            return Ok(());
+        }
         let key = v.category.trim().to_ascii_lowercase();
         if !CALCIUM_CATEGORIES.iter().any(|c| c.key == key) {
             return Err(format!("unknown calcium category «{}» for «{food_name}»", v.category));
@@ -636,26 +650,21 @@ pub async fn lookup_calcium(food_name: &str) -> Result<f64, String> {
         Ok(())
     })
     .await?;
-    let key = v.category.trim().to_ascii_lowercase();
-    let cat = CALCIUM_CATEGORIES
-        .iter()
-        .find(|c| c.key == key)
-        .expect("строка проверена выше");
-    // Величина из СПРАВОЧНИКА берётся как есть: строка описывает группу, справочник —
-    // этот продукт, и расходятся они законно (варёная чечевица против сухой). Прочее
+    // Величина из СПРАВОЧНИКА берётся как есть: строка описывает ГРУППУ, справочник —
+    // этот продукт, и расходятся они законно (мороженое против сливок). Прочее
     // поджимается границами строки — грубому промаху так не пройти.
-    let mg = if v.from_reference {
-        v.recommended
-    } else {
-        v.recommended.clamp(cat.mg_min, cat.mg_max)
+    let (mg, source) = match calcium_reference_hit(&v.reference_key) {
+        Some((name, mg)) => (*mg, format!("справочник «{name}»")),
+        None => {
+            let key = v.category.trim().to_ascii_lowercase();
+            let cat = CALCIUM_CATEGORIES
+                .iter()
+                .find(|c| c.key == key)
+                .expect("строка проверена выше");
+            (v.calcium_mg.clamp(cat.mg_min, cat.mg_max), format!("строка {}", cat.key))
+        }
     };
-    leptos::logging::log!(
-        "calcium «{food_name}»: {mg} мг · {} — {} [{}] ({})",
-        v.category,
-        v.food_type,
-        if v.from_reference { "справочник" } else { "строка" },
-        v.reason
-    );
+    leptos::logging::log!("calcium «{food_name}»: {mg} мг [{source}] ({})", v.reason);
     Ok(mg)
 }
 

@@ -80,10 +80,15 @@ pub fn nutrient_names() -> impl Iterator<Item = &'static str> {
 /// по таблице категорий и справочнику (`ai::lookup_calcium`). Клетчатку отдаёт
 /// растительный узел конвейера признаков, и своего прохода у неё больше нет.
 ///
+/// `identity` — готовое опознание из конвейера признаков; пустая строка допустима.
+/// Без него кальций спрашивался по голому имени из дневника, то есть ровно так, как
+/// спрашивалось железо до «Гольца»: незнакомое слово модель достраивала под свой
+/// вопрос, и в молочном промпте им становилось что угодно молочное.
+///
 /// Progress is cached as each nutrient arrives, so a later failure never loses the
 /// values already fetched and they aren't re-requested. FAIL LOUDLY: the first
 /// nutrient error is returned (the queue's `with_retries` retries the rest).
-pub async fn enrich_food(food: &Food) -> Result<(), String> {
+pub async fn enrich_food(food: &Food, identity: &str) -> Result<(), String> {
     for (name, unit) in TARGETS {
         if food.nutrients.contains_key(*name) {
             continue; // already enriched (e.g. by a previous partial pass)
@@ -95,7 +100,7 @@ pub async fn enrich_food(food: &Food) -> Result<(), String> {
         // Кальций идёт по таблице категорий и справочнику — см. `ai::lookup_calcium`.
         // Развилки больше нет: в списке остался он один.
         let _ = unit;
-        let value = ai::lookup_calcium(&food.name).await?;
+        let value = ai::lookup_calcium(&food.name, identity).await?;
         let mut one = BTreeMap::new();
         one.insert(name.to_string(), value);
         local::cache_food_nutrients(&food.id, one).await;

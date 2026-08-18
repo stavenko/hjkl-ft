@@ -254,8 +254,13 @@ async fn run_worker() {
         // still current for the enrichment gate.
         if super::enrich::needs_enrichment(&food) {
             let f = food.clone();
+            let ident_for_calcium = identity.clone();
             with_retries(
-                move || { let f = f.clone(); async move { super::enrich::enrich_food(&f).await } },
+                move || {
+                    let f = f.clone();
+                    let id = ident_for_calcium.clone();
+                    async move { super::enrich::enrich_food(&f, &id).await }
+                },
                 errors::FoodAspect::Nutrients,
                 &food.name,
             ).await;

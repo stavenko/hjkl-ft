@@ -38,6 +38,9 @@ const CASES = [
   ["Котлеты куриные", false],
   ["Бисквит", false],
   ["Оливье", false],
+  ["Салат с яйцом", false],
+  ["Запеканка творожная", false],
+  ["Яичный салат", false],
   // Слово «яйцо» без яйца.
   ["Киндер сюрприз", false],
   ["Шоколадное яйцо", false],
@@ -118,6 +121,17 @@ const eggPrompt = (name, identity) =>
   `Our automatic classifier says this product is: ${identity}\n\n` +
   "Decide whether this product belongs to BIRD EGGS, or is made of bird eggs — of any bird, " +
   "farmed or wild.\n\n" +
+  "WE COUNT GRAMS. Say yes only when the grams of this product ARE grams of egg: the product " +
+  "is egg through and through, or egg with no more than a spoon of butter, milk or oil in it. " +
+  "Cooking, curing and drying change nothing — raw, boiled, fried, poached, smoked, salted, " +
+  "dried into powder, whole or beaten, yolk or white alone.\n\n" +
+  "Say no when eggs are ONE INGREDIENT AMONG SEVERAL and their share cannot be told from the " +
+  "name: mayonnaise, sauces, salads, pancakes, batter, pasta, cakes, biscuits, cutlets, " +
+  "casseroles. There is no way to count their grams of egg, so they are not egg.\n\n" +
+  "Judge by WEIGHT, not by importance. A yolk gives mayonnaise its name and its texture, but " +
+  "its grams are oil, so mayonnaise is NO. A SALAD is never egg, whatever it is called: " +
+  "«яичный салат» is eggs cut up with dressing and other foods, and nobody can say how much " +
+  "of it was egg.\n\n" +
   "Fill the reason FIRST — one short sentence — and let the answer follow from it.\n\n" +
   "Respond with ONLY a minified JSON object and nothing else.";
 

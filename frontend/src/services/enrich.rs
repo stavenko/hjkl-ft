@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use api_types::Food;
 
-use super::indicators::{N_CALCIUM, N_FIBER};
+use super::indicators::N_CALCIUM;
 use super::{ai, local};
 
 #[derive(Clone, Copy)]
@@ -46,10 +46,11 @@ impl Unit {
 /// не делает, а общий проход спрашивал одно число без таблицы категорий — и порция
 /// скумбрии закрывала недельную норму целиком. Теперь и то, и другое считается из
 /// профиля жира, см. `services::fats`.
-const TARGETS: &[(&str, Unit)] = &[
-    (N_CALCIUM, Unit::Mg),
-    (N_FIBER, Unit::G),
-];
+/// КЛЕТЧАТКИ ЗДЕСЬ БОЛЬШЕ НЕТ: её отдаёт растительный узел конвейера признаков
+/// вместе с частью растения (`services::flags_pipeline`). Продукт там уже опознан,
+/// и отдельный запрос за одним числом был лишними деньгами и лишним поводом для
+/// разногласий: два запроса про один продукт отвечали по-разному.
+const TARGETS: &[(&str, Unit)] = &[(N_CALCIUM, Unit::Mg)];
 
 /// Nutrient keys that must NEVER be rendered in nutrient lists / forms / badges.
 /// `Железо` and `Омега-3` were written into `Food.nutrients` by earlier builds;
@@ -75,11 +76,9 @@ pub fn nutrient_names() -> impl Iterator<Item = &'static str> {
     TARGETS.iter().map(|(n, _)| *n)
 }
 
-/// Fill the missing nutrients for `food` — ONE focused request per nutrient
-/// (`ai::lookup_nutrient`), each asking for a single value in its canonical unit
-/// with the food NAME as the only anchor. This deliberately does NOT reuse the
-/// batched `ai::lookup`: asking for kcal + four nested nutrients at once makes qwen3
-/// corrupt the JSON structure; one nutrient at a time keeps it focused.
+/// Fill the missing nutrients for `food` — сейчас это только КАЛЬЦИЙ, своим запросом
+/// по таблице категорий и справочнику (`ai::lookup_calcium`). Клетчатку отдаёт
+/// растительный узел конвейера признаков, и своего прохода у неё больше нет.
 ///
 /// Progress is cached as each nutrient arrives, so a later failure never loses the
 /// values already fetched and they aren't re-requested. FAIL LOUDLY: the first
@@ -93,11 +92,10 @@ pub async fn enrich_food(food: &Food) -> Result<(), String> {
         // вопрос «сколько кальция» модель не тянет: на 200 замеров половина ответов
         // легла в коридор 120–135 мг независимо от продукта, семена занижались
         // кратно, а слово «обогащённое» в названии не читалось вовсе.
-        let value = if *name == N_CALCIUM {
-            ai::lookup_calcium(&food.name).await?
-        } else {
-            ai::lookup_nutrient(&food.name, name, unit.label()).await?
-        };
+        // Кальций идёт по таблице категорий и справочнику — см. `ai::lookup_calcium`.
+        // Развилки больше нет: в списке остался он один.
+        let _ = unit;
+        let value = ai::lookup_calcium(&food.name).await?;
         let mut one = BTreeMap::new();
         one.insert(name.to_string(), value);
         local::cache_food_nutrients(&food.id, one).await;

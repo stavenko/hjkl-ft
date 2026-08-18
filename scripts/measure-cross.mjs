@@ -60,6 +60,17 @@ const CASES = [
   ["Творог 5 %", false, false, false, false, true],
 ];
 
+// ONLY=подстрока[,подстрока] — прогнать прицельно по больным позициям. Соседи по
+// набору на ответ не влияют (каждый продукт идёт своим конвейером), поэтому такой
+// прогон сравним с полным.
+if (process.env.ONLY) {
+  const want = process.env.ONLY.split(",").map((s) => s.trim().toLowerCase());
+  const kept = CASES.filter(([n]) => want.some((w) => n.toLowerCase().includes(w)));
+  if (!kept.length) throw new Error(`ONLY=${process.env.ONLY} не совпал ни с одним продуктом`);
+  CASES.length = 0;
+  CASES.push(...kept);
+}
+
 const FLAGS = ["овощ/фрукт", "гем", "красное мясо", "переработанное", "глобула"];
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");

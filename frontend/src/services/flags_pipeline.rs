@@ -51,9 +51,15 @@ use super::ai::{build_executor_think, strip_code_fences, veg_fruit_from_category
 /// Сколько раз повторить каждый шаг, прежде чем сдаться.
 const MAX_TRIES: u32 = 3;
 
-/// Редкие имена и то, ЧЕМ они являются.
+/// Редкие имена: что это за еда и как называется по-английски.
 ///
-/// Нужны ровно здесь — в шаге опознания. Рядом, в профиле жира, тот же «Голец»
+/// Каждая запись — СВОЯ СТРОКА вида «слово: определение, could be translated as
+/// [варианты]». Сначала словарь склеивался в одну строку через точку с запятой, и на
+/// «бастурму» модель выдала `ostrich meat` — дословно значение СОСЕДНЕЙ записи,
+/// стоявшей перед ней. Разделить записи строками стоит ничего, а спутать их так
+/// труднее.
+///
+/// Нужен ровно здесь — в шаге опознания. Рядом, в профиле жира, тот же «Голец»
 /// определяется без осечек, потому что ПЕРЕЧИСЛЕН среди примеров строки
 /// `fish_fatty_cold`: модели не нужно его знать, если ей сказать. Уговоры не
 /// работали — ни рамка «имя взято из дневника питания», ни разрешение ответить
@@ -65,43 +71,92 @@ const MAX_TRIES: u32 = 3;
 /// признак балансирует. Здесь же они безвредны: вердиктов рядом нет.
 ///
 /// Пополняется по мере находок: сюда идёт всё, на чём признаки спотыкались.
-const RARE_NAMES: &[(&str, &str)] = &[
-    ("голец", "Arctic char, a fish"),
-    ("пикша", "haddock, a fish"),
-    ("сайда", "saithe (pollock), a fish"),
-    ("зубатка", "wolffish, a fish"),
-    ("муксун", "muksun, a whitefish"),
-    ("омуль", "omul, a whitefish"),
-    ("нельма", "nelma, a whitefish"),
-    ("кижуч", "coho salmon, a fish"),
-    ("кета", "chum salmon, a fish"),
-    ("нерка", "sockeye salmon, a fish"),
-    ("чавыча", "chinook salmon, a fish"),
-    ("горбуша", "pink salmon, a fish"),
-    ("сайра", "saury, a fish"),
-    ("мойва", "capelin, a fish"),
-    ("путассу", "blue whiting, a fish"),
-    ("минтай", "alaska pollock, a fish"),
-    ("навага", "navaga, a fish"),
-    ("палтус", "halibut, a fish"),
-    ("толстолобик", "silver carp, a fish"),
-    ("пангасиус", "pangasius, a fish"),
-    ("страусятина", "ostrich meat, the flesh of a bird"),
+const RARE_NAMES: &[(&str, &str, &[&str])] = &[
+    // Рыбы. Промысловых имён сотни, и почти все незнакомы модели.
+    ("голец", "a cold-water fish of the salmon family", &["Arctic char", "char"]),
+    ("пикша", "a fish of the cod family", &["haddock"]),
+    ("сайда", "a fish of the cod family", &["saithe", "pollock", "coalfish"]),
+    ("зубатка", "a large northern sea fish", &["wolffish", "sea wolf"]),
+    ("муксун", "a northern whitefish", &["muksun"]),
+    ("омуль", "a northern whitefish", &["omul"]),
+    ("нельма", "a northern whitefish", &["nelma", "Siberian white salmon"]),
+    ("кижуч", "a Pacific salmon", &["coho salmon"]),
+    ("кета", "a Pacific salmon", &["chum salmon"]),
+    ("нерка", "a Pacific salmon", &["sockeye salmon"]),
+    ("чавыча", "a Pacific salmon", &["chinook salmon", "king salmon"]),
+    ("горбуша", "a Pacific salmon", &["pink salmon"]),
+    ("сайра", "a small oily sea fish", &["saury"]),
+    ("мойва", "a small oily northern fish", &["capelin"]),
+    ("путассу", "a fish of the cod family", &["blue whiting"]),
+    ("минтай", "a fish of the cod family", &["Alaska pollock", "walleye pollock"]),
+    ("навага", "a northern fish of the cod family", &["navaga", "wachna cod"]),
+    ("палтус", "a large flatfish", &["halibut"]),
+    ("толстолобик", "a freshwater carp", &["silver carp"]),
+    ("пангасиус", "a farmed freshwater catfish", &["pangasius", "basa"]),
+    // Мясные названия, на которых модель ошибалась.
+    ("страусятина", "the flesh of an ostrich, that is of a BIRD", &["ostrich meat"]),
+    ("бастурма", "air-dried cured BEEF, a whole muscle", &["basturma", "pastirma"]),
+    ("суджук", "a dry cured sausage of beef or lamb", &["sujuk", "sucuk"]),
+    ("буженина", "a whole piece of PORK, baked and not cured", &["buzhenina", "baked pork"]),
+    // «Fuet truffle» модель звала грибом, цепляясь за слово truffle: это колбаса С
+    // трюфелем, а не трюфель.
+    ("fuet", "a Catalan dry cured PORK sausage", &["fuet", "fuet truffle"]),
+    ("чоризо", "a Spanish dry cured pork sausage", &["chorizo"]),
 ];
 
-/// Словарь редких имён как текст промпта — из того же массива, что и сам словарь.
-fn rare_names_block() -> String {
-    if RARE_NAMES.is_empty() {
+/// Русские сокращения с этикеток. Их модель не знает и достраивает наугад: «Черника
+/// с/м» была опознана как «blueberry in syrup» — «с/м» прочлось сиропом, после чего
+/// верное правило про сахар отправило ягоду в NONE.
+///
+/// Живут здесь, а не в правилах признаков: это часть ОПОЗНАНИЯ, а не оценки.
+const SHORTHANDS: &[(&str, &str)] = &[
+    ("с/м", "fresh-frozen, nothing added"),
+    ("св/м", "fresh-frozen, nothing added"),
+    ("х/к", "cold-smoked"),
+    ("г/к", "hot-smoked"),
+    ("с/с", "lightly salted"),
+    ("б/г", "headless, said of fish"),
+    ("б/к", "skinless"),
+    ("в/с", "top grade — a grade and nothing more"),
+    ("п/ф", "a semi-prepared product"),
+    ("ц/з", "wholegrain"),
+];
+
+/// Словарь как текст промпта — целиком, по строке на запись.
+///
+/// Целиком, а не «только подходящие строки». Была попытка отбирать записи НАШИМ
+/// кодом по вхождению подстроки — и это оказалось прямо против задумки: сопоставлять
+/// слово с записью модель умеет лучше нас. Она знает падежи («филе гольца»),
+/// латиницу, опечатки и слово внутри фразы, а `contains` не знает ничего: ключ
+/// «голец» не найдётся в «гольца», то есть словарь молчал бы ровно там, где нужен.
+///
+/// По строке на запись — потому что слитный список через «;» модель путает: на
+/// «бастурму» она выдала `ostrich meat`, значение соседней записи.
+fn dictionary_block() -> String {
+    if RARE_NAMES.is_empty() && SHORTHANDS.is_empty() {
         return String::new();
     }
-    let lines = RARE_NAMES
+    let names = RARE_NAMES
         .iter()
-        .map(|(name, what)| format!("{name} — {what}"))
+        .map(|(word, what, tr)| {
+            format!("  {word}: {what}, could be translated as [{}]", tr.join(", "))
+        })
         .collect::<Vec<_>>()
-        .join("; ");
+        .join("\n");
+    let short = SHORTHANDS
+        .iter()
+        .map(|(word, what)| format!("  {word}: {what}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
-        "Some names people write in a food diary are rare and easy to mistake for something \
-         else. Here is what they are: {lines}.\n\n"
+        "A DICTIONARY of names that are rare or easy to mistake. Each line stands on its own \
+         and has nothing to do with its neighbours. Match the name you were given against it \
+         YOURSELF — the word may stand in another grammatical case, in the middle of a phrase, \
+         in Latin letters or misspelled, and it still counts as the same word.\n\
+         {names}\n\n\
+         ABBREVIATIONS from Russian labels. Every one of them is about storage, cut or grade — \
+         none adds an ingredient.\n\
+         {short}\n\n"
     )
 }
 
@@ -123,6 +178,9 @@ pub struct FlagsCtx {
     /// Заполняется первым узлом: «Arctic char, a fish».
     pub identity: Option<String>,
     pub flags: Flags,
+    /// Клетчатка, г на 100 г. Её отдаёт растительный узел вместе с частью растения:
+    /// продукт там уже опознан, и отдельный запрос за ней был лишними деньгами.
+    pub fibre_g: Option<f64>,
     /// Попытки по шагам: у каждого свои, чтобы упавший не тратил чужие.
     tries: [u32; 6],
     /// Обоснования по шагам — для лога и телеметрии.
@@ -136,6 +194,7 @@ impl FlagsCtx {
             food_name: food_name.to_string(),
             identity: None,
             flags: Flags::default(),
+            fibre_g: None,
             tries: [0; 6],
             reasons: Vec::new(),
             last_error: None,
@@ -154,8 +213,8 @@ impl FlagsCtx {
     fn given(&self) -> String {
         match &self.identity {
             Some(w) => format!(
-                "WHAT THIS FOOD IS has already been established: {w}. Take it as given — do not \
-                 second-guess it and never re-guess the species yourself.\n\n"
+                "WHAT THIS FOOD MOST LIKELY IS, with the confidence of each guess: {w}. These \
+                 are given to you — judge by them and do not re-guess the species yourself.\n\n"
             ),
             None => String::new(),
         }
@@ -207,16 +266,50 @@ where
 // нужны: они и есть инструкция.
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct IdentityOption {
+    /// What this food most likely is. English, a sentence of five or six words.
+    definition: String,
+    /// How sure you are of this one, from 0.0 to 1.0.
+    confidence: f64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct IdentityAnswer {
-    /// The creature or plant this food comes from, WHICH PART of it, and what was
-    /// done to it. English, one short phrase, at most 12 words.
-    what_this_food_is: String,
+    /// The three most likely definitions, the surest one first.
+    options: Vec<IdentityOption>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct CategoryAnswer {
     /// The ONE word naming the category that fits, or NONE if none does.
     category_that_fits: String,
+}
+
+// Растительный ответ: части растения и клетчатка.
+//
+// Прежде спрашивался наш собственный термин «овощ или фрукт», и модель угадывала,
+// что мы под ним понимаем: картофель получал то овощ, то корнеплод, чипсы гуляли
+// между прогонами. Части растения — факты, их угадывать не надо, а признак
+// «овощи и фрукты» выводится из них НАШИМ кодом: растение, но не корень, не боб,
+// не зерно и не семя. Замер: 29/29.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct PlantAnswer {
+    /// Is this food a part of some plant at all?
+    is_product_a_part_of_some_plant: bool,
+    /// A root or a tuber: potato, carrot, beetroot, radish, celeriac.
+    is_root: bool,
+    /// A leaf or a stalk: cabbage, lettuce, dill, celery stalk.
+    is_leaf: bool,
+    /// A fruit or a berry: apple, cherry, cucumber, tomato.
+    is_fruit: bool,
+    /// A seed or a nut: walnut, pistachio, sunflower seed, sesame.
+    is_seed: bool,
+    /// The fruit of a legume plant: lentils, beans, peas, soy, chickpeas.
+    is_legume: bool,
+    /// A grain: wheat, rye, spelt, buckwheat, rice, oats, and bread made of them.
+    is_grain: bool,
+    /// Dietary fibre in grams per 100 g. Zero is a valid answer.
+    fibre_g_per_100g: f64,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -243,24 +336,16 @@ impl Prompt for IdentifyPrompt {
 
     fn serialize(&self) -> String {
         format!(
-            "Say what this food is. Nothing else is asked of you: no judgement, no category, \
-             no numbers.\n\n\
-             The name was typed by a person into their FOOD DIARY, so it always names something \
-             eaten — never a material, a device or a term from another trade, however much the \
-             word may look like one.\n\n\
-             Name the creature or plant it comes from, WHICH PART of it — flesh, an organ, a \
-             fruit, a berry, a seed, a leaf, a root, milk, an egg — and what was done to it if \
-             the name says so: smoked, salted, boiled, dried, minced, in syrup. Answer in \
-             ENGLISH, one short phrase: \"Arctic char, a fish\", \"chicken thigh, poultry \
-             meat\", \"beef liver, an organ\", \"buckwheat, a grain\", \"chicken egg\", \
-             \"cherry in syrup, a berry with added sugar\".\n\n\
-             Never merely repeat the name back — a name copied out says nothing. Never answer \
-             with a food that merely SOUNDS similar: a Russian word for meat is not a berry \
-             because their first letters agree. If you truly do not recognise the word, name the \
-             most likely KIND of food it is and say you are unsure; do not invent a species.\n\n\
-             {rare}The food: {name}\n\n\
-             Respond with ONLY a single minified JSON object and nothing else.",
-            rare = rare_names_block(),
+            "A person wrote this into their food diary: {name}\n\n\
+             Say what it is, using YOUR OWN KNOWLEDGE first. The dictionary below covers a few \
+             rare words only — check whether this name is one of them, and if it is not, ignore \
+             the dictionary and answer from what you know. It is a help, not a list of allowed \
+             answers.\n\n\
+             Give the THREE most likely definitions, the surest one first, each a sentence of \
+             five or six words, each with your confidence from 0.0 to 1.0.\n\n\
+             {rare}Respond with ONLY a minified JSON object and nothing else: \
+             {{\"options\": [{{\"definition\": \"…\", \"confidence\": 0.9}}, …]}}",
+            rare = dictionary_block(),
             name = self.food_name,
         )
     }
@@ -268,11 +353,24 @@ impl Prompt for IdentifyPrompt {
     fn update_context(&self, mut ctx: Self::Context, raw: Self::Output) -> Self::Context {
         ctx.tries[0] += 1;
         match serde_json::from_str::<IdentityAnswer>(strip_code_fences(raw.trim())) {
-            Ok(a) if !a.what_this_food_is.trim().is_empty() => {
-                ctx.identity = Some(a.what_this_food_is.trim().to_string());
-                ctx.last_error = None;
+            Ok(a) => {
+                // Признакам уходят ВСЕ варианты с их достоверностью, а не только
+                // первый: пусть видно, что уверенности нет, — «голец» модель звала и
+                // рыбой, и кониной, и разница между 0.9 и 0.4 здесь и есть ответ.
+                let opts: Vec<String> = a
+                    .options
+                    .iter()
+                    .filter(|o| !o.definition.trim().is_empty())
+                    .take(3)
+                    .map(|o| format!("{} ({:.2})", o.definition.trim(), o.confidence))
+                    .collect();
+                if opts.is_empty() {
+                    ctx.last_error = Some("опознание пустое".to_string());
+                } else {
+                    ctx.identity = Some(opts.join("; "));
+                    ctx.last_error = None;
+                }
             }
-            Ok(_) => ctx.last_error = Some("опознание пустое".to_string()),
             Err(e) => ctx.last_error = Some(format!("опознание не разобрано: {e}, ответ: {raw}")),
         }
         ctx
@@ -462,6 +560,11 @@ impl Step {
         }
     }
 
+    /// Растительный шаг спрашивает части растения и клетчатку, а не наш термин.
+    fn as_plant(self) -> bool {
+        matches!(self, Step::VegFruit)
+    }
+
     /// Чем кончается промпт: просьбой назвать категорию словом или дать вердикт.
     fn tail(self) -> &'static str {
         if self.as_category() {
@@ -491,7 +594,10 @@ impl Step {
                 — DISHES MADE MAINLY OF THEM: salads, stewed or roasted vegetables, vegetable \
                 soups, fruit salads.\n\n\
                 Sugar changes what a food is: jam, preserves, fruit in syrup, candied fruit and \
-                juices belong to none of the categories, however much fruit went into them.",
+                juices belong to none of the categories, however much fruit went into them. \
+                FREEZING, DRYING AND COOKING change nothing: frozen berries are berries, boiled \
+                beetroot is a vegetable, and a note about freezing in the name — «с/м», \
+                «мороженая», «frozen» — is about storage, not about what the food is.",
             Step::Heme => "\
                 THE CATEGORIES OF RICH HEME-IRON SOURCES:\n\
                 — LIVER itself — of any animal, bird or fish — and food made mainly of liver: \
@@ -518,10 +624,12 @@ impl Step {
                 — FOOD MADE MAINLY OF SUCH FLESH: sausages, frankfurters, ham, bacon, salami, \
                 mince, meatballs, cutlets, stew, canned meat — whatever the flesh has been \
                 through.\n\n\
-                It is the FLESH — muscle — that belongs to these categories. INNER ORGANS do \
-                not: liver, heart, kidney, tongue, lung, tripe and dishes made mainly of them \
-                are outside, however red they look. Neither do BIRDS — chicken, turkey, duck, \
-                goose, ostrich — nor fish, seafood, eggs, dairy or anything from a plant.",
+                It is MUSCLE that belongs to these categories. A TONGUE and a HEART are \
+                muscle, so beef tongue, pork heart and dishes made mainly of them DO belong. \
+                Organs that are NOT muscle stay outside — liver, kidneys, lungs, tripe, brain — \
+                however red they look. BIRDS are outside whatever the part: chicken, turkey, \
+                duck, goose, ostrich, and a chicken heart with them, because a bird is not a \
+                mammal. Fish, seafood, eggs, dairy and anything from a plant are outside too.",
             Step::ProcessedMeat => "\
                 THE QUESTION: is this meat PRESERVED — cured, smoked, salted, dried or \
                 fermented for keeping? Meat here is the flesh of a MAMMAL or a BIRD.\n\n\
@@ -530,6 +638,9 @@ impl Step {
                 is not preserving: boiling, frying, baking, stewing, grilling, mincing, \
                 freezing and packaging leave meat unpreserved, however industrial the \
                 process.\n\n\
+                A word like «молочные», «сливочные», «milk» or «cream» in a sausage's name \
+                describes its recipe, not its kind: milk sausages are sausages, cured with \
+                nitrite like any other, and the answer for them is TRUE.\n\n\
                 PRESERVED, therefore TRUE: sausages and frankfurters, wieners, salami and other \
                 dry sausages — fuet, chorizo, sobrassada, soppressata, sujuk, kabanos, \
                 landjäger, pepperoni, whatever else they are called abroad — ham, bacon, \
@@ -590,6 +701,21 @@ impl Prompt for FlagPrompt {
     }
 
     fn serialize(&self) -> String {
+        if self.step.as_plant() {
+            return format!(
+                "A person wrote this into their food diary: {name}\n\n\
+                 {given}\
+                 First answer whether this food is a part of some plant at all. If it is, \
+                 answer which part of the plant it is — a root or tuber, a leaf or stalk, a \
+                 fruit or berry, a seed or nut, a legume, a grain. If the food is not from a \
+                 plant, every part field is false.\n\n\
+                 Then give the dietary FIBRE of this food in grams per 100 g, as you know it. \
+                 Zero is a valid answer for food that has none.\n\n\
+                 Respond with ONLY a minified JSON object and nothing else.",
+                name = self.food_name,
+                given = self.given,
+            );
+        }
         format!(
             "Decide ONE question about one food, and nothing else.\n\n\
              The food: {name}\n\n\
@@ -610,6 +736,51 @@ impl Prompt for FlagPrompt {
 
     fn update_context(&self, mut ctx: Self::Context, raw: Self::Output) -> Self::Context {
         ctx.tries[self.step.slot()] += 1;
+        if self.step.as_plant() {
+            match serde_json::from_str::<PlantAnswer>(strip_code_fences(raw.trim())) {
+                Ok(a) => {
+                    // «Овощи и фрукты» — это растение, но НЕ корень, не боб, не зерно
+                    // и не семя. Решает наш код, а не модель: у неё спрашивают только
+                    // факты о растении.
+                    let veg = a.is_product_a_part_of_some_plant
+                        && !a.is_root
+                        && !a.is_legume
+                        && !a.is_grain
+                        && !a.is_seed;
+                    self.step.set(&mut ctx.flags, veg);
+                    ctx.fibre_g = Some(a.fibre_g_per_100g.max(0.0));
+                    let part = if a.is_root { "корень" }
+                        else if a.is_leaf { "лист" }
+                        else if a.is_fruit { "плод" }
+                        else if a.is_seed { "семя" }
+                        else if a.is_legume { "боб" }
+                        else if a.is_grain { "зерно" }
+                        else { "не растение" };
+                    ctx.reasons.push(format!("растение: {part}"));
+                    ctx.last_error = None;
+                    leptos::logging::log!(
+                        "фрукты/овощи «{}»: {veg} — {part}, клетчатка {} г",
+                        ctx.food_name,
+                        a.fibre_g_per_100g
+                    );
+                    crate::services::telemetry::report_detection(
+                        self.step.kind(),
+                        &ctx.food_name,
+                        &veg.to_string(),
+                        &format!(
+                            "{} → {part}",
+                            ctx.identity.clone().unwrap_or_else(|| "(не опознано)".to_string())
+                        ),
+                        &[a.fibre_g_per_100g],
+                    );
+                }
+                Err(e) => {
+                    ctx.last_error =
+                        Some(format!("растение не разобрано: {e}, ответ: {raw}"))
+                }
+            }
+            return ctx;
+        }
         let parsed: Result<(bool, String), String> = if self.step.as_category() {
             // Вердикт выводим САМИ из названной категории: пока его ставила модель,
             // она называла «FRUITS» и отвечала «да» на вишню в сиропе.
@@ -657,7 +828,9 @@ impl Prompt for FlagPrompt {
         &self,
         executor: E,
     ) -> LocalBoxStream<'static, PromptExecutionEvent> {
-        if self.step.as_category() {
+        if self.step.as_plant() {
+            run_structured::<E, PlantAnswer>(executor, self.serialize(), self.name())
+        } else if self.step.as_category() {
             run_structured::<E, CategoryAnswer>(executor, self.serialize(), self.name())
         } else {
             run_structured::<E, FlagAnswer>(executor, self.serialize(), self.name())
@@ -718,10 +891,15 @@ impl Node for FlagNode {
 /// Возвращает то, что удалось выяснить: неполученный признак остаётся `None` и будет
 /// переспрошен позже. FAILS LOUDLY только если не выяснено НИЧЕГО — тогда есть о чём
 /// сообщить в журнал ошибок.
-pub async fn classify_all(food_name: &str) -> Result<Flags, String> {
-    // Thinking OFF: с рассуждением qwen3 паркует короткий ответ в канал размышления
-    // и возвращает пустой контент.
-    let executor = build_executor_think(false)?;
+pub async fn classify_all(
+    food_name: &str,
+) -> Result<(Flags, Option<f64>, Option<String>), String> {
+    // Thinking ON. В остальных запросах он выключен: qwen3 паркует короткий ответ в
+    // канал размышления и отдаёт пустой контент. Здесь пробуем включить, потому что
+    // узлам достались настоящие противоречия — «язык это мышца, но орган», «копчёная
+    // рыба консервирована, но не мясо», — и их надо продумать, а не угадать. Лимит
+    // токенов в режиме рассуждения вчетверо больше (8000), так что ответу есть место.
+    let executor = build_executor_think(true)?;
     let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode { executor })));
 
     let mut stream = run_pipeline(pipeline, FlagsCtx::new(food_name));
@@ -734,6 +912,8 @@ pub async fn classify_all(food_name: &str) -> Result<Flags, String> {
 
     let ctx = last.ok_or_else(|| "конвейер признаков не дал результата".to_string())?;
     let f = ctx.flags;
+    let fibre = ctx.fibre_g;
+    let identity = ctx.identity.clone();
     let got = [f.veg_fruit, f.heme, f.red_meat, f.processed_meat, f.milk_globule]
         .iter()
         .filter(|v| v.is_some())
@@ -748,5 +928,5 @@ pub async fn classify_all(food_name: &str) -> Result<Flags, String> {
         ctx.identity.clone().unwrap_or_else(|| "(не опознано)".to_string()),
         ctx.reasons.join(" · ")
     );
-    Ok(f)
+    Ok((f, fibre, identity))
 }

@@ -250,7 +250,7 @@ pub async fn lookup(
 }
 
 /// Ask the model for a single JSON object of type `T`. THE one path every
-/// structured request takes — `lookup`, `lookup_nutrient`, `lookup_iron`,
+/// structured request takes — `lookup`, `lookup_calcium`, `lookup_iron`,
 /// `classify_food`, `match_food`. The ai-worker turns `T`'s schema into a JSON-mode
 /// instruction; `on_token` reports thinking/answer tokens so a caller can drive the
 /// live "thinking/answer (N tok)" UI (pass `|_| {}` when there is no UI).
@@ -345,74 +345,6 @@ where
     }
     Err(last_err)
 }
-
-// A focused, FLAT single-nutrient answer. Deliberately not the nested
-// `NutrientDetail` (value+unit) shape: the batched `lookup` asks for kcal plus a
-// `custom_nutrients` MAP of nested value/unit objects, and qwen3 reliably corrupts
-// that deep structure (observed live: `,{"zhelezo"` instead of `,"zhelezo":`). One
-// nutrient, three plain numbers + a comment keeps the model focused and the JSON
-// trivially well-formed.
-//
-// NB: `///` here becomes the schema's `description`, and the ai-worker pastes the
-// schema into the prompt verbatim — so `///` text is READ BY THE MODEL. This block
-// is developer rationale, hence `//`. Written as `///` it made the model answer with
-// the schema document itself instead of a value, and the whole nutrient pass wrote
-// nothing to the database.
-#[derive(Debug, Deserialize, JsonSchema)]
-struct SingleNutrient {
-    /// Lowest reasonable amount per 100 g (a plain number in the requested unit).
-    min_value: f64,
-    /// Highest reasonable amount per 100 g (a plain number in the requested unit).
-    max_value: f64,
-    /// Most likely amount per 100 g (a plain number in the requested unit).
-    recommended: f64,
-    /// Short explanation of the value, in the requested language.
-    comment: String,
-}
-
-/// Look up ONE nutrient for a food, relying ONLY on the food NAME. Simplified,
-/// focused counterpart to `lookup`: a flat prompt + flat schema so the model isn't
-/// juggling five nutrients and a nested structure at once (which broke it). Same
-/// streaming `execute` path as the working `lookup`. Returns the recommended amount
-/// per 100 g in `unit`. Retries on a transient empty / unparseable response. FAIL
-/// LOUDLY after the retries.
-pub async fn lookup_nutrient(food_name: &str, nutrient: &str, unit: &str) -> Result<f64, String> {
-    let lang = match crate::services::i18n::get_lang() {
-        crate::services::i18n::Lang::Ru => "Russian",
-        crate::services::i18n::Lang::En => "English",
-    };
-    let prompt = format!(
-        "You are a nutritional database. For the food item \"{food_name}\", give the amount of \
-         {nutrient} per 100 grams, as a plain number in {unit}.\n\n\
-         For raw/dry as-sold products (grains, rice, pasta, flour, meat, fish, legumes) use the \
-         RAW value unless the name says cooked/boiled/fried/steamed.\n\n\
-         Provide:\n\
-         - min_value: lowest reasonable amount (number, in {unit})\n\
-         - max_value: highest reasonable amount (number, in {unit})\n\
-         - recommended: the most likely amount (number, in {unit})\n\
-         - comment: brief explanation in {lang}\n\n\
-         Base the answer only on the food name \"{food_name}\". All values are per 100 g in {unit} \
-         — bare numbers, no unit text. Respond with ONLY a single minified JSON object and nothing \
-         else — no markdown, no prose."
-    );
-
-    // Тот же бракет, что у железа: сначала диапазон, потом значение внутри него.
-    // Модель, поставившая своё «наиболее вероятное» вне собственных min…max, себе
-    // противоречит — такой ответ выбрасывается, а не записывается в базу.
-    let v: SingleNutrient = generate_validated(prompt, |_| {}, 3, |v: &SingleNutrient| {
-        if v.min_value <= v.recommended && v.recommended <= v.max_value && v.min_value >= 0.0 {
-            Ok(())
-        } else {
-            Err(format!(
-                "{nutrient} contradicts itself for «{food_name}»: {}…{}…{} {unit}",
-                v.min_value, v.recommended, v.max_value
-            ))
-        }
-    })
-    .await?;
-    Ok(v.recommended)
-}
-
 // ── Сколько кальция в продукте, по категориям ─────────────────────────────────
 //
 // Измерено на 200 запросах (по десять на двадцать продуктов, `scripts/measure-
@@ -453,13 +385,15 @@ const CALCIUM_CATEGORIES: &[CalciumCategory] = &[
     CalciumCategory { key: "milk_liquid", mg_min: 90.0, mg_max: 150.0,
         examples: "молоко, кефир, ряженка, айран, простокваша, питьевой йогурт" },
     CalciumCategory { key: "yogurt_sour_cream", mg_min: 80.0, mg_max: 180.0,
-        examples: "йогурт, греческий йогурт, сметана, сливочный сыр без соли" },
+        examples: "йогурт, греческий йогурт, скир, сметана, простокваша густая, \
+                   сливочный сыр без соли" },
     CalciumCategory { key: "cottage_cheese", mg_min: 80.0, mg_max: 200.0,
         examples: "творог, зернёный творог, творожная масса, сырники" },
     CalciumCategory { key: "milk_concentrated", mg_min: 250.0, mg_max: 1300.0,
         examples: "сухое молоко, сгущённое молоко, молочная сыворотка сухая" },
-    CalciumCategory { key: "cream_whey", mg_min: 50.0, mg_max: 110.0,
-        examples: "сливки, сыворотка, мороженое пломбир" },
+    CalciumCategory { key: "cream_whey", mg_min: 50.0, mg_max: 150.0,
+        examples: "сливки, сыворотка, мороженое пломбир, мороженое сливочное, эскимо, \
+                   молочный коктейль" },
     // ── Немолочные источники, где кальция действительно много ──
     CalciumCategory { key: "seeds_high", mg_min: 500.0, mg_max: 1500.0,
         examples: "мак, кунжут, семена чиа" },
@@ -476,7 +410,7 @@ const CALCIUM_CATEGORIES: &[CalciumCategory] = &[
     // Обычная рыба и морепродукты — кальция в них десятки миллиграммов, для
     // недельной нормы это шум. Строка нужна отдельно от `other_none`: модель ищет
     // САМУЮ ПОХОЖУЮ строку, и без рыбной среди них любая рыба уезжала в консервы.
-    CalciumCategory { key: "fish_plain", mg_min: 0.0, mg_max: 0.0,
+    CalciumCategory { key: "fish_plain", mg_min: 10.0, mg_max: 60.0,
         examples: "рыба и морепродукты без костей: лосось, кижуч, горбуша, форель, треска, \
                    минтай, скумбрия, сельдь, тунец, филе любой рыбы, креветки, кальмар" },
     CalciumCategory { key: "tofu", mg_min: 100.0, mg_max: 700.0,
@@ -492,7 +426,7 @@ const CALCIUM_CATEGORIES: &[CalciumCategory] = &[
         examples: "фасоль сухая, нут сухой, соевые бобы, маш" },
     CalciumCategory { key: "greens_leafy", mg_min: 130.0, mg_max: 260.0,
         examples: "петрушка, укроп, кале, руккола, базилик, кинза" },
-    CalciumCategory { key: "vegetables_other", mg_min: 25.0, mg_max: 90.0,
+    CalciumCategory { key: "vegetables_other", mg_min: 15.0, mg_max: 90.0,
         examples: "брокколи, цветная капуста, белокочанная капуста, пекинская капуста, \
                    стручковая фасоль, репа" },
     CalciumCategory { key: "greens_oxalate", mg_min: 40.0, mg_max: 120.0,
@@ -507,11 +441,107 @@ const CALCIUM_CATEGORIES: &[CalciumCategory] = &[
         examples: "соевое молоко без добавок, овсяное молоко, миндальное молоко, кокосовое молоко" },
     // ── Всё прочее — ноль ──
     CalciumCategory { key: "other_none", mg_min: 0.0, mg_max: 0.0,
-        examples: "мясо, птица, рыба без костей, яйца, крупы, макароны, хлеб, овощи, фрукты, \
-                   масло, сахар, сладости, вода, чай, кофе, алкоголь — всё, чего нет выше" },
+        examples: "мясо, птица, яйца, крупы, макароны, хлеб, растительное масло, сахар, \
+                   конфеты, вода, чай, кофе, алкоголь" },
 ];
 
 /// Таблица кальция как текст промпта — из того же массива, что и проверка.
+/// СПРАВОЧНИК КАЛЬЦИЯ: продукт → миллиграммы на 100 г.
+///
+/// Категории с диапазонами ([`CALCIUM_CATEGORIES`]) отвечают на вопрос «какого рода
+/// этот продукт», а число внутри диапазона до сих пор называла модель по памяти — и
+/// называла плохо: замер по группам источников дал верную строку в 26 случаях из 30
+/// и верную величину лишь в 13. Сыру российскому она давала 130 мг при справочных
+/// 880, моцарелле 150 при 500, сливочному мороженому 12–22 мг три попытки подряд.
+/// Строку она выбирает хорошо, цифры помнит плохо — поэтому цифры теперь наши.
+///
+/// Здесь только то, что люди едят часто, и прежде всего молочное: на него приходится
+/// большая часть кальция в рационе, и там же были самые грубые промахи. Всё
+/// остальное по-прежнему считается по строке и её диапазону.
+///
+/// Значения типовые, на 100 г съедобной части. Пополняется по мере находок.
+pub(crate) const CALCIUM_REFERENCE: &[(&str, f64)] = &[
+    // Жидкое молочное.
+    ("молоко", 120.0),
+    ("кефир", 120.0),
+    ("ряженка", 124.0),
+    ("простокваша", 118.0),
+    ("айран", 118.0),
+    ("питьевой йогурт", 110.0),
+    // Кисломолочное густое.
+    ("йогурт натуральный", 120.0),
+    ("йогурт греческий", 110.0),
+    ("скир", 150.0),
+    ("сметана", 90.0),
+    // Творог.
+    ("творог", 150.0),
+    ("творог обезжиренный", 120.0),
+    ("творожная масса", 135.0),
+    // Сыры.
+    ("пармезан", 1180.0),
+    ("грана падано", 1160.0),
+    ("эмменталь", 1000.0),
+    ("маасдам", 800.0),
+    ("сыр российский", 880.0),
+    ("чеддер", 720.0),
+    ("гауда", 700.0),
+    ("сулугуни", 650.0),
+    ("брынза", 530.0),
+    ("моцарелла", 500.0),
+    ("адыгейский сыр", 520.0),
+    ("фета", 360.0),
+    ("камамбер", 390.0),
+    ("рикотта", 210.0),
+    ("бри", 185.0),
+    ("творожный сыр", 100.0),
+    ("плавленый сыр", 700.0),
+    // Прочее молочное.
+    ("молоко сухое", 1000.0),
+    ("молоко сгущённое", 120.0),
+    ("сливки", 86.0),
+    ("сыворотка молочная", 60.0),
+    ("мороженое пломбир", 130.0),
+    ("мороженое сливочное", 120.0),
+    // Немолочные источники, где кальция много.
+    ("мак", 1460.0),
+    ("кунжут", 975.0),
+    ("семена чиа", 630.0),
+    ("тахини", 420.0),
+    ("тофу", 350.0),
+    ("миндаль", 260.0),
+    ("сардины консервированные", 380.0),
+    ("шпроты", 300.0),
+    ("лосось консервированный", 180.0),
+    // Растительное.
+    ("петрушка", 245.0),
+    ("укроп", 223.0),
+    ("руккола", 160.0),
+    ("кале", 150.0),
+    ("шпинат", 99.0),
+    ("брокколи", 47.0),
+    ("капуста белокочанная", 40.0),
+    ("цветная капуста", 22.0),
+    ("фасоль сухая", 143.0),
+    ("нут сухой", 105.0),
+    ("курага", 160.0),
+    ("инжир сушёный", 162.0),
+    ("апельсин", 40.0),
+    // Частое, где кальция мало, — чтобы не уходило в ноль по недоразумению.
+    ("яйцо куриное", 55.0),
+    ("рыба, филе", 25.0),
+    ("хлеб", 25.0),
+    ("говядина", 12.0),
+];
+
+/// Справочник как текст промпта — из того же массива, что и сам справочник.
+fn calcium_reference_table() -> String {
+    CALCIUM_REFERENCE
+        .iter()
+        .map(|(name, mg)| format!("  {name}: {mg:.0}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn calcium_category_table() -> String {
     CALCIUM_CATEGORIES
         .iter()
@@ -533,12 +563,12 @@ struct CalciumDetail {
     category: String,
     /// What this product actually is, in two or three words.
     food_type: String,
-    /// Lowest reasonable CALCIUM CONTENT per 100 g, in milligrams.
-    min_value: f64,
-    /// Highest reasonable CALCIUM CONTENT per 100 g, in milligrams.
-    max_value: f64,
-    /// Most likely CALCIUM CONTENT per 100 g, in milligrams.
+    /// CALCIUM CONTENT per 100 g, in milligrams.
     recommended: f64,
+    /// True when the value was taken FROM THE REFERENCE table, false when it was
+    /// worked out from the category row.
+    #[serde(default)]
+    from_reference: bool,
     /// One short sentence: why this category and this amount. Keep it under 20 words.
     reason: String,
 }
@@ -555,8 +585,13 @@ pub async fn lookup_calcium(food_name: &str) -> Result<f64, String> {
          CALCIUM it contains per 100 grams, in MILLIGRAMS.\n\n\
          For raw/dry as-sold products (grains, seeds, legumes, flour) use the RAW value unless \
          the name says cooked/boiled/soaked.\n\n\
-         First place the food in ONE row of this table, then give a value INSIDE that row's \
-         range:\n\n\
+         FIRST look for this food in the REFERENCE below. It lists milligrams per 100 g for \
+         foods people eat often. If the food is there — or is plainly the same food under \
+         another name, in another grammatical case or with a fat percentage attached — take \
+         the number FROM THE REFERENCE and do not invent your own.\n\n\
+         {reference}\n\n\
+         If the food is NOT in the reference, place it in ONE row of this table and give a \
+         value INSIDE that row's range:\n\n\
          {table}\n\n\
          Report:\n\
          - category: the row key, copied EXACTLY as written above\n\
@@ -570,40 +605,58 @@ pub async fn lookup_calcium(food_name: &str) -> Result<f64, String> {
            кальцием», «fortified»). Otherwise it is plant_milk_plain, which has very little.\n\
          - Canned fish counts as fish_with_bones only when the bones are eaten (sardines, \
            sprats, canned salmon). Fillet without bones is other_none.\n\
-         - Anything not covered by a row above is other_none, and its value is 0. Meat, fish \
-           fillet, eggs, cereals, bread, pasta, vegetables, fruit, oils, sweets and drinks all \
-           go there — they carry some calcium, but too little to count.\n\n\
+         - The examples in a row are EXAMPLES, not the whole row. A food that is not named \
+           there still belongs to the row it is closest to: скир goes with yogurts, мороженое \
+           with cream, айран with milk, любой сыр — to the cheese row that matches its \
+           hardness. Answer other_none ONLY when the food genuinely carries no calcium worth \
+           counting — meat, eggs, cereals, bread, oil, sugar, water, tea, coffee. Never answer \
+           other_none merely because the name is missing from the examples.\n\
+         - Dairy is NEVER other_none: every milk product belongs to one of the dairy rows. \
+           Vegetables are never other_none either: they go to vegetables_other or \
+           greens_leafy.\n\n\
          Base the answer only on the food name \"{food_name}\". Respond with ONLY a single \
          minified JSON object and nothing else — no markdown, no prose.",
+        reference = calcium_reference_table(),
         table = calcium_category_table(),
         lang = lang,
     );
 
-    let v: CalciumDetail = generate_validated(prompt, |_| {}, 4, |v: &CalciumDetail| {
-        if !(v.min_value <= v.recommended && v.recommended <= v.max_value && v.min_value >= 0.0) {
-            return Err(format!(
-                "calcium contradicts itself: {}…{}…{} мг",
-                v.min_value, v.recommended, v.max_value
-            ));
-        }
+    // Единственное, что осталось проверкой: строка обязана существовать. Она хранится
+    // и решает, куда продукт отнесён, — выдуманный ключ хранить нельзя.
+    //
+    // Всё остальное больше НЕ отвергается. Раньше выход за границы строки стоил
+    // попытки: модель по три раза подряд предлагала мороженому 12–22 мг при коридоре
+    // 50–150, и все три уходили впустую. Отвергать бессмысленно, когда подставить
+    // нечего; теперь есть что — справочник.
+    let v: CalciumDetail = generate_validated(prompt, |_| {}, 3, |v: &CalciumDetail| {
         let key = v.category.trim().to_ascii_lowercase();
-        let Some(cat) = CALCIUM_CATEGORIES.iter().find(|c| c.key == key) else {
+        if !CALCIUM_CATEGORIES.iter().any(|c| c.key == key) {
             return Err(format!("unknown calcium category «{}» for «{food_name}»", v.category));
-        };
-        if !(cat.mg_min - 1e-9..=cat.mg_max + 1e-9).contains(&v.recommended) {
-            return Err(format!(
-                "calcium {} мг outside «{}» ({}–{} мг) for «{food_name}»",
-                v.recommended, cat.key, cat.mg_min, cat.mg_max
-            ));
         }
         Ok(())
     })
     .await?;
+    let key = v.category.trim().to_ascii_lowercase();
+    let cat = CALCIUM_CATEGORIES
+        .iter()
+        .find(|c| c.key == key)
+        .expect("строка проверена выше");
+    // Величина из СПРАВОЧНИКА берётся как есть: строка описывает группу, справочник —
+    // этот продукт, и расходятся они законно (варёная чечевица против сухой). Прочее
+    // поджимается границами строки — грубому промаху так не пройти.
+    let mg = if v.from_reference {
+        v.recommended
+    } else {
+        v.recommended.clamp(cat.mg_min, cat.mg_max)
+    };
     leptos::logging::log!(
-        "calcium «{food_name}»: {} мг · {} — {} ({})",
-        v.recommended, v.category, v.food_type, v.reason
+        "calcium «{food_name}»: {mg} мг · {} — {} [{}] ({})",
+        v.category,
+        v.food_type,
+        if v.from_reference { "справочник" } else { "строка" },
+        v.reason
     );
-    Ok(v.recommended)
+    Ok(mg)
 }
 
 // ── How well iron is absorbed, by food category ──────────────────────────────
@@ -648,6 +701,113 @@ pub(crate) struct IronCategory {
 // Границы — справочные значения на 100 г съедобной части (USDA / стандартные
 // таблицы), сырой продукт: низ = самый бедный из ТИПИЧНЫХ представителей строки,
 // верх = самый богатый.
+/// СПРАВОЧНИК ЖЕЛЕЗА: продукт → миллиграммы на 100 г.
+///
+/// Заведён по той же причине, что и [`CALCIUM_REFERENCE`], и по тем же измерениям:
+/// строку таблицы модель выбирает верно в 27 случаях из 30, а величину — лишь в 18.
+/// Мидиям она давала 1.5 мг при справочных 6.7, петрушке 1.1 при 6.2, кунжуту 6.1
+/// при 14.6; творогу и яблоку — втрое больше должного. Причём трижды подряд
+/// предлагала значения ВНЕ диапазона собственной строки, и приложение их отвергало:
+/// проверка коридором работает, но подставить ей нечего.
+///
+/// Третье число — ДОЛЯ УСВОЕНИЯ этого продукта. Модели она не показывается вовсе:
+/// без таблицы та даёт чечевице и творогу те же 0.20, что и говядине, вчетверо
+/// завышая усвоенное. Модель называет КЛЮЧ записи, а оба числа берём мы.
+///
+/// Для продуктов вне справочника доля по-прежнему берётся из строки
+/// [`IRON_CATEGORIES`], которую выбирает отдельный шаг.
+///
+/// Значения типовые, на 100 г съедобной части; для круп и бобовых — в сухом виде,
+/// если в названии не сказано «варёная». Пополняется по мере находок.
+pub(crate) const IRON_REFERENCE: &[(&str, f64, f64)] = &[
+    ("печень свиная", 18.0, 0.25),
+    ("печень куриная", 9.0, 0.25),
+    ("печень говяжья", 6.9, 0.25),
+    ("печень индейки", 7.5, 0.25),
+    ("печень трески", 1.9, 0.25),
+    ("сердечки куриные", 5.9, 0.25),
+    ("сердце говяжье", 4.3, 0.25),
+    ("почки говяжьи", 5.9, 0.25),
+    ("желудки куриные", 3.2, 0.25),
+    ("язык говяжий", 4.1, 0.25),
+    ("говядина", 2.6, 0.2),
+    ("баранина", 1.9, 0.2),
+    ("крольчатина", 1.3, 0.2),
+    ("свинина", 0.9, 0.2),
+    ("телятина", 1.1, 0.2),
+    ("оленина", 3.4, 0.2),
+    ("куриная грудка", 1.0, 0.15),
+    ("куриное бедро", 1.3, 0.15),
+    ("индейка филе", 1.4, 0.15),
+    ("колбаса варёная", 1.7, 0.15),
+    ("сосиски", 1.8, 0.15),
+    ("салями", 1.5, 0.15),
+    ("ветчина", 1.3, 0.15),
+    ("устрицы", 9.2, 0.25),
+    ("мидии", 6.7, 0.25),
+    ("креветки", 1.8, 0.25),
+    ("гребешки", 0.6, 0.25),
+    ("кальмар", 0.7, 0.25),
+    ("скумбрия", 1.6, 0.15),
+    ("сельдь", 1.1, 0.15),
+    ("лосось", 0.8, 0.15),
+    ("тунец", 1.0, 0.15),
+    ("треска", 0.4, 0.15),
+    ("голец", 0.5, 0.15),
+    ("икра красная", 1.8, 0.2),
+    ("кунжут", 14.6, 0.04),
+    ("семена тыквы", 8.8, 0.04),
+    ("чечевица сухая", 7.5, 0.05),
+    ("фасоль сухая", 6.7, 0.05),
+    ("нут сухой", 6.2, 0.05),
+    ("соя", 15.7, 0.03),
+    ("семена подсолнечника", 5.3, 0.04),
+    ("кешью", 6.7, 0.04),
+    ("фисташки", 4.2, 0.04),
+    ("миндаль", 3.7, 0.04),
+    ("грецкий орех", 2.9, 0.04),
+    ("арахис", 4.6, 0.04),
+    ("чечевица варёная", 3.3, 0.05),
+    ("фасоль варёная", 2.9, 0.05),
+    ("тофу", 5.4, 0.03),
+    ("гречка сухая", 6.7, 0.04),
+    ("гречка варёная", 1.5, 0.04),
+    ("овсянка сухая", 4.3, 0.04),
+    ("овсянка на воде", 1.7, 0.04),
+    ("рис белый варёный", 0.5, 0.08),
+    ("хлеб ржаной", 3.9, 0.04),
+    ("хлеб пшеничный", 1.5, 0.08),
+    ("макароны варёные", 1.3, 0.08),
+    ("петрушка", 6.2, 0.08),
+    ("укроп", 6.6, 0.08),
+    ("шпинат", 2.7, 0.02),
+    ("руккола", 1.5, 0.08),
+    ("брокколи", 0.7, 0.08),
+    ("капуста белокочанная", 0.6, 0.08),
+    ("картофель", 0.9, 0.08),
+    ("морковь", 0.7, 0.08),
+    ("яблоко", 0.1, 0.1),
+    ("банан", 0.3, 0.1),
+    ("курага", 3.2, 0.1),
+    ("изюм", 1.9, 0.1),
+    ("чернослив", 0.9, 0.1),
+    ("яйцо куриное", 1.7, 0.04),
+    ("творог", 0.4, 0.02),
+    ("молоко", 0.1, 0.02),
+    ("сыр твёрдый", 0.7, 0.02),
+    ("шоколад тёмный", 11.9, 0.02),
+    ("какао порошок", 13.9, 0.02),
+];
+
+/// Справочник железа как текст промпта — из того же массива, что и сам справочник.
+pub(crate) fn iron_reference_table() -> String {
+    IRON_REFERENCE
+        .iter()
+        .map(|(name, mg, _absorption)| format!("  {name}: {mg}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(crate) const IRON_CATEGORIES: &[IronCategory] = &[
     // ── Гем: усваивается лучше всего ──
     // Печень говяжья 6.5 · куриная 9 · свиная 18; сердце 4.3, почки 4.6.
@@ -758,15 +918,15 @@ pub(crate) struct IronCategoryPick {
 // одно количество внутри её диапазона, и выбирать больше нечего.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct IronAmount {
-    /// Lowest reasonable IRON CONTENT per 100 g, in milligrams.
-    pub(crate) min_value_iron: f64,
-    /// Highest reasonable IRON CONTENT per 100 g, in milligrams.
-    pub(crate) max_value_iron: f64,
-    /// Most likely IRON CONTENT per 100 g, in milligrams.
+    /// IRON CONTENT per 100 g, in milligrams.
     pub(crate) recommended_iron: f64,
     /// How sure you are of `recommended_iron`, from 0.0 to 1.0. Be honest: 1.0 means you
     /// know THIS food's iron content; 0.0 means you are guessing from the category alone.
     pub(crate) iron_confidence: f64,
+    /// The name of the REFERENCE entry this food matches, copied exactly as written
+    /// there, or NONE when the reference has nothing for it.
+    #[serde(default)]
+    pub(crate) reference_key: String,
     /// One short sentence: why this amount. Keep it under 15 words.
     pub(crate) reason: String,
 }
@@ -1640,10 +1800,12 @@ pub async fn classify_red_meat(names: &[String]) -> Result<Vec<bool>, String> {
          flesh of wild mammals — venison, elk, boar. Any cut, whole or ground, raw or cooked;\n\
          — FOOD MADE MAINLY OF SUCH FLESH: sausages, frankfurters, ham, bacon, salami, mince, \
          meatballs, cutlets, stew, canned meat — whatever the flesh has been through.\n\n\
-         It is the FLESH — muscle — that belongs to these categories. INNER ORGANS do not: \
-         liver, heart, kidney, tongue, lung, tripe and dishes made mainly of them are outside, \
-         however red they look. Neither do BIRDS — chicken, turkey, duck, goose — nor fish, \
-         seafood, eggs, dairy or anything from a plant.\n\n\
+         It is MUSCLE that belongs to these categories. A TONGUE and a HEART are muscle, so \
+         beef tongue, pork heart and dishes made mainly of them DO belong. Organs that are NOT \
+         muscle stay outside — liver, kidneys, lungs, tripe, brain — however red they look. \
+         BIRDS are outside whatever the part: chicken, turkey, duck, goose, ostrich, and a \
+         chicken heart with them, because a bird is not a mammal. Fish, seafood, eggs, dairy \
+         and anything from a plant are outside too.\n\n\
          For EVERY food, first THINK IT THROUGH in the reason field: whose flesh is this, and \
          is it flesh at all? Name the category, or say that none of them fits. One short \
          sentence, at most 10 words. Then give the verdict: true if it belongs to a category, \

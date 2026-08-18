@@ -184,9 +184,11 @@ async fn run_worker() {
         //
         // Старый путь оставлен рядом и включается этой константой — чтобы можно было
         // померить оба на одном наборе, а не рассуждать о них.
+        // Опознание живёт до конца прохода: его ждут и железо, и жиры.
+        let mut identity = String::new();
         if USE_PIPELINE && needs_classification(&food) {
             let name = food.name.clone();
-            if let Some(f) = with_retries(
+            if let Some((f, fibre, ident)) = with_retries(
                 move || {
                     let n = name.clone();
                     async move { super::flags_pipeline::classify_all(&n).await }
@@ -209,6 +211,14 @@ async fn run_worker() {
                     if let Some(v) = value {
                         local::cache_food_flag(&id, flag, v).await;
                     }
+                }
+                identity = ident.unwrap_or_default();
+                // Клетчатка приходит вместе с частями растения — своего запроса у неё
+                // больше нет.
+                if let Some(g) = fibre {
+                    let mut one = std::collections::BTreeMap::new();
+                    one.insert(super::indicators::N_FIBER.to_string(), g.max(0.0));
+                    local::cache_food_nutrients(&id, one).await;
                 }
                 // Копия в памяти ОБЯЗАНА догнать базу: гейт ниже смотрит на `food`, и
                 // без этого прежний путь переспрашивал всё заново и затирал ответы
@@ -279,8 +289,13 @@ async fn run_worker() {
         // Тоже с первого дня — по той же причине, что и жиры.
         if super::iron::needs_iron(&food) {
             let f = food.clone();
+            let ident_for_iron = identity.clone();
             with_retries(
-                move || { let f = f.clone(); async move { super::iron::enrich_iron(&f).await } },
+                move || {
+                    let f = f.clone();
+                    let id = ident_for_iron.clone();
+                    async move { super::iron::enrich_iron(&f, &id).await }
+                },
                 errors::FoodAspect::Iron,
                 &food.name,
             ).await;

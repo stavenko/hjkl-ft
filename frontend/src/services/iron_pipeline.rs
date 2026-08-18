@@ -1,35 +1,30 @@
-//! Определение железа — конвейер `arti_pipes` из двух узлов.
+//! Железо: два запроса одной формы — СКОЛЬКО и НАСКОЛЬКО УСВАИВАЕТСЯ.
 //!
-//! Совмещённый промпт делал две разные работы разом и путался: арбуз получал
-//! усвоение 0.15 (долю мясной строки), а голец объявлялся говядиной — «Голец - это
-//! говядина». Работы разделены по узлам:
+//! Оба устроены как кальций, и это не подражание, а вывод из замеров: строку таблицы
+//! модель выбирает хорошо (27 из 30), а числа помнит плохо (18 из 30). Мидиям она
+//! давала 1.5 мг при справочных 6.7, петрушке 1.1 при 6.2, кунжуту 6.1 при 14.6.
+//! Поэтому числа наши, а её работа — узнать продукт и назвать запись.
 //!
-//!   1. [`CategoryNode`] — КЛАССИФИКАЦИЯ. Список строк даётся без диапазонов, поэтому
-//!      списывать нечего; единственная работа — узнать продукт.
-//!   2. [`AmountNode`] — ВЕЛИЧИНА. Категория уже выбрана и передана готовой вместе с
-//!      её диапазоном; выбирать больше нечего, надо назвать одно количество.
+//! Форма у обоих запросов одна:
 //!
-//! КТО НАЗЫВАЕТ ЧИСЛО — решает уверенность. Модель, которую жёстко инструктируют,
-//! свободы не проявляет: она исполняет правило буквально (при запрете отвечать
-//! границами брала середину, при правиле «не знаешь — бери низ» брала низ даже для
-//! говядины). Но если СПРОСИТЬ её об уверенности, она отвечает честно: замер дал
-//! незнакомому опаху 0.0 и прямое «не имею информации», клыкачу 0.3–0.6, а печени,
-//! говядине, кунжуту и чечевице — 0.8–0.9, причём значения оказались ближе к
-//! справочным, чем наши границы (кунжут 12.7 при справочных 14.6 против 3.5 у нижней
-//! границы строки).
+//!   1. что человек записал в дневник и что об этом сказало ОПОЗНАНИЕ;
+//!   2. СПРАВОЧНИК «продукт → число»: нашёлся — назови его ключ;
+//!   3. ТАБЛИЦА КАТЕГОРИЙ — для всего, чего в справочнике нет;
+//!   4. один ответ.
 //!
-//! Поэтому: содержание берётся у модели, когда она уверена, и из нашей строки, когда
-//! нет. Доля усвоения — ВСЕГДА из строки: по ней уверенность модели ниже (0.4–0.8), а
-//! ошибки грубее — чечевице она давала то 0.02, то 0.3 при верных ~0.05, и именно
-//! доля мясной строки, приписанная арбузу, дала 9 мг усвоенного за день.
+//! УЗЛА КЛАССИФИКАЦИИ ЗДЕСЬ БОЛЬШЕ НЕТ. Раньше первым шагом стоял `CategoryNode`,
+//! который заодно опознавал продукт своим полем `food_type` — без словаря, без версий
+//! с уверенностью — и опознавал плохо: «Голец - это говядина». Теперь опознание
+//! приходит готовым из общего узла (`services::flags_pipeline`), и делать его дважды,
+//! разными словами, незачем.
 //!
-//! ПОВТОРЫ идут через `select_next_node`: узел, чей ответ не разобрался или не прошёл
-//! проверку, возвращает СЕБЯ следующим, пока не исчерпает попытки. Отдельного цикла
-//! ретраев здесь нет — ветвление конвейера и есть механизм повтора.
+//! Доля усвоения устроена так же: свой справочник «продукт → доля» перед глазами,
+//! таблица строк с долями следом, и число ВОЗВРАЩАЕТ МОДЕЛЬ — переписав его оттуда,
+//! куда сама же отнесла продукт. Оно и идёт в счёт; в коде остаётся лишь зажим в
+//! 0…1, потому что доля вне этого промежутка не значит ничего.
 //!
-//! Доля усвоения не спрашивается ни на одном шаге: её даёт `IRON_CATEGORIES` по
-//! выбранной строке. Модель её не знает — без таблицы она выдаёт чечевице и творогу
-//! те же 0.20, что и говядине.
+//! ПОВТОРЫ идут через `select_next_node`: узел, чей ответ не разобрался, возвращает
+//! себя следующим, пока не исчерпает попытки.
 
 use arti_pipes::executor::PromptExecutor;
 use arti_pipes::llm_executors::qwen::Qwen;
@@ -38,58 +33,66 @@ use arti_pipes::pipeline::{run_pipeline, Pipeline};
 use arti_pipes::prompt::{Prompt, PromptExecutionEvent};
 use futures::stream::LocalBoxStream;
 use futures::StreamExt;
+use schemars::JsonSchema;
+use serde::Deserialize;
 
 use super::ai::{
-    build_executor_think, strip_code_fences, IronAmount, IronCategory, IronCategoryPick,
-    IRON_CATEGORIES,
+    build_executor_think, iron_reference_table, strip_code_fences, IRON_CATEGORIES, IRON_REFERENCE,
 };
 
 /// Сколько раз повторить каждый шаг, прежде чем сдаться.
 const MAX_TRIES: u32 = 3;
 
-/// С какой уверенности значение модели принимается вместо нашего. Замер: знакомые
-/// продукты она оценивает на 0.8–0.9 (печень, говядина, кунжут, чечевица),
-/// незнакомые — на 0.0–0.6 (опах прямо писал «не имею информации»). Порог проходит
-/// между этими кучами.
-const CONFIDENT: f64 = 0.7;
-
-/// Контекст, который течёт по конвейеру.
+/// Контекст конвейера.
 #[derive(Clone)]
 pub struct IronCtx {
     pub food_name: String,
-    pub lang: &'static str,
+    /// Готовое опознание: «Arctic char, a cold-water fish (0.90); …».
+    pub identity: String,
     /// Заполняется первым узлом.
-    pub category: Option<&'static IronCategory>,
-    pub food_type: String,
-    /// Заполняется вторым узлом.
     pub amount_mg: Option<f64>,
-    /// Сколько попыток потратил каждый шаг.
-    pub tries_pick: u32,
-    pub tries_amount: u32,
-    /// Последняя причина отказа — попадает в текст ошибки, если конвейер не дошёл.
+    /// Заполняется вторым узлом.
+    pub absorption: Option<f64>,
+    tries_amount: u32,
+    tries_absorption: u32,
     pub last_error: Option<String>,
-    pub reason_pick: String,
-    pub reason_amount: String,
+    reason_amount: String,
+    reason_absorption: String,
 }
 
 impl IronCtx {
-    fn new(food_name: &str, lang: &'static str) -> Self {
+    fn new(food_name: &str, identity: &str) -> Self {
         Self {
             food_name: food_name.to_string(),
-            lang,
-            category: None,
-            food_type: String::new(),
+            identity: identity.to_string(),
             amount_mg: None,
-            tries_pick: 0,
+            absorption: None,
             tries_amount: 0,
+            tries_absorption: 0,
             last_error: None,
-            reason_pick: String::new(),
             reason_amount: String::new(),
+            reason_absorption: String::new(),
         }
+    }
+
+    /// Общая шапка обоих запросов: что человек записал и что об этом известно.
+    fn head(&self) -> String {
+        let known = if self.identity.trim().is_empty() {
+            String::new()
+        } else {
+            format!(
+                "Our automatic classifier says this product is: {}\n\n",
+                self.identity
+            )
+        };
+        format!(
+            "A person wrote this into their food diary: {}\n\n{known}",
+            self.food_name
+        )
     }
 }
 
-/// Список категорий БЕЗ ЧИСЕЛ — для шага классификации. Диапазоны там не нужны, а их
+/// Строки таблицы БЕЗ ЧИСЕЛ — для запроса количества. Числа там не нужны, а их
 /// присутствие вредит: модель, увидев числа, начинает ими отвечать.
 fn category_keys() -> String {
     IRON_CATEGORIES
@@ -99,12 +102,45 @@ fn category_keys() -> String {
         .join("\n")
 }
 
-/// Общий для обоих промптов прогон: schema-injected JSON mode, оба потока
-/// раскручиваются, финальный текст уходит в `Completed`.
-fn run_structured<E, S>(executor: E, text: String, name: String) -> LocalBoxStream<'static, PromptExecutionEvent>
+/// Строки С ДОЛЯМИ — для запроса усвоения. Здесь доля и есть предмет вопроса,
+/// поэтому она показывается: без таблицы модель даёт чечевице и творогу те же 0.20,
+/// что и говядине.
+fn absorption_keys() -> String {
+    IRON_CATEGORIES
+        .iter()
+        .map(|c| {
+            format!(
+                "  {key:<20} {a:<5} — {ex}",
+                key = c.key,
+                a = c.absorption,
+                ex = c.examples
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Справочник долей усвоения — из того же массива, что и справочник количества.
+/// Доля ПРОДУКТА точнее доли его группы: у куриной печени 0.25, а строка
+/// `meat_poultry`, куда её однажды отнесли, даёт 0.15.
+fn absorption_reference_table() -> String {
+    IRON_REFERENCE
+        .iter()
+        .map(|(name, _mg, absorption)| format!("  {name}: {absorption}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Общий прогон: schema-injected JSON mode, оба потока раскручиваются, финальный
+/// текст уходит в `Completed`.
+fn run_structured<E, S>(
+    executor: E,
+    text: String,
+    name: String,
+) -> LocalBoxStream<'static, PromptExecutionEvent>
 where
     E: PromptExecutor + 'static,
-    S: schemars::JsonSchema + 'static,
+    S: JsonSchema + 'static,
 {
     Box::pin(async_stream::stream! {
         yield PromptExecutionEvent::Scheduled(name);
@@ -134,147 +170,87 @@ where
     })
 }
 
-// ── Шаг 1: категория ─────────────────────────────────────────────────────────
-
-struct CategoryPrompt {
-    food_name: String,
-    lang: &'static str,
-}
-
-impl Prompt for CategoryPrompt {
-    type Output = String;
-    type Context = IronCtx;
-
-    fn name(&self) -> String {
-        "iron.category".to_string()
-    }
-
-    fn serialize(&self) -> String {
-        format!(
-            "You are a nutritional database. Classify the food item \"{name}\" into ONE of \
-             these categories.\n\n\
-             {keys}\n\n\
-             Report:\n\
-             - category: the key, copied EXACTLY as written above\n\
-             - food_type: what this product is, in two or three words, in {lang}\n\
-             - reason: ONE short sentence (under 15 words) in {lang} — why this category\n\n\
-             Rules:\n\
-             - ANY fish goes to `fish`, including names you don't recognise. A fish is never \
-               `meat_red` — that row is for beef, pork, lamb and the like.\n\
-             - Drinks go to `drinks`: water, juice, beer (with or without alcohol), wine, \
-               kvass. Only milk, kefir and other MILK drinks go to `dairy`.\n\
-             - Fresh fruit and berries → `fruit_fresh`; dried ones → `fruit_dried`.\n\
-             - Vegetables → `vegetables`; leafy herbs eaten by the bunch (parsley, dill, \
-               rocket) → `greens_herbs`.\n\
-             - A cooked dish goes to `dish_with_meat` when it contains meat, otherwise to \
-               `dish_meatless`.\n\
-             - If several fit, pick the one that dominates the food's iron.\n\n\
-             Base the answer only on the food name \"{name}\". Respond with ONLY a single \
-             minified JSON object and nothing else — no markdown, no prose.",
-            name = self.food_name,
-            keys = category_keys(),
-            lang = self.lang,
-        )
-    }
-
-    fn update_context(&self, mut ctx: Self::Context, raw: Self::Output) -> Self::Context {
-        ctx.tries_pick += 1;
-        match serde_json::from_str::<IronCategoryPick>(strip_code_fences(raw.trim())) {
-            Ok(pick) => {
-                let key = pick.category.trim().to_ascii_lowercase();
-                match IRON_CATEGORIES.iter().find(|c| c.key == key) {
-                    Some(cat) => {
-                        ctx.category = Some(cat);
-                        ctx.food_type = pick.food_type;
-                        ctx.reason_pick = pick.reason;
-                        ctx.last_error = None;
-                    }
-                    None => {
-                        ctx.last_error =
-                            Some(format!("неизвестная категория «{}»", pick.category));
-                    }
-                }
-            }
-            Err(e) => ctx.last_error = Some(format!("категория не разобрана: {e}, ответ: {raw}")),
-        }
-        ctx
-    }
-
-    fn execute<E: PromptExecutor>(&self, executor: E) -> LocalBoxStream<'static, PromptExecutionEvent> {
-        run_structured::<E, IronCategoryPick>(executor, self.serialize(), self.name())
-    }
-}
-
-struct CategoryNode {
+/// Общий прогон узла: раскрутить поток, обновить контекст, отдать `Completed`.
+fn run_node<P>(
+    prompt: P,
     executor: Qwen,
-}
-
-impl Node for CategoryNode {
-    type Prompt = CategoryPrompt;
-    type Executor = Qwen;
-    type Error = String;
-    type Context = IronCtx;
-
-    fn prompt(&self, ctx: &Self::Context) -> Self::Prompt {
-        CategoryPrompt { food_name: ctx.food_name.clone(), lang: ctx.lang }
-    }
-
-    fn prompt_executor(&self) -> Self::Executor {
-        self.executor.clone()
-    }
-
-    fn run(&self, context: Self::Context) -> LocalBoxStream<'static, NodeEvent<Self::Context>> {
-        let prompt = self.prompt(&context);
-        let mut stream = prompt.execute(self.prompt_executor());
-        Box::pin(async_stream::stream! {
-            let id = uuid::Uuid::new_v4();
-            let mut out = String::new();
-            let mut failed: Option<String> = None;
-            while let Some(ev) = stream.next().await {
-                match &ev {
-                    PromptExecutionEvent::Completed(o) => out = o.clone(),
-                    PromptExecutionEvent::Error(e) => failed = Some(format!("{e:?}")),
-                    _ => {}
-                }
-                yield NodeEvent::Prompt(id, ev);
+    context: IronCtx,
+    amount_step: bool,
+) -> LocalBoxStream<'static, NodeEvent<IronCtx>>
+where
+    P: Prompt<Output = String, Context = IronCtx> + 'static,
+{
+    let mut stream = prompt.execute(executor);
+    Box::pin(async_stream::stream! {
+        let id = uuid::Uuid::new_v4();
+        let mut out = String::new();
+        let mut failed: Option<String> = None;
+        while let Some(ev) = stream.next().await {
+            match &ev {
+                PromptExecutionEvent::Completed(o) => out = o.clone(),
+                PromptExecutionEvent::Error(e) => failed = Some(format!("{e:?}")),
+                _ => {}
             }
-            // Сбой ИСПОЛНЕНИЯ (оборванный fetch, недоступный воркер) — тоже повод
-            // повторить, поэтому он ложится в тот же счётчик попыток.
-            let ctx = if let Some(e) = failed {
-                let mut c = context;
-                c.tries_pick += 1;
-                c.last_error = Some(e);
-                c
-            } else {
-                prompt.update_context(context, out)
-            };
-            yield NodeEvent::Completed(ctx);
-        })
-    }
-
-    fn select_next_node(&self, ctx: &Self::Context) -> Option<Box<dyn NodeRunner<Self::Context>>> {
-        match ctx.category {
-            // Категория есть — дальше за величиной.
-            Some(_) => Some(Box::new(NodeWrapper::new(AmountNode {
-                executor: self.executor.clone(),
-            }))),
-            // Нет — ПОВТОР этого же узла, пока есть попытки. Это и есть механизм
-            // ретраев: ветвление конвейера, а не цикл вокруг него.
-            None if ctx.tries_pick < MAX_TRIES => Some(Box::new(NodeWrapper::new(CategoryNode {
-                executor: self.executor.clone(),
-            }))),
-            None => None,
+            yield NodeEvent::Prompt(id, ev);
         }
-    }
+        let ctx = if let Some(e) = failed {
+            let mut c = context;
+            if amount_step {
+                c.tries_amount += 1;
+            } else {
+                c.tries_absorption += 1;
+            }
+            c.last_error = Some(e);
+            c
+        } else {
+            prompt.update_context(context, out)
+        };
+        yield NodeEvent::Completed(ctx);
+    })
 }
 
-// ── Шаг 2: количество ────────────────────────────────────────────────────────
+// Комментарии у структур ответа обычные, а НЕ доковые: док структуры уезжает в
+// json_schema как "description", и модель возвращает его вместо данных.
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct AmountAnswer {
+    /// One short sentence: which reference entry or which category, and why.
+    reason: String,
+    /// The name of the REFERENCE entry this food matches, copied exactly, or NONE.
+    reference_key: String,
+    /// The category row key from the table, copied exactly.
+    category: String,
+    /// Iron per 100 g, in milligrams.
+    iron_mg: f64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct AbsorptionAnswer {
+    /// One short sentence: which reference entry or which category, and why.
+    reason: String,
+    /// The name of the REFERENCE entry this food matches, copied exactly, or NONE.
+    reference_key: String,
+    /// The category row key from the table, copied exactly.
+    category: String,
+    /// The absorbed FRACTION of this food's iron, from 0.0 to 1.0.
+    absorbed_fraction: f64,
+}
+
+/// Запись справочника по ключу, который назвала модель.
+fn reference_hit(key: &str) -> Option<&'static (&'static str, f64, f64)> {
+    let key = key.trim();
+    if key.is_empty() || key.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    IRON_REFERENCE
+        .iter()
+        .find(|(name, _, _)| name.eq_ignore_ascii_case(key))
+}
+
+// ── Шаг 1: сколько железа ────────────────────────────────────────────────────
 
 struct AmountPrompt {
-    food_name: String,
-    food_type: String,
-    lang: &'static str,
-    cat: &'static IronCategory,
+    head: String,
 }
 
 impl Prompt for AmountPrompt {
@@ -287,71 +263,55 @@ impl Prompt for AmountPrompt {
 
     fn serialize(&self) -> String {
         format!(
-            "You are a nutritional database. For the food item \"{name}\" ({ftype}), report how \
-             much IRON it contains per 100 grams, in MILLIGRAMS.\n\n\
-             This food belongs to the category `{key}` ({ex}). Foods of this category carry \
-             between {min} and {max} mg of iron per 100 g — your answer MUST be inside that \
-             range.\n\n\
-             For raw/dry as-sold products (grains, rice, pasta, flour, meat, fish, legumes) use \
-             the RAW value unless the name says cooked/boiled/fried/steamed.\n\n\
-             First bracket the plausible range, then commit to one value inside it:\n\
-             - min_value_iron: lowest reasonable amount (number, mg)\n\
-             - max_value_iron: highest reasonable amount (number, mg)\n\
-             - recommended_iron: the amount for THIS food (number, mg)\n\
-             - iron_confidence: how sure you are of `recommended_iron`, from 0.0 to 1.0\n\
-             - reason: ONE short sentence (under 15 words) in {lang} — why this amount\n\n\
-             All three amounts are MILLIGRAMS per 100 g, and min ≤ recommended ≤ max.\n\n\
-             BE HONEST ABOUT `iron_confidence`. It is not a formality:\n\
-             - 0.8–1.0 — you KNOW this specific food's iron content.\n\
-             - 0.3–0.7 — you are reasoning from a similar food.\n\
-             - 0.0–0.2 — you do not know this food at all and are guessing from the category.\n\
-             A low number is not a bad answer: when you are unsure we substitute a safe \
-             value ourselves. An overstated number is the harmful one — it tells the person \
-             they have met an iron target they have not.\n\n\
-             Respond with ONLY a single minified JSON object and nothing else — no markdown, \
-             no prose.",
-            name = self.food_name,
-            ftype = self.food_type,
-            key = self.cat.key,
-            ex = self.cat.examples,
-            min = self.cat.mg_min,
-            max = self.cat.mg_max,
-            lang = self.lang,
+            "{head}\
+             How much IRON does this food hold per 100 grams, in milligrams?\n\n\
+             FIRST look for it in the REFERENCE below. If it is there — or is plainly the same \
+             food under another name, in another grammatical case or with a cut or grade \
+             attached — put that entry's name into \"reference_key\", copied exactly.\n\n\
+             {reference}\n\n\
+             Whether or not you found it, ALSO place the food in one row of the table below and \
+             answer with that row's key. If the reference had nothing, answer \"reference_key\" \
+             with NONE and give a value that fits the row.\n\n\
+             {rows}\n\n\
+             For raw or dry as-sold products use the RAW value unless the name says cooked or \
+             boiled.\n\n\
+             Fill \"reason\" FIRST, then the two keys, then the milligrams.\n\n\
+             Respond with ONLY a minified JSON object and nothing else.",
+            head = self.head,
+            reference = iron_reference_table(),
+            rows = category_keys(),
         )
     }
 
     fn update_context(&self, mut ctx: Self::Context, raw: Self::Output) -> Self::Context {
         ctx.tries_amount += 1;
-        match serde_json::from_str::<IronAmount>(strip_code_fences(raw.trim())) {
+        match serde_json::from_str::<AmountAnswer>(strip_code_fences(raw.trim())) {
             Ok(v) => {
-                let said = v.recommended_iron;
-                // Бракет не украшение: модель, поставившая своё «наиболее вероятное»
-                // вне собственных min…max, себе противоречит.
-                if !(v.min_value_iron <= said && said <= v.max_value_iron && v.min_value_iron >= 0.0)
-                {
-                    ctx.last_error = Some(format!(
-                        "железо противоречит себе: {}…{}…{} мг",
-                        v.min_value_iron, said, v.max_value_iron
-                    ));
-                    return ctx;
-                }
-                // Замер показал: спрошенная напрямую, модель знает содержание лучше
-                // нашей таблицы — кунжуту даёт 12.7 при справочных 14.6, чечевице 6.6
-                // при 7.5, тогда как нижняя граница строки давала 3.5 и 5. И она
-                // ЧЕСТНО отличает знание от догадки: незнакомый опах получал
-                // уверенность 0.0 и прямое «не имею информации», клыкач 0.3–0.6.
-                //
-                // Поэтому уверенное значение берём у неё, неуверенное — своё. Даже
-                // уверенное поджимается границами строки: категория выбрана отдельным
-                // шагом и надёжна, так что грубый промах ей уже не пройти.
-                let (mg, source) = if v.iron_confidence >= CONFIDENT {
-                    (said.clamp(self.cat.mg_min, self.cat.mg_max), "модель")
-                } else {
-                    (self.cat.mg_min, "низ строки")
+                // Справочник — как есть: строка описывает ГРУППУ, справочник — этот
+                // продукт, и расходятся они законно (варёная чечевица 3.3 мг против
+                // строки `legumes` 5–8, которая про сухую).
+                let (mg, source) = match reference_hit(&v.reference_key) {
+                    Some((name, mg, _)) => (*mg, format!("справочник «{name}»")),
+                    None => {
+                        let row = v.category.trim().to_ascii_lowercase();
+                        match IRON_CATEGORIES.iter().find(|c| c.key == row) {
+                            // Вне справочника значение поджимается границами строки:
+                            // отвергать и переспрашивать бессмысленно, когда подставить
+                            // нечего.
+                            Some(cat) => (
+                                v.iron_mg.clamp(cat.mg_min, cat.mg_max),
+                                format!("строка {}", cat.key),
+                            ),
+                            None => {
+                                ctx.last_error =
+                                    Some(format!("неизвестная строка железа «{}»", v.category));
+                                return ctx;
+                            }
+                        }
+                    }
                 };
                 ctx.amount_mg = Some(mg);
-                ctx.reason_amount =
-                    format!("{} [{source}, уверенность {:.1}]", v.reason, v.iron_confidence);
+                ctx.reason_amount = format!("{} [{source}]", v.reason);
                 ctx.last_error = None;
             }
             Err(e) => ctx.last_error = Some(format!("количество не разобрано: {e}, ответ: {raw}")),
@@ -359,8 +319,11 @@ impl Prompt for AmountPrompt {
         ctx
     }
 
-    fn execute<E: PromptExecutor>(&self, executor: E) -> LocalBoxStream<'static, PromptExecutionEvent> {
-        run_structured::<E, IronAmount>(executor, self.serialize(), self.name())
+    fn execute<E: PromptExecutor>(
+        &self,
+        executor: E,
+    ) -> LocalBoxStream<'static, PromptExecutionEvent> {
+        run_structured::<E, AmountAnswer>(executor, self.serialize(), self.name())
     }
 }
 
@@ -375,12 +338,7 @@ impl Node for AmountNode {
     type Context = IronCtx;
 
     fn prompt(&self, ctx: &Self::Context) -> Self::Prompt {
-        AmountPrompt {
-            food_name: ctx.food_name.clone(),
-            food_type: ctx.food_type.clone(),
-            lang: ctx.lang,
-            cat: ctx.category.expect("узел величины запускается только с выбранной категорией"),
-        }
+        AmountPrompt { head: ctx.head() }
     }
 
     fn prompt_executor(&self) -> Self::Executor {
@@ -388,38 +346,124 @@ impl Node for AmountNode {
     }
 
     fn run(&self, context: Self::Context) -> LocalBoxStream<'static, NodeEvent<Self::Context>> {
-        let prompt = self.prompt(&context);
-        let mut stream = prompt.execute(self.prompt_executor());
-        Box::pin(async_stream::stream! {
-            let id = uuid::Uuid::new_v4();
-            let mut out = String::new();
-            let mut failed: Option<String> = None;
-            while let Some(ev) = stream.next().await {
-                match &ev {
-                    PromptExecutionEvent::Completed(o) => out = o.clone(),
-                    PromptExecutionEvent::Error(e) => failed = Some(format!("{e:?}")),
-                    _ => {}
-                }
-                yield NodeEvent::Prompt(id, ev);
-            }
-            let ctx = if let Some(e) = failed {
-                let mut c = context;
-                c.tries_amount += 1;
-                c.last_error = Some(e);
-                c
-            } else {
-                prompt.update_context(context, out)
-            };
-            yield NodeEvent::Completed(ctx);
-        })
+        run_node(self.prompt(&context), self.prompt_executor(), context, true)
     }
 
     fn select_next_node(&self, ctx: &Self::Context) -> Option<Box<dyn NodeRunner<Self::Context>>> {
-        match ctx.amount_mg {
-            Some(_) => None,
-            None if ctx.tries_amount < MAX_TRIES => Some(Box::new(NodeWrapper::new(AmountNode {
+        // Количество не вышло, но попытки есть — пробуем снова. Иначе идём за
+        // усвоением: без него миллиграммы всё равно бесполезны.
+        if ctx.amount_mg.is_none() && ctx.tries_amount < MAX_TRIES {
+            return Some(Box::new(NodeWrapper::new(AmountNode {
                 executor: self.executor.clone(),
-            }))),
+            })));
+        }
+        Some(Box::new(NodeWrapper::new(AbsorptionNode {
+            executor: self.executor.clone(),
+        })))
+    }
+}
+
+// ── Шаг 2: насколько усваивается ─────────────────────────────────────────────
+
+struct AbsorptionPrompt {
+    head: String,
+}
+
+impl Prompt for AbsorptionPrompt {
+    type Output = String;
+    type Context = IronCtx;
+
+    fn name(&self) -> String {
+        "iron.absorption".to_string()
+    }
+
+    fn serialize(&self) -> String {
+        format!(
+            "{head}\
+             What FRACTION of this food's iron does the body actually take up? Heme iron — from \
+             liver, offal, meat and shellfish — absorbs several times better than the non-heme \
+             iron of plants, and tea, coffee and oxalates hold it back further.\n\n\
+             FIRST look for the food in the REFERENCE below. If it is there — or is plainly the \
+             same food under another name, in another grammatical case or with a cut or grade \
+             attached — put that entry's name into \"reference_key\", copied exactly, and answer \
+             \"absorbed_fraction\" with THAT ENTRY'S NUMBER, copied exactly. Do not round it, do \
+             not adjust it, do not replace it with one you remember.\n\n\
+             {reference}\n\n\
+             Whether or not you found it, ALSO place the food in one row of the table below and \
+             answer with that row's key. The number after the key is that row's fraction; if the \
+             reference had nothing, answer \"reference_key\" with NONE and give THAT ROW'S \
+             number as the fraction.\n\n\
+             {rows}\n\n\
+             Fill \"reason\" FIRST, then the two keys, then the fraction.\n\n\
+             Respond with ONLY a minified JSON object and nothing else.",
+            head = self.head,
+            reference = absorption_reference_table(),
+            rows = absorption_keys(),
+        )
+    }
+
+    fn update_context(&self, mut ctx: Self::Context, raw: Self::Output) -> Self::Context {
+        ctx.tries_absorption += 1;
+        match serde_json::from_str::<AbsorptionAnswer>(strip_code_fences(raw.trim())) {
+            Ok(v) => {
+                // Долю ВОЗВРАЩАЕТ МОДЕЛЬ — она видит и справочник с процентами, и
+                // таблицу строк, и её дело найти нужную запись и назвать её число.
+                //
+                // Единственная поправка — зажим в 0…1: доля вне этого промежутка не
+                // означает ничего, и хранить её нельзя. Это не отказ и не повтор,
+                // просто негодное значение не может попасть в счёт.
+                let fraction = v.absorbed_fraction.clamp(0.0, 1.0);
+                let source = match reference_hit(&v.reference_key) {
+                    Some((name, _, _)) => format!("справочник «{name}»"),
+                    None => format!("строка {}", v.category.trim()),
+                };
+                ctx.absorption = Some(fraction);
+                ctx.reason_absorption = format!("{} [{source}]", v.reason);
+                ctx.last_error = None;
+            }
+            Err(e) => ctx.last_error = Some(format!("усвоение не разобрано: {e}, ответ: {raw}")),
+        }
+        ctx
+    }
+
+    fn execute<E: PromptExecutor>(
+        &self,
+        executor: E,
+    ) -> LocalBoxStream<'static, PromptExecutionEvent> {
+        run_structured::<E, AbsorptionAnswer>(executor, self.serialize(), self.name())
+    }
+}
+
+struct AbsorptionNode {
+    executor: Qwen,
+}
+
+impl Node for AbsorptionNode {
+    type Prompt = AbsorptionPrompt;
+    type Executor = Qwen;
+    type Error = String;
+    type Context = IronCtx;
+
+    fn prompt(&self, ctx: &Self::Context) -> Self::Prompt {
+        AbsorptionPrompt { head: ctx.head() }
+    }
+
+    fn prompt_executor(&self) -> Self::Executor {
+        self.executor.clone()
+    }
+
+    fn run(&self, context: Self::Context) -> LocalBoxStream<'static, NodeEvent<Self::Context>> {
+        run_node(self.prompt(&context), self.prompt_executor(), context, false)
+    }
+
+    fn select_next_node(&self, ctx: &Self::Context) -> Option<Box<dyn NodeRunner<Self::Context>>> {
+        match ctx.absorption {
+            Some(_) => None,
+            None if ctx.tries_absorption < MAX_TRIES => {
+                Some(Box::new(NodeWrapper::new(AbsorptionNode {
+                    executor: self.executor.clone(),
+                })))
+            }
             None => None,
         }
     }
@@ -427,19 +471,20 @@ impl Node for AmountNode {
 
 // ── Запуск ───────────────────────────────────────────────────────────────────
 
-/// Железо продукта: `(мг на 100 г, доля усвоения)`. FAILS LOUDLY, если конвейер не
-/// дошёл до величины за отведённые попытки.
-pub async fn lookup_iron(food_name: &str) -> Result<(f64, f64), String> {
-    let lang = match crate::services::i18n::get_lang() {
-        crate::services::i18n::Lang::Ru => "Russian",
-        crate::services::i18n::Lang::En => "English",
-    };
+/// Железо продукта: `(мг на 100 г, доля усвоения)`.
+///
+/// `identity` — готовое опознание из общего узла. Пустая строка допустима: тогда оба
+/// запроса работают по одному названию, как работали до конвейера признаков.
+///
+/// FAILS LOUDLY, если не дошли до обоих чисел: миллиграммы без доли усвоения
+/// бессмысленны, их нельзя ни сложить, ни сравнить с планкой.
+pub async fn lookup_iron(food_name: &str, identity: &str) -> Result<(f64, f64), String> {
     // Thinking OFF: с рассуждением qwen3 паркует короткий ответ в канал размышления и
     // возвращает пустой контент.
     let executor = build_executor_think(false)?;
-    let pipeline = Pipeline::new(Box::new(NodeWrapper::new(CategoryNode { executor })));
+    let pipeline = Pipeline::new(Box::new(NodeWrapper::new(AmountNode { executor })));
 
-    let mut stream = run_pipeline(pipeline, IronCtx::new(food_name, lang));
+    let mut stream = run_pipeline(pipeline, IronCtx::new(food_name, identity));
     let mut last: Option<IronCtx> = None;
     while let Some(ev) = stream.next().await {
         if let NodeEvent::Completed(ctx) = ev {
@@ -448,20 +493,17 @@ pub async fn lookup_iron(food_name: &str) -> Result<(f64, f64), String> {
     }
 
     let ctx = last.ok_or_else(|| "конвейер железа не дал результата".to_string())?;
-    match (ctx.category, ctx.amount_mg) {
-        (Some(cat), Some(mg)) => {
+    match (ctx.amount_mg, ctx.absorption) {
+        (Some(mg), Some(absorption)) => {
             leptos::logging::log!(
-                "iron «{food_name}»: {mg} мг · {} · усвоение {} — {} ({} / {})",
-                cat.key,
-                cat.absorption,
-                ctx.food_type,
-                ctx.reason_pick,
-                ctx.reason_amount
+                "iron «{food_name}»: {mg} мг · усвоение {absorption} — {} / {}",
+                ctx.reason_amount,
+                ctx.reason_absorption
             );
-            Ok((mg, cat.absorption))
+            Ok((mg, absorption))
         }
         _ => Err(ctx
             .last_error
-            .unwrap_or_else(|| "конвейер железа не дошёл до значения".to_string())),
+            .unwrap_or_else(|| "конвейер железа не дошёл до значений".to_string())),
     }
 }

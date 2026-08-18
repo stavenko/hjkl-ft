@@ -181,6 +181,9 @@ pub struct FlagsCtx {
     /// Клетчатка, г на 100 г. Её отдаёт растительный узел вместе с частью растения:
     /// продукт там уже опознан, и отдельный запрос за ней был лишними деньгами.
     pub fibre_g: Option<f64>,
+    /// Остановиться сразу после опознания. Нужно, когда признаки у продукта уже
+    /// есть, а опознание всё равно требуется — его ждут кальций, железо и жиры.
+    identify_only: bool,
     /// Попытки по шагам: у каждого свои, чтобы упавший не тратил чужие.
     tries: [u32; 6],
     /// Обоснования по шагам — для лога и телеметрии.
@@ -195,6 +198,7 @@ impl FlagsCtx {
             identity: None,
             flags: Flags::default(),
             fibre_g: None,
+            identify_only: false,
             tries: [0; 6],
             reasons: Vec::new(),
             last_error: None,
@@ -414,6 +418,9 @@ impl Node for IdentifyNode {
             return Some(Box::new(NodeWrapper::new(IdentifyNode {
                 executor: self.executor.clone(),
             })));
+        }
+        if ctx.identify_only {
+            return None;
         }
         Some(Box::new(NodeWrapper::new(FlagNode {
             executor: self.executor.clone(),
@@ -929,4 +936,32 @@ pub async fn classify_all(
         ctx.reasons.join(" · ")
     );
     Ok((f, fibre, identity))
+}
+
+/// ТОЛЬКО опознание, без признаков.
+///
+/// Признаки продукта могут быть уже собраны, а кальций, железо и жиры — ещё нет: так
+/// бывает после миграции, стирающей одно и оставляющей другое, и после конфликта
+/// синхронизации. Раньше в этом случае конвейер не запускался вовсе, и все трое шли к
+/// модели с голым именем из дневника — тем самым, из-за которого «Голец» получал
+/// 120 мг кальция как «жидкий молочный продукт вроде кефира».
+pub async fn identify(food_name: &str) -> Result<Option<String>, String> {
+    let executor = build_executor_think(true)?;
+    let mut ctx = FlagsCtx::new(food_name);
+    ctx.identify_only = true;
+    let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode { executor })));
+
+    let mut stream = run_pipeline(pipeline, ctx);
+    let mut last: Option<FlagsCtx> = None;
+    while let Some(ev) = stream.next().await {
+        if let NodeEvent::Completed(ctx) = ev {
+            last = Some(ctx);
+        }
+    }
+    let ctx = last.ok_or_else(|| "опознание не дало результата".to_string())?;
+    leptos::logging::log!(
+        "опознание «{food_name}»: {}",
+        ctx.identity.clone().unwrap_or_else(|| "(не опознано)".to_string())
+    );
+    Ok(ctx.identity)
 }

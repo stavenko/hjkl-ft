@@ -426,9 +426,16 @@ const CALCIUM_CATEGORIES: &[CalciumCategory] = &[
         examples: "фасоль сухая, нут сухой, соевые бобы, маш" },
     CalciumCategory { key: "greens_leafy", mg_min: 130.0, mg_max: 260.0,
         examples: "петрушка, укроп, кале, руккола, базилик, кинза" },
-    CalciumCategory { key: "vegetables_other", mg_min: 15.0, mg_max: 90.0,
+    // ФРУКТЫ И ЯГОДЫ ЖИВУТ ЗДЕСЬ ЖЕ, и не по родству, а по величине: у них те же
+    // единицы и десятки миллиграммов, что у овощей. Своей строки у них не было
+    // вовсе, и живой прогон это поймал — «мороженая вишня» проваливалась в
+    // `other_none` с нулём, а до того брала 130 мг по созвучному «мороженому».
+    // Нижняя граница снижена с 15 до 5: у яблока кальция около шести.
+    CalciumCategory { key: "vegetables_other", mg_min: 5.0, mg_max: 90.0,
         examples: "брокколи, цветная капуста, белокочанная капуста, пекинская капуста, \
-                   стручковая фасоль, репа" },
+                   стручковая фасоль, репа, картофель, морковь, свёкла, кабачок, помидор, \
+                   огурец, тыква, а также ЛЮБЫЕ фрукты и ягоды: яблоко, груша, банан, \
+                   апельсин, вишня, клубника, черника, виноград — свежие и замороженные" },
     CalciumCategory { key: "greens_oxalate", mg_min: 40.0, mg_max: 120.0,
         examples: "шпинат, щавель, ревень, свекольная ботва" },
     CalciumCategory { key: "dried_fruit", mg_min: 30.0, mg_max: 180.0,
@@ -526,6 +533,25 @@ pub(crate) const CALCIUM_REFERENCE: &[(&str, f64)] = &[
     ("курага", 160.0),
     ("инжир сушёный", 162.0),
     ("апельсин", 40.0),
+    // Овощи, фрукты и ягоды поимённо. Строка без чисел даёт им потолок коридора:
+    // замер поймал вишне 90 мг при настоящих шестнадцати, отварному картофелю 40 при
+    // двенадцати. Величины мелкие, но они складываются за день.
+    ("картофель", 12.0),
+    ("морковь", 33.0),
+    ("помидор", 10.0),
+    ("огурец", 16.0),
+    ("кабачок", 15.0),
+    ("тыква", 21.0),
+    ("яблоко", 6.0),
+    ("груша", 9.0),
+    ("банан", 5.0),
+    ("виноград", 10.0),
+    ("вишня", 16.0),
+    ("клубника", 16.0),
+    ("черника", 6.0),
+    // Сливочное масло — почти чистый жир, кальция в нём практически нет. Без своей
+    // записи модель брала «сливки» с их 86 мг.
+    ("сливочное масло", 24.0),
     // Частое, где кальция мало, — чтобы не уходило в ноль по недоразумению.
     ("яйцо куриное", 55.0),
     ("рыба, филе", 25.0),
@@ -602,7 +628,10 @@ pub async fn lookup_calcium(food_name: &str, identity: &str) -> Result<f64, Stri
          How much CALCIUM does this food hold per 100 grams, in milligrams?\n\n\
          FIRST look for it in the REFERENCE below. If it is there — or is plainly the same food \
          under another name, in another grammatical case or with a fat percentage attached — \
-         put that entry's name into \"reference_key\", copied exactly.\n\n\
+         put that entry's name into \"reference_key\", copied exactly. An entry fits ONLY when \
+         it is THE SAME FOOD: «мороженая вишня» is a frozen berry and not «мороженое», however \
+         alike the words. When no entry is the same food, answer NONE — that is a good answer, \
+         the table below then decides.\n\n\
          {reference}\n\n\
          Whether or not you found it, ALSO place the food in one row of the table below and \
          answer with that row's key. If the reference had nothing, answer \"reference_key\" \
@@ -624,8 +653,9 @@ pub async fn lookup_calcium(food_name: &str, identity: &str) -> Result<f64, Stri
            counting — meat, eggs, cereals, bread, oil, sugar, water, tea, coffee. Never answer \
            other_none merely because the name is missing from the examples.\n\
          - Dairy is NEVER other_none: every milk product belongs to one of the dairy rows. \
-           Vegetables are never other_none either: they go to vegetables_other or \
-           greens_leafy.\n\n\
+           Neither is a VEGETABLE, and vegetables_other holds EVERY vegetable, root and tuber \
+           there is — raw, boiled, fried or frozen, named in the examples or not. A boiled \
+           potato belongs there just as a raw one does.\n\n\
          Fill \"reason\" FIRST, then the two keys, then the milligrams.\n\n\
          Respond with ONLY a minified JSON object and nothing else.",
         reference = calcium_reference_table(),

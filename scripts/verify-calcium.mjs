@@ -52,6 +52,18 @@ const CASES = [
   ["рыба с костями", "Сардины консервированные", "fish_with_bones", 380],
   ["рыба с костями", "Шпроты в масле", "fish_with_bones", 300],
   ["рыба с костями", "Лосось консервированный", "fish_with_bones", 180],
+
+  // ЛОВУШКИ. Живой прогон (scripts/check-full-pass.mjs) поймал две беды сразу:
+  // «Мороженая вишня» получила 130 мг по записи «мороженое пломбир» — слово похоже,
+  // продукт другой; «Картофель отварной» ушёл в other_none, хотя строка прямо
+  // запрещает овощам эту строку.
+  ["ловушки", "Мороженая вишня", "vegetables_other", 16],
+  ["ловушки", "Картофель отварной", "vegetables_other", 10],
+  ["ловушки", "Голец", "fish_plain", 25],
+  ["ловушки", "Скумбрия х/к", "fish_plain", 25],
+  // Своя запись в справочнике: 24 мг — это правда, а не «почти ноль», как ждал
+  // прежний эталон. Строка при попадании в справочник ни на что не влияет.
+  ["ловушки", "Сливочное масло", "cream_whey", 24],
 ];
 
 const CALCIUM_REFERENCE = [
@@ -113,6 +125,20 @@ const CALCIUM_REFERENCE = [
   ["курага", 160.0],
   ["инжир сушёный", 162.0],
   ["апельсин", 40.0],
+  ["картофель", 12.0],
+  ["морковь", 33.0],
+  ["помидор", 10.0],
+  ["огурец", 16.0],
+  ["кабачок", 15.0],
+  ["тыква", 21.0],
+  ["яблоко", 6.0],
+  ["груша", 9.0],
+  ["банан", 5.0],
+  ["виноград", 10.0],
+  ["вишня", 16.0],
+  ["клубника", 16.0],
+  ["черника", 6.0],
+  ["сливочное масло", 24.0],
   ["яйцо куриное", 55.0],
   ["рыба, филе", 25.0],
   ["хлеб", 25.0],
@@ -138,7 +164,7 @@ const CALCIUM_ROWS = [
   ["nuts_other", 40.0, 150.0, "фундук, фисташки, кешью, грецкий орех, арахис, кедровый орех"],
   ["legumes_dry", 60.0, 300.0, "фасоль сухая, нут сухой, соевые бобы, маш"],
   ["greens_leafy", 130.0, 260.0, "петрушка, укроп, кале, руккола, базилик, кинза"],
-  ["vegetables_other", 15.0, 90.0, "брокколи, цветная капуста, белокочанная капуста, пекинская капуста, стручковая фасоль, репа"],
+  ["vegetables_other", 5.0, 90.0, "брокколи, цветная капуста, белокочанная капуста, пекинская капуста, стручковая фасоль, репа, картофель, морковь, свёкла, кабачок, помидор, огурец, тыква, а также ЛЮБЫЕ фрукты и ягоды: яблоко, груша, банан, апельсин, вишня, клубника, черника, виноград — свежие и замороженные"],
   ["greens_oxalate", 40.0, 120.0, "шпинат, щавель, ревень, свекольная ботва"],
   ["dried_fruit", 30.0, 180.0, "инжир сушёный, курага, урюк, финики"],
   ["fortified", 100.0, 180.0, "обогащённое кальцием растительное молоко, сок с кальцием, хлопья с кальцием"],
@@ -216,7 +242,10 @@ const calciumPrompt = (name, identity) =>
   "How much CALCIUM does this food hold per 100 grams, in milligrams?\n\n" +
   "FIRST look for it in the REFERENCE below. If it is there — or is plainly the same food " +
   "under another name, in another grammatical case or with a fat percentage attached — put " +
-  "that entry's name into \"reference_key\", copied exactly.\n\n" +
+  "that entry's name into \"reference_key\", copied exactly. An entry fits ONLY when it is " +
+  "THE SAME FOOD: «мороженая вишня» is a frozen berry and not «мороженое», however alike the " +
+  "words. When no entry is the same food, answer NONE — that is a good answer, the table " +
+  "below then decides.\n\n" +
   CALCIUM_REFERENCE.map(([n, mg]) => `  ${n}: ${mg}`).join("\n") + "\n\n" +
   "Whether or not you found it, ALSO place the food in one row of the table below and answer " +
   "with that row's key. If the reference had nothing, answer \"reference_key\" with NONE and " +
@@ -237,8 +266,10 @@ const calciumPrompt = (name, identity) =>
   "other_none ONLY when the food genuinely carries no calcium worth counting — meat, eggs, " +
   "cereals, bread, oil, sugar, water, tea, coffee. Never answer other_none merely because the " +
   "name is missing from the examples.\n" +
-  "- Dairy is NEVER other_none: every milk product belongs to one of the dairy rows. " +
-  "Vegetables are never other_none either: they go to vegetables_other or greens_leafy.\n\n" +
+  "- Dairy is NEVER other_none: every milk product belongs to one of the dairy rows. Neither " +
+  "is a VEGETABLE, and vegetables_other holds EVERY vegetable, root and tuber there is — raw, " +
+  "boiled, fried or frozen, named in the examples or not. A boiled potato belongs there just " +
+  "as a raw one does.\n\n" +
   "Fill \"reason\" FIRST, then the two keys, then the milligrams.\n\n" +
   "Respond with ONLY a minified JSON object and nothing else.";
 

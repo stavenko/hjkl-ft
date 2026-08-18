@@ -250,6 +250,31 @@ async fn run_worker() {
             }
         }
 
+        // ОПОЗНАНИЕ НУЖНО И ТОГДА, когда признаки уже собраны. Так бывает после
+        // миграции, стирающей кальций и железо, и после конфликта синхронизации:
+        // конвейер выше не запускается, `identity` остаётся пустой, и кальций,
+        // железо и жиры идут к модели с голым именем из дневника. Живой прогон
+        // поймал это дословно: «Голец» получил 120 мг кальция как «жидкий молочный
+        // продукт вроде кефира» — при том, что первым проходом ему верно дали 25.
+        let needs_identity = super::enrich::needs_enrichment(&food)
+            || food.fat_profile.is_none()
+            || super::iron::needs_iron(&food);
+        if identity.is_empty() && needs_identity {
+            let name = food.name.clone();
+            if let Some(ident) = with_retries(
+                move || {
+                    let n = name.clone();
+                    async move { super::flags_pipeline::identify(&n).await }
+                },
+                errors::FoodAspect::Kind,
+                &food.name,
+            )
+            .await
+            {
+                identity = ident.unwrap_or_default();
+            }
+        }
+
         // `food.nutrients` is unchanged by classification, so the loaded copy is
         // still current for the enrichment gate.
         if super::enrich::needs_enrichment(&food) {

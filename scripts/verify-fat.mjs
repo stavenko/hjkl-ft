@@ -264,6 +264,8 @@ const profilePrompt = (name, identity) =>
   "attached — put that entry's name into \"reference_key\", copied exactly.\n\n" +
   FAT_REFERENCE.map(([n, s, m, p, e]) =>
     `  ${n}: SFA ${s}, MUFA ${m}, PUFA ${p}, EPA+DHA ${e}`).join("\n") + "\n\n" +
+  "The reference keys are written in RUSSIAN: copy the key letter for letter as it stands " +
+  "there, never translated and never transliterated.\n\n" +
   "Whether or not you found it, ALSO place the food in one row of the table below — rows are " +
   "by the TYPE OF FAT, not by the type of dish — and answer with that row's key. If the " +
   "reference had nothing, the values must fit that row's ranges.\n\n" +

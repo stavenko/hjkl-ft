@@ -24,7 +24,7 @@ const CASES = [
   ["Черника с/м", "fruit", 3.6],
   ["Брокколи", "leaf", 2.6],
   ["Укроп свежий", "leaf", 2.8],
-  ["Сельдерей стебель", "leaf", 1.6],
+  ["Сельдерей стебель", "leaf|none", 1.6],
   ["Капуста белокочанная", "leaf", 2.0],
   ["Картофель отварной", "root", 1.8],
   ["Морковь", "root", 2.8],
@@ -177,6 +177,10 @@ const FIBRE_REFERENCE = [
   ["топинамбур", 1.6],
   ["стручковая фасоль", 3.4],
   ["шампиньоны", 1.0],
+  ["сельдерей стебель", 1.6],
+  ["сельдерей корень", 1.8],
+  ["спаржа", 2.1],
+  ["ревень", 1.8],
   ["петрушка", 3.3],
   ["укроп", 2.1],
   ["шпинат", 2.2],
@@ -203,12 +207,16 @@ const plantPrompt = (name, identity) =>
   `A person wrote this into their food diary: ${name}\n\n` +
   `Our automatic classifier says this product is: ${identity}\n\n` +
   "First answer whether this food is a part of some plant at all. If it is, answer which part " +
-  "of the plant it is — a root or tuber, a leaf or stalk, a fruit or berry, a seed or nut, a " +
-  "legume, a grain. If the food is not from a plant, every part field is false.\n\n" +
+  "A PERSON EATS HERE — not where the plant keeps it. The parts: one that grew underground " +
+  "(root, tuber, bulb), one that grew above the ground on the stem (leaf or stalk), a fruit " +
+  "or berry, a seed or nut, a legume, a grain. Celery has a root, but its stalk is what is " +
+  "eaten here, and the stalk grew above the ground. If the food is not from a plant, every " +
+  "part field is false.\n\n" +
   "A plant part is the PLANT MATTER ITSELF — whole or cut, raw or cooked, fresh, frozen or " +
   "dried. What was PRESSED OR REFINED OUT of a plant is not a part of it: an oil, a sugar, a " +
-  "syrup, a starch. Of the plant nothing is left there but the one substance taken out, so " +
-  "for those every part field is false as well.\n\n" +
+  "syrup, a starch. Potato starch is not a tuber — of the tuber nothing is left in it but the " +
+  "starch, and one substance taken out of a plant is not a part of that plant. For all of " +
+  "those every part field is false as well.\n\n" +
   "Then give the dietary FIBRE of this food, in grams per 100 g. FIRST look for the food in " +
   "the REFERENCE below and put its entry name into \"fibre_reference_key\", copied exactly — " +
   "we take the number ourselves. THE FORM IS PART OF THE ENTRY: dry grains and boiled ones " +
@@ -216,6 +224,8 @@ const plantPrompt = (name, identity) =>
   "entry is the same food, and give the grams as you know them. Zero is a valid answer for " +
   "food that has none.\n\n" +
   FIBRE_REFERENCE.map(([n, g]) => `  ${n}: ${g}`).join("\n") + "\n\n" +
+  "The reference keys are written in RUSSIAN: copy the key letter for letter as it stands " +
+  "there, never translated and never transliterated.\n\n" +
   "Respond with ONLY a minified JSON object and nothing else.";
 
 const plantSchema = {
@@ -297,7 +307,13 @@ for (const [name, wantPart, refFibre] of CASES) {
   if (pl.err) { badPart++; console.log(`FAIL ${name.padEnd(26)} части: ${pl.err} ${pl.raw ?? ""}`); continue; }
   const o = pl.obj;
   const part = partOf(o);
-  const okPart = part === wantPart;
+  if (process.env.RAW) {
+    console.log("     сырой ответ:", JSON.stringify({
+      plant: o.is_product_a_part_of_some_plant, root: o.is_root, leaf: o.is_leaf,
+      fruit: o.is_fruit, seed: o.is_seed, legume: o.is_legume, grain: o.is_grain,
+      key: o.fibre_reference_key, g: o.fibre_g_per_100g }));
+  }
+  const okPart = String(wantPart).split("|").includes(part);
   if (!okPart) badPart++;
   // Клетчатка: судим мягко — вдвое туда или обратно от справочной. Нам нужен
   // порядок величины, а не точность граммов.

@@ -248,6 +248,8 @@ const calciumPrompt = (name, identity) =>
   "words. When no entry is the same food, answer NONE — that is a good answer, the table " +
   "below then decides.\n\n" +
   CALCIUM_REFERENCE.map(([n, mg]) => `  ${n}: ${mg}`).join("\n") + "\n\n" +
+  "The reference keys are written in RUSSIAN: copy the key letter for letter as it stands " +
+  "there, never translated and never transliterated.\n\n" +
   "Whether or not you found it, ALSO place the food in one row of the table below and answer " +
   "with that row's key. If the reference had nothing, answer \"reference_key\" with NONE and " +
   "give a value that fits the row.\n\n" +

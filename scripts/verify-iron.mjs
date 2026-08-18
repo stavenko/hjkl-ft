@@ -41,6 +41,7 @@ const CASES = [
   ["бобовые и орехи", "Чечевица варёная", "legumes", 3.3],
   ["бобовые и орехи", "Фасоль красная сухая", "legumes", 6.7],
   ["бобовые и орехи", "Нут сухой", "legumes", 6.2],
+  ["бобовые и орехи", "Соя", "legumes", 15.7],
   ["бобовые и орехи", "Кунжут", "nuts_seeds", 14.6],
   ["бобовые и орехи", "Миндаль", "nuts_seeds", 3.7],
   ["бобовые и орехи", "Семена тыквы", "nuts_seeds", 8.8],
@@ -242,6 +243,8 @@ const ironPrompt = (name, identity) =>
   "— put that entry's name into \"reference_key\", copied exactly, and we take the numbers " +
   "ourselves. Answer NONE when the reference has nothing for it.\n\n" +
   IRON_REFERENCE.map(([n, mg]) => `  ${n}: ${mg}`).join("\n") + "\n\n" +
+  "The reference keys are written in RUSSIAN: copy the key letter for letter as it stands " +
+  "there, never translated and never transliterated.\n\n" +
   "Whether or not you found it in the reference, you MUST also place the food in ONE row of " +
   "the table below and answer with that row's key — the row decides how well the iron is " +
   "absorbed, and we need it either way. If the food is not in the reference, the value must " +

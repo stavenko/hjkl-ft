@@ -301,9 +301,11 @@ struct CategoryAnswer {
 struct PlantAnswer {
     /// Is this food a part of some plant at all?
     is_product_a_part_of_some_plant: bool,
-    /// A root or a tuber: potato, carrot, beetroot, radish, celeriac.
+    /// A part that grew UNDERGROUND: a root, a tuber or a bulb — potato, carrot,
+    /// beetroot, radish, celeriac, onion.
     is_root: bool,
-    /// A leaf or a stalk: cabbage, lettuce, dill, celery stalk.
+    /// A part that grew ABOVE THE GROUND on the stem: a leaf or a stalk — cabbage,
+    /// lettuce, dill, celery stalk, rhubarb, asparagus.
     is_leaf: bool,
     /// A fruit or a berry: apple, cherry, cucumber, tomato.
     is_fruit: bool,
@@ -746,13 +748,18 @@ impl Prompt for FlagPrompt {
                 "A person wrote this into their food diary: {name}\n\n\
                  {given}\
                  First answer whether this food is a part of some plant at all. If it is, \
-                 answer which part of the plant it is — a root or tuber, a leaf or stalk, a \
-                 fruit or berry, a seed or nut, a legume, a grain. If the food is not from a \
-                 plant, every part field is false.\n\n\
+                 answer WHICH PART A PERSON EATS HERE — not where the plant keeps it. The \
+                 parts: one that grew underground (root, tuber, bulb), one that grew above the \
+                 ground on the stem (leaf or stalk), a fruit or berry, a seed or nut, a legume, \
+                 a grain. Celery has a root, but its stalk is what is eaten here, and the stalk \
+                 grew above the ground. If the food is not from a plant, every part field is \
+                 false.\n\n\
                  A plant part is the PLANT MATTER ITSELF — whole or cut, raw or cooked, fresh, \
                  frozen or dried. What was PRESSED OR REFINED OUT of a plant is not a part of \
-                 it: an oil, a sugar, a syrup, a starch. Of the plant nothing is left there but \
-                 the one substance taken out, so for those every part field is false as well.\n\n\
+                 it: an oil, a sugar, a syrup, a starch. Potato starch is not a tuber — of the \
+                 tuber nothing is left in it but the starch, and one substance taken out of a \
+                 plant is not a part of that plant. For all of those every part field is false \
+                 as well.\n\n\
                  Then give the dietary FIBRE of this food, in grams per 100 g. FIRST look for \
                  the food in the REFERENCE below and put its entry name into \
                  \"fibre_reference_key\", copied exactly — we take the number ourselves. THE \
@@ -761,6 +768,8 @@ impl Prompt for FlagPrompt {
                  is the same food, and give the grams as you know them. Zero is a valid \
                  answer for food that has none.\n\n\
                  {fibre_reference}\n\n\
+                 The reference keys are written in RUSSIAN: copy the key letter for letter \
+                 as it stands there, never translated and never transliterated.\n\n\
                  Respond with ONLY a minified JSON object and nothing else.",
                 name = self.food_name,
                 given = self.given,

@@ -525,6 +525,10 @@ pub(crate) const FIBRE_REFERENCE: &[(&str, f64)] = &[
     ("топинамбур", 1.6),
     ("стручковая фасоль", 3.4),
     ("шампиньоны", 1.0),
+    ("сельдерей стебель", 1.6),
+    ("сельдерей корень", 1.8),
+    ("спаржа", 2.1),
+    ("ревень", 1.8),
     // ── Зелень ──
     ("петрушка", 3.3),
     ("укроп", 2.1),
@@ -749,6 +753,8 @@ pub async fn lookup_calcium(food_name: &str, identity: &str) -> Result<f64, Stri
          alike the words. When no entry is the same food, answer NONE — that is a good answer, \
          the table below then decides.\n\n\
          {reference}\n\n\
+         The reference keys are written in RUSSIAN: copy the key letter for letter as it \
+         stands there, never translated and never transliterated.\n\n\
          Whether or not you found it, ALSO place the food in one row of the table below and \
          answer with that row's key. If the reference had nothing, answer \"reference_key\" \
          with NONE and give a value that fits the row.\n\n\
@@ -1442,6 +1448,8 @@ pub async fn lookup_basic_fat_profile(
          same food under another name, in another grammatical case or with a cut, grade or fat \
          percentage attached — put that entry's name into \"reference_key\", copied exactly.\n\n\
          {reference}\n\n\
+         The reference keys are written in RUSSIAN: copy the key letter for letter as it \
+         stands there, never translated and never transliterated.\n\n\
          Whether or not you found it, ALSO place the food in one row of the table below — rows \
          are by the TYPE OF FAT, not by the type of dish — and answer with that row's key. If \
          the reference had nothing, the values must fit that row's ranges.\n\n\

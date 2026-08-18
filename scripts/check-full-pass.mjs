@@ -210,7 +210,7 @@ if (errs.length) {
   console.log("\n=== что говорило приложение об ошибках ===");
   for (const l of errs.slice(-20)) console.log("  " + l.slice(0, 220));
 }
-const said = [...new Set(logs.filter((l) => /calcium|жиры|железо|признаки|опозна/i.test(l)))];
+const said = [...new Set(logs.filter((l) => /calcium|iron|жиры|железо|признаки|опозна/i.test(l)))];
 if (said.length) {
   console.log("\n=== что приложение записало в лог ===");
   for (const l of said.slice(-40)) console.log("  " + l.slice(0, 220));

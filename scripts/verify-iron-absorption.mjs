@@ -238,6 +238,8 @@ const absorptionPrompt = (name, identity) =>
   "with THAT ENTRY'S NUMBER, copied exactly. Do not round it, do not adjust it, do not replace " +
   "it with one you remember.\n\n" +
   IRON_REFERENCE.map(([n, , a]) => `  ${n}: ${a}`).join("\n") + "\n\n" +
+  "The reference keys are written in RUSSIAN: copy the key letter for letter as it stands " +
+  "there, never translated and never transliterated.\n\n" +
   "Whether or not you found it, ALSO place the food in one row of the table below and answer " +
   "with that row's key. The number after the key is that row's fraction; if the reference had " +
   "nothing, answer \"reference_key\" with NONE and give THAT ROW'S number as the fraction.\n\n" +

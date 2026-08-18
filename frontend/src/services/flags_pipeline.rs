@@ -48,6 +48,18 @@ use serde::Deserialize;
 
 use super::ai::{build_executor_think, strip_code_fences, veg_fruit_from_category};
 
+/// НИЖЕ ЭТОЙ УВЕРЕННОСТИ ОПОЗНАНИЕ СЧИТАЕТСЯ НЕСОСТОЯВШИМСЯ.
+///
+/// Модель честно отвечает «не знаю» — «I do not know the word „Маш“», — и ставит
+/// себе 0.10. Мы это до сих пор не читали: брали лучший вариант, какой бы плохой он
+/// ни был, и дальше он шёл во все признаки как факт. Так «Кыстыбый» — татарская
+/// лепёшка с картофелем — получал гем и красное мясо и съедал недельную планку.
+///
+/// Порог взят из замеров: знакомое опознаётся на 0.9, незнакомое — на 0.1, между
+/// ними пусто. Продукт ниже порога остаётся БЕЗ признаков: пустое поле честнее
+/// выдуманного, и его переспросят при следующем проходе.
+const IDENTITY_MIN_CONFIDENCE: f64 = 0.6;
+
 /// Сколько раз повторить каждый шаг, прежде чем сдаться.
 const MAX_TRIES: u32 = 3;
 
@@ -178,6 +190,8 @@ pub struct FlagsCtx {
     pub food_name: String,
     /// Заполняется первым узлом: «Arctic char, a fish».
     pub identity: Option<String>,
+    /// Уверенность лучшего варианта опознания, 0…1.
+    pub identity_confidence: f64,
     pub flags: Flags,
     /// Клетчатка, г на 100 г. Её отдаёт растительный узел вместе с частью растения:
     /// продукт там уже опознан, и отдельный запрос за ней был лишними деньгами.
@@ -197,6 +211,7 @@ impl FlagsCtx {
         Self {
             food_name: food_name.to_string(),
             identity: None,
+            identity_confidence: 0.0,
             flags: Flags::default(),
             fibre_g: None,
             identify_only: false,
@@ -204,6 +219,16 @@ impl FlagsCtx {
             reasons: Vec::new(),
             last_error: None,
         }
+    }
+
+    /// Опознан ли продукт: уверенность лучшей версии не ниже порога.
+    ///
+    /// Спрашивать вдобавок «знаешь ли ты эту еду» пробовали — негодно: своей памятью
+    /// модель не знает и гольца, его опознаёт словарь, и на прямой вопрос она честно
+    /// отвечает «нет» про всё редкое сразу. Порог работает, когда у опознания
+    /// выключено рассуждение: тогда числа честные.
+    fn recognised(&self) -> bool {
+        self.identity_confidence >= IDENTITY_MIN_CONFIDENCE
     }
 
     /// Строка «это ЕСТЬ то-то» для промптов признаков. Пустая, если опознать не
@@ -278,8 +303,20 @@ struct IdentityOption {
     confidence: f64,
 }
 
+// ДВА ПОЛЯ ПЕРЕД ВАРИАНТАМИ — не украшение, а то, что делает уверенность честной.
+//
+// Без них модель ставит 0.90 чему угодно: «Кыстыбый — a type of fish», «Полба — тип
+// рыбы». С ними она сперва отвечает, что помнит сама и что нашла в словаре, и уже
+// после этого числа перестают врать: незнакомое получает 0.10, а голец — 0.90 через
+// словарь. Замер это показал ещё до конвейера, но в код тогда перенесли только
+// варианты, и порог отсекать было нечем.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct IdentityAnswer {
+    /// The closest definition you can recall YOURSELF, without the dictionary. If you
+    /// do not know this word, say so plainly — that is a valid answer.
+    from_own_knowledge: String,
+    /// The closest definition from the dictionary, or NONE if nothing in it fits.
+    from_dictionary: String,
     /// The three most likely definitions, the surest one first.
     options: Vec<IdentityOption>,
 }
@@ -357,14 +394,16 @@ impl Prompt for IdentifyPrompt {
     fn serialize(&self) -> String {
         format!(
             "A person wrote this into their food diary: {name}\n\n\
-             Say what it is, using YOUR OWN KNOWLEDGE first. The dictionary below covers a few \
-             rare words only — check whether this name is one of them, and if it is not, ignore \
-             the dictionary and answer from what you know. It is a help, not a list of allowed \
-             answers.\n\n\
-             Give the THREE most likely definitions, the surest one first, each a sentence of \
-             five or six words, each with your confidence from 0.0 to 1.0.\n\n\
-             {rare}Respond with ONLY a minified JSON object and nothing else: \
-             {{\"options\": [{{\"definition\": \"…\", \"confidence\": 0.9}}, …]}}",
+             Answer three things about it.\n\
+             1. \"from_own_knowledge\": the closest definition you can recall YOURSELF, without \
+             the dictionary. If you do not know this word, say so plainly — that is a valid \
+             answer.\n\
+             2. \"from_dictionary\": the closest definition from the dictionary below, or NONE \
+             if nothing in it fits this name.\n\
+             3. \"options\": the three most likely definitions of the food, the surest first, \
+             each a sentence of five or six words, each with your confidence from 0.0 to \
+             1.0.\n\n\
+             {rare}Respond with ONLY a minified JSON object and nothing else.",
             rare = dictionary_block(),
             name = self.food_name,
         )
@@ -377,6 +416,12 @@ impl Prompt for IdentifyPrompt {
                 // Признакам уходят ВСЕ варианты с их достоверностью, а не только
                 // первый: пусть видно, что уверенности нет, — «голец» модель звала и
                 // рыбой, и кониной, и разница между 0.9 и 0.4 здесь и есть ответ.
+                leptos::logging::log!(
+                    "опознание «{}»: память — {} · словарь — {}",
+                    ctx.food_name,
+                    a.from_own_knowledge.trim(),
+                    a.from_dictionary.trim()
+                );
                 let opts: Vec<String> = a
                     .options
                     .iter()
@@ -387,6 +432,12 @@ impl Prompt for IdentifyPrompt {
                 if opts.is_empty() {
                     ctx.last_error = Some("опознание пустое".to_string());
                 } else {
+                    ctx.identity_confidence = a
+                        .options
+                        .iter()
+                        .filter(|o| !o.definition.trim().is_empty())
+                        .map(|o| o.confidence)
+                        .fold(0.0_f64, f64::max);
                     ctx.identity = Some(opts.join("; "));
                     ctx.last_error = None;
                 }
@@ -405,7 +456,16 @@ impl Prompt for IdentifyPrompt {
 }
 
 struct IdentifyNode {
+    /// Исполнитель БЕЗ рассуждения — им спрашивается само опознание.
+    ///
+    /// Рассуждая, модель уговаривает саму себя: на «Кыстыбый» она в памяти пишет «I
+    /// don't recognize this term», а вариантам проставляет 0.6–0.7 и выдаёт лосося.
+    /// Без рассуждения тот же вопрос пять раз из пяти даёт честные 0.10. Незнание
+    /// должно оставаться незнанием.
     executor: Qwen,
+    /// Исполнитель С рассуждением — он уходит дальше, в узлы признаков: там
+    /// противоречия настоящие («язык это мышца, но орган»), и их надо продумать.
+    flags_executor: Qwen,
 }
 
 impl Node for IdentifyNode {
@@ -433,13 +493,16 @@ impl Node for IdentifyNode {
         if ctx.identity.is_none() && ctx.tries[0] < MAX_TRIES {
             return Some(Box::new(NodeWrapper::new(IdentifyNode {
                 executor: self.executor.clone(),
+                flags_executor: self.flags_executor.clone(),
             })));
         }
-        if ctx.identify_only {
+        // Ниже порога признаки не спрашиваются вовсе: продукт неизвестен, и любой
+        // вердикт о нём был бы выдуман.
+        if ctx.identify_only || !ctx.recognised() {
             return None;
         }
         Some(Box::new(NodeWrapper::new(FlagNode {
-            executor: self.executor.clone(),
+            executor: self.flags_executor.clone(),
             step: Step::VegFruit,
         })))
     }
@@ -990,16 +1053,24 @@ impl Node for FlagNode {
 /// Возвращает то, что удалось выяснить: неполученный признак остаётся `None` и будет
 /// переспрошен позже. FAILS LOUDLY только если не выяснено НИЧЕГО — тогда есть о чём
 /// сообщить в журнал ошибок.
-pub async fn classify_all(
-    food_name: &str,
-) -> Result<(Flags, Option<f64>, Option<String>), String> {
+pub struct Recognised {
+    pub flags: Flags,
+    pub fibre_g: Option<f64>,
+    pub identity: Option<String>,
+    /// false — продукт не опознан: признаков нет и спрашивать их нечем.
+    pub recognised: bool,
+}
+
+pub async fn classify_all(food_name: &str) -> Result<Recognised, String> {
     // Thinking ON. В остальных запросах он выключен: qwen3 паркует короткий ответ в
     // канал размышления и отдаёт пустой контент. Здесь пробуем включить, потому что
     // узлам достались настоящие противоречия — «язык это мышца, но орган», «копчёная
     // рыба консервирована, но не мясо», — и их надо продумать, а не угадать. Лимит
     // токенов в режиме рассуждения вчетверо больше (8000), так что ответу есть место.
-    let executor = build_executor_think(true)?;
-    let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode { executor })));
+    let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode {
+        executor: build_executor_think(false)?,
+        flags_executor: build_executor_think(true)?,
+    })));
 
     let mut stream = run_pipeline(pipeline, FlagsCtx::new(food_name));
     let mut last: Option<FlagsCtx> = None;
@@ -1010,6 +1081,29 @@ pub async fn classify_all(
     }
 
     let ctx = last.ok_or_else(|| "конвейер признаков не дал результата".to_string())?;
+    // ПРОДУКТ НЕ ОПОЗНАН — говорим об этом вслух и не отдаём ни одного признака.
+    // Раньше низкая уверенность молча превращалась в факт: «Кыстыбый» с версией
+    // «мясное блюдо» на 0.30 получал гем и красное мясо.
+    if !ctx.recognised() {
+        let what = ctx.identity.clone().unwrap_or_else(|| "(нет версий)".to_string());
+        leptos::logging::log!(
+            "НЕ ОПОЗНАНО «{food_name}»: лучшая версия {:.2} — {what}",
+            ctx.identity_confidence
+        );
+        crate::services::telemetry::report_detection(
+            "identity.unknown",
+            food_name,
+            "unknown",
+            &what,
+            &[ctx.identity_confidence],
+        );
+        return Ok(Recognised {
+            flags: Flags::default(),
+            fibre_g: None,
+            identity: None,
+            recognised: false,
+        });
+    }
     let f = ctx.flags;
     let fibre = ctx.fibre_g;
     let identity = ctx.identity.clone();
@@ -1027,7 +1121,7 @@ pub async fn classify_all(
         ctx.identity.clone().unwrap_or_else(|| "(не опознано)".to_string()),
         ctx.reasons.join(" · ")
     );
-    Ok((f, fibre, identity))
+    Ok(Recognised { flags: f, fibre_g: fibre, identity, recognised: true })
 }
 
 /// ТОЛЬКО опознание, без признаков.
@@ -1038,10 +1132,12 @@ pub async fn classify_all(
 /// модели с голым именем из дневника — тем самым, из-за которого «Голец» получал
 /// 120 мг кальция как «жидкий молочный продукт вроде кефира».
 pub async fn identify(food_name: &str) -> Result<Option<String>, String> {
-    let executor = build_executor_think(true)?;
     let mut ctx = FlagsCtx::new(food_name);
     ctx.identify_only = true;
-    let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode { executor })));
+    let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode {
+        executor: build_executor_think(false)?,
+        flags_executor: build_executor_think(true)?,
+    })));
 
     let mut stream = run_pipeline(pipeline, ctx);
     let mut last: Option<FlagsCtx> = None;
@@ -1051,6 +1147,16 @@ pub async fn identify(food_name: &str) -> Result<Option<String>, String> {
         }
     }
     let ctx = last.ok_or_else(|| "опознание не дало результата".to_string())?;
+    // Тот же порог, что и в полном конвейере: неуверенное опознание не лучше его
+    // отсутствия — кальций, железо и жиры пусть работают по одному имени, чем по
+    // выдуманному определению.
+    if !ctx.recognised() {
+        leptos::logging::log!(
+            "НЕ ОПОЗНАНО «{food_name}»: лучшая версия {:.2}",
+            ctx.identity_confidence
+        );
+        return Ok(None);
+    }
     leptos::logging::log!(
         "опознание «{food_name}»: {}",
         ctx.identity.clone().unwrap_or_else(|| "(не опознано)".to_string())

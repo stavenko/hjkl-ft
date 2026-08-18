@@ -61,6 +61,10 @@ page.on("console", (m) => logs.push(`${m.type()}: ${m.text()}`));
 const calls = [];
 page.on("response", (r) => {
   const u = r.url();
+  if (/bug-report/.test(u)) {
+    console.log(`  [телеметрия] ${r.status()} ${u.replace(/^https?:\/\/[^/]+/, "")}`);
+    return;
+  }
   if (!/ai-worker|ai\.renorma/.test(u)) return;
   calls.push({ status: r.status(), url: u.replace(/^https?:\/\/[^/]+/, "") });
 });

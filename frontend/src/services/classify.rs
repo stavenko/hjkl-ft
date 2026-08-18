@@ -194,7 +194,7 @@ async fn run_worker() {
         let mut identity = String::new();
         if USE_PIPELINE && needs_classification(&food) {
             let name = food.name.clone();
-            if let Some((f, fibre, ident)) = with_retries(
+            if let Some(r) = with_retries(
                 move || {
                     let n = name.clone();
                     async move { super::flags_pipeline::classify_all(&n).await }
@@ -204,6 +204,19 @@ async fn run_worker() {
             )
             .await
             {
+                // ПРОДУКТ НЕ ОПОЗНАН — проход по нему кончается здесь. Ни признаков,
+                // ни нутриентов, ни железа, ни жиров: всё это было бы выдумано о еде,
+                // которой мы не знаем. Человеку скажем словами, в Cloudflare уйдёт
+                // событие «identity.unknown», и по нему стоит оповещение.
+                if !r.recognised {
+                    errors::record_food(
+                        errors::FoodAspect::Kind,
+                        &food.name,
+                        "продукт не опознан: у модели нет уверенной версии",
+                    );
+                    continue;
+                }
+                let (f, fibre, ident) = (r.flags, r.fibre_g, r.identity);
                 // Записывается только выясненное. Неполученный признак остаётся
                 // пустым и будет переспрошен в другой раз — записать его наугад
                 // значило бы соврать молча.

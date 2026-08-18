@@ -369,6 +369,14 @@ async fn record_event(mut req: Request, env: &Env, user_id: &str) -> Result<Resp
 //   double5 — 1, чтобы складывать
 const DETECTION_DATASET: &str = "CLIENT_DETECTIONS";
 
+/// Вид определения, которым клиент сообщает: продукт опознать не удалось.
+/// Совпадает со строкой в `flags_pipeline::classify_all` — менять только вместе.
+const UNRECOGNISED_FOOD: &str = "identity.unknown";
+
+/// Начало строки в логе, на которое настроено оповещение в Cloudflare.
+/// УСТОЙЧИВОЕ: правило алерта ищет ровно эту подстроку.
+const ALERT_PREFIX: &str = "ALERT unrecognised-food:";
+
 /// Число из тела запроса; отсутствующее поле — ноль, а не ошибка: у определений
 /// без чисел (признаки) их и не бывает.
 fn number(body: &serde_json::Value, key: &str) -> f64 {
@@ -385,6 +393,22 @@ async fn record_detection(mut req: Request, env: &Env, user_id: &str) -> Result<
     let subject = field(&body, "subject");
     if kind.is_empty() || subject.is_empty() {
         return Ok(error_response("missing kind/subject", 400));
+    }
+
+    // НЕОПОЗНАННАЯ ЕДА — В ЛОГ ВОРКЕРА, а не только в Analytics Engine.
+    //
+    // По датасету аналитики алерт не повесить: он для запросов постфактум. А по
+    // строке в Workers Logs — можно, и это единственное место, где видно, что модель
+    // перестала узнавать еду у живых людей. Префикс устойчивый, менять его нельзя:
+    // на нём стоит правило оповещения.
+    let alerted = kind == UNRECOGNISED_FOOD;
+    if alerted {
+        console_error!(
+            "{ALERT_PREFIX} «{subject}» — {} (user {user_id}, {}, {})",
+            field(&body, "reason"),
+            field(&body, "platform"),
+            field(&body, "build"),
+        );
     }
 
     let dataset = match env.analytics_engine(DETECTION_DATASET) {
@@ -413,5 +437,9 @@ async fn record_detection(mut req: Request, env: &Env, user_id: &str) -> Result<
     if let Err(e) = point.write_to(&dataset) {
         console_error!("analytics engine write: {e}");
     }
-    Response::from_json(&serde_json::json!({ "ok": true })).map(|r| r.with_status(202))
+    // `alerted` возвращается наружу не для клиента, а чтобы проверку можно было
+    // сделать одним запросом: попала ли неопознанная еда в ветку, которая пишет
+    // строку оповещения в лог воркера.
+    Response::from_json(&serde_json::json!({ "ok": true, "alerted": alerted }))
+        .map(|r| r.with_status(202))
 }

@@ -35,16 +35,17 @@ const CASES = [
   ["справочник: прочее", "Яйцо куриное", { ref: "яйцо куриное" }],
   ["справочник: прочее", "Говядина", { ref: "говядина" }],
 
-  ["вне справочника", "Сыр бри", { row: "dairy_fat" }],
+  ["вне справочника", "Сыр бри", { ref: "сыр твёрдый" }],
   ["вне справочника", "Кабачок тушёный", { row: "no_fat" }],
   ["вне справочника", "Гречка варёная", { row: "grain_legume" }],
-  ["вне справочника", "Вафли шоколадные", { row: "cocoa_confectionery" }],
+
   ["вне справочника", "Сибас", { row: "fish_warm_low_n3" }],
   ["вне справочника", "Гребешки", { row: "fish_lean_seafood" }],
   ["вне справочника", "Горбуша", { row: "fish_fatty_cold" }],
   ["вне справочника", "Баранина", { ref: "баранина" }],
   ["вне справочника", "Фундук", { ref: "фундук" }],
 
+  ["блюда", "Вафли шоколадные", "dish"],
   ["блюда", "Голубцы", "dish"],
   ["блюда", "Плов с бараниной", "dish"],
   ["блюда", "Оливье", "dish"],
@@ -222,25 +223,22 @@ const head = (name, identity) =>
 // Копия `is_composite_dish`.
 const compositePrompt = (name, identity) =>
   head(name, identity) +
-  "Does the FAT of this food come from SEVERAL DIFFERENT SOURCES mixed together?\n\n" +
-  "A food whose fat comes from ONE source is NOT a composite dish, however processed it is. " +
-  "These are of one source:\n" +
+  "Is this a DISH COOKED FROM SEVERAL DIFFERENT FOODS, or is it a SINGLE food?\n\n" +
+  "A SINGLE FOOD is one food, however processed. These count as one:\n" +
   "— the flesh, organs, fat or skin of one animal, bird or fish, raw or cooked;\n" +
   "— one plant and what is pressed or ground from it: an oil, a nut, a seed, a grain, a " +
   "vegetable, a fruit;\n" +
   "— milk and everything made from milk alone: butter, cream, cheese, curd, yoghurt;\n" +
   "— eggs;\n" +
   "— a factory product built around one of these: sausage, ham, tinned fish, nut paste.\n\n" +
-  "A food whose fat comes from SEVERAL sources IS a composite dish. Typically these are cooked " +
-  "from a recipe: stuffed vegetables, cabbage rolls, cutlets and meatballs, casseroles and " +
-  "bakes, pies and pastry with a filling, pilaf, stews and soups, salads with dressing, " +
-  "sandwiches, ready meals.\n\n" +
-  "ANYTHING COOKED FROM A RECIPE OF SEVERAL FOODS IS A COMPOSITE DISH — even when one of them " +
-  "plainly carries most of the fat. A soup with meat is a composite dish: besides the meat " +
-  "there is the oil it was fried in. The question is where the fat COMES FROM, not which " +
-  "source of it is the largest.\n\n" +
-  "Fill the reason FIRST — name what this food is made of and where its fat comes from — and " +
-  "let the verdict follow from it.\n\n" +
+  "A DISH is cooked from several foods at once: stuffed vegetables, cabbage rolls, cutlets " +
+  "and meatballs, casseroles and bakes, pies and pastry with a filling, pilaf, stews and " +
+  "soups, salads with dressing, sandwiches, waffles, ready meals.\n\n" +
+  "A dish stays a dish even when one of its foods plainly outweighs the rest: борщ with beef " +
+  "is cooked from meat, vegetables and the oil they were fried in, and that makes it a dish. " +
+  "Do not ask which part is the largest — ask whether more than one food went into it.\n\n" +
+  "Fill the reason FIRST — name what this food is made of — and let the verdict follow from " +
+  "it.\n\n" +
   "Respond with ONLY a single minified JSON object.";
 
 const compositeSchema = {

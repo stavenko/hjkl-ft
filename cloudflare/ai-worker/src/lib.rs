@@ -414,6 +414,9 @@ async fn handle_chat_completions(
         .and_then(|rf| rf.get("json_schema"))
         .and_then(|js| js.get("schema"))
         .cloned();
+    // Схема, уже развёрнутая (без `$ref`) — уходит и в промпт инструкцией, и в саму
+    // Workers AI как `response_format`.
+    let inlined_schema = schema_opt.as_ref().map(inline_schema);
     if let Some(schema) = schema_opt {
         let inlined = inline_schema(&schema);
         let schema_json = serde_json::to_string(&inlined)
@@ -492,6 +495,24 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
         run_params.insert(
             "chat_template_kwargs".to_string(),
             serde_json::json!({ "enable_thinking": enable_thinking }),
+        );
+    }
+
+    // СХЕМА УХОДИТ И В САМУ WORKERS AI, а не только текстом в промпт.
+    //
+    // Инструкция в промпте — просьба, и модель её изредка нарушает: замер поймал, что
+    // ответ доходит целиком (finish_reason=stop, [DONE], usage на месте), но в конце
+    // стоит лишняя закрывающая скобка — `…"}}]}` вместо `…"}]}`. Разбор такого падает,
+    // и попытка пропадает целиком. Это не обрыв связи и не потолок токенов, это
+    // невалидный JSON, который никто не обязывался делать валидным.
+    //
+    // `response_format` включает на стороне платформы декодирование ПО ГРАММАТИКЕ —
+    // лишней скобке там взяться неоткуда. Инструкция в промпте остаётся: она задаёт
+    // смысл полей, а грамматика — форму.
+    if let Some(schema) = inlined_schema {
+        run_params.insert(
+            "response_format".to_string(),
+            serde_json::json!({ "type": "json_schema", "json_schema": schema }),
         );
     }
 

@@ -45,6 +45,14 @@ const CASES = [
   ["Гречка варёная", "grain", 2.7],
   ["Хлеб бородинский", "grain", 7.0],
   ["Чипсы картофельные", "root", 4.4],
+  // ВЫЖИМКИ. Живой проход поймал: оливковое масло получало признак «овощ/фрукт» и
+  // уходило в дневную планку 800 г, потому что оно «растение, но не корень, не боб,
+  // не зерно и не семя».
+  ["Оливковое масло", "none", 0.0],
+  ["Подсолнечное масло", "none", 0.0],
+  ["Сахар", "none", 0.0],
+  ["Крахмал картофельный", "none", 0.0],
+  ["Мёд", "none", 0.0],
   ["Говядина", "none", 0.0],
   ["Творог 5 %", "none", 0.0],
 ];
@@ -197,6 +205,10 @@ const plantPrompt = (name, identity) =>
   "First answer whether this food is a part of some plant at all. If it is, answer which part " +
   "of the plant it is — a root or tuber, a leaf or stalk, a fruit or berry, a seed or nut, a " +
   "legume, a grain. If the food is not from a plant, every part field is false.\n\n" +
+  "A plant part is the PLANT MATTER ITSELF — whole or cut, raw or cooked, fresh, frozen or " +
+  "dried. What was PRESSED OR REFINED OUT of a plant is not a part of it: an oil, a sugar, a " +
+  "syrup, a starch. Of the plant nothing is left there but the one substance taken out, so " +
+  "for those every part field is false as well.\n\n" +
   "Then give the dietary FIBRE of this food, in grams per 100 g. FIRST look for the food in " +
   "the REFERENCE below and put its entry name into \"fibre_reference_key\", copied exactly — " +
   "we take the number ourselves. THE FORM IS PART OF THE ENTRY: dry grains and boiled ones " +

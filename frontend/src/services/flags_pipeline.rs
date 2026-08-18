@@ -749,6 +749,10 @@ impl Prompt for FlagPrompt {
                  answer which part of the plant it is — a root or tuber, a leaf or stalk, a \
                  fruit or berry, a seed or nut, a legume, a grain. If the food is not from a \
                  plant, every part field is false.\n\n\
+                 A plant part is the PLANT MATTER ITSELF — whole or cut, raw or cooked, fresh, \
+                 frozen or dried. What was PRESSED OR REFINED OUT of a plant is not a part of \
+                 it: an oil, a sugar, a syrup, a starch. Of the plant nothing is left there but \
+                 the one substance taken out, so for those every part field is false as well.\n\n\
                  Then give the dietary FIBRE of this food, in grams per 100 g. FIRST look for \
                  the food in the REFERENCE below and put its entry name into \
                  \"fibre_reference_key\", copied exactly — we take the number ourselves. THE \

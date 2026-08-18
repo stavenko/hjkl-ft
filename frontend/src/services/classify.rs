@@ -275,10 +275,12 @@ async fn run_worker() {
         // и человек смотрит на пустые шкалы, пока он разгребается.
         if food.fat_profile.is_none() {
             let name = food.name.clone();
+            let ident_for_fat = identity.clone();
             if let Some(profile) = with_retries(
                 move || {
                     let n = name.clone();
-                    async move { super::ai::lookup_fat_profile(&n).await }
+                    let id = ident_for_fat.clone();
+                    async move { super::ai::lookup_fat_profile(&n, &id).await }
                 },
                 errors::FoodAspect::Fats,
                 &food.name,

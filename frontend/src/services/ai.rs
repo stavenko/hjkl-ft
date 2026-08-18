@@ -1044,6 +1044,100 @@ pub(crate) const FAT_ROWS: &[FatRow] = &[
                    специи — всё, где жира практически нет" },
 ];
 
+/// СПРАВОЧНИК профилей жира: продукт → доли от его собственного жира, в процентах.
+/// Пятое число — EPA+DHA, часть ПНЖК.
+///
+/// Строка таблицы описывает ГРУППУ, и внутри группы разброс велик: у `nuts_tree`
+/// коридор МНЖК 55–70 при макадамии 79 и кедровом орехе 28, а строка `coconut_palm`
+/// требует 82–92 % насыщенных — верно для кокосового масла, но не для пальмового,
+/// где их около половины. Строка такому продукту не поможет, справочник поможет.
+///
+/// Числа — типовые справочные доли; три рыбы (кижуч, сельдь, лосось) сверены при
+/// настройке строки `fish_fatty_cold`.
+pub(crate) const FAT_REFERENCE: &[(&str, f64, f64, f64, f64)] = &[
+    // ── Масла и выделенные жиры ──
+    ("оливковое масло", 14.0, 73.0, 11.0, 0.0),
+    ("подсолнечное масло", 11.0, 20.0, 66.0, 0.0),
+    ("высокоолеиновое подсолнечное масло", 9.0, 83.0, 4.0, 0.0),
+    ("кукурузное масло", 13.0, 28.0, 55.0, 0.0),
+    ("соевое масло", 15.0, 23.0, 58.0, 0.0),
+    ("рапсовое масло", 7.0, 63.0, 28.0, 0.0),
+    ("льняное масло", 9.0, 18.0, 68.0, 0.0),
+    ("кунжутное масло", 14.0, 40.0, 42.0, 0.0),
+    ("арахисовое масло", 17.0, 46.0, 32.0, 0.0),
+    ("кокосовое масло", 87.0, 6.0, 2.0, 0.0),
+    ("пальмовое масло", 49.0, 37.0, 9.0, 0.0),
+    ("сливочное масло", 63.0, 26.0, 4.0, 0.0),
+    ("топлёное масло", 65.0, 25.0, 4.0, 0.0),
+    ("сало свиное", 39.0, 45.0, 11.0, 0.0),
+    ("говяжий жир", 42.0, 44.0, 4.0, 0.0),
+    ("куриный жир", 30.0, 45.0, 21.0, 0.0),
+    // ── Орехи, семена, жирные плоды ──
+    ("грецкий орех", 9.0, 14.0, 72.0, 0.0),
+    ("миндаль", 8.0, 65.0, 25.0, 0.0),
+    ("фундук", 8.0, 78.0, 10.0, 0.0),
+    ("кешью", 20.0, 59.0, 17.0, 0.0),
+    ("фисташки", 13.0, 54.0, 31.0, 0.0),
+    ("кедровый орех", 7.0, 28.0, 62.0, 0.0),
+    ("бразильский орех", 24.0, 37.0, 36.0, 0.0),
+    ("макадамия", 16.0, 79.0, 2.0, 0.0),
+    ("арахис", 17.0, 49.0, 31.0, 0.0),
+    ("семена подсолнечника", 11.0, 19.0, 66.0, 0.0),
+    ("семена тыквы", 19.0, 34.0, 45.0, 0.0),
+    ("кунжут", 15.0, 40.0, 42.0, 0.0),
+    ("семена чиа", 11.0, 8.0, 78.0, 0.0),
+    ("семена льна", 9.0, 19.0, 68.0, 0.0),
+    ("авокадо", 15.0, 68.0, 13.0, 0.0),
+    ("оливки", 13.0, 74.0, 9.0, 0.0),
+    // ── Мясо, птица, яйцо ──
+    ("говядина", 40.0, 45.0, 4.0, 0.0),
+    ("баранина", 45.0, 42.0, 6.0, 0.0),
+    ("свинина", 37.0, 45.0, 12.0, 0.0),
+    ("курица", 29.0, 44.0, 21.0, 0.0),
+    ("индейка", 30.0, 40.0, 25.0, 0.0),
+    ("утка", 33.0, 49.0, 13.0, 0.0),
+    ("яйцо куриное", 31.0, 44.0, 15.0, 1.0),
+    // ── Рыба и морепродукты ──
+    ("кижуч", 21.0, 36.0, 34.0, 18.0),
+    ("сельдь", 23.0, 41.0, 24.0, 17.0),
+    ("лосось", 23.0, 28.0, 29.0, 15.0),
+    ("скумбрия", 24.0, 40.0, 24.0, 18.0),
+    ("печень трески", 18.0, 50.0, 25.0, 20.0),
+    ("треска", 21.0, 15.0, 47.0, 40.0),
+    ("тунец", 26.0, 26.0, 30.0, 25.0),
+    ("креветки", 25.0, 17.0, 40.0, 35.0),
+    ("мидии", 22.0, 22.0, 35.0, 28.0),
+    ("тилапия", 35.0, 33.0, 24.0, 5.0),
+    ("пангасиус", 38.0, 40.0, 17.0, 2.0),
+    // ── Молочное и кондитерское ──
+    ("молоко", 63.0, 26.0, 4.0, 0.0),
+    ("творог", 63.0, 26.0, 4.0, 0.0),
+    ("сыр твёрдый", 63.0, 26.0, 4.0, 0.0),
+    ("сметана", 63.0, 26.0, 4.0, 0.0),
+    ("шоколад тёмный", 60.0, 33.0, 3.0, 0.0),
+    ("какао порошок", 60.0, 33.0, 3.0, 0.0),
+];
+
+/// Справочник в том виде, в каком его видит модель.
+pub(crate) fn fat_reference_table() -> String {
+    FAT_REFERENCE
+        .iter()
+        .map(|(name, s, m, p, e)| {
+            format!("  {name}: SFA {s:.0}, MUFA {m:.0}, PUFA {p:.0}, EPA+DHA {e:.0}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Запись справочника по ключу, который назвала модель.
+fn fat_reference_hit(key: &str) -> Option<&'static (&'static str, f64, f64, f64, f64)> {
+    let key = key.trim();
+    if key.is_empty() || key.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    FAT_REFERENCE.iter().find(|(name, ..)| name.eq_ignore_ascii_case(key))
+}
+
 fn fat_row_table() -> String {
     FAT_ROWS
         .iter()
@@ -1065,6 +1159,9 @@ fn fat_row_table() -> String {
 // инструкцию модели. Пояснения для людей — `//`, как это.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct FatProfileAnswer {
+    /// The name of the REFERENCE entry this food matches, copied exactly, or NONE.
+    #[serde(default)]
+    pub(crate) reference_key: String,
     /// The category key from the table, copied EXACTLY as written there.
     pub(crate) category: String,
     /// What this product actually is, in two or three words.
@@ -1107,13 +1204,21 @@ struct CompositeAnswer {
     verdict_is_a_composite_dish: bool,
 }
 
+/// Шапка всех трёх запросов о жире: что человек записал и что об этом известно.
+fn fat_head(food_name: &str, identity: &str) -> String {
+    let known = if identity.trim().is_empty() {
+        String::new()
+    } else {
+        format!("Our automatic classifier says this product is: {identity}\n\n")
+    };
+    format!("A person wrote this into their food diary: {food_name}\n\n{known}")
+}
+
 /// Составное ли это блюдо (жир из нескольких источников), а не базовый продукт.
-pub async fn is_composite_dish(food_name: &str) -> Result<bool, String> {
+pub async fn is_composite_dish(food_name: &str, identity: &str) -> Result<bool, String> {
     let prompt = format!(
-        "Answer ONE question about the food \"{food_name}\", and nothing else. Food names may \
-         be in ANY language — judge by meaning, not by wording.\n\n\
-         QUESTION: does the FAT of this food come from SEVERAL DIFFERENT SOURCES mixed \
-         together?\n\n\
+        "{head}\
+         Does the FAT of this food come from SEVERAL DIFFERENT SOURCES mixed together?\n\n\
          A food whose fat comes from ONE source is NOT a composite dish, however processed it \
          is. These are of one source:\n\
          — the flesh, organs, fat or skin of one animal, bird or fish, raw or cooked;\n\
@@ -1126,9 +1231,14 @@ pub async fn is_composite_dish(food_name: &str) -> Result<bool, String> {
          cooked from a recipe: stuffed vegetables, cabbage rolls, cutlets and meatballs, \
          casseroles and bakes, pies and pastry with a filling, pilaf, stews and soups, salads \
          with dressing, sandwiches, ready meals.\n\n\
-         THINK IT THROUGH FIRST in the reason field — name what this food is made of and where \
-         its fat comes from — and let the verdict follow from it.\n\n\
+         ANYTHING COOKED FROM A RECIPE OF SEVERAL FOODS IS A COMPOSITE DISH — even when one of \
+         them plainly carries most of the fat. A soup with meat is a composite dish: besides \
+         the meat there is the oil it was fried in. The question is where the fat COMES FROM, \
+         not which source of it is the largest.\n\n\
+         Fill the reason FIRST — name what this food is made of and where its fat comes from — \
+         and let the verdict follow from it.\n\n\
          Respond with ONLY a single minified JSON object.",
+        head = fat_head(food_name, identity),
     );
     let v: CompositeAnswer = generate(prompt, |_| {}).await?;
     leptos::logging::log!(
@@ -1147,30 +1257,44 @@ pub async fn is_composite_dish(food_name: &str) -> Result<bool, String> {
 }
 
 /// Профиль жира продукта: развилка, а дальше — своя ветка для каждого случая.
-pub async fn lookup_fat_profile(food_name: &str) -> Result<api_types::FatProfile, String> {
-    if is_composite_dish(food_name).await? {
-        return lookup_dish_fat_profile(food_name).await;
+///
+/// `identity` — готовое опознание из конвейера признаков; пустая строка допустима.
+pub async fn lookup_fat_profile(
+    food_name: &str,
+    identity: &str,
+) -> Result<api_types::FatProfile, String> {
+    if is_composite_dish(food_name, identity).await? {
+        return lookup_dish_fat_profile(food_name, identity).await;
     }
-    lookup_basic_fat_profile(food_name).await
+    lookup_basic_fat_profile(food_name, identity).await
 }
 
-/// Профиль жира БАЗОВОГО продукта. Промпт — дословно тот, что прошёл замер.
-pub async fn lookup_basic_fat_profile(food_name: &str) -> Result<api_types::FatProfile, String> {
+/// Профиль жира БАЗОВОГО продукта: сперва справочник, потом строка таблицы.
+pub async fn lookup_basic_fat_profile(
+    food_name: &str,
+    identity: &str,
+) -> Result<api_types::FatProfile, String> {
     let lang = match crate::services::i18n::get_lang() {
         crate::services::i18n::Lang::Ru => "Russian",
         crate::services::i18n::Lang::En => "English",
     };
     let prompt = format!(
-        "You are a nutritional database. For the food item \"{food_name}\", report the \
-         FATTY-ACID PROFILE OF ITS FAT.\n\n\
+        "{head}\
+         Report the FATTY-ACID PROFILE OF THIS FOOD'S FAT.\n\n\
          Every number you report is a PERCENT OF THIS FOOD'S TOTAL FAT, by weight — NOT grams \
          per 100 g of food. A food's total fat is already known to us; you only describe how \
          that fat is composed. This means the profile does NOT depend on how much fat the food \
          has: pure sunflower oil and a sauce made from it share the same profile.\n\n\
-         First place the food in ONE row of this table — rows are by the TYPE OF FAT, not by \
-         the type of dish — then give values INSIDE that row's ranges:\n\n\
+         FIRST look for the food in the REFERENCE below. If it is there — or is plainly the \
+         same food under another name, in another grammatical case or with a cut, grade or fat \
+         percentage attached — put that entry's name into \"reference_key\", copied exactly.\n\n\
+         {reference}\n\n\
+         Whether or not you found it, ALSO place the food in one row of the table below — rows \
+         are by the TYPE OF FAT, not by the type of dish — and answer with that row's key. If \
+         the reference had nothing, the values must fit that row's ranges.\n\n\
          {table}\n\n\
          Report:\n\
+         - reference_key: the reference entry's name, copied exactly, or NONE\n\
          - category: the row key, copied EXACTLY as written above\n\
          - food_type: what this product is, in two or three words, in {lang}\n\
          - sfa_pct / mufa_pct / pufa_pct: percent of total fat, each INSIDE its range in the \
@@ -1196,13 +1320,20 @@ pub async fn lookup_basic_fat_profile(food_name: &str) -> Result<api_types::FatP
            fish_warm_low_n3.\n\
          - Anything with practically no fat goes to no_fat; its profile is irrelevant, report \
            the row and zeros.\n\n\
-         Base the answer only on the food name \"{food_name}\". Respond with ONLY a single \
-         minified JSON object and nothing else — no markdown, no prose.",
+         Fill \"reason\" FIRST, then the two keys, then the numbers.\n\n\
+         Respond with ONLY a single minified JSON object and nothing else — no markdown, no \
+         prose.",
+        head = fat_head(food_name, identity),
+        reference = fat_reference_table(),
         table = fat_row_table(),
         lang = lang,
     );
 
     let v: FatProfileAnswer = generate_validated(prompt, |_| {}, 4, |v: &FatProfileAnswer| {
+        // Запись справочника снимает вопрос о строке: числа всё равно возьмутся оттуда.
+        if fat_reference_hit(&v.reference_key).is_some() {
+            return Ok(());
+        }
         let key = v.category.trim().to_ascii_lowercase();
         if !FAT_ROWS.iter().any(|r| r.key == key) {
             return Err(format!("unknown fat row «{}» for «{food_name}»", v.category));
@@ -1218,31 +1349,51 @@ pub async fn lookup_basic_fat_profile(food_name: &str) -> Result<api_types::FatP
     })
     .await?;
 
-    let key = v.category.trim().to_ascii_lowercase();
-    let row = FAT_ROWS
-        .iter()
-        .find(|r| r.key == key)
-        .ok_or_else(|| format!("unknown fat row «{}»", v.category))?;
-    let clamp = |x: f64, (lo, hi): (f64, f64)| x.clamp(lo, hi);
-    let pufa = clamp(v.pufa_pct, row.pufa);
-    // EPA+DHA — ЧАСТЬ ПНЖК, поэтому зажимается ещё и под неё: замер поймал ответы,
-    // где часть превышала целое.
-    let epa_dha = clamp(v.epa_dha_pct, row.epa_dha).min(pufa);
-    let profile = api_types::FatProfile {
-        sfa_pct: clamp(v.sfa_pct, row.sfa),
-        mufa_pct: clamp(v.mufa_pct, row.mufa),
-        pufa_pct: pufa,
-        epa_dha_pct: epa_dha,
+    // Профиль из СПРАВОЧНИКА берётся как есть: строка описывает группу, справочник —
+    // этот продукт, и расходятся они законно. Пальмовое масло стоит в строке кокоса,
+    // где насыщенных 82–92, а у него их около половины — зажим строкой испортил бы
+    // верное число.
+    let (profile, source) = match fat_reference_hit(&v.reference_key) {
+        Some((name, s, m, p, e)) => (
+            api_types::FatProfile {
+                sfa_pct: *s,
+                mufa_pct: *m,
+                pufa_pct: *p,
+                epa_dha_pct: e.min(*p),
+            },
+            format!("справочник «{name}»"),
+        ),
+        None => {
+            let key = v.category.trim().to_ascii_lowercase();
+            let row = FAT_ROWS
+                .iter()
+                .find(|r| r.key == key)
+                .ok_or_else(|| format!("unknown fat row «{}»", v.category))?;
+            let clamp = |x: f64, (lo, hi): (f64, f64)| x.clamp(lo, hi);
+            let pufa = clamp(v.pufa_pct, row.pufa);
+            // EPA+DHA — ЧАСТЬ ПНЖК, поэтому зажимается ещё и под неё: замер поймал
+            // ответы, где часть превышала целое.
+            let epa_dha = clamp(v.epa_dha_pct, row.epa_dha).min(pufa);
+            (
+                api_types::FatProfile {
+                    sfa_pct: clamp(v.sfa_pct, row.sfa),
+                    mufa_pct: clamp(v.mufa_pct, row.mufa),
+                    pufa_pct: pufa,
+                    epa_dha_pct: epa_dha,
+                },
+                format!("строка {}", row.key),
+            )
+        }
     };
     leptos::logging::log!(
-        "жиры «{food_name}»: {} · {} — НЖК {:.0} МНЖК {:.0} ПНЖК {:.0} EPA+DHA {:.0} ({})",
-        row.key, v.food_type, profile.sfa_pct, profile.mufa_pct, profile.pufa_pct,
+        "жиры «{food_name}»: {source} · {} — НЖК {:.0} МНЖК {:.0} ПНЖК {:.0} EPA+DHA {:.0} ({})",
+        v.food_type, profile.sfa_pct, profile.mufa_pct, profile.pufa_pct,
         profile.epa_dha_pct, v.reason
     );
     crate::services::telemetry::report_detection(
         "fat.row",
         food_name,
-        row.key,
+        &source,
         &format!("{} — {}", v.food_type, v.reason),
         &[profile.sfa_pct, profile.mufa_pct, profile.pufa_pct, profile.epa_dha_pct],
     );
@@ -1309,14 +1460,18 @@ fn pessimise_dish_fat(sfa: f64, mufa: f64, pufa: f64) -> api_types::FatProfile {
 }
 
 /// Профиль жира составного блюда: свободный ответ модели, прижатый к худшему.
-async fn lookup_dish_fat_profile(food_name: &str) -> Result<api_types::FatProfile, String> {
+async fn lookup_dish_fat_profile(
+    food_name: &str,
+    identity: &str,
+) -> Result<api_types::FatProfile, String> {
     let lang = match crate::services::i18n::get_lang() {
         crate::services::i18n::Lang::Ru => "Russian",
         crate::services::i18n::Lang::En => "English",
     };
     let prompt = format!(
-        "You are a nutritional database. \"{food_name}\" is a COMPOSITE DISH — its fat comes \
-         from several ingredients at once. Report the FATTY-ACID PROFILE OF ITS FAT.\n\n\
+        "{head}\
+         This is a COMPOSITE DISH — its fat comes from several ingredients at once. Report the \
+         FATTY-ACID PROFILE OF ITS FAT.\n\n\
          Every number you report is a PERCENT OF THIS DISH'S TOTAL FAT, by weight — NOT grams \
          per 100 g. How much fat the dish has is already known to us; you only describe how \
          that fat is composed.\n\n\
@@ -1328,8 +1483,9 @@ async fn lookup_dish_fat_profile(food_name: &str) -> Result<api_types::FatProfil
          Report sfa_pct, mufa_pct and pufa_pct as percents of total fat. The rest of the weight \
          is glycerol, so the three need not add up to 100 — never inflate a fraction to make \
          them.\n\n\
-         Base the answer only on the dish name \"{food_name}\". Respond with ONLY a single \
-         minified JSON object and nothing else — no markdown, no prose.",
+         Respond with ONLY a single minified JSON object and nothing else — no markdown, no \
+         prose.",
+        head = fat_head(food_name, identity),
     );
 
     let v: DishFatAnswer = generate_validated(prompt, |_| {}, 4, |v: &DishFatAnswer| {

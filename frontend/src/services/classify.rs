@@ -110,6 +110,7 @@ const FLAGS: &[(
     ("молочная глобула", |f| f.is_milk_globule.is_none(), local::FoodFlag::MilkGlobule),
     ("красное мясо", |f| f.is_red_meat.is_none(), local::FoodFlag::RedMeat),
     ("переработанное мясо", |f| f.is_processed_meat.is_none(), local::FoodFlag::ProcessedMeat),
+    ("яйцо", |f| f.is_egg.is_none(), local::FoodFlag::Egg),
 ];
 
 /// Спрашивать признаки КОНВЕЙЕРОМ (опознание → пять вердиктов) вместо пяти
@@ -126,6 +127,11 @@ async fn ask(flag: local::FoodFlag, name: &str) -> Result<bool, String> {
         local::FoodFlag::MilkGlobule => ai::classify_milk_globule(&names).await?,
         local::FoodFlag::RedMeat => ai::classify_red_meat(&names).await?,
         local::FoodFlag::ProcessedMeat => ai::classify_processed_meat(&names).await?,
+        // У яйца отдельного запроса СТАРОГО образца нет и не будет: признак заведён
+        // уже при конвейере. Старый путь для него просто не работает.
+        local::FoodFlag::Egg => {
+            return Err("яйцо спрашивается только конвейером".to_string());
+        }
     };
     v.into_iter().next().ok_or_else(|| "пустой ответ классификатора".to_string())
 }
@@ -207,6 +213,7 @@ async fn run_worker() {
                     (local::FoodFlag::MilkGlobule, f.milk_globule),
                     (local::FoodFlag::RedMeat, f.red_meat),
                     (local::FoodFlag::ProcessedMeat, f.processed_meat),
+                    (local::FoodFlag::Egg, f.egg),
                 ] {
                     if let Some(v) = value {
                         local::cache_food_flag(&id, flag, v).await;
@@ -228,6 +235,7 @@ async fn run_worker() {
                 food.is_milk_globule = f.milk_globule.or(food.is_milk_globule);
                 food.is_red_meat = f.red_meat.or(food.is_red_meat);
                 food.is_processed_meat = f.processed_meat.or(food.is_processed_meat);
+                food.is_egg = f.egg.or(food.is_egg);
             }
         }
 

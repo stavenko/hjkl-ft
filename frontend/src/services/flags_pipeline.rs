@@ -169,6 +169,7 @@ pub struct Flags {
     pub red_meat: Option<bool>,
     pub processed_meat: Option<bool>,
     pub milk_globule: Option<bool>,
+    pub egg: Option<bool>,
 }
 
 /// Контекст, который течёт по конвейеру.
@@ -185,7 +186,7 @@ pub struct FlagsCtx {
     /// есть, а опознание всё равно требуется — его ждут кальций, железо и жиры.
     identify_only: bool,
     /// Попытки по шагам: у каждого свои, чтобы упавший не тратил чужие.
-    tries: [u32; 6],
+    tries: [u32; 7],
     /// Обоснования по шагам — для лога и телеметрии.
     reasons: Vec<String>,
     pub last_error: Option<String>,
@@ -199,7 +200,7 @@ impl FlagsCtx {
             flags: Flags::default(),
             fibre_g: None,
             identify_only: false,
-            tries: [0; 6],
+            tries: [0; 7],
             reasons: Vec::new(),
             last_error: None,
         }
@@ -475,6 +476,7 @@ enum Step {
     RedMeat,
     ProcessedMeat,
     MilkGlobule,
+    Egg,
 }
 
 impl Step {
@@ -486,6 +488,7 @@ impl Step {
             Step::RedMeat => 3,
             Step::ProcessedMeat => 4,
             Step::MilkGlobule => 5,
+            Step::Egg => 6,
         }
     }
 
@@ -495,7 +498,8 @@ impl Step {
             Step::Heme => Some(Step::RedMeat),
             Step::RedMeat => Some(Step::ProcessedMeat),
             Step::ProcessedMeat => Some(Step::MilkGlobule),
-            Step::MilkGlobule => None,
+            Step::MilkGlobule => Some(Step::Egg),
+            Step::Egg => None,
         }
     }
 
@@ -510,6 +514,9 @@ impl Step {
         match self {
             Step::VegFruit | Step::Heme => true,
             Step::RedMeat | Step::ProcessedMeat | Step::MilkGlobule => false,
+            // Яйцу опознание впереди нужнее всего: без него «Афоня» или «Киндер» —
+            // просто слова, а с ним видно, что это яйцо шоколадное, а не птичье.
+            Step::Egg => true,
         }
     }
 
@@ -533,6 +540,7 @@ impl Step {
             Step::RedMeat => "красное мясо",
             Step::ProcessedMeat => "переработанное мясо",
             Step::MilkGlobule => "молочная глобула",
+            Step::Egg => "яйцо",
         }
     }
 
@@ -544,6 +552,7 @@ impl Step {
             Step::RedMeat => "flag.red_meat",
             Step::ProcessedMeat => "flag.processed_meat",
             Step::MilkGlobule => "flag.milk_globule",
+            Step::Egg => "flag.egg",
         }
     }
 
@@ -554,6 +563,7 @@ impl Step {
             Step::RedMeat => f.red_meat,
             Step::ProcessedMeat => f.processed_meat,
             Step::MilkGlobule => f.milk_globule,
+            Step::Egg => f.egg,
         }
     }
 
@@ -564,6 +574,7 @@ impl Step {
             Step::RedMeat => f.red_meat = Some(v),
             Step::ProcessedMeat => f.processed_meat = Some(v),
             Step::MilkGlobule => f.milk_globule = Some(v),
+            Step::Egg => f.egg = Some(v),
         }
     }
 
@@ -689,6 +700,24 @@ impl Step {
                 comes mainly from these. Do NOT hedge here: a cheese or a cottage cheese that \
                 was not churned HAS intact globules, even though the curd was pressed, salted, \
                 aged or heated.",
+            Step::Egg => "\
+                THE QUESTION: is this food a bird's egg, or a food made of eggs and \
+                almost nothing else?\n\n\
+                YES, whoever laid it — hen, quail, duck, goose, turkey, ostrich — and whatever \
+                was done to it. An egg stays an egg after the shell is cracked and the yolk \
+                broken, and it stays an egg after cooking, curing or drying: raw, boiled, \
+                poached, fried, baked, smoked, pickled, salted, or dried into powder. Egg \
+                powder — яичный порошок, меланж — is YES: it is whole eggs with the water \
+                taken out and nothing else. The \
+                YOLK and the WHITE on their own are YES. So are яичница, глазунья, омлет and \
+                scrambled eggs, even with a spoon of milk, butter or oil in them — the food is \
+                still eggs.\n\n\
+                NO when eggs are merely ONE INGREDIENT AMONG MANY: pancakes, batter, \
+                mayonnaise, pasta, cake, biscuit, meringue in a dessert, cutlets, casseroles, \
+                salads. NO for anything called an egg without being one — a chocolate egg, an \
+                egg-shaped sweet.\n\n\
+                ROE IS NOT AN EGG HERE: caviar, salmon roe, cod roe and fish milt come from \
+                fish, not from birds.",
         }
     }
 }
@@ -921,7 +950,7 @@ pub async fn classify_all(
     let f = ctx.flags;
     let fibre = ctx.fibre_g;
     let identity = ctx.identity.clone();
-    let got = [f.veg_fruit, f.heme, f.red_meat, f.processed_meat, f.milk_globule]
+    let got = [f.veg_fruit, f.heme, f.red_meat, f.processed_meat, f.milk_globule, f.egg]
         .iter()
         .filter(|v| v.is_some())
         .count();
@@ -931,7 +960,7 @@ pub async fn classify_all(
             .unwrap_or_else(|| "конвейер признаков не дал ни одного вердикта".to_string()));
     }
     leptos::logging::log!(
-        "признаки «{food_name}»: {} — выяснено {got} из 5 ({})",
+        "признаки «{food_name}»: {} — выяснено {got} из 6 ({})",
         ctx.identity.clone().unwrap_or_else(|| "(не опознано)".to_string()),
         ctx.reasons.join(" · ")
     );

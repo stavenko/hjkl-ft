@@ -103,6 +103,14 @@ pub struct Food {
     /// `None` — ещё не классифицировано.
     #[serde(default)]
     pub is_milk_globule: Option<bool>,
+    /// AI-assigned tag: продукт — ЯЙЦО ПТИЦЫ. `None` = ещё не спрашивали.
+    ///
+    /// Признак снимался вместе с удалённой «Оценкой» и стирался из базы миграцией
+    /// 10 — вернулся отдельным узлом конвейера. Считается только само яйцо, чьё бы
+    /// оно ни было и как бы ни приготовлено, а также желток и белок порознь. Блюдо,
+    /// в котором яйцо лишь одно из многого, сюда не идёт, и икра тоже: она рыбья.
+    #[serde(default)]
+    pub is_egg: Option<bool>,
     /// Iron in mg per 100 g. Filled by the DEDICATED iron pass, not by the general
     /// nutrient enricher — iron is judged together with how well it is absorbed, so
     /// it deliberately does NOT live in `nutrients` (which is a plain amount map
@@ -349,6 +357,7 @@ impl FoodDraft {
             is_milk_globule: None,
             is_red_meat: None,
             is_processed_meat: None,
+            is_egg: None,
             fat_profile: None,
             balance_fat_profile: None,
             iron_mg: None,

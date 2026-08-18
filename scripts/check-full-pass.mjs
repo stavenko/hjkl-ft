@@ -25,6 +25,7 @@ const FOODS = (process.env.FOODS || [
   "Мороженая вишня",
   "Картофель отварной",
   "Творог 5%",
+  "Яичница глазунья",
 ].join("|")).split("|");
 const WAIT_MS = Number(process.env.WAIT_MS || 420000);
 
@@ -159,7 +160,7 @@ const readAll = () => page.evaluate(async (uid) => {
   return all.map((f) => ({
     name: f.name,
     veg: f.is_veg_fruit, heme: f.is_heme, glob: f.is_milk_globule,
-    red: f.is_red_meat, proc: f.is_processed_meat,
+    red: f.is_red_meat, proc: f.is_processed_meat, egg: f.is_egg,
     ca: f.nutrients?.["Кальций"] ?? null,
     fibre: f.nutrients?.["Клетчатка"] ?? null,
     mg: f.iron_mg, abs: f.iron_absorption,
@@ -170,6 +171,7 @@ const readAll = () => page.evaluate(async (uid) => {
 // Продукт разобран, когда заполнено ВСЁ, что должен заполнить проход.
 const done = (r) =>
   r.veg != null && r.heme != null && r.glob != null && r.red != null && r.proc != null &&
+  r.egg != null &&
   r.ca != null && r.mg != null && r.abs != null && r.fat != null;
 
 const t0 = Date.now();
@@ -182,7 +184,7 @@ while (Date.now() - t0 < WAIT_MS) {
 
 const yn = (v) => (v === true ? "да" : v === false ? "нет" : "—");
 console.log(`\n=== полный проход (ждали ${Math.round((Date.now() - t0) / 1000)} с) ===\n`);
-console.log("продукт              ов гем гл км мгп  кальций клетч  железо        жир");
+console.log("продукт              ов гем гл км мгп яц  кальций клетч  железо        жир");
 let ok = 0;
 for (const r of rows) {
   if (done(r)) ok++;
@@ -192,13 +194,13 @@ for (const r of rows) {
   console.log(
     `${done(r) ? "OK " : "НЕТ"} ${r.name.padEnd(18)} ` +
     `${yn(r.veg).padEnd(3)} ${yn(r.heme).padEnd(3)} ${yn(r.glob).padEnd(3)} ` +
-    `${yn(r.red).padEnd(3)} ${yn(r.proc).padEnd(4)} ` +
+    `${yn(r.red).padEnd(3)} ${yn(r.proc).padEnd(3)} ${yn(r.egg).padEnd(3)} ` +
     `${String(r.ca ?? "—").padEnd(7)} ${String(r.fibre ?? "—").padEnd(6)} ` +
     `${r.mg != null ? `${r.mg} мг × ${r.abs}` : "—"}`.padEnd(14) + ` ${fat}`
   );
 }
 console.log(`\nразобрано полностью ${ok} из ${rows.length}`);
-console.log("(ов — овощ/фрукт, гем, гл — молочная глобула, км — красное мясо, мгп — мясная гастрономия)");
+console.log("(ов — овощ/фрукт, гем, гл — молочная глобула, км — красное мясо, мгп — мясная гастрономия, яц — яйцо)");
 
 console.log(`\n=== обращения к AI-воркеру: ${calls.length} ===`);
 const byStatus = calls.reduce((m, c) => ((m[c.status] = (m[c.status] ?? 0) + 1), m), {});

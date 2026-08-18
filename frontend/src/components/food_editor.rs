@@ -279,6 +279,7 @@ pub fn FoodEditor(
             is_milk_globule: None,
             is_red_meat: None,
             is_processed_meat: None,
+            is_egg: None,
             iron_mg: None,
             iron_absorption: None,
             fat_profile: None,

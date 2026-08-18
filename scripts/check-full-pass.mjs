@@ -213,5 +213,16 @@ if (said.length) {
   console.log("\n=== что приложение записало в лог ===");
   for (const l of said.slice(-40)) console.log("  " + l.slice(0, 220));
 }
+// Снимок дашборда в ТОМ ЖЕ прогоне: разобранное должно не только лечь в базу, но и
+// нарисоваться. Отдельным скриптом это не снять — пришлось бы сеять руками то, что
+// приложение и так только что посчитало.
+if (process.env.SHOT) {
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#splash", { state: "detached", timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(4000);
+  await page.screenshot({ path: process.env.SHOT, fullPage: true });
+  const screen = (await page.locator("body").innerText().catch(() => "")).replace(/\n+/g, " | ");
+  console.log(`\nэкран: ${screen.slice(0, 700)}`);
+}
 await b.close();
 process.exit(ok === rows.length ? 0 : 1);

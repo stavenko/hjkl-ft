@@ -317,6 +317,17 @@ struct PlantAnswer {
     fibre_g_per_100g: f64,
 }
 
+// Ответ узла ЯЙЦА. Отдельная структура ради ИМЕНИ ПОЛЯ: «verdict» ничего не говорит
+// модели о том, что решается, а имя-вопрос — говорит. Это тот же приём, что у
+// растительного узла, и он там дал 29/29.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct EggAnswer {
+    /// Which category fits, or that none does. One short sentence, at most 12 words.
+    reason: String,
+    /// Does this product belong to bird eggs, or is it made of bird eggs?
+    is_this_product_of_bird_eggs: bool,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FlagAnswer {
     /// Which category fits, or that none does. One short sentence, at most 12 words.
@@ -583,6 +594,12 @@ impl Step {
         matches!(self, Step::VegFruit)
     }
 
+    /// Яичный шаг спрашивает СВОИМ вопросом, а не через общий перечень категорий:
+    /// вопрос здесь один и короткий, и перечня ему не нужно.
+    fn as_egg(self) -> bool {
+        matches!(self, Step::Egg)
+    }
+
     /// Чем кончается промпт: просьбой назвать категорию словом или дать вердикт.
     fn tail(self) -> &'static str {
         if self.as_category() {
@@ -700,24 +717,9 @@ impl Step {
                 comes mainly from these. Do NOT hedge here: a cheese or a cottage cheese that \
                 was not churned HAS intact globules, even though the curd was pressed, salted, \
                 aged or heated.",
-            Step::Egg => "\
-                THE QUESTION: is this food a bird's egg, or a food made of eggs and \
-                almost nothing else?\n\n\
-                YES, whoever laid it — hen, quail, duck, goose, turkey, ostrich — and whatever \
-                was done to it. An egg stays an egg after the shell is cracked and the yolk \
-                broken, and it stays an egg after cooking, curing or drying: raw, boiled, \
-                poached, fried, baked, smoked, pickled, salted, or dried into powder. Egg \
-                powder — яичный порошок, меланж — is YES: it is whole eggs with the water \
-                taken out and nothing else. The \
-                YOLK and the WHITE on their own are YES. So are яичница, глазунья, омлет and \
-                scrambled eggs, even with a spoon of milk, butter or oil in them — the food is \
-                still eggs.\n\n\
-                NO when eggs are merely ONE INGREDIENT AMONG MANY: pancakes, batter, \
-                mayonnaise, pasta, cake, biscuit, meringue in a dessert, cutlets, casseroles, \
-                salads. NO for anything called an egg without being one — a chocolate egg, an \
-                egg-shaped sweet.\n\n\
-                ROE IS NOT AN EGG HERE: caviar, salmon roe, cod roe and fish milt come from \
-                fish, not from birds.",
+            // Вопрос яйца задаётся своим промптом целиком (см. `serialize`), перечня
+            // категорий у него нет.
+            Step::Egg => "",
         }
     }
 }
@@ -747,6 +749,19 @@ impl Prompt for FlagPrompt {
                  plant, every part field is false.\n\n\
                  Then give the dietary FIBRE of this food in grams per 100 g, as you know it. \
                  Zero is a valid answer for food that has none.\n\n\
+                 Respond with ONLY a minified JSON object and nothing else.",
+                name = self.food_name,
+                given = self.given,
+            );
+        }
+        if self.step.as_egg() {
+            return format!(
+                "A person wrote this into their food diary: {name}\n\n\
+                 {given}\
+                 Decide whether this product belongs to BIRD EGGS, or is made of bird eggs — \
+                 of any bird, farmed or wild.\n\n\
+                 Fill the reason FIRST — one short sentence — and let the answer follow from \
+                 it.\n\n\
                  Respond with ONLY a minified JSON object and nothing else.",
                 name = self.food_name,
                 given = self.given,
@@ -817,7 +832,11 @@ impl Prompt for FlagPrompt {
             }
             return ctx;
         }
-        let parsed: Result<(bool, String), String> = if self.step.as_category() {
+        let parsed: Result<(bool, String), String> = if self.step.as_egg() {
+            serde_json::from_str::<EggAnswer>(strip_code_fences(raw.trim()))
+                .map(|a| (a.is_this_product_of_bird_eggs, a.reason))
+                .map_err(|e| format!("яйцо не разобрано: {e}, ответ: {raw}"))
+        } else if self.step.as_category() {
             // Вердикт выводим САМИ из названной категории: пока его ставила модель,
             // она называла «FRUITS» и отвечала «да» на вишню в сиропе.
             serde_json::from_str::<CategoryAnswer>(strip_code_fences(raw.trim()))
@@ -866,6 +885,8 @@ impl Prompt for FlagPrompt {
     ) -> LocalBoxStream<'static, PromptExecutionEvent> {
         if self.step.as_plant() {
             run_structured::<E, PlantAnswer>(executor, self.serialize(), self.name())
+        } else if self.step.as_egg() {
+            run_structured::<E, EggAnswer>(executor, self.serialize(), self.name())
         } else if self.step.as_category() {
             run_structured::<E, CategoryAnswer>(executor, self.serialize(), self.name())
         } else {

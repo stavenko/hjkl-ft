@@ -116,29 +116,18 @@ const identitySchema = {
 const eggPrompt = (name, identity) =>
   `A person wrote this into their food diary: ${name}\n\n` +
   `Our automatic classifier says this product is: ${identity}\n\n` +
-  "THE QUESTION: is this food a bird's egg, or a food made of eggs and almost nothing " +
-  "else?\n\n" +
-  "YES, whoever laid it — hen, quail, duck, goose, turkey, ostrich — and whatever was done to " +
-  "it. An egg stays an egg after the shell is cracked and the yolk broken, and it stays an egg " +
-  "after cooking, curing or drying: raw, boiled, poached, fried, baked, smoked, pickled, " +
-  "salted, or dried into powder. Egg powder — яичный порошок, меланж — is YES: it is whole " +
-  "eggs with the water taken out and nothing else. The YOLK and the WHITE on their own are " +
-  "YES. So are яичница, глазунья, омлет and scrambled eggs, even with a spoon of milk, butter " +
-  "or oil in them — the food is still eggs.\n\n" +
-  "NO when eggs are merely ONE INGREDIENT AMONG MANY: pancakes, batter, mayonnaise, pasta, " +
-  "cake, biscuit, meringue in a dessert, cutlets, casseroles, salads. NO for anything called " +
-  "an egg without being one — a chocolate egg, an egg-shaped sweet.\n\n" +
-  "ROE IS NOT AN EGG HERE: caviar, salmon roe, cod roe and fish milt come from fish, not from " +
-  "birds.\n\n" +
-  "Fill the reason field FIRST — name the ONE category that fits, or say that none does — and " +
-  "let the verdict follow from it. Never list the categories that do not fit: running through " +
-  "them turns into denying them all, the right one included.\n\n" +
+  "Decide whether this product belongs to BIRD EGGS, or is made of bird eggs — of any bird, " +
+  "farmed or wild.\n\n" +
+  "Fill the reason FIRST — one short sentence — and let the answer follow from it.\n\n" +
   "Respond with ONLY a minified JSON object and nothing else.";
 
 const eggSchema = {
   type: "object",
-  properties: { reason: { type: "string" }, verdict: { type: "boolean" } },
-  required: ["reason", "verdict"],
+  properties: {
+    reason: { type: "string" },
+    is_this_product_of_bird_eggs: { type: "boolean" },
+  },
+  required: ["reason", "is_this_product_of_bird_eggs"],
   additionalProperties: false,
 };
 
@@ -191,7 +180,7 @@ for (const [name, want] of CASES) {
     opts[0] ?? { definition: "(нет)", confidence: 0 });
   const r = await ask(eggPrompt(name, top.definition), eggSchema, "egg");
   if (r.err) { bad++; console.log(`FAIL ${name.padEnd(26)} яйцо: ${r.err} ${r.raw ?? ""}`); continue; }
-  const got = r.obj.verdict === true;
+  const got = r.obj.is_this_product_of_bird_eggs === true;
   const ok = got === want;
   if (!ok) bad++;
   console.log(`${ok ? "OK  " : "MISS"} ${name.padEnd(26)} ${got ? "да " : "нет"}   ${top.definition}`);

@@ -1,0 +1,24 @@
+import { chromium } from "playwright";
+import { readFileSync } from "fs";
+const FE = "https://1c96a721.renorma-fit-dev.pages.dev";
+const uid = readFileSync("/tmp/repro_uid.txt", "utf8").trim();
+const token = readFileSync("/tmp/repro_token.txt", "utf8").trim();
+const b = await chromium.launch({ headless: true });
+const ctx = await b.newContext({ viewport: { width: 430, height: 920 }, serviceWorkers: "block" });
+const page = await ctx.newPage();
+page.on("console", m => { const t = m.text(); if (/auth|token|401|403|checking|session/i.test(t)) console.log("[page]", t.slice(0,180)); });
+await page.goto(FE, { waitUntil: "domcontentloaded" });
+await page.evaluate(({ uid, token }) => {
+  localStorage.clear();
+  localStorage.setItem("user_id", uid);
+  localStorage.setItem("auth_token", token);
+  localStorage.setItem("token_id", "tok1");
+  localStorage.setItem("auth_ctx", "browser");
+  localStorage.setItem("pwa_dismissed", "true");
+  localStorage.setItem("paywall_skipped_date", new Date().toISOString().slice(0, 10));
+}, { uid, token });
+await page.goto(FE + "/recipes", { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(12000);
+console.log("testids:", await page.evaluate(() => [...document.querySelectorAll("[data-testid]")].map(e => e.getAttribute("data-testid")).slice(0, 20)));
+console.log("BODY:", (await page.evaluate(() => document.body.innerText)).slice(0, 250).replace(/\n/g, " | "));
+await b.close();

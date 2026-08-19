@@ -1,0 +1,333 @@
+{
+  "flags": {
+    "identify": {
+      "prompt": "A person wrote this into their food diary: {{FOOD}}\n\nAnswer three things about it.\n1. \"from_own_knowledge\": the closest definition you can recall YOURSELF, without the dictionary. If you do not know this word, say so plainly — that is a valid answer.\n2. \"from_dictionary\": the closest definition from the dictionary below, or NONE if nothing in it fits this name.\n3. \"options\": the three most likely definitions of the food, the surest first, each a sentence of five or six words, each with your confidence from 0.0 to 1.0.\n\nA DICTIONARY of names that are rare or easy to mistake. Each line stands on its own and has nothing to do with its neighbours. Match the name you were given against it YOURSELF — the word may stand in another grammatical case, in the middle of a phrase, in Latin letters or misspelled, and it still counts as the same word.\n  голец: a cold-water fish of the salmon family, could be translated as [Arctic char, char]\n  пикша: a fish of the cod family, could be translated as [haddock]\n  сайда: a fish of the cod family, could be translated as [saithe, pollock, coalfish]\n  зубатка: a large northern sea fish, could be translated as [wolffish, sea wolf]\n  муксун: a northern whitefish, could be translated as [muksun]\n  омуль: a northern whitefish, could be translated as [omul]\n  нельма: a northern whitefish, could be translated as [nelma, Siberian white salmon]\n  кижуч: a Pacific salmon, could be translated as [coho salmon]\n  кета: a Pacific salmon, could be translated as [chum salmon]\n  нерка: a Pacific salmon, could be translated as [sockeye salmon]\n  чавыча: a Pacific salmon, could be translated as [chinook salmon, king salmon]\n  горбуша: a Pacific salmon, could be translated as [pink salmon]\n  сайра: a small oily sea fish, could be translated as [saury]\n  мойва: a small oily northern fish, could be translated as [capelin]\n  путассу: a fish of the cod family, could be translated as [blue whiting]\n  минтай: a fish of the cod family, could be translated as [Alaska pollock, walleye pollock]\n  навага: a northern fish of the cod family, could be translated as [navaga, wachna cod]\n  палтус: a large flatfish, could be translated as [halibut]\n  толстолобик: a freshwater carp, could be translated as [silver carp]\n  пангасиус: a farmed freshwater catfish, could be translated as [pangasius, basa]\n  страусятина: the flesh of an ostrich, that is of a BIRD, could be translated as [ostrich meat]\n  бастурма: air-dried cured BEEF, a whole muscle, could be translated as [basturma, pastirma]\n  суджук: a dry cured sausage of beef or lamb, could be translated as [sujuk, sucuk]\n  буженина: a whole piece of PORK, baked and not cured, could be translated as [buzhenina, baked pork]\n  fuet: a Catalan dry cured PORK sausage, could be translated as [fuet, fuet truffle]\n  чоризо: a Spanish dry cured pork sausage, could be translated as [chorizo]\n  полба: spelt, an ancient wheat GRAIN, could be translated as [spelt, farro, emmer]\n  булгур: cracked parboiled wheat, a GRAIN, could be translated as [bulgur]\n  кускус: small steamed balls of wheat semolina, a GRAIN, could be translated as [couscous]\n  маш: mung bean, a small green LEGUME, could be translated as [mung bean, moong]\n  нут: chickpea, a LEGUME, could be translated as [chickpea, garbanzo]\n  чечевица: lentil, a LEGUME, could be translated as [lentil]\n  топинамбур: jerusalem artichoke, an edible TUBER, could be translated as [jerusalem artichoke, sunchoke]\n  руккола: a peppery salad LEAF, could be translated as [rocket, arugula]\n  кинза: the fresh LEAVES of coriander, could be translated as [cilantro, coriander leaves]\n  щавель: a sour salad LEAF, could be translated as [sorrel]\n  ирга: saskatoon, a dark sweet BERRY on a shrub, could be translated as [saskatoon berry, juneberry]\n  жимолость: honeyberry, an edible blue BERRY, could be translated as [honeyberry, haskap]\n  облепиха: sea buckthorn, an orange BERRY, could be translated as [sea buckthorn]\n  морошка: cloudberry, an amber BERRY, could be translated as [cloudberry]\n  фейхоа: feijoa, a green FRUIT, could be translated as [feijoa, pineapple guava]\n  кыстыбый: a Tatar flatbread folded over MASHED POTATO, usually without meat, could be translated as [kystybyi]\n  эчпочмак: a Tatar triangular PASTRY filled with BEEF or LAMB, potato and onion, could be translated as [echpochmak, uchpuchmak]\n  бешбармак: boiled LAMB, BEEF or horse meat with flat noodles, could be translated as [beshbarmak]\n  куурдак: fried MEAT of lamb or beef with potato and onion, could be translated as [kuurdak, kavardak]\n  манты: steamed DUMPLINGS filled with minced LAMB or BEEF and onion, could be translated as [manti]\n  лагман: hand-pulled NOODLES with MEAT and vegetables, could be translated as [lagman]\n  шурпа: a rich SOUP of LAMB or BEEF with vegetables, could be translated as [shurpa, shorpa]\n  самса: a baked PASTRY filled with minced MEAT and onion, could be translated as [samsa, samosa]\n  чак-чак: fried dough pieces in honey — a SWEET, no meat, could be translated as [chak-chak]\n  хачапури: a Georgian bread filled with CHEESE, sometimes an egg, could be translated as [khachapuri]\n  хинкали: large Georgian DUMPLINGS filled with minced MEAT, could be translated as [khinkali]\n  чахохбили: a Georgian stew of CHICKEN with tomatoes, could be translated as [chakhokhbili]\n  лобио: a Georgian dish of BEANS, could be translated as [lobio]\n  аджапсандали: a Georgian stew of VEGETABLES: aubergine, pepper, tomato, could be translated as [ajapsandali]\n  долма: vine leaves stuffed with minced MEAT and rice, could be translated as [dolma]\n  люля-кебаб: grilled minced LAMB or BEEF on a skewer, could be translated as [lula kebab]\n  шаурма: flatbread rolled around roasted MEAT with vegetables and sauce, could be translated as [shawarma, doner]\n  плов: rice cooked with MEAT, carrot and onion, could be translated as [pilaf, plov]\n  пахлава: layered pastry with NUTS and syrup — a SWEET, could be translated as [baklava]\n  кутабы: a thin flatbread folded over GREENS, cheese or minced meat, could be translated as [qutab]\n  бозбаш: a SOUP of LAMB with chickpeas, could be translated as [bozbash]\n  хаш: a broth of beef or lamb TRIPE and shanks, could be translated as [khash]\n  сациви: CHICKEN or turkey in a walnut sauce, could be translated as [satsivi]\n\nABBREVIATIONS from Russian labels. Every one of them is about storage, cut or grade — none adds an ingredient.\n  с/м: fresh-frozen, nothing added\n  св/м: fresh-frozen, nothing added\n  х/к: cold-smoked\n  г/к: hot-smoked\n  с/с: lightly salted\n  б/г: headless, said of fish\n  б/к: skinless\n  в/с: top grade — a grade and nothing more\n  п/ф: a semi-prepared product\n  ц/з: wholegrain\n\nRespond with ONLY a minified JSON object and nothing else.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "IdentityAnswer",
+        "type": "object",
+        "properties": {
+          "from_own_knowledge": {
+            "type": "string"
+          },
+          "from_dictionary": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/IdentityOption"
+            }
+          }
+        },
+        "required": [
+          "from_own_knowledge",
+          "from_dictionary",
+          "options"
+        ],
+        "$defs": {
+          "IdentityOption": {
+            "type": "object",
+            "properties": {
+              "definition": {
+                "description": "What this food most likely is. English, a sentence of five or six words.",
+                "type": "string"
+              },
+              "confidence": {
+                "description": "How sure you are of this one, from 0.0 to 1.0.",
+                "type": "number",
+                "format": "double"
+              }
+            },
+            "required": [
+              "definition",
+              "confidence"
+            ]
+          }
+        }
+      }
+    },
+    "plant": {
+      "prompt": "A person wrote this into their food diary: {{FOOD}}\n\nWHAT THIS FOOD MOST LIKELY IS, with the confidence of each guess: {{IDENTITY}}. These are given to you — judge by them and do not re-guess the species yourself.\n\nFirst answer whether this food is a part of some plant at all. If it is, answer WHICH PART A PERSON EATS HERE — not where the plant keeps it. The parts: one that grew underground (root, tuber, bulb), one that grew above the ground on the stem (leaf or stalk), a fruit or berry, a seed or nut, a legume, a grain. Celery has a root, but its stalk is what is eaten here, and the stalk grew above the ground. If the food is not from a plant, every part field is false.\n\nA plant part is the PLANT MATTER ITSELF — whole or cut, raw or cooked, fresh, frozen or dried. What was PRESSED OR REFINED OUT of a plant is not a part of it: an oil, a sugar, a syrup, a starch. Potato starch is not a tuber — of the tuber nothing is left in it but the starch, and one substance taken out of a plant is not a part of that plant. For all of those every part field is false as well.\n\nThen give the dietary FIBRE of this food, in grams per 100 g. FIRST look for the food in the REFERENCE below and put its entry name into \"fibre_reference_key\", copied exactly — we take the number ourselves. THE FORM IS PART OF THE ENTRY: dry grains and boiled ones are separate, and picking the wrong one is worse than picking none. Answer NONE when no entry is the same food, and give the grams as you know them. Zero is a valid answer for food that has none.\n\n  гречка сухая: 10\n  овсянка сухая: 10\n  перловка сухая: 15.6\n  пшено сухое: 8.5\n  булгур сухой: 12.5\n  киноа сухая: 7\n  рис белый сухой: 1.3\n  рис бурый сухой: 3.5\n  макароны сухие: 3\n  манка сухая: 3.6\n  отруби пшеничные: 43\n  отруби овсяные: 15.4\n  попкорн: 14.5\n  гречка варёная: 2.7\n  овсянка на воде: 1.7\n  рис белый варёный: 0.4\n  макароны варёные: 1.8\n  чечевица варёная: 7.9\n  фасоль варёная: 6.4\n  нут варёный: 7.6\n  хлеб пшеничный: 2.7\n  хлеб ржаной: 5.8\n  хлеб бородинский: 7.9\n  хлеб цельнозерновой: 7\n  чечевица сухая: 10.7\n  фасоль сухая: 15\n  нут сухой: 12.2\n  горох сухой: 11\n  маш: 16\n  соя: 9.3\n  тофу: 0.4\n  миндаль: 12.5\n  грецкий орех: 6.7\n  фундук: 9.7\n  кешью: 3.3\n  фисташки: 10\n  кедровый орех: 3.7\n  арахис: 8.5\n  семена подсолнечника: 8.6\n  семена тыквы: 6\n  кунжут: 11.8\n  семена льна: 27\n  семена чиа: 34\n  картофель: 2.2\n  морковь: 2.8\n  капуста белокочанная: 2.5\n  брокколи: 2.6\n  цветная капуста: 2\n  помидор: 1.2\n  огурец: 0.7\n  лук репчатый: 1.7\n  болгарский перец: 1.7\n  кабачок: 1\n  свёкла: 2.8\n  тыква: 0.5\n  топинамбур: 1.6\n  стручковая фасоль: 3.4\n  шампиньоны: 1\n  сельдерей стебель: 1.6\n  сельдерей корень: 1.8\n  спаржа: 2.1\n  ревень: 1.8\n  петрушка: 3.3\n  укроп: 2.1\n  шпинат: 2.2\n  руккола: 1.6\n  салат листовой: 1.3\n  яблоко: 2.4\n  груша: 3.1\n  банан: 2.6\n  апельсин: 2.4\n  виноград: 0.9\n  клубника: 2\n  черника: 2.4\n  вишня: 1.6\n  малина: 6.5\n  смородина: 4.8\n  авокадо: 6.7\n  курага: 7.3\n  изюм: 3.7\n  чернослив: 7\n  финики: 8\n\nThe reference keys are written in RUSSIAN: copy the key letter for letter as it stands there, never translated and never transliterated.\n\nRespond with ONLY a minified JSON object and nothing else.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "PlantAnswer",
+        "type": "object",
+        "properties": {
+          "is_product_a_part_of_some_plant": {
+            "description": "Is this food a part of some plant at all?",
+            "type": "boolean"
+          },
+          "is_root": {
+            "description": "A part that grew UNDERGROUND: a root, a tuber or a bulb — potato, carrot,\nbeetroot, radish, celeriac, onion.",
+            "type": "boolean"
+          },
+          "is_leaf": {
+            "description": "A part that grew ABOVE THE GROUND on the stem: a leaf or a stalk — cabbage,\nlettuce, dill, celery stalk, rhubarb, asparagus.",
+            "type": "boolean"
+          },
+          "is_fruit": {
+            "description": "A fruit or a berry: apple, cherry, cucumber, tomato.",
+            "type": "boolean"
+          },
+          "is_seed": {
+            "description": "A seed or a nut: walnut, pistachio, sunflower seed, sesame.",
+            "type": "boolean"
+          },
+          "is_legume": {
+            "description": "The fruit of a legume plant: lentils, beans, peas, soy, chickpeas.",
+            "type": "boolean"
+          },
+          "is_grain": {
+            "description": "A grain: wheat, rye, spelt, buckwheat, rice, oats, and bread made of them.",
+            "type": "boolean"
+          },
+          "fibre_reference_key": {
+            "description": "The name of the FIBRE REFERENCE entry this food matches, copied exactly, or NONE.",
+            "type": "string"
+          },
+          "fibre_g_per_100g": {
+            "description": "Dietary fibre in grams per 100 g. Zero is a valid answer.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "is_product_a_part_of_some_plant",
+          "is_root",
+          "is_leaf",
+          "is_fruit",
+          "is_seed",
+          "is_legume",
+          "is_grain",
+          "fibre_reference_key",
+          "fibre_g_per_100g"
+        ]
+      }
+    },
+    "heme": {
+      "prompt": "Decide ONE question about one food, and nothing else.\n\nThe food: {{FOOD}}\n\nWHAT THIS FOOD MOST LIKELY IS, with the confidence of each guess: {{IDENTITY}}. These are given to you — judge by them and do not re-guess the species yourself.\n\nTHE CATEGORIES OF RICH HEME-IRON SOURCES:\n— LIVER itself — of any animal, bird or fish — and food made mainly of liver: pâté, liver sausage, liver cake;\n— OTHER INNER ORGANS themselves — hearts, kidneys, tongues, gizzards, lungs, blood sausage — of any animal, bird or fish. It is the ORGAN that belongs to this category, never the animal's flesh: a fish fillet, a bird's breast or leg is not an organ;\n— MEAT OF MAMMALS: beef, veal, pork, lamb, mutton, goat, and the meat of other farmed or wild mammals — venison, elk, boar, horse, rabbit — in any cut, ground or whole, raw or cooked, and food made mainly of such meat: sausage, frankfurters, ham, bacon, salami, mince, meatballs, cutlets, stew, canned meat. A creature that is not a mammal has no meat in this category;\n— MOLLUSCS OF THESE KINDS ONLY: mussels, oysters, clams and vongole, cockles, octopus, whelks, winkles. The category is these kinds, not the zoological class: a mollusc of another kind does not belong to it.\n\nDo not reason about how many milligrams of iron a food holds — you do not know those numbers, and the categories already account for them.\n\nA composite dish belongs to a category only when such an ingredient is its MAIN part. Words about preparation, storage, freezing, packaging, cut, grade or country of origin never change what a food is.\n\nFill the reason field FIRST — name the ONE category that fits, or say that none does — and let the verdict follow from it. Never list the categories that do not fit: running through them turns into denying them all, the right one included.\n\nRespond with ONLY a single minified JSON object with the fields from the schema.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "FlagAnswer",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "Which category fits, or that none does. One short sentence, at most 12 words.",
+            "type": "string"
+          },
+          "verdict": {
+            "description": "True if the food belongs to one of the categories.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reason",
+          "verdict"
+        ]
+      }
+    },
+    "red_meat": {
+      "prompt": "Decide ONE question about one food, and nothing else.\n\nThe food: {{FOOD}}\n\nTHE CATEGORIES OF RED MEAT:\n— THE FLESH of MAMMALS: beef, veal, pork, lamb, mutton, goat, horse, rabbit, and the flesh of wild mammals — venison, elk, boar. Any cut, whole or ground, raw or cooked;\n— FOOD MADE MAINLY OF SUCH FLESH: sausages, frankfurters, ham, bacon, salami, mince, meatballs, cutlets, stew, canned meat — whatever the flesh has been through.\n\nIt is MUSCLE that belongs to these categories. A TONGUE and a HEART are muscle, so beef tongue, pork heart and dishes made mainly of them DO belong. Organs that are NOT muscle stay outside — liver, kidneys, lungs, tripe, brain — however red they look. BIRDS are outside whatever the part: chicken, turkey, duck, goose, ostrich, and a chicken heart with them, because a bird is not a mammal. Fish, seafood, eggs, dairy and anything from a plant are outside too.\n\nWHAT THIS FOOD MOST LIKELY IS, with the confidence of each guess: {{IDENTITY}}. These are given to you — judge by them and do not re-guess the species yourself.\n\nA composite dish belongs to a category only when such an ingredient is its MAIN part. Words about preparation, storage, freezing, packaging, cut, grade or country of origin never change what a food is.\n\nFill the reason field FIRST — name the ONE category that fits, or say that none does — and let the verdict follow from it. Never list the categories that do not fit: running through them turns into denying them all, the right one included.\n\nRespond with ONLY a single minified JSON object with the fields from the schema.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "FlagAnswer",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "Which category fits, or that none does. One short sentence, at most 12 words.",
+            "type": "string"
+          },
+          "verdict": {
+            "description": "True if the food belongs to one of the categories.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reason",
+          "verdict"
+        ]
+      }
+    },
+    "processed_meat": {
+      "prompt": "Decide ONE question about one food, and nothing else.\n\nThe food: {{FOOD}}\n\nTHE QUESTION: is this meat PRESERVED — cured, smoked, salted, dried or fermented for keeping? Meat here is the flesh of a MAMMAL or a BIRD.\n\nMeat is preserved when it has been through one of these: CURING with nitrite or nitrate salt, SMOKING, prolonged SALTING, AIR-DRYING, or FERMENTATION. Cooking is not preserving: boiling, frying, baking, stewing, grilling, mincing, freezing and packaging leave meat unpreserved, however industrial the process.\n\nA word like «молочные», «сливочные», «milk» or «cream» in a sausage's name describes its recipe, not its kind: milk sausages are sausages, cured with nitrite like any other, and the answer for them is TRUE.\n\nPRESERVED, therefore TRUE: sausages and frankfurters, wieners, salami and other dry sausages — fuet, chorizo, sobrassada, soppressata, sujuk, kabanos, landjäger, pepperoni, whatever else they are called abroad — ham, bacon, gammon, pastrami, prosciutto and jamon, bresaola, basturma, smoked and cured brisket, liver sausage and pâté made with cure, hot dogs, corned beef, canned luncheon meat, jerky. Also a dish whose MAIN meat part is one of these — pizza with salami, pasta carbonara, sausage in a bun, solyanka.\n\nNOT PRESERVED, therefore FALSE: fresh and frozen meat of any kind, mince, cutlets and meatballs, home-made or shop-bought, boiled or baked meat, roast, stew, kebab, dumplings, canned meat that was merely boiled in the tin, poultry that went through none of the treatments above. FISH, SEAFOOD AND ROE are false ALWAYS, however they were treated: smoked mackerel, salted herring, lightly salted salmon, dried cod, canned sprats, caviar — a fish that was smoked is a smoked fish, never a preserved meat.\n\nWHAT THIS FOOD MOST LIKELY IS, with the confidence of each guess: {{IDENTITY}}. These are given to you — judge by them and do not re-guess the species yourself.\n\nA composite dish belongs to a category only when such an ingredient is its MAIN part. Words about preparation, storage, freezing, packaging, cut, grade or country of origin never change what a food is.\n\nFill the reason field FIRST — name the ONE category that fits, or say that none does — and let the verdict follow from it. Never list the categories that do not fit: running through them turns into denying them all, the right one included.\n\nRespond with ONLY a single minified JSON object with the fields from the schema.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "FlagAnswer",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "Which category fits, or that none does. One short sentence, at most 12 words.",
+            "type": "string"
+          },
+          "verdict": {
+            "description": "True if the food belongs to one of the categories.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reason",
+          "verdict"
+        ]
+      }
+    },
+    "milk_globule": {
+      "prompt": "Decide ONE question about one food, and nothing else.\n\nThe food: {{FOOD}}\n\nTHE QUESTION: is the fat of this food still enclosed in INTACT MILK FAT GLOBULES?\nMilk fat leaves the udder wrapped in a membrane. Only three things destroy that membrane: CHURNING, RENDERING and MELTING WITH EMULSIFYING SALTS. Nothing else does — not fermenting, not souring, not heating, not ageing, not salting, not freezing, not drying, not concentrating.\nDecide in THIS ORDER and STOP at the first step that matches.\nSTEP 1 — does this food contain MILK FAT at all? If it is not dairy — meat, poultry, fish, eggs, vegetable oils, nuts, seeds, plants, or a plant «milk» made of soy, oat, almond or coconut — then FALSE, there is no milk fat to ask about.\nSTEP 2 — was that milk fat CHURNED out (butter, buttermilk-made spreads), RENDERED (ghee, clarified butter, butter oil, anhydrous milk fat) or MELTED WITH EMULSIFYING SALTS (processed cheese, cheese spread, cheese in a tub)? Then FALSE. The same applies when a cook or a factory added the milk fat AS BUTTER rather than as milk or cream: milk chocolate, buttercream, shortcrust pastry, croissants, waffles, biscuits are FALSE.\nSTEP 3 — otherwise the fat is still in its native globules: TRUE. This is the normal case for dairy, and it holds however the product was processed short of churning — milk of any fat content, cream, sour cream, kefir, ryazhenka, ayran, acidophilus, drinking and thick yogurt, cottage cheese of any fat content including fat-free, curd mass, ricotta, natural cheeses (hard, semi-hard, soft, brined), condensed and powdered milk, whey, ice cream, and dishes whose fat comes mainly from these. Do NOT hedge here: a cheese or a cottage cheese that was not churned HAS intact globules, even though the curd was pressed, salted, aged or heated.\n\nWHAT THIS FOOD MOST LIKELY IS, with the confidence of each guess: {{IDENTITY}}. These are given to you — judge by them and do not re-guess the species yourself.\n\nA composite dish belongs to a category only when such an ingredient is its MAIN part. Words about preparation, storage, freezing, packaging, cut, grade or country of origin never change what a food is.\n\nFill the reason field FIRST — name the ONE category that fits, or say that none does — and let the verdict follow from it. Never list the categories that do not fit: running through them turns into denying them all, the right one included.\n\nRespond with ONLY a single minified JSON object with the fields from the schema.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "FlagAnswer",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "Which category fits, or that none does. One short sentence, at most 12 words.",
+            "type": "string"
+          },
+          "verdict": {
+            "description": "True if the food belongs to one of the categories.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reason",
+          "verdict"
+        ]
+      }
+    },
+    "egg": {
+      "prompt": "A person wrote this into their food diary: {{FOOD}}\n\nWHAT THIS FOOD MOST LIKELY IS, with the confidence of each guess: {{IDENTITY}}. These are given to you — judge by them and do not re-guess the species yourself.\n\nDecide whether this product belongs to BIRD EGGS, or is made of bird eggs — of any bird, farmed or wild.\n\nWE COUNT GRAMS. Say yes only when the grams of this product ARE grams of egg: the product is egg through and through, or egg with no more than a spoon of butter, milk or oil in it. Cooking, curing and drying change nothing — raw, boiled, fried, poached, smoked, salted, dried into powder, whole or beaten, yolk or white alone.\n\nSay no when eggs are ONE INGREDIENT AMONG SEVERAL and their share cannot be told from the name: mayonnaise, sauces, salads, pancakes, batter, pasta, cakes, biscuits, cutlets, casseroles. There is no way to count their grams of egg, so they are not egg.\n\nJudge by WEIGHT, not by importance. A yolk gives mayonnaise its name and its texture, but its grams are oil, so mayonnaise is NO. A SALAD is never egg, whatever it is called: «яичный салат» is eggs cut up with dressing and other foods, and nobody can say how much of it was egg.\n\nFill the reason FIRST — one short sentence — and let the answer follow from it.\n\nRespond with ONLY a minified JSON object and nothing else.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "EggAnswer",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "Which category fits, or that none does. One short sentence, at most 12 words.",
+            "type": "string"
+          },
+          "is_this_product_of_bird_eggs": {
+            "description": "Does this product belong to bird eggs, or is it made of bird eggs?",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reason",
+          "is_this_product_of_bird_eggs"
+        ]
+      }
+    }
+  },
+  "nutrients": {
+    "calcium": {
+      "prompt": "A person wrote this into their food diary: {{FOOD}}\n\nOur automatic classifier says this product is: {{IDENTITY}}\n\nHow much CALCIUM does this food hold per 100 grams, in milligrams?\n\nFIRST look for it in the REFERENCE below. If it is there — or is plainly the same food under another name, in another grammatical case or with a fat percentage attached — put that entry's name into \"reference_key\", copied exactly. An entry fits ONLY when it is THE SAME FOOD: «мороженая вишня» is a frozen berry and not «мороженое», however alike the words. When no entry is the same food, answer NONE — that is a good answer, the table below then decides.\n\n  молоко: 120\n  кефир: 120\n  ряженка: 124\n  простокваша: 118\n  айран: 118\n  питьевой йогурт: 110\n  йогурт натуральный: 120\n  йогурт греческий: 110\n  скир: 150\n  сметана: 90\n  творог: 150\n  творог обезжиренный: 120\n  творожная масса: 135\n  пармезан: 1180\n  грана падано: 1160\n  эмменталь: 1000\n  маасдам: 800\n  сыр российский: 880\n  чеддер: 720\n  гауда: 700\n  сулугуни: 650\n  брынза: 530\n  моцарелла: 500\n  адыгейский сыр: 520\n  фета: 360\n  камамбер: 390\n  рикотта: 210\n  бри: 185\n  творожный сыр: 100\n  плавленый сыр: 700\n  молоко сухое: 1000\n  молоко сгущённое: 120\n  сливки: 86\n  сыворотка молочная: 60\n  мороженое пломбир: 130\n  мороженое сливочное: 120\n  мак: 1460\n  кунжут: 975\n  семена чиа: 630\n  тахини: 420\n  тофу: 350\n  соя: 240\n  миндаль: 260\n  сардины консервированные: 380\n  шпроты: 300\n  лосось консервированный: 180\n  петрушка: 245\n  укроп: 223\n  руккола: 160\n  кале: 150\n  шпинат: 99\n  брокколи: 47\n  капуста белокочанная: 40\n  цветная капуста: 22\n  гречка сухая: 20\n  гречка варёная: 7\n  рис белый варёный: 3\n  овсянка на воде: 8\n  макароны варёные: 7\n  чечевица варёная: 19\n  фасоль варёная: 35\n  нут варёный: 49\n  овсянка сухая: 52\n  перловка сухая: 29\n  пшено сухое: 27\n  булгур сухой: 35\n  киноа сухая: 47\n  полба сухая: 25\n  рис белый сухой: 10\n  макароны сухие: 21\n  маш: 132\n  чечевица сухая: 56\n  горох сухой: 115\n  фасоль сухая: 143\n  нут сухой: 105\n  курага: 160\n  инжир сушёный: 162\n  апельсин: 40\n  картофель: 12\n  морковь: 33\n  помидор: 10\n  огурец: 16\n  кабачок: 15\n  тыква: 21\n  яблоко: 6\n  груша: 9\n  банан: 5\n  виноград: 10\n  вишня: 16\n  клубника: 16\n  черника: 6\n  сливочное масло: 24\n  яйцо куриное: 55\n  рыба, филе: 25\n  хлеб: 25\n  говядина: 12\n\nThe reference keys are written in RUSSIAN: copy the key letter for letter as it stands there, never translated and never transliterated.\n\nWhether or not you found it, ALSO place the food in one row of the table below and answer with that row's key. If the reference had nothing, answer \"reference_key\" with NONE and give a value that fits the row.\n\n  cheese_hard          — пармезан, грана падано, чеддер, гауда, эмменталь, российский, пекорино\n  cheese_semi          — моцарелла, сулугуни, адыгейский, брынза, фета, эдам, косичка\n  cheese_soft          — рикотта, камамбер, бри, маскарпоне, творожный сыр, филадельфия\n  cheese_processed     — плавленый сыр, сырок плавленый, сыр в ванночке, хохланд, виола\n  milk_liquid          — молоко, кефир, ряженка, айран, простокваша, питьевой йогурт\n  yogurt_sour_cream    — йогурт, греческий йогурт, скир, сметана, простокваша густая, сливочный сыр без соли\n  cottage_cheese       — творог, зернёный творог, творожная масса, сырники\n  milk_concentrated    — сухое молоко, сгущённое молоко, молочная сыворотка сухая\n  cream_whey           — сливки, сыворотка, мороженое пломбир, мороженое сливочное, эскимо, молочный коктейль\n  seeds_high           — мак, кунжут, семена чиа\n  sesame_paste         — тахини, халва тахинная, кунжутная паста, козинак кунжутный\n  fish_with_bones      — рыбные консервы, которые едят ВМЕСТЕ С КОСТЯМИ: сардины, шпроты, килька, консервы «с костями» на этикетке\n  fish_plain           — рыба и морепродукты без костей: лосось, кижуч, горбуша, форель, треска, минтай, скумбрия, сельдь, тунец, филе любой рыбы, креветки, кальмар\n  tofu                 — тофу, соевый творог\n  nuts_high_calcium    — миндаль, бразильский орех\n  nuts_other           — фундук, фисташки, кешью, грецкий орех, арахис, кедровый орех\n  legumes_dry          — фасоль сухая, нут сухой, соевые бобы, маш\n  greens_leafy         — петрушка, укроп, кале, руккола, базилик, кинза\n  vegetables_other     — брокколи, цветная капуста, белокочанная капуста, пекинская капуста, стручковая фасоль, репа, картофель, морковь, свёкла, кабачок, помидор, огурец, тыква, а также ЛЮБЫЕ фрукты и ягоды: яблоко, груша, банан, апельсин, вишня, клубника, черника, виноград — свежие и замороженные\n  greens_oxalate       — шпинат, щавель, ревень, свекольная ботва\n  dried_fruit          — инжир сушёный, курага, урюк, финики\n  fortified            — обогащённое кальцием растительное молоко, сок с кальцием, хлопья с кальцием\n  plant_milk_plain     — соевое молоко без добавок, овсяное молоко, миндальное молоко, кокосовое молоко\n  other_none           — мясо, птица, яйца, крупы, макароны, хлеб, растительное масло, сахар, конфеты, вода, чай, кофе, алкоголь\n\nFor raw or dry as-sold products (grains, seeds, legumes, flour) use the RAW value unless the name says cooked, boiled or soaked. THIS DECIDES THE ENTRY TOO: for a name that says nothing about cooking, «Овсянка» or «Гречка», the dry entry is the right one — a boiled entry may be picked only when the name itself says boiled.\n\nRules for choosing the row:\n- Cheese goes by HARDNESS: hard and dry → cheese_hard, semi-hard and brined → cheese_semi, soft and fresh → cheese_soft, melted/processed → cheese_processed.\n- A plant drink counts as fortified ONLY if the name says so («обогащённое», «с кальцием», «fortified»). Otherwise it is plant_milk_plain, which has very little.\n- Canned fish counts as fish_with_bones only when the bones are eaten (sardines, sprats, canned salmon). Fillet without bones is other_none.\n- The examples in a row are EXAMPLES, not the whole row. A food that is not named there still belongs to the row it is closest to: скир goes with yogurts, мороженое with cream, айран with milk, любой сыр — to the cheese row that matches its hardness. Answer other_none ONLY when the food genuinely carries no calcium worth counting — meat, eggs, cereals, bread, oil, sugar, water, tea, coffee. Never answer other_none merely because the name is missing from the examples.\n- Dairy is NEVER other_none: every milk product belongs to one of the dairy rows. Neither is a VEGETABLE, and vegetables_other holds EVERY vegetable, root and tuber there is — raw, boiled, fried or frozen, named in the examples or not. A boiled potato belongs there just as a raw one does.\n\nFill \"reason\" FIRST, then the two keys, then the milligrams.\n\nRespond with ONLY a minified JSON object and nothing else.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "CalciumAnswer",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "One short sentence: which reference entry or which category, and why.",
+            "type": "string"
+          },
+          "reference_key": {
+            "description": "The name of the REFERENCE entry this food matches, copied exactly, or NONE.",
+            "type": "string"
+          },
+          "category": {
+            "description": "The category row key from the table, copied exactly.",
+            "type": "string"
+          },
+          "calcium_mg": {
+            "description": "Calcium per 100 g, in milligrams.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "reason",
+          "reference_key",
+          "category",
+          "calcium_mg"
+        ]
+      }
+    },
+    "fat_composite": {
+      "prompt": "Our automatic classifier says this product is: {{IDENTITY}}\n\nIs this a DISH COOKED FROM SEVERAL DIFFERENT FOODS, or is it a SINGLE food?\n\nA SINGLE FOOD is one food, however processed. These count as one:\n— the flesh, organs, fat or skin of one animal, bird or fish, raw or cooked;\n— one plant and what is pressed or ground from it: an oil, a nut, a seed, a grain, a vegetable, a fruit;\n— milk and everything made from milk alone: butter, cream, cheese, curd, yoghurt;\n— eggs;\n— a factory product built around one of these: sausage, ham, tinned fish, nut paste.\n\nA DISH is cooked from several foods at once: stuffed vegetables, cabbage rolls, cutlets and meatballs, casseroles and bakes, pies and pastry with a filling, pilaf, stews and soups, salads with dressing, sandwiches, waffles, ready meals.\n\nA dish stays a dish even when one of its foods plainly outweighs the rest: борщ with beef is cooked from meat, vegetables and the oil they were fried in, and that makes it a dish. Do not ask which part is the largest — ask whether more than one food went into it.\n\nFill the reason FIRST — name what this food is made of — and let the verdict follow from it.\n\nRespond with ONLY a single minified JSON object.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "CompositeAnswer",
+        "description": "Обоснование первым — оно и есть размышление модели (см. раздел про признаки).",
+        "type": "object",
+        "properties": {
+          "reason_where_the_fat_of_this_food_comes_from": {
+            "description": "Which ingredients this food is made of, and where its fat comes from. One\nshort sentence.",
+            "type": "string"
+          },
+          "verdict_is_a_composite_dish": {
+            "description": "True when the fat comes from SEVERAL different sources mixed together.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reason_where_the_fat_of_this_food_comes_from",
+          "verdict_is_a_composite_dish"
+        ]
+      }
+    },
+    "fat_profile": {
+      "prompt": "Our automatic classifier says this product is: {{IDENTITY}}\n\nReport the FATTY-ACID PROFILE OF THIS FOOD'S FAT.\n\nEvery number you report is a PERCENT OF THIS FOOD'S TOTAL FAT, by weight — NOT grams per 100 g of food. A food's total fat is already known to us; you only describe how that fat is composed. This means the profile does NOT depend on how much fat the food has: pure sunflower oil and a sauce made from it share the same profile.\n\nFIRST look for the food in the REFERENCE below. If it is there — or is plainly the same food under another name, in another grammatical case or with a cut, grade or fat percentage attached — put that entry's name into \"reference_key\", copied exactly.\n\n  оливковое масло: SFA 14, MUFA 73, PUFA 11, EPA+DHA 0\n  подсолнечное масло: SFA 11, MUFA 20, PUFA 66, EPA+DHA 0\n  высокоолеиновое подсолнечное масло: SFA 9, MUFA 83, PUFA 4, EPA+DHA 0\n  кукурузное масло: SFA 13, MUFA 28, PUFA 55, EPA+DHA 0\n  соевое масло: SFA 15, MUFA 23, PUFA 58, EPA+DHA 0\n  рапсовое масло: SFA 7, MUFA 63, PUFA 28, EPA+DHA 0\n  льняное масло: SFA 9, MUFA 18, PUFA 68, EPA+DHA 0\n  кунжутное масло: SFA 14, MUFA 40, PUFA 42, EPA+DHA 0\n  арахисовое масло: SFA 17, MUFA 46, PUFA 32, EPA+DHA 0\n  кокосовое масло: SFA 87, MUFA 6, PUFA 2, EPA+DHA 0\n  пальмовое масло: SFA 49, MUFA 37, PUFA 9, EPA+DHA 0\n  сливочное масло: SFA 63, MUFA 26, PUFA 4, EPA+DHA 0\n  топлёное масло: SFA 65, MUFA 25, PUFA 4, EPA+DHA 0\n  сало свиное: SFA 39, MUFA 45, PUFA 11, EPA+DHA 0\n  говяжий жир: SFA 42, MUFA 44, PUFA 4, EPA+DHA 0\n  куриный жир: SFA 30, MUFA 45, PUFA 21, EPA+DHA 0\n  грецкий орех: SFA 9, MUFA 14, PUFA 72, EPA+DHA 0\n  миндаль: SFA 8, MUFA 65, PUFA 25, EPA+DHA 0\n  фундук: SFA 8, MUFA 78, PUFA 10, EPA+DHA 0\n  кешью: SFA 20, MUFA 59, PUFA 17, EPA+DHA 0\n  фисташки: SFA 13, MUFA 54, PUFA 31, EPA+DHA 0\n  кедровый орех: SFA 7, MUFA 28, PUFA 62, EPA+DHA 0\n  бразильский орех: SFA 24, MUFA 37, PUFA 36, EPA+DHA 0\n  макадамия: SFA 16, MUFA 79, PUFA 2, EPA+DHA 0\n  арахис: SFA 17, MUFA 49, PUFA 31, EPA+DHA 0\n  семена подсолнечника: SFA 11, MUFA 19, PUFA 66, EPA+DHA 0\n  семена тыквы: SFA 19, MUFA 34, PUFA 45, EPA+DHA 0\n  кунжут: SFA 15, MUFA 40, PUFA 42, EPA+DHA 0\n  семена чиа: SFA 11, MUFA 8, PUFA 78, EPA+DHA 0\n  семена льна: SFA 9, MUFA 19, PUFA 68, EPA+DHA 0\n  авокадо: SFA 15, MUFA 68, PUFA 13, EPA+DHA 0\n  оливки: SFA 13, MUFA 74, PUFA 9, EPA+DHA 0\n  говядина: SFA 40, MUFA 45, PUFA 4, EPA+DHA 0\n  баранина: SFA 45, MUFA 42, PUFA 6, EPA+DHA 0\n  свинина: SFA 37, MUFA 45, PUFA 12, EPA+DHA 0\n  курица: SFA 29, MUFA 44, PUFA 21, EPA+DHA 0\n  индейка: SFA 30, MUFA 40, PUFA 25, EPA+DHA 0\n  утка: SFA 33, MUFA 49, PUFA 13, EPA+DHA 0\n  яйцо куриное: SFA 31, MUFA 44, PUFA 15, EPA+DHA 1\n  кижуч: SFA 21, MUFA 36, PUFA 34, EPA+DHA 18\n  сельдь: SFA 23, MUFA 41, PUFA 24, EPA+DHA 17\n  лосось: SFA 23, MUFA 28, PUFA 29, EPA+DHA 15\n  скумбрия: SFA 24, MUFA 40, PUFA 24, EPA+DHA 18\n  печень трески: SFA 18, MUFA 50, PUFA 25, EPA+DHA 20\n  треска: SFA 21, MUFA 15, PUFA 47, EPA+DHA 40\n  тунец: SFA 26, MUFA 26, PUFA 30, EPA+DHA 25\n  креветки: SFA 25, MUFA 17, PUFA 40, EPA+DHA 35\n  мидии: SFA 22, MUFA 22, PUFA 35, EPA+DHA 28\n  тилапия: SFA 35, MUFA 33, PUFA 24, EPA+DHA 5\n  пангасиус: SFA 38, MUFA 40, PUFA 17, EPA+DHA 2\n  молоко: SFA 63, MUFA 26, PUFA 4, EPA+DHA 0\n  творог: SFA 63, MUFA 26, PUFA 4, EPA+DHA 0\n  сыр твёрдый: SFA 63, MUFA 26, PUFA 4, EPA+DHA 0\n  сметана: SFA 63, MUFA 26, PUFA 4, EPA+DHA 0\n  шоколад тёмный: SFA 60, MUFA 33, PUFA 3, EPA+DHA 0\n  какао порошок: SFA 60, MUFA 33, PUFA 3, EPA+DHA 0\n\nThe reference keys are written in RUSSIAN: copy the key letter for letter as it stands there, never translated and never transliterated.\n\nWhether or not you found it, ALSO place the food in one row of the table below — rows are by the TYPE OF FAT, not by the type of dish — and answer with that row's key. If the reference had nothing, the values must fit that row's ranges.\n\n  coconut_palm         SFA 82–92, MUFA 5–12, PUFA 1–3, EPA+DHA 0–0 — кокосовое масло, пальмовое масло, кокосовая стружка, кокосовое молоко, пальмоядровый жир\n  dairy_fat            SFA 60–70, MUFA 22–30, PUFA 2–6, EPA+DHA 0–0 — сливочное масло, топлёное масло, сливки, сметана, сыр, молоко, творог, мороженое, кефир\n  beef_lamb_fat        SFA 38–48, MUFA 40–50, PUFA 2–6, EPA+DHA 0–0 — говядина, телятина, баранина, курдючное сало, говяжий жир, субпродукты жвачных\n  pork_fat             SFA 33–40, MUFA 42–50, PUFA 8–14, EPA+DHA 0–0 — свинина, сало, шпик, бекон, ветчина, колбаса, сосиски, свиные субпродукты\n  poultry_fat          SFA 26–32, MUFA 40–48, PUFA 18–26, EPA+DHA 0–1 — курица, индейка, утка, гусь, куриная кожа, куриный жир, куриная печень\n  egg_fat              SFA 28–34, MUFA 40–48, PUFA 12–18, EPA+DHA 0–2 — яйцо, яичный желток, омлет, яичница\n  olive_avocado        SFA 12–18, MUFA 65–75, PUFA 10–16, EPA+DHA 0–0 — оливковое масло, оливки, маслины, авокадо, масло авокадо\n  rapeseed_mustard     SFA 6–9, MUFA 58–66, PUFA 26–32, EPA+DHA 0–0 — рапсовое масло, каноловое масло, горчичное масло, семена горчицы\n  peanut               SFA 15–20, MUFA 45–55, PUFA 25–35, EPA+DHA 0–0 — арахис, арахисовое масло, арахисовая паста\n  seed_oils_linoleic   SFA 10–15, MUFA 18–28, PUFA 55–68, EPA+DHA 0–0 — подсолнечное масло, кукурузное масло, соевое масло, масло виноградных семечек, семечки подсолнуха, тыквенные семечки, кунжут, тахини, майонез, маргарин\n  high_oleic_oils      SFA 7–12, MUFA 75–85, PUFA 5–12, EPA+DHA 0–0 — высокоолеиновое подсолнечное, высокоолеиновое сафлоровое, олеиновый подсолнечник\n  flax_chia            SFA 8–11, MUFA 15–22, PUFA 66–75, EPA+DHA 0–0 — льняное масло, семена льна, семена чиа, рыжиковое масло\n  walnut_hemp          SFA 9–12, MUFA 13–22, PUFA 65–75, EPA+DHA 0–0 — грецкий орех, конопляное семя, масло грецкого ореха\n  fish_fatty_cold      SFA 20–25, MUFA 28–42, PUFA 24–34, EPA+DHA 13–20 — скумбрия, сельдь, лосось, форель, сардина, шпроты, анчоус, икра, рыбий жир, печень трески, голец, кета, чавыча, нерка, горбуша, сайра, мойва, палтус\n  fish_lean_seafood    SFA 18–25, MUFA 12–20, PUFA 30–45, EPA+DHA 25–40 — треска, минтай, навага, судак, тунец, креветки, мидии, кальмар, гребешок, крабовые палочки\n  fish_warm_low_n3     SFA 25–35, MUFA 25–40, PUFA 20–30, EPA+DHA 3–8 — тилапия, пангасиус, баса, дорадо, сибас, карп, толстолобик, сом — тепловодная и прудовая рыба\n  nuts_tree            SFA 7–14, MUFA 55–70, PUFA 15–30, EPA+DHA 0–0 — миндаль, фундук, кешью, фисташки, кедровый орех, бразильский орех, макадамия\n  cocoa_confectionery  SFA 55–65, MUFA 28–35, PUFA 2–5, EPA+DHA 0–0 — шоколад, какао, какао-масло, конфеты, вафли, печенье, торт, кондитерский жир\n  grain_legume         SFA 15–22, MUFA 12–25, PUFA 45–60, EPA+DHA 0–0 — крупы, хлеб, макароны, рис, овсянка, бобовые, чечевица, нут, соя, тофу\n  no_fat               SFA 0–0, MUFA 0–0, PUFA 0–0, EPA+DHA 0–0 — овощи, фрукты, зелень, сахар, мёд, вода, чай, кофе, алкоголь, желатин, специи — всё, где жира практически нет\n\nReport:\n- reference_key: the reference entry's name, copied exactly, or NONE\n- category: the row key, copied EXACTLY as written above\n- food_type: what this product is, in two or three words, in Russian\n- sfa_pct / mufa_pct / pufa_pct: percent of total fat, each INSIDE its range in the chosen row. The remaining weight is glycerol, so the three need not add up to 100 — never inflate a fraction to make them.\n- epa_dha_pct: EPA plus DHA together, percent of total fat, inside the row's range. Also part of pufa_pct. Zero for everything that is not fish, seafood or fish oil — plants contain NO EPA or DHA, however rich in omega-3 they are.\n- reason: ONE short sentence (under 20 words) in Russian — why this row and this profile\n\nRules for choosing the row:\n- Go by WHERE THE FAT COMES FROM. A dish fried in sunflower oil whose own fat is mostly that oil belongs to the oil's row, not to the row of the vegetable.\n- A mixed dish goes to the row of its DOMINANT fat source.\n- Cooking, freezing, canning and packaging do not change the profile. The row does not depend on them.\n- A plain name goes to the ORDINARY variety of that oil. Only an explicit «высокоолеиновое» / «high-oleic» in the name moves sunflower or safflower oil to high_oleic_oils.\n- Fish splits by WHERE IT LIVES, not by how fatty it is: cold-water sea fish carry EPA and DHA, while warm-water and farmed pond fish carry mostly linoleic acid and very little n-3. A fish you do not recognise as a cold-water sea species goes to fish_warm_low_n3.\n- Anything with practically no fat goes to no_fat; its profile is irrelevant, report the row and zeros.\n\nFill \"reason\" FIRST, then the two keys, then the numbers.\n\nRespond with ONLY a single minified JSON object and nothing else — no markdown, no prose.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "FatProfileAnswer",
+        "type": "object",
+        "properties": {
+          "reference_key": {
+            "description": "The name of the REFERENCE entry this food matches, copied exactly, or NONE.",
+            "type": "string"
+          },
+          "category": {
+            "description": "The category key from the table, copied EXACTLY as written there.",
+            "type": "string"
+          },
+          "food_type": {
+            "description": "What this product actually is, in two or three words.",
+            "type": "string"
+          },
+          "sfa_pct": {
+            "description": "SATURATED fatty acids as a PERCENT OF THIS FOOD'S TOTAL FAT, by weight. Not\nper 100 g of food.",
+            "type": "number",
+            "format": "double"
+          },
+          "mufa_pct": {
+            "description": "MONOUNSATURATED fatty acids as a PERCENT OF THIS FOOD'S TOTAL FAT, by weight.",
+            "type": "number",
+            "format": "double"
+          },
+          "pufa_pct": {
+            "description": "POLYUNSATURATED fatty acids as a PERCENT OF THIS FOOD'S TOTAL FAT, by weight.",
+            "type": "number",
+            "format": "double"
+          },
+          "epa_dha_pct": {
+            "description": "EPA plus DHA together as a PERCENT OF THIS FOOD'S TOTAL FAT. Part of\n`pufa_pct`, so it can never exceed it. Zero for everything except fish,\nseafood and fish oil.",
+            "type": "number",
+            "format": "double"
+          },
+          "reason": {
+            "description": "One short sentence: why this row and this profile. Keep it under 20 words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reference_key",
+          "category",
+          "food_type",
+          "sfa_pct",
+          "mufa_pct",
+          "pufa_pct",
+          "epa_dha_pct",
+          "reason"
+        ]
+      }
+    }
+  }
+}

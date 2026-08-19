@@ -379,6 +379,34 @@ fn inline_schema(schema: &serde_json::Value) -> serde_json::Value {
     resolve_refs(schema, defs)
 }
 
+/// Убрать из схемы служебное, прежде чем показывать её МОДЕЛИ: `$schema`, `title`,
+/// `$defs`/`definitions`.
+///
+/// Схема вклеивается в промпт текстом и читается наравне с инструкцией, поэтому всё
+/// лишнее в ней — шум. Замер на выдуманных именах: со служебными полями шесть
+/// бессмысленных слов из пятнадцати проходили как еда («Бубурек копчёный — a type of
+/// smoked bread», уверенность 0.90), без них — ни одного. Название типа из Rust
+/// («IdentityAnswer») модели не говорит ничего, а место в голове занимает.
+///
+/// В саму Workers AI уходит ПОЛНАЯ схема: там она задаёт грамматику, и служебные
+/// поля ей не мешают.
+fn strip_schema_meta(v: &serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::Object(map) => {
+            let cleaned = map
+                .iter()
+                .filter(|(k, _)| !matches!(k.as_str(), "$schema" | "title" | "$defs" | "definitions"))
+                .map(|(k, val)| (k.clone(), strip_schema_meta(val)))
+                .collect();
+            serde_json::Value::Object(cleaned)
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(strip_schema_meta).collect())
+        }
+        other => other.clone(),
+    }
+}
+
 /// True if any message has array content with an `image_url` part.
 fn has_image_content(messages: &[serde_json::Value]) -> bool {
     messages.iter().any(|m| {
@@ -418,7 +446,7 @@ async fn handle_chat_completions(
     // Workers AI как `response_format`.
     let inlined_schema = schema_opt.as_ref().map(inline_schema);
     if let Some(schema) = schema_opt {
-        let inlined = inline_schema(&schema);
+        let inlined = strip_schema_meta(&inline_schema(&schema));
         let schema_json = serde_json::to_string(&inlined)
             .map_err(|e| Error::RustError(format!("serialize schema: {e}")))?;
         let json_instruction = format!(

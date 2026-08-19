@@ -752,27 +752,10 @@ fn calcium_reference_hit(key: &str) -> Option<&'static (&'static str, f64)> {
     CALCIUM_REFERENCE.iter().find(|(name, _)| key_eq(name, key))
 }
 
-/// Сколько кальция в продукте, мг на 100 г.
-///
-/// Форма запроса — общая с железом, и это не подражание, а вывод из замеров: строку
-/// таблицы модель выбирает хорошо, а числа помнит плохо (13 из 30 до справочника,
-/// 30 из 30 после). Порядок частей:
-///
-///   1. что человек записал в дневник и что об этом сказало ОПОЗНАНИЕ;
-///   2. СПРАВОЧНИК «продукт → миллиграммы»: нашёлся — назови его ключ;
-///   3. ТАБЛИЦА СТРОК — для всего, чего в справочнике нет;
-///   4. правила выбора строки — они ловят промахи, которые видны в замерах;
-///   5. один ответ.
-///
-/// `identity` — готовое опознание из конвейера признаков; пустая строка допустима
-/// (продукт, у которого все признаки уже собраны, конвейер не гоняет).
-pub async fn lookup_calcium(food_name: &str, identity: &str) -> Result<f64, String> {
-    let known = if identity.trim().is_empty() {
-        String::new()
-    } else {
-        format!("Our automatic classifier says this product is: {identity}\n\n")
-    };
-    let prompt = format!(
+/// Текст запроса о кальции. Отдельной функцией, чтобы замер брал ЕГО, а не копию:
+/// рукописные копии расходились с кодом и мерили не то, что работает.
+fn calcium_prompt(food_name: &str, known: &str) -> String {
+    format!(
         "A person wrote this into their food diary: {food_name}\n\n{known}\
          How much CALCIUM does this food hold per 100 grams, in milligrams?\n\n\
          FIRST look for it in the REFERENCE below. If it is there — or is plainly the same food \
@@ -813,7 +796,30 @@ pub async fn lookup_calcium(food_name: &str, identity: &str) -> Result<f64, Stri
          Respond with ONLY a minified JSON object and nothing else.",
         reference = calcium_reference_table(),
         table = calcium_category_keys(),
-    );
+    )
+}
+
+/// Сколько кальция в продукте, мг на 100 г.
+///
+/// Форма запроса — общая с железом, и это не подражание, а вывод из замеров: строку
+/// таблицы модель выбирает хорошо, а числа помнит плохо (13 из 30 до справочника,
+/// 30 из 30 после). Порядок частей:
+///
+///   1. что человек записал в дневник и что об этом сказало ОПОЗНАНИЕ;
+///   2. СПРАВОЧНИК «продукт → миллиграммы»: нашёлся — назови его ключ;
+///   3. ТАБЛИЦА СТРОК — для всего, чего в справочнике нет;
+///   4. правила выбора строки — они ловят промахи, которые видны в замерах;
+///   5. один ответ.
+///
+/// `identity` — готовое опознание из конвейера признаков; пустая строка допустима
+/// (продукт, у которого все признаки уже собраны, конвейер не гоняет).
+pub async fn lookup_calcium(food_name: &str, identity: &str) -> Result<f64, String> {
+    let known = if identity.trim().is_empty() {
+        String::new()
+    } else {
+        format!("Our automatic classifier says this product is: {identity}\n\n")
+    };
+    let prompt = calcium_prompt(food_name, &known);
 
     // Единственное, что осталось проверкой: строка обязана существовать. Она хранится
     // и решает, куда продукт отнесён, — выдуманный ключ хранить нельзя.
@@ -1367,13 +1373,9 @@ fn fat_head(food_name: &str, identity: &str) -> String {
     format!("A person wrote this into their food diary: {food_name}\n\n{known}")
 }
 
-/// Составное ли это блюдо (жир из нескольких источников), а не базовый продукт.
-pub async fn is_composite_dish(food_name: &str, identity: &str) -> Result<bool, String> {
-    // ВОПРОС — О ПРОДУКТЕ, А НЕ О ЖИРЕ, и это вывод из замера. Спрошенная «does the
-    // FAT come from several sources», модель трижды из трёх отвечала про борщ «нет,
-    // жир от говядины» — она понимала вопрос как «какой источник преобладает». Про
-    // сам продукт — «сварено ли это из нескольких продуктов» — ответ однозначен.
-    let prompt = format!(
+/// Текст развилки «продукт или блюдо» — отдельной функцией ради замеров.
+fn composite_prompt(food_name: &str, head: &str) -> String {
+    format!(
         "{head}\
          Is this a DISH COOKED FROM SEVERAL DIFFERENT FOODS, or is it a SINGLE food?\n\n\
          A SINGLE FOOD is one food, however processed. These count as one:\n\
@@ -1393,8 +1395,17 @@ pub async fn is_composite_dish(food_name: &str, identity: &str) -> Result<bool, 
          Fill the reason FIRST — name what this food is made of — and let the verdict follow \
          from it.\n\n\
          Respond with ONLY a single minified JSON object.",
-        head = fat_head(food_name, identity),
-    );
+        head = head,
+    )
+}
+
+/// Составное ли это блюдо (жир из нескольких источников), а не базовый продукт.
+pub async fn is_composite_dish(food_name: &str, identity: &str) -> Result<bool, String> {
+    // ВОПРОС — О ПРОДУКТЕ, А НЕ О ЖИРЕ, и это вывод из замера. Спрошенная «does the
+    // FAT come from several sources», модель трижды из трёх отвечала про борщ «нет,
+    // жир от говядины» — она понимала вопрос как «какой источник преобладает». Про
+    // сам продукт — «сварено ли это из нескольких продуктов» — ответ однозначен.
+    let prompt = composite_prompt(food_name, &fat_head(food_name, identity));
     let v: CompositeAnswer = generate(prompt, |_| {}).await?;
     leptos::logging::log!(
         "составное «{food_name}»: {} — {}",
@@ -1424,16 +1435,10 @@ pub async fn lookup_fat_profile(
     lookup_basic_fat_profile(food_name, identity).await
 }
 
-/// Профиль жира БАЗОВОГО продукта: сперва справочник, потом строка таблицы.
-pub async fn lookup_basic_fat_profile(
-    food_name: &str,
-    identity: &str,
-) -> Result<api_types::FatProfile, String> {
-    let lang = match crate::services::i18n::get_lang() {
-        crate::services::i18n::Lang::Ru => "Russian",
-        crate::services::i18n::Lang::En => "English",
-    };
-    let prompt = format!(
+/// Текст запроса о профиле жира базового продукта — отдельной функцией ради замеров.
+fn basic_fat_prompt(food_name: &str, head: &str, lang: &str) -> String {
+    let _ = food_name;
+    format!(
         "{head}\
          Report the FATTY-ACID PROFILE OF THIS FOOD'S FAT.\n\n\
          Every number you report is a PERCENT OF THIS FOOD'S TOTAL FAT, by weight — NOT grams \
@@ -1480,11 +1485,23 @@ pub async fn lookup_basic_fat_profile(
          Fill \"reason\" FIRST, then the two keys, then the numbers.\n\n\
          Respond with ONLY a single minified JSON object and nothing else — no markdown, no \
          prose.",
-        head = fat_head(food_name, identity),
+        head = head,
         reference = fat_reference_table(),
         table = fat_row_table(),
         lang = lang,
-    );
+    )
+}
+
+/// Профиль жира БАЗОВОГО продукта: сперва справочник, потом строка таблицы.
+pub async fn lookup_basic_fat_profile(
+    food_name: &str,
+    identity: &str,
+) -> Result<api_types::FatProfile, String> {
+    let lang = match crate::services::i18n::get_lang() {
+        crate::services::i18n::Lang::Ru => "Russian",
+        crate::services::i18n::Lang::En => "English",
+    };
+    let prompt = basic_fat_prompt(food_name, &fat_head(food_name, identity), lang);
 
     let v: FatProfileAnswer = generate_validated(prompt, |_| {}, 4, |v: &FatProfileAnswer| {
         // Запись справочника снимает вопрос о строке: числа всё равно возьмутся оттуда.
@@ -3392,3 +3409,30 @@ mod tests {
     }
 }
 
+
+// ── Выгрузка промптов о нутриентах для замеров ───────────────────────────────
+//
+// Та же причина, что и у конвейера признаков (см. `flags_pipeline::prompt_dump`):
+// замер обязан гонять текст и схему, которые реально уходят в модель, а не их
+// рукописную копию.
+#[cfg(test)]
+pub(crate) fn prompt_dump() -> serde_json::Value {
+    const FOOD: &str = "{{FOOD}}";
+    const IDENT: &str = "{{IDENTITY}}";
+    let known = format!("Our automatic classifier says this product is: {IDENT}\n\n");
+
+    serde_json::json!({
+        "calcium": {
+            "prompt": calcium_prompt(FOOD, &known),
+            "schema": schemars::schema_for!(CalciumAnswer),
+        },
+        "fat_composite": {
+            "prompt": composite_prompt(FOOD, &known),
+            "schema": schemars::schema_for!(CompositeAnswer),
+        },
+        "fat_profile": {
+            "prompt": basic_fat_prompt(FOOD, &known, "Russian"),
+            "schema": schemars::schema_for!(FatProfileAnswer),
+        },
+    })
+}

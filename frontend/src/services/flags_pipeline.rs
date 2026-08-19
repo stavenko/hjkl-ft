@@ -1285,3 +1285,85 @@ pub async fn identify(food_name: &str) -> Result<Option<String>, String> {
     );
     Ok(ctx.identity)
 }
+
+// ── Выгрузка промптов для замеров ────────────────────────────────────────────
+//
+// ЗАМЕРЫ ОБЯЗАНЫ ГОНЯТЬ ТО ЖЕ, ЧТО РАБОТАЕТ. Пока скрипты держали рукописные копии
+// промптов, копии расходились с кодом — и расхождение было не видно, потому что
+// обе стороны «работали». Дважды это стоило дня: сперва в коде оказалось три поля
+// опознания против одного в копии, потом выяснилось, что ai-worker вклеивает в
+// промпт СХЕМУ, которой в копии не было вовсе, — и именно она пропускала выдуманные
+// слова как еду.
+//
+// Отсюда выгружаются и текст, и схема — ровно те, что уходят в модель. Имя продукта
+// и опознание подставлены маркерами, чтобы замер мог поставить свои.
+#[cfg(test)]
+mod prompt_dump {
+    use super::*;
+
+    /// Маркеры, которые замер заменяет своими значениями.
+    const FOOD: &str = "{{FOOD}}";
+    const IDENT: &str = "{{IDENTITY}}";
+
+    fn ctx() -> FlagsCtx {
+        let mut c = FlagsCtx::new(FOOD);
+        c.identity = Some(IDENT.to_string());
+        c
+    }
+
+    /// Все промпты конвейера признаков + их схемы, как JSON.
+    pub fn dump() -> serde_json::Value {
+        let c = ctx();
+        let mut nodes = serde_json::Map::new();
+
+        let identify = IdentifyPrompt { food_name: FOOD.to_string() };
+        nodes.insert(
+            "identify".to_string(),
+            serde_json::json!({
+                "prompt": identify.serialize(),
+                "schema": schemars::schema_for!(IdentityAnswer),
+            }),
+        );
+
+        for (name, step) in [
+            ("plant", Step::VegFruit),
+            ("heme", Step::Heme),
+            ("red_meat", Step::RedMeat),
+            ("processed_meat", Step::ProcessedMeat),
+            ("milk_globule", Step::MilkGlobule),
+            ("egg", Step::Egg),
+        ] {
+            let p = FlagPrompt {
+                food_name: c.food_name.clone(),
+                given: c.given(),
+                step,
+            };
+            let schema = if step.as_plant() {
+                schemars::schema_for!(PlantAnswer)
+            } else if step.as_egg() {
+                schemars::schema_for!(EggAnswer)
+            } else if step.as_category() {
+                schemars::schema_for!(CategoryAnswer)
+            } else {
+                schemars::schema_for!(FlagAnswer)
+            };
+            nodes.insert(
+                name.to_string(),
+                serde_json::json!({ "prompt": p.serialize(), "schema": schema }),
+            );
+        }
+        serde_json::Value::Object(nodes)
+    }
+
+    /// Пишет выгрузку в `scripts/prompts.json` — оттуда её читают замеры.
+    /// Это не проверка, а генерация: тест ничего не утверждает, кроме того, что
+    /// промпты вообще строятся.
+    #[test]
+    fn write_prompts_json() {
+        let all = serde_json::json!({ "flags": dump(), "nutrients": crate::services::ai::prompt_dump() });
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../scripts/prompts.json");
+        std::fs::write(path, serde_json::to_string_pretty(&all).expect("сериализация"))
+            .expect("записать scripts/prompts.json");
+        assert!(all["flags"]["identify"]["prompt"].as_str().unwrap().contains("{{FOOD}}"));
+    }
+}

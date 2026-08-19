@@ -64,87 +64,7 @@ if (process.env.ONLY) {
   CASES.push(...kept);
 }
 
-const RARE = [
-  ["голец", "a cold-water fish of the salmon family", ["Arctic char", "char"]],
-  ["пикша", "a fish of the cod family", ["haddock"]],
-  ["сайда", "a fish of the cod family", ["saithe", "pollock", "coalfish"]],
-  ["муксун", "a northern whitefish", ["muksun"]],
-  ["страусятина", "the flesh of an ostrich, that is of a BIRD", ["ostrich meat"]],
-  ["бастурма", "air-dried cured BEEF, a whole muscle", ["basturma", "pastirma"]],
-  ["буженина", "a whole piece of PORK, baked and not cured", ["buzhenina", "baked pork"]],
-  ["fuet", "a Catalan dry cured PORK sausage", ["fuet", "fuet truffle"]],
-  ["маш", "mung bean, a small green LEGUME", ["mung bean", "moong"]],
-  ["полба", "spelt, an ancient wheat GRAIN", ["spelt", "farro"]],
-  ["ирга", "saskatoon, a dark sweet BERRY on a shrub", ["saskatoon berry", "juneberry"]],
-  ["жимолость", "honeyberry, an edible blue BERRY", ["honeyberry", "haskap"]],
-  ["топинамбур", "jerusalem artichoke, an edible TUBER", ["jerusalem artichoke", "sunchoke"]],
-  ["печень трески", "cod liver, the LIVER of a fish — not roe", ["cod liver"]],
-];
-const SHORT = [
-  ["с/м", "fresh-frozen, nothing added"],
-  ["х/к", "cold-smoked"],
-  ["с/с", "lightly salted"],
-  ["в/с", "top grade — a grade and nothing more"],
-  ["ц/з", "wholegrain"],
-];
-const dictionary = () =>
-  "DICTIONARY of rare or confusable names:\n" +
-  RARE.map(([w, what, tr]) => `  ${w}: ${what}, could be translated as [${tr.join(", ")}]`).join("\n") +
-  "\n\nABBREVIATIONS from Russian labels (storage, cut or grade only):\n" +
-  SHORT.map(([w, what]) => `  ${w}: ${what}`).join("\n") + "\n\n";
-
-const identityPrompt = (name) =>
-  `A person wrote this into their food diary: ${name}\n\n` +
-  "Answer three things about it.\n" +
-  "1. \"from_own_knowledge\": the closest definition you can recall YOURSELF, without the " +
-  "dictionary. If you do not know this word, say so plainly — that is a valid answer.\n" +
-  "2. \"from_dictionary\": the closest definition from the dictionary below, or NONE if nothing " +
-  "in it fits this name.\n" +
-  "3. \"options\": the three most likely definitions of the food, the surest first, each a " +
-  "sentence of five or six words, each with your confidence from 0.0 to 1.0.\n\n" +
-  dictionary() +
-  "Respond with ONLY a minified JSON object and nothing else.";
-
-const identitySchema = {
-  type: "object",
-  properties: {
-    from_own_knowledge: { type: "string" },
-    from_dictionary: { type: "string" },
-    options: { type: "array", items: { type: "object",
-      properties: { definition: { type: "string" }, confidence: { type: "number" } },
-      required: ["definition", "confidence"], additionalProperties: false } },
-  },
-  required: ["from_own_knowledge", "from_dictionary", "options"],
-  additionalProperties: false,
-};
-
-const hemePrompt = (name, identity) =>
-  `A person wrote this into their food diary: ${name}\n\n` +
-  `Our automatic classifier says this product is: ${identity}\n\n` +
-  "Is this product a rich source of HEME IRON? It is, if it is one of these:\n" +
-  "  LIVER — the liver of any animal, bird or FISH, and food made mainly of liver: pâté, " +
-  "liver sausage;\n" +
-  "  ORGAN — another inner organ: heart, kidney, tongue, gizzard, lung, blood sausage — of any " +
-  "animal, bird or fish;\n" +
-  "  MAMMAL_MEAT — the meat of a mammal: beef, veal, pork, lamb, goat, venison, boar, horse, " +
-  "rabbit, in any cut, and food made mainly of it: sausage, ham, bacon, salami, mince, " +
-  "cutlets;\n" +
-  "  MOLLUSC — but only these kinds: mussels, oysters, clams and vongole, cockles, octopus, " +
-  "whelks, winkles.\n\n" +
-  "The FLESH of a bird or a fish is not an organ: a chicken breast, a chicken thigh and a fish " +
-  "fillet are none of these. A mollusc of another kind, such as squid, is none of these either, " +
-  "and neither are crustaceans, eggs, dairy and plants. Do not reason about milligrams of iron " +
-  "— the categories account for them.\n\n" +
-  "Answer with ONE word: LIVER, ORGAN, MAMMAL_MEAT, MOLLUSC or OTHER.\n\n" +
-  "Fill \"reason\" FIRST — one short sentence — and let the word follow from it.\n\n" +
-  "Respond with ONLY a minified JSON object and nothing else.";
-
-const hemeSchema = {
-  type: "object",
-  properties: { reason: { type: "string" }, verdict: { type: "string" } },
-  required: ["reason", "verdict"],
-  additionalProperties: false,
-};
+import { promptFor } from "./lib/prompts.mjs";
 
 const b64 = (b) => Buffer.from(b).toString("base64url");
 const uid = `parts-${Date.now()}`;
@@ -188,20 +108,26 @@ const ask = async (text, schema, name) => {
 let bad = 0;
 console.log("продукт                      ответ            гем   опознание");
 for (const [name, want] of CASES) {
-  const id = await ask(identityPrompt(name), identitySchema, "identity");
+  const idp = promptFor("flags", "identify", name);
+  const id = await ask(idp.prompt, idp.schema, "identity");
   if (id.err) { bad++; console.log(`FAIL ${name.padEnd(26)} опознание: ${id.err}`); continue; }
   const opts = (id.obj.options ?? []).filter((o) => o && o.definition);
   const top = opts.reduce((a, b) => (Number(b.confidence) > Number(a.confidence) ? b : a),
     opts[0] ?? { definition: "(нет)", confidence: 0 });
-  const r = await ask(hemePrompt(name, top.definition), hemeSchema, "heme");
+  const np = promptFor("flags", "heme", name, top.definition);
+  const r = await ask(np.prompt, np.schema, "heme");
   if (r.err) { bad++; console.log(`FAIL ${name.padEnd(26)} гем: ${r.err} ${r.raw ?? ""}`); continue; }
-  const got = String(r.obj.verdict).trim().toUpperCase();
-  const ok = got === want;
+  // Код спрашивает ВЕРДИКТ, а не категорию словом: эталон сводим к нему же.
+  const got = r.obj.verdict === true;
+  // Категории набора — наши, вердикт кода — булев. Истина здесь: богатый источник гемового железа.
+  const YES = ["LIVER", "ORGAN", "MAMMAL_MEAT", "MOLLUSC"];
+  const shouldBe = YES.includes(String(want).toUpperCase());
+  const ok = got === shouldBe;
   if (!ok) bad++;
   // Наш признак: печень, сердце, мышца млекопитающего и страус тратят недельные граммы.
-  const isHeme = ["LIVER", "ORGAN", "MAMMAL_MEAT", "MOLLUSC"].includes(got);
-  console.log(`${ok ? "OK  " : "MISS"} ${name.padEnd(26)} ${got.padEnd(16)} ${isHeme ? "да " : "нет"}           ${top.definition}`);
-  if (!ok) console.log(`     ждали ${want}, модель: ${r.obj.reason}`);
+  
+  console.log(`${ok ? "OK  " : "MISS"} ${name.padEnd(26)} ${(got ? "да " : "нет").padEnd(16)} ${got ? "да " : "нет"}           ${top.definition}`);
+  if (!ok) console.log(`     ждали ${shouldBe ? "да" : "нет"} (${want}), модель: ${r.obj.reason}`);
 }
 console.log(`\nпопаданий: ${CASES.length - bad}/${CASES.length}`);
 process.exit(bad ? 1 : 0);

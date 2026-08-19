@@ -5,8 +5,9 @@
 // еду: ИКРА (рыбьи яйца, по-русски даже слово другое, а по-английски то самое roe)
 // и всё, что зовётся яйцом, не будучи им, — шоколадное яйцо, яйцо-сюрприз.
 //
-// ВНИМАНИЕ: промпт — копия шага `Step::Egg` из `flags_pipeline.rs`; итоговая
-// проверка живым путём.
+// ПРОМПТ И СХЕМА БЕРУТСЯ ИЗ КОДА (scripts/prompts.json, см. scripts/lib/prompts.mjs) —
+// ровно те, что уходят в модель из приложения. Копий здесь больше нет: они дважды
+// разошлись с кодом, и оба раза замер показывал не то, что работает.
 const AI = process.env.AI || "https://ai-worker-dev.vg-stavenko.workers.dev";
 const PAY = process.env.PAY || "https://payment-worker-dev.vg-stavenko.workers.dev";
 const SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
@@ -62,88 +63,7 @@ if (process.env.ONLY) {
   CASES.push(...kept);
 }
 
-const RARE = [
-  ["голец", "a cold-water fish of the salmon family", ["Arctic char", "char"]],
-  ["пикша", "a fish of the cod family", ["haddock"]],
-  ["сайда", "a fish of the cod family", ["saithe", "pollock", "coalfish"]],
-  ["муксун", "a northern whitefish", ["muksun"]],
-  ["страусятина", "the flesh of an ostrich, that is of a BIRD", ["ostrich meat"]],
-  ["бастурма", "air-dried cured BEEF, a whole muscle", ["basturma", "pastirma"]],
-  ["буженина", "a whole piece of PORK, baked and not cured", ["buzhenina", "baked pork"]],
-  ["fuet", "a Catalan dry cured PORK sausage", ["fuet", "fuet truffle"]],
-  ["маш", "mung bean, a small green LEGUME", ["mung bean", "moong"]],
-  ["полба", "spelt, an ancient wheat GRAIN", ["spelt", "farro"]],
-  ["ирга", "saskatoon, a dark sweet BERRY on a shrub", ["saskatoon berry", "juneberry"]],
-  ["жимолость", "honeyberry, an edible blue BERRY", ["honeyberry", "haskap"]],
-  ["топинамбур", "jerusalem artichoke, an edible TUBER", ["jerusalem artichoke", "sunchoke"]],
-  ["печень трески", "cod liver, the LIVER of a fish — not roe", ["cod liver"]],
-];
-const SHORT = [
-  ["с/м", "fresh-frozen, nothing added"],
-  ["х/к", "cold-smoked"],
-  ["с/с", "lightly salted"],
-  ["в/с", "top grade — a grade and nothing more"],
-  ["ц/з", "wholegrain"],
-];
-const dictionary = () =>
-  "DICTIONARY of rare or confusable names:\n" +
-  RARE.map(([w, what, tr]) => `  ${w}: ${what}, could be translated as [${tr.join(", ")}]`).join("\n") +
-  "\n\nABBREVIATIONS from Russian labels (storage, cut or grade only):\n" +
-  SHORT.map(([w, what]) => `  ${w}: ${what}`).join("\n") + "\n\n";
-
-const identityPrompt = (name) =>
-  `A person wrote this into their food diary: ${name}\n\n` +
-  "Answer three things about it.\n" +
-  "1. \"from_own_knowledge\": the closest definition you can recall YOURSELF, without the " +
-  "dictionary. If you do not know this word, say so plainly — that is a valid answer.\n" +
-  "2. \"from_dictionary\": the closest definition from the dictionary below, or NONE if nothing " +
-  "in it fits this name.\n" +
-  "3. \"options\": the three most likely definitions of the food, the surest first, each a " +
-  "sentence of five or six words, each with your confidence from 0.0 to 1.0.\n\n" +
-  dictionary() +
-  "Respond with ONLY a minified JSON object and nothing else.";
-
-const identitySchema = {
-  type: "object",
-  properties: {
-    from_own_knowledge: { type: "string" },
-    from_dictionary: { type: "string" },
-    options: { type: "array", items: { type: "object",
-      properties: { definition: { type: "string" }, confidence: { type: "number" } },
-      required: ["definition", "confidence"], additionalProperties: false } },
-  },
-  required: ["from_own_knowledge", "from_dictionary", "options"],
-  additionalProperties: false,
-};
-
-const eggPrompt = (name, identity) =>
-  `A person wrote this into their food diary: ${name}\n\n` +
-  `Our automatic classifier says this product is: ${identity}\n\n` +
-  "Decide whether this product belongs to BIRD EGGS, or is made of bird eggs — of any bird, " +
-  "farmed or wild.\n\n" +
-  "WE COUNT GRAMS. Say yes only when the grams of this product ARE grams of egg: the product " +
-  "is egg through and through, or egg with no more than a spoon of butter, milk or oil in it. " +
-  "Cooking, curing and drying change nothing — raw, boiled, fried, poached, smoked, salted, " +
-  "dried into powder, whole or beaten, yolk or white alone.\n\n" +
-  "Say no when eggs are ONE INGREDIENT AMONG SEVERAL and their share cannot be told from the " +
-  "name: mayonnaise, sauces, salads, pancakes, batter, pasta, cakes, biscuits, cutlets, " +
-  "casseroles. There is no way to count their grams of egg, so they are not egg.\n\n" +
-  "Judge by WEIGHT, not by importance. A yolk gives mayonnaise its name and its texture, but " +
-  "its grams are oil, so mayonnaise is NO. A SALAD is never egg, whatever it is called: " +
-  "«яичный салат» is eggs cut up with dressing and other foods, and nobody can say how much " +
-  "of it was egg.\n\n" +
-  "Fill the reason FIRST — one short sentence — and let the answer follow from it.\n\n" +
-  "Respond with ONLY a minified JSON object and nothing else.";
-
-const eggSchema = {
-  type: "object",
-  properties: {
-    reason: { type: "string" },
-    is_this_product_of_bird_eggs: { type: "boolean" },
-  },
-  required: ["reason", "is_this_product_of_bird_eggs"],
-  additionalProperties: false,
-};
+import { promptFor } from "./lib/prompts.mjs";
 
 const b64 = (b) => Buffer.from(b).toString("base64url");
 const uid = `parts-${Date.now()}`;
@@ -187,12 +107,14 @@ const ask = async (text, schema, name) => {
 let bad = 0;
 console.log("продукт                      яйцо  опознание");
 for (const [name, want] of CASES) {
-  const id = await ask(identityPrompt(name), identitySchema, "identity");
+  const idp = promptFor("flags", "identify", name);
+  const id = await ask(idp.prompt, idp.schema, "identity");
   if (id.err) { bad++; console.log(`FAIL ${name.padEnd(26)} опознание: ${id.err}`); continue; }
   const opts = (id.obj.options ?? []).filter((o) => o && o.definition);
   const top = opts.reduce((a, b) => (Number(b.confidence) > Number(a.confidence) ? b : a),
     opts[0] ?? { definition: "(нет)", confidence: 0 });
-  const r = await ask(eggPrompt(name, top.definition), eggSchema, "egg");
+  const eggp = promptFor("flags", "egg", name, top.definition);
+  const r = await ask(eggp.prompt, eggp.schema, "egg");
   if (r.err) { bad++; console.log(`FAIL ${name.padEnd(26)} яйцо: ${r.err} ${r.raw ?? ""}`); continue; }
   const got = r.obj.is_this_product_of_bird_eggs === true;
   const ok = got === want;

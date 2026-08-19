@@ -239,12 +239,12 @@ struct AbsorptionAnswer {
 /// Запись справочника по ключу, который назвала модель.
 fn reference_hit(key: &str) -> Option<&'static (&'static str, f64, f64)> {
     let key = key.trim();
-    if key.is_empty() || key.eq_ignore_ascii_case("none") {
+    if key.is_empty() || crate::services::ai::key_eq(key, "none") {
         return None;
     }
     IRON_REFERENCE
         .iter()
-        .find(|(name, _, _)| name.eq_ignore_ascii_case(key))
+        .find(|(name, _, _)| crate::services::ai::key_eq(name, key))
 }
 
 // ── Шаг 1: сколько железа ────────────────────────────────────────────────────

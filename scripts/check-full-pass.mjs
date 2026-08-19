@@ -12,6 +12,8 @@
 // подписанный dev-JWT и фейковая оплаченная подписка — тем же путём, что
 // frontend/scripts/seed-test-subscription.mjs.
 import { chromium } from "playwright";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
 
 const FE = process.env.FE || "https://renorma-fit-dev.pages.dev";
 const PAY = process.env.PAY || "https://payment-worker-dev.vg-stavenko.workers.dev";
@@ -59,6 +61,29 @@ const page = await ctx.newPage();
 const logs = [];
 page.on("console", (m) => logs.push(`${m.type()}: ${m.text()}`));
 const calls = [];
+// Отладка: тело первого запроса опознания — чтобы сверить промпт приложения с копией.
+if (process.env.DUMP_PROMPT) {
+  page.on("request", (req) => {
+    if (!/ai-worker/.test(req.url())) return;
+    const body = req.postData() || "";
+    if (!body.includes("food diary") || global.__dumped) return;
+    global.__dumped = true;
+    try {
+      const j = JSON.parse(body);
+      const c = j.messages?.[0]?.content || "";
+      console.log("=== ПРОМПТ ПРИЛОЖЕНИЯ ===");
+      console.log("длина:", c.length, "| есть 'маш':", /\n  маш:/.test(c),
+        "| есть 'кыстыбый':", /кыстыбый/.test(c), "| записей:", (c.match(/could be translated/g)||[]).length);
+      console.log("сообщений:", j.messages?.length, "| роли:",
+        (j.messages || []).map((m) => m.role).join(","));
+      console.log("поля запроса:", Object.keys(j).join(","));
+      require("node:fs").writeFileSync(process.env.DUMP_PROMPT,
+        JSON.stringify({ prompt: c, schema: j.response_format?.json_schema?.schema }, null, 1));
+      console.log("сохранено в", process.env.DUMP_PROMPT);
+      console.log("=== think:", j.think, "max_tokens:", j.max_tokens);
+    } catch {}
+  });
+}
 page.on("response", (r) => {
   const u = r.url();
   if (/bug-report/.test(u)) {

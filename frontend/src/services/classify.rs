@@ -104,19 +104,26 @@ const FLAGS: &[(
     &str,
     fn(&Food) -> bool,
     local::FoodFlag,
+    super::flags_pipeline::Aspect,
 )] = &[
-    ("фрукты/овощи", |f| f.is_veg_fruit.is_none(), local::FoodFlag::VegFruit),
-    ("гем", |f| f.is_heme.is_none(), local::FoodFlag::Heme),
-    ("молочная глобула", |f| f.is_milk_globule.is_none(), local::FoodFlag::MilkGlobule),
-    ("красное мясо", |f| f.is_red_meat.is_none(), local::FoodFlag::RedMeat),
-    ("переработанное мясо", |f| f.is_processed_meat.is_none(), local::FoodFlag::ProcessedMeat),
-    ("яйцо", |f| f.is_egg.is_none(), local::FoodFlag::Egg),
+    ("фрукты/овощи", |f| f.is_veg_fruit.is_none(), local::FoodFlag::VegFruit,
+        super::flags_pipeline::Aspect::VegFruit),
+    ("гем", |f| f.is_heme.is_none(), local::FoodFlag::Heme,
+        super::flags_pipeline::Aspect::Heme),
+    ("молочная глобула", |f| f.is_milk_globule.is_none(), local::FoodFlag::MilkGlobule,
+        super::flags_pipeline::Aspect::MilkGlobule),
+    ("красное мясо", |f| f.is_red_meat.is_none(), local::FoodFlag::RedMeat,
+        super::flags_pipeline::Aspect::RedMeat),
+    ("переработанное мясо", |f| f.is_processed_meat.is_none(), local::FoodFlag::ProcessedMeat,
+        super::flags_pipeline::Aspect::ProcessedMeat),
+    ("яйцо", |f| f.is_egg.is_none(), local::FoodFlag::Egg,
+        super::flags_pipeline::Aspect::Egg),
 ];
 
 /// True if `food` still misses at least one of the asked flags — то есть работа для
 /// прохода вообще есть. Что именно спрашивать, решает [`FLAGS`], каждый сам за себя.
 fn needs_classification(food: &Food) -> bool {
-    FLAGS.iter().any(|(_, missing, _)| missing(food))
+    FLAGS.iter().any(|(_, missing, _, _)| missing(food))
 }
 
 /// Enqueue a food id for background classification (no-op if already queued) and
@@ -169,12 +176,34 @@ async fn run_worker() {
         //
         // Опознание живёт до конца прохода: его ждут и кальций, и железо, и жиры.
         let mut identity = String::new();
-        if needs_classification(&food) {
+        // ЧТО СПРАШИВАТЬ: признак, которого нет И который сегодня уже не спрашивали.
+        //
+        // Второе условие — не бережливость, а тишина: продукт, о котором модель
+        // отказалась говорить, до сих пор шёл к ней при каждом запуске приложения, и
+        // так без конца. Сутки — время, за которое может выйти сборка с новым
+        // словарём или справочником; раньше ответ будет тот же.
+        let mut wanted = Vec::new();
+        for (_, missing, _, aspect) in FLAGS {
+            if missing(&food) && super::food_probe::may_ask(&id, aspect.slug()).await {
+                wanted.push(*aspect);
+            }
+        }
+        // Опознание — впереди всего, и оно решает судьбу прохода. Если продукт не
+        // опознали меньше суток назад, нового разговора не будет: ни признаков, ни
+        // нутриентов, ни железа, ни жиров — их всё равно спрашивать не о чем.
+        let may_identify =
+            super::food_probe::may_ask(&id, super::flags_pipeline::ASPECT_IDENTITY).await;
+        if !wanted.is_empty() && !may_identify {
+            continue;
+        }
+        if !wanted.is_empty() {
             let name = food.name.clone();
+            let ask = wanted.clone();
             if let Some(r) = with_retries(
                 move || {
                     let n = name.clone();
-                    async move { super::flags_pipeline::classify_all(&n).await }
+                    let a = ask.clone();
+                    async move { super::flags_pipeline::classify_all(&n, &a).await }
                 },
                 errors::FoodAspect::Kind,
                 &food.name,
@@ -191,22 +220,62 @@ async fn run_worker() {
                         &food.name,
                         "продукт не опознан: у модели нет уверенной версии",
                     );
+                    // След неудачи: сутки этот продукт не трогаем. По этим же записям
+                    // собирается список подвисшей еды (`food_probe::stuck`).
+                    super::food_probe::record(
+                        &id,
+                        super::flags_pipeline::ASPECT_IDENTITY,
+                        false,
+                        &food.name,
+                    )
+                    .await;
                     continue;
                 }
+                super::food_probe::record(
+                    &id,
+                    super::flags_pipeline::ASPECT_IDENTITY,
+                    true,
+                    "",
+                )
+                .await;
                 let (f, fibre, ident) = (r.flags, r.fibre_g, r.identity);
                 // Записывается только выясненное. Неполученный признак остаётся
                 // пустым и будет переспрошен в другой раз — записать его наугад
                 // значило бы соврать молча.
-                for (flag, value) in [
-                    (local::FoodFlag::VegFruit, f.veg_fruit),
-                    (local::FoodFlag::Heme, f.heme),
-                    (local::FoodFlag::MilkGlobule, f.milk_globule),
-                    (local::FoodFlag::RedMeat, f.red_meat),
-                    (local::FoodFlag::ProcessedMeat, f.processed_meat),
-                    (local::FoodFlag::Egg, f.egg),
+                for (flag, value, aspect) in [
+                    (local::FoodFlag::VegFruit, f.veg_fruit,
+                        super::flags_pipeline::Aspect::VegFruit),
+                    (local::FoodFlag::Heme, f.heme,
+                        super::flags_pipeline::Aspect::Heme),
+                    (local::FoodFlag::MilkGlobule, f.milk_globule,
+                        super::flags_pipeline::Aspect::MilkGlobule),
+                    (local::FoodFlag::RedMeat, f.red_meat,
+                        super::flags_pipeline::Aspect::RedMeat),
+                    (local::FoodFlag::ProcessedMeat, f.processed_meat,
+                        super::flags_pipeline::Aspect::ProcessedMeat),
+                    (local::FoodFlag::Egg, f.egg, super::flags_pipeline::Aspect::Egg),
                 ] {
-                    if let Some(v) = value {
-                        local::cache_food_flag(&id, flag, v).await;
+                    // След ставим только тем, кого В ЭТОТ РАЗ спрашивали: у остальных
+                    // прошлые записи не трогаем — они и так молчат.
+                    if !wanted.contains(&aspect) {
+                        continue;
+                    }
+                    match value {
+                        Some(v) => {
+                            local::cache_food_flag(&id, flag, v).await;
+                            super::food_probe::record(&id, aspect.slug(), true, "").await;
+                        }
+                        // Спросили и не получили: узел исчерпал попытки. Сутки этот
+                        // признак не трогаем, остальные идут своим чередом.
+                        None => {
+                            super::food_probe::record(
+                                &id,
+                                aspect.slug(),
+                                false,
+                                "вердикт не получен",
+                            )
+                            .await;
+                        }
                     }
                 }
                 identity = ident.unwrap_or_default();

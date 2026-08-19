@@ -12,6 +12,7 @@ pub mod enrich;
 pub mod errors;
 pub mod fats;
 pub mod flags_pipeline;
+pub mod food_probe;
 pub mod diag;
 pub mod i18n;
 pub mod heme;

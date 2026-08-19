@@ -92,7 +92,7 @@ fn bump(store_name: &str) {
     });
 }
 
-const DB_VERSION: u32 = 19;
+const DB_VERSION: u32 = 20;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -102,7 +102,7 @@ const ALL_STORES: &[&str] = &[
     "foods", "diary", "recipes", "recipe_ingredients",
     "goals", "food_drafts", "weight_entries", "step_entries",
     "progress_photos", "summaries", "chat", "profile", "deletions", "_sync_meta",
-    "app_flags", "planka_history",
+    "app_flags", "planka_history", "food_probe",
     "support_messages", "support_outbox", "support_meta",
 ];
 
@@ -214,6 +214,12 @@ fn builder(name: &str) -> rexie::RexieBuilder {
         // order the mutations happened (`seq` is a zero-padded monotonic string).
         // Written by the tracked put/delete below; drained by sync::push.
         .add_object_store(ObjectStore::new("_outbox").key_path("seq"))
+        // Попытки разобрать продукт: по строке на «продукт + что спрашивали». Нужна,
+        // чтобы не долбить модель одним и тем же каждый час — ни по признаку, который
+        // она уже отказалась называть, ни по еде, которую не смогла опознать. Локальная
+        // и НЕ синкается: это след разговора с моделью на этом устройстве, а не данные
+        // человека.
+        .add_object_store(ObjectStore::new("food_probe").key_path("key"))
 }
 
 /// How long to wait for a database open before treating it as blocked. A schema

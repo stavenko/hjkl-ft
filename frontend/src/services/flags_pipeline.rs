@@ -60,6 +60,10 @@ use super::ai::{build_executor_think, strip_code_fences, veg_fruit_from_category
 /// выдуманного, и его переспросят при следующем проходе.
 const IDENTITY_MIN_CONFIDENCE: f64 = 0.6;
 
+/// Имя аспекта опознания в следе попыток (`services::food_probe`). Устойчивое:
+/// по нему отбираются продукты, которые не удалось опознать вовсе.
+pub const ASPECT_IDENTITY: &str = "identity";
+
 /// Сколько раз повторить каждый шаг, прежде чем сдаться.
 const MAX_TRIES: u32 = 3;
 
@@ -114,6 +118,55 @@ const RARE_NAMES: &[(&str, &str, &[&str])] = &[
     // трюфелем, а не трюфель.
     ("fuet", "a Catalan dry cured PORK sausage", &["fuet", "fuet truffle"]),
     ("чоризо", "a Spanish dry cured pork sausage", &["chorizo"]),
+    // ── Крупы, бобовые, зелень, ягоды: русские имена, которых модель не знает ──
+    // Все они ловились живым путём: без строки в словаре «Полба» опознавалась как
+    // «тип рыбы» с уверенностью 0.90, а «Маш» — как «имя или сокращение».
+    ("полба", "spelt, an ancient wheat GRAIN", &["spelt", "farro", "emmer"]),
+    ("булгур", "cracked parboiled wheat, a GRAIN", &["bulgur"]),
+    ("кускус", "small steamed balls of wheat semolina, a GRAIN", &["couscous"]),
+    ("маш", "mung bean, a small green LEGUME", &["mung bean", "moong"]),
+    ("нут", "chickpea, a LEGUME", &["chickpea", "garbanzo"]),
+    ("чечевица", "lentil, a LEGUME", &["lentil"]),
+    ("топинамбур", "jerusalem artichoke, an edible TUBER", &["jerusalem artichoke", "sunchoke"]),
+    ("руккола", "a peppery salad LEAF", &["rocket", "arugula"]),
+    ("кинза", "the fresh LEAVES of coriander", &["cilantro", "coriander leaves"]),
+    ("щавель", "a sour salad LEAF", &["sorrel"]),
+    ("ирга", "saskatoon, a dark sweet BERRY on a shrub", &["saskatoon berry", "juneberry"]),
+    ("жимолость", "honeyberry, an edible blue BERRY", &["honeyberry", "haskap"]),
+    ("облепиха", "sea buckthorn, an orange BERRY", &["sea buckthorn"]),
+    ("морошка", "cloudberry, an amber BERRY", &["cloudberry"]),
+    ("фейхоа", "feijoa, a green FRUIT", &["feijoa", "pineapple guava"]),
+    // ── Кухни, а не языки ──
+    // Национальные блюда приходят в дневник как есть, и по имени модель достраивает
+    // их наугад: «Кыстыбый» она звала лососем, «Эчпочмак» — русским пельменем. Здесь
+    // важен СОСТАВ: по нему решаются мясные признаки и овощная планка.
+    ("кыстыбый", "a Tatar flatbread folded over MASHED POTATO, usually without meat",
+        &["kystybyi"]),
+    ("эчпочмак", "a Tatar triangular PASTRY filled with BEEF or LAMB, potato and onion",
+        &["echpochmak", "uchpuchmak"]),
+    ("бешбармак", "boiled LAMB, BEEF or horse meat with flat noodles", &["beshbarmak"]),
+    ("куурдак", "fried MEAT of lamb or beef with potato and onion", &["kuurdak", "kavardak"]),
+    ("манты", "steamed DUMPLINGS filled with minced LAMB or BEEF and onion", &["manti"]),
+    ("лагман", "hand-pulled NOODLES with MEAT and vegetables", &["lagman"]),
+    ("шурпа", "a rich SOUP of LAMB or BEEF with vegetables", &["shurpa", "shorpa"]),
+    ("самса", "a baked PASTRY filled with minced MEAT and onion", &["samsa", "samosa"]),
+    ("чак-чак", "fried dough pieces in honey — a SWEET, no meat", &["chak-chak"]),
+    ("хачапури", "a Georgian bread filled with CHEESE, sometimes an egg", &["khachapuri"]),
+    ("хинкали", "large Georgian DUMPLINGS filled with minced MEAT", &["khinkali"]),
+    ("чахохбили", "a Georgian stew of CHICKEN with tomatoes", &["chakhokhbili"]),
+    ("лобио", "a Georgian dish of BEANS", &["lobio"]),
+    ("аджапсандали", "a Georgian stew of VEGETABLES: aubergine, pepper, tomato",
+        &["ajapsandali"]),
+    ("долма", "vine leaves stuffed with minced MEAT and rice", &["dolma"]),
+    ("люля-кебаб", "grilled minced LAMB or BEEF on a skewer", &["lula kebab"]),
+    ("шаурма", "flatbread rolled around roasted MEAT with vegetables and sauce",
+        &["shawarma", "doner"]),
+    ("плов", "rice cooked with MEAT, carrot and onion", &["pilaf", "plov"]),
+    ("пахлава", "layered pastry with NUTS and syrup — a SWEET", &["baklava"]),
+    ("кутабы", "a thin flatbread folded over GREENS, cheese or minced meat", &["qutab"]),
+    ("бозбаш", "a SOUP of LAMB with chickpeas", &["bozbash"]),
+    ("хаш", "a broth of beef or lamb TRIPE and shanks", &["khash"]),
+    ("сациви", "CHICKEN or turkey in a walnut sauce", &["satsivi"]),
 ];
 
 /// Русские сокращения с этикеток. Их модель не знает и достраивает наугад: «Черника
@@ -196,6 +249,9 @@ pub struct FlagsCtx {
     /// Клетчатка, г на 100 г. Её отдаёт растительный узел вместе с частью растения:
     /// продукт там уже опознан, и отдельный запрос за ней был лишними деньгами.
     pub fibre_g: Option<f64>,
+    /// Какие шаги спрашивать. Пустой список значит «ни одного»: признаки на месте
+    /// или их спрашивали меньше суток назад и получили отказ.
+    wanted: Vec<Step>,
     /// Остановиться сразу после опознания. Нужно, когда признаки у продукта уже
     /// есть, а опознание всё равно требуется — его ждут кальций, железо и жиры.
     identify_only: bool,
@@ -214,6 +270,7 @@ impl FlagsCtx {
             identity_confidence: 0.0,
             flags: Flags::default(),
             fibre_g: None,
+            wanted: Vec::new(),
             identify_only: false,
             tries: [0; 7],
             reasons: Vec::new(),
@@ -310,14 +367,21 @@ struct IdentityOption {
 // после этого числа перестают врать: незнакомое получает 0.10, а голец — 0.90 через
 // словарь. Замер это показал ещё до конвейера, но в код тогда перенесли только
 // варианты, и порог отсекать было нечем.
+// ПОЛЯ ЗДЕСЬ БЕЗ ДОКОВ, и это не небрежность.
+//
+// Доки полей уезжают в json_schema, а ai-worker вклеивает схему ТЕКСТОМ в промпт —
+// модель читает их наравне с инструкцией. У этого узла инструкция уже говорит про
+// каждое поле, и повтор оказался вреден: описание «если не знаешь — так и скажи»
+// перевешивало словарь. Замер на слове «Маш», которое В СЛОВАРЕ ЕСТЬ: с описаниями
+// оно не находилось ни разу из трёх, без них — три раза из трёх.
+//
+// У остальных узлов доки полей ОСТАЮТСЯ: там они несут смысл, которого в тексте нет
+// (части растения, доли жира), и без них замеры проседают — растение падало с 32 из
+// 34 до 28.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct IdentityAnswer {
-    /// The closest definition you can recall YOURSELF, without the dictionary. If you
-    /// do not know this word, say so plainly — that is a valid answer.
     from_own_knowledge: String,
-    /// The closest definition from the dictionary, or NONE if nothing in it fits.
     from_dictionary: String,
-    /// The three most likely definitions, the surest one first.
     options: Vec<IdentityOption>,
 }
 
@@ -501,10 +565,16 @@ impl Node for IdentifyNode {
         if ctx.identify_only || !ctx.recognised() {
             return None;
         }
-        Some(Box::new(NodeWrapper::new(FlagNode {
-            executor: self.flags_executor.clone(),
-            step: Step::VegFruit,
-        })))
+        // Первый ЗАПРОШЕННЫЙ шаг, а не первый по порядку: спрашивать признак, который
+        // уже стоит, незачем — и это не экономия, а точность. Продукт с одним пустым
+        // признаком гонял через модель все шесть вопросов, и пять готовых вердиктов
+        // каждый раз переписывались новыми, которые могли и разойтись с прежними.
+        ctx.wanted.first().map(|first| {
+            Box::new(NodeWrapper::new(FlagNode {
+                executor: self.flags_executor.clone(),
+                step: *first,
+            })) as Box<dyn NodeRunner<Self::Context>>
+        })
     }
 }
 
@@ -1035,12 +1105,13 @@ impl Node for FlagNode {
                 step: self.step,
             })));
         }
-        // Иначе — дальше по цепочке. Упавший признак не мешает остальным: он
-        // останется пустым и будет переспрошен в другой раз.
-        self.step.next().map(|next| {
+        // Иначе — к следующему ЗАПРОШЕННОМУ шагу. Упавший признак не мешает
+        // остальным: он останется пустым и будет переспрошен, когда пройдут сутки.
+        let pos = ctx.wanted.iter().position(|s| *s == self.step)?;
+        ctx.wanted.get(pos + 1).map(|next| {
             Box::new(NodeWrapper::new(FlagNode {
                 executor: self.executor.clone(),
-                step: next,
+                step: *next,
             })) as Box<dyn NodeRunner<Self::Context>>
         })
     }
@@ -1061,7 +1132,47 @@ pub struct Recognised {
     pub recognised: bool,
 }
 
-pub async fn classify_all(food_name: &str) -> Result<Recognised, String> {
+/// Признак, который можно попросить у конвейера. Снаружи шаги называются так же,
+/// как поля продукта, — чтобы вызывающий не знал о внутреннем порядке узлов.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Aspect {
+    VegFruit,
+    Heme,
+    MilkGlobule,
+    RedMeat,
+    ProcessedMeat,
+    Egg,
+}
+
+impl Aspect {
+    fn step(self) -> Step {
+        match self {
+            Aspect::VegFruit => Step::VegFruit,
+            Aspect::Heme => Step::Heme,
+            Aspect::MilkGlobule => Step::MilkGlobule,
+            Aspect::RedMeat => Step::RedMeat,
+            Aspect::ProcessedMeat => Step::ProcessedMeat,
+            Aspect::Egg => Step::Egg,
+        }
+    }
+
+    /// Имя для следа попыток — устойчивое, менять нельзя.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Aspect::VegFruit => "veg_fruit",
+            Aspect::Heme => "heme",
+            Aspect::MilkGlobule => "milk_globule",
+            Aspect::RedMeat => "red_meat",
+            Aspect::ProcessedMeat => "processed_meat",
+            Aspect::Egg => "egg",
+        }
+    }
+}
+
+/// Спросить перечисленные признаки. `wanted` — только те, которых не хватает и
+/// которые сегодня ещё не спрашивали: остальные не трогаем, чтобы готовый вердикт не
+/// переписывался новым, который может с ним и разойтись.
+pub async fn classify_all(food_name: &str, wanted: &[Aspect]) -> Result<Recognised, String> {
     // Thinking ON. В остальных запросах он выключен: qwen3 паркует короткий ответ в
     // канал размышления и отдаёт пустой контент. Здесь пробуем включить, потому что
     // узлам достались настоящие противоречия — «язык это мышца, но орган», «копчёная
@@ -1072,7 +1183,18 @@ pub async fn classify_all(food_name: &str) -> Result<Recognised, String> {
         flags_executor: build_executor_think(true)?,
     })));
 
-    let mut stream = run_pipeline(pipeline, FlagsCtx::new(food_name));
+    let mut ctx = FlagsCtx::new(food_name);
+    // Порядок узлов сохраняем свой, а не тот, в котором попросили: у шагов он выверен
+    // замерами (мясные идут после гема).
+    ctx.wanted = [
+        Step::VegFruit, Step::Heme, Step::RedMeat,
+        Step::ProcessedMeat, Step::MilkGlobule, Step::Egg,
+    ]
+    .into_iter()
+    .filter(|s| wanted.iter().any(|a| a.step() == *s))
+    .collect();
+
+    let mut stream = run_pipeline(pipeline, ctx);
     let mut last: Option<FlagsCtx> = None;
     while let Some(ev) = stream.next().await {
         if let NodeEvent::Completed(ctx) = ev {

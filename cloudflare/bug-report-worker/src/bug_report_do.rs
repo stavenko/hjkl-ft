@@ -51,6 +51,19 @@ impl BugReportDO {
             )",
             None,
         )?;
+        // Неопознанная еда: копится здесь, а не в Analytics Engine, потому что из
+        // воркера её надо ЧИТАТЬ — раз в сутки, чтобы отправить сводку. Аналитика
+        // читается только снаружи, по API и с отдельным токеном; своя таблица снимает
+        // и токен, и зависимость.
+        self.state.storage().sql().exec(
+            "CREATE TABLE IF NOT EXISTS unknown_food (
+                id        TEXT PRIMARY KEY,
+                subject   TEXT NOT NULL,
+                user      TEXT NOT NULL,
+                seen_at   INTEGER NOT NULL
+            )",
+            None,
+        )?;
         Ok(())
     }
 
@@ -103,6 +116,53 @@ impl BugReportDO {
         Response::from_json(&serde_json::json!({ "id": id }))
     }
 
+    /// Записать одну встречу с неопознанной едой.
+    fn add_unknown(&self, b: &serde_json::Value) -> Result<Response> {
+        let subject = Self::str_or_default(b, "subject", "");
+        let user = Self::str_or_default(b, "user", "");
+        if subject.is_empty() {
+            return Response::error("missing subject", 400);
+        }
+        self.state.storage().sql().exec(
+            "INSERT INTO unknown_food (id, subject, user, seen_at) VALUES (?, ?, ?, ?)",
+            Some(vec![
+                format!("uf_{}", uuid_v4()).into(),
+                subject.into(),
+                user.into(),
+                (Date::now().as_millis() as i64).into(),
+            ]),
+        )?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    /// Сводка за последние `hours` часов: продукт, сколько раз и у скольких РАЗНЫХ
+    /// людей. Людей считаем отдельно: один человек, добавивший продукт трижды, — не то
+    /// же, что трое, споткнувшихся об одно имя, и пополнять словарь стоит по второму.
+    fn unknown_digest(&self, hours: i64) -> Result<Response> {
+        let since = Date::now().as_millis() as i64 - hours * 3_600_000;
+        let rows: Vec<serde_json::Value> = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT subject, COUNT(*) AS n, COUNT(DISTINCT user) AS people
+                   FROM unknown_food
+                  WHERE seen_at > ?
+                  GROUP BY subject
+                  ORDER BY people DESC, n DESC
+                  LIMIT 30",
+                Some(vec![since.into()]),
+            )?
+            .to_array::<serde_json::Value>()?;
+        // Старое чистим здесь же: таблица служебная, месяца истории хватает с запасом.
+        let cutoff = Date::now().as_millis() as i64 - 30 * 24 * 3_600_000;
+        self.state.storage().sql().exec(
+            "DELETE FROM unknown_food WHERE seen_at < ?",
+            Some(vec![cutoff.into()]),
+        )?;
+        Response::from_json(&serde_json::json!({ "foods": rows }))
+    }
+
     fn list(&self) -> Result<Response> {
         let rows: Vec<serde_json::Value> = self
             .state
@@ -137,6 +197,18 @@ impl DurableObject for BugReportDO {
                 self.insert(&b)
             }
             (Method::Get, "/reports") => self.list(),
+            (Method::Post, "/unknown-food") => {
+                let b: serde_json::Value = req.json().await?;
+                self.add_unknown(&b)
+            }
+            (Method::Get, "/unknown-digest") => {
+                let hours = url
+                    .query_pairs()
+                    .find(|(k, _)| k == "hours")
+                    .and_then(|(_, v)| v.parse::<i64>().ok())
+                    .unwrap_or(24);
+                self.unknown_digest(hours)
+            }
             // Erase one user's reports (the DO is global, so this is a targeted delete).
             (Method::Post, "/wipe-user") => {
                 let b: serde_json::Value = req.json().await?;
@@ -146,6 +218,10 @@ impl DurableObject for BugReportDO {
                     .ok_or_else(|| Error::RustError("missing user_id".into()))?;
                 self.state.storage().sql().exec(
                     "DELETE FROM reports WHERE user = ?",
+                    Some(vec![user.into()]),
+                )?;
+                self.state.storage().sql().exec(
+                    "DELETE FROM unknown_food WHERE user = ?",
                     Some(vec![user.into()]),
                 )?;
                 Response::from_json(&serde_json::json!({ "ok": true }))

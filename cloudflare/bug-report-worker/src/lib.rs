@@ -121,6 +121,14 @@ async fn require_secrets(env: &Env) -> std::result::Result<(), Response> {
     Ok(())
 }
 
+/// Раз в сутки — сводка о неопознанной еде (см. `send_unknown_digest`).
+#[event(scheduled)]
+async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    if let Err(e) = send_unknown_digest(&env).await {
+        console_error!("суточная сводка: {e}");
+    }
+}
+
 #[event(fetch)]
 async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let origin = req
@@ -224,6 +232,26 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         }
         let res = do_get(&stub, "/reports").await?;
         return cors_relay(res).await;
+    }
+
+    // Ручной запуск суточной сводки — тем же ключом разработчика. Нужен, чтобы
+    // проверить путь до Telegram, не дожидаясь ночного расписания, и чтобы было чем
+    // разбираться, если сводка вдруг перестанет приходить.
+    if method == Method::Post && path == "/admin/digest" {
+        let admin_key = req
+            .headers()
+            .get("X-Admin-Key")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let expected = token::secret_or_var(env, "ADMIN_KEY")
+            .await
+            .map_err(Error::RustError)?;
+        if admin_key != expected {
+            return Ok(error_response("Unauthorized", 401));
+        }
+        send_unknown_digest(env).await?;
+        return Response::from_json(&serde_json::json!({ "ok": true }));
     }
 
     // ── Everything else is app-JWT authed ──
@@ -345,6 +373,58 @@ async fn record_event(mut req: Request, env: &Env, user_id: &str) -> Result<Resp
     Response::from_json(&serde_json::json!({ "ok": true })).map(|r| r.with_status(202))
 }
 
+/// Суточная сводка о неопознанной еде — в Telegram.
+///
+/// Шлётся ОДНИМ сообщением раз в сутки, а не по событию: один продукт при трёх
+/// попытках и каждом обходе очереди даёт десятки срабатываний, и такие оповещения
+/// выключают на второй день. Нечего сказать — молчим.
+///
+/// Бот и получатель заданы секретами; без них рассылка просто не делается — это не
+/// ошибка, а незаданная настройка.
+async fn send_unknown_digest(env: &Env) -> Result<()> {
+    let token = match token::secret_or_var(env, "TELEGRAM_ALERT_BOT_TOKEN").await {
+        Ok(t) if !t.is_empty() => t,
+        _ => return Ok(()),
+    };
+    let chat_id = match token::secret_or_var(env, "TELEGRAM_ALERT_CHAT_ID").await {
+        Ok(c) if !c.is_empty() => c,
+        _ => return Ok(()),
+    };
+
+    let stub = bug_stub(env)?;
+    let mut resp = do_get(&stub, "/unknown-digest?hours=24").await?;
+    let body: serde_json::Value = resp.json().await?;
+    let foods = body.get("foods").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    if foods.is_empty() {
+        return Ok(());
+    }
+
+    let mut lines = vec![format!("Не опознано за сутки: {} продукт(ов)", foods.len())];
+    for f in foods.iter().take(20) {
+        let subject = f.get("subject").and_then(|v| v.as_str()).unwrap_or("?");
+        let people = f.get("people").and_then(|v| v.as_i64()).unwrap_or(0);
+        let n = f.get("n").and_then(|v| v.as_i64()).unwrap_or(0);
+        lines.push(format!("• {subject} — {people} чел., {n} раз"));
+    }
+    lines.push(String::new());
+    lines.push("Каждое имя — повод пополнить словарь редких имён.".to_string());
+
+    let url = format!("https://api.telegram.org/bot{token}/sendMessage");
+    let payload = serde_json::json!({ "chat_id": chat_id, "text": lines.join("\n") });
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/json")?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(serde_json::to_string(&payload)?.into()));
+    let req = Request::new_with_init(&url, &init)?;
+    let mut r = Fetch::Request(req).send().await?;
+    if r.status_code() < 200 || r.status_code() >= 300 {
+        console_error!("сводка не ушла: {} {}", r.status_code(), r.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
 // ── Определения → Analytics Engine ───────────────────────────────────────────
 //
 // Что модель РАЗОБРАЛА, а не на чём споткнулась. Без этого потока видны только
@@ -403,6 +483,14 @@ async fn record_detection(mut req: Request, env: &Env, user_id: &str) -> Result<
     // на нём стоит правило оповещения.
     let alerted = kind == UNRECOGNISED_FOOD;
     if alerted {
+        // В DO — чтобы было что собрать в суточную сводку. Аналитика для этого не
+        // годится: её читают только снаружи, по отдельному токену.
+        if let Ok(stub) = bug_stub(env) {
+            let row = serde_json::json!({ "subject": subject, "user": user_id });
+            if let Err(e) = do_post(&stub, "/unknown-food", &row).await {
+                console_error!("unknown-food не записан: {e}");
+            }
+        }
         console_error!(
             "{ALERT_PREFIX} «{subject}» — {} (user {user_id}, {}, {})",
             field(&body, "reason"),

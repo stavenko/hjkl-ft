@@ -60,6 +60,15 @@ use super::ai::{build_executor_think, strip_code_fences, veg_fruit_from_category
 /// выдуманного, и его переспросят при следующем проходе.
 const IDENTITY_MIN_CONFIDENCE: f64 = 0.6;
 
+/// Во сколько раз обесценивается уверенность, когда модель сама призналась, что слова
+/// не знает, а словарь его не содержит.
+///
+/// Числа она в этом случае ставит не еде, а СВОЕЙ ФОРМУЛИРОВКЕ: «Бубурек копчёный — a
+/// type of smoked bread» набирал 0.80 при честном «I do not know this word». С этим
+/// множителем такой ответ даёт 0.48 и до порога не дотягивает, а ответ с полной
+/// уверенностью — ровно 0.6 — проходит.
+const IDENTITY_UNKNOWN_PENALTY: f64 = 0.6;
+
 /// Имя аспекта опознания в следе попыток (`services::food_probe`). Устойчивое:
 /// по нему отбираются продукты, которые не удалось опознать вовсе.
 pub const ASPECT_IDENTITY: &str = "identity";
@@ -245,6 +254,10 @@ pub struct FlagsCtx {
     pub identity: Option<String>,
     /// Уверенность лучшего варианта опознания, 0…1.
     pub identity_confidence: f64,
+    /// Модель ответила про своё знание словом UNKNOWN.
+    pub identity_unknown_to_model: bool,
+    /// В словаре редких имён ничего не нашлось (NONE).
+    pub identity_dictionary_empty: bool,
     pub flags: Flags,
     /// Клетчатка, г на 100 г. Её отдаёт растительный узел вместе с частью растения:
     /// продукт там уже опознан, и отдельный запрос за ней был лишними деньгами.
@@ -268,6 +281,8 @@ impl FlagsCtx {
             food_name: food_name.to_string(),
             identity: None,
             identity_confidence: 0.0,
+            identity_unknown_to_model: false,
+            identity_dictionary_empty: false,
             flags: Flags::default(),
             fibre_g: None,
             wanted: Vec::new(),
@@ -278,14 +293,35 @@ impl FlagsCtx {
         }
     }
 
-    /// Опознан ли продукт: уверенность лучшей версии не ниже порога.
+    /// Опознан ли продукт.
     ///
-    /// Спрашивать вдобавок «знаешь ли ты эту еду» пробовали — негодно: своей памятью
-    /// модель не знает и гольца, его опознаёт словарь, и на прямой вопрос она честно
-    /// отвечает «нет» про всё редкое сразу. Порог работает, когда у опознания
-    /// выключено рассуждение: тогда числа честные.
+    /// РЕШАЕТ ПРИЗНАНИЕ, А НЕ ЧИСЛО. На выдуманное слово модель отвечает «I do not know
+    /// this word» и тут же ставит версиям 0.80, 0.70, 0.60: числа выражают уверенность
+    /// в ФОРМУЛИРОВКЕ, а не в том, что такая еда есть. «Бубурек копчёный — a type of
+    /// smoked bread» набирал 0.80 три раза из трёх. Признание спрашивается отдельным
+    /// булевым полем — разбирать его из текста значило бы гадать по словам.
+    ///
+    /// Поэтому опознание считается несостоявшимся, когда модель не вспомнила ничего
+    /// САМА и словарь тоже промолчал. Одного из двух хватает: голец опознан словарём,
+    /// творог — памятью.
+    ///
+    /// Порог по уверенности остаётся вторым ситом — он ловит случаи, где модель
+    /// что-то припомнила, но сама себе не верит.
     fn recognised(&self) -> bool {
-        self.identity_confidence >= IDENTITY_MIN_CONFIDENCE
+        self.identity_weight() >= IDENTITY_MIN_CONFIDENCE
+    }
+
+    /// Уверенность, ПОНИЖЕННАЯ ПРИЗНАНИЕМ: модель сказала, что слова не знает, и
+    /// словарь тоже промолчал — значит версия построена ни на чём, и её число значит
+    /// меньше. Множитель `IDENTITY_UNKNOWN_PENALTY` оставляет дорогу только тем
+    /// ответам, где модель уверена полностью.
+    ///
+    /// Понижаем ТОЛЬКО когда молчат оба: гольца модель своей памятью не знает, его
+    /// опознаёт словарь, и штрафовать за это было бы наказанием за честность.
+    fn identity_weight(&self) -> f64 {
+        let guessing = self.identity_unknown_to_model && self.identity_dictionary_empty;
+        let penalty = if guessing { IDENTITY_UNKNOWN_PENALTY } else { 1.0 };
+        self.identity_confidence * penalty
     }
 
     /// Строка «это ЕСТЬ то-то» для промптов признаков. Пустая, если опознать не
@@ -380,8 +416,20 @@ struct IdentityOption {
 // 34 до 28.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct IdentityAnswer {
+    // ПОРЯДОК ПОЛЕЙ — ЭТО ПОРЯДОК РАССУЖДЕНИЯ. Каждый флаг идёт СРАЗУ ЗА своим
+    // текстом: сперва модель пишет, что вспомнила, и тут же отвечает, знает ли слово
+    // вообще; потом — что нашла в словаре, и тут же, нашла ли. Два флага подряд
+    // модель заполняет согласованно, и признание в одном тянет за собой другое.
     from_own_knowledge: String,
+    /// Слово не говорит модели ничего. Это и есть главный сигнал: на выдуманное имя
+    /// она отвечает честно, но версиям всё равно ставит 0.80 — числа выражают
+    /// уверенность в формулировке, а не в существовании такой еды.
+    i_dont_know_this_word: bool,
     from_dictionary: String,
+    /// Нашлась ли строка словаря ПРО ЭТУ еду. Булевым полем, а не разбором «NONE» из
+    /// текста: строку она пишет по-разному — «NONE», «none», «NONE — nothing fits», —
+    /// и любое отклонение молча означало бы «словарь нашёл», сняв штраф с выдумки.
+    i_see_this_food_in_the_dictionary: bool,
     options: Vec<IdentityOption>,
 }
 
@@ -458,13 +506,22 @@ impl Prompt for IdentifyPrompt {
     fn serialize(&self) -> String {
         format!(
             "A person wrote this into their food diary: {name}\n\n\
-             Answer three things about it.\n\
+             Answer five things about it.\n\
              1. \"from_own_knowledge\": the closest definition you can recall YOURSELF, without \
-             the dictionary. If you do not know this word, say so plainly — that is a valid \
-             answer.\n\
-             2. \"from_dictionary\": the closest definition from the dictionary below, or NONE \
+             the dictionary.\n\
+             2. \"i_dont_know_this_word\": true when the name means NOTHING to you — no \
+             memory, no resemblance, nothing but a guess from the way it sounds. False for \
+             ordinary foods you do know: творог, гречка, скумбрия, вишня.\n\
+             3. \"from_dictionary\": the closest definition from the dictionary below, or NONE \
              if nothing in it fits this name.\n\
-             3. \"options\": the three most likely definitions of the food, the surest first, \
+             4. \"i_see_this_food_in_the_dictionary\": true when a line of the dictionary is \
+             about THIS food — the same word, in another grammatical case, in Latin letters or \
+             misspelled. False when the dictionary holds nothing about it.\n\
+             A NAME OFTEN CARRIES AN ORDINARY WORD BESIDE THE UNKNOWN ONE — «копчёный», \
+             «сладкая», «филе». Reading the meaning off THAT word is still a guess: in \
+             «Бубурек копчёный» you know what smoked means, but you do not know what a \
+             бубурек is, and the answer there is true.\n\
+             5. \"options\": the three most likely definitions of the food, the surest first, \
              each a sentence of five or six words, each with your confidence from 0.0 to \
              1.0.\n\n\
              {rare}Respond with ONLY a minified JSON object and nothing else.",
@@ -480,11 +537,15 @@ impl Prompt for IdentifyPrompt {
                 // Признакам уходят ВСЕ варианты с их достоверностью, а не только
                 // первый: пусть видно, что уверенности нет, — «голец» модель звала и
                 // рыбой, и кониной, и разница между 0.9 и 0.4 здесь и есть ответ.
+                ctx.identity_unknown_to_model = a.i_dont_know_this_word;
+                ctx.identity_dictionary_empty = !a.i_see_this_food_in_the_dictionary;
                 leptos::logging::log!(
-                    "опознание «{}»: память — {} · словарь — {}",
+                    "опознание «{}»: память — {} (не знает: {}) · словарь — {} (нашёл: {})",
                     ctx.food_name,
                     a.from_own_knowledge.trim(),
-                    a.from_dictionary.trim()
+                    a.i_dont_know_this_word,
+                    a.from_dictionary.trim(),
+                    a.i_see_this_food_in_the_dictionary
                 );
                 let opts: Vec<String> = a
                     .options
@@ -1209,8 +1270,12 @@ pub async fn classify_all(food_name: &str, wanted: &[Aspect]) -> Result<Recognis
     if !ctx.recognised() {
         let what = ctx.identity.clone().unwrap_or_else(|| "(нет версий)".to_string());
         leptos::logging::log!(
-            "НЕ ОПОЗНАНО «{food_name}»: лучшая версия {:.2} — {what}",
-            ctx.identity_confidence
+            "НЕ ОПОЗНАНО «{food_name}»: вес {:.2} (уверенность {:.2}, сама не знает: {}, \
+             словарь пуст: {}) — {what}",
+            ctx.identity_weight(),
+            ctx.identity_confidence,
+            ctx.identity_unknown_to_model,
+            ctx.identity_dictionary_empty
         );
         crate::services::telemetry::report_detection(
             "identity.unknown",

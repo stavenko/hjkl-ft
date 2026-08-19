@@ -1066,49 +1066,6 @@ pub(crate) const IRON_CATEGORIES: &[IronCategory] = &[
         examples: "чай, кофе, какао, шоколад" },
 ];
 
-// Модель отвечает ТОЛЬКО про содержание железа: min / max / most-likely — тот же
-// бракет, что у любого другого нутриента. Доля усвоения у неё не спрашивается: она
-// её не знает (без таблицы даёт чечевице и творогу те же 0.20, что и говядине), а с
-// таблицей в промпте начинала списывать её числа в поле миллиграммов. Долю даёт
-// `IRON_CATEGORIES` по выбранной строке.
-//
-// NB: `///` doc comments on this struct and its fields are turned into the JSON
-// schema's `description` strings by `schemars`, and the ai-worker pastes that schema
-// into the prompt verbatim. Everything written with `///` here is therefore READ BY
-// THE MODEL — keep it addressed to the model, and put developer rationale in `//`
-// comments like this one.
-// ШАГ 1 — только КЛАССИФИКАЦИЯ. Ни одного числа: этому промпту таблица показывается
-// без диапазонов, поэтому списать оттуда нечего, и вся его работа — узнать продукт.
-// Совмещённый промпт (категория + величина разом) путался: арбуз получал усвоение
-// 0.15 — долю мясной строки, — а голец объявлялся говядиной.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub(crate) struct IronCategoryPick {
-    /// The category key from the list, copied EXACTLY as written there.
-    pub(crate) category: String,
-    /// What this product actually is, in two or three words.
-    pub(crate) food_type: String,
-    /// One short sentence: why this category. Keep it under 15 words.
-    pub(crate) reason: String,
-}
-
-// ШАГ 2 — только ВЕЛИЧИНА. Категория уже выбрана и передана готовой; здесь называется
-// одно количество внутри её диапазона, и выбирать больше нечего.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub(crate) struct IronAmount {
-    /// IRON CONTENT per 100 g, in milligrams.
-    pub(crate) recommended_iron: f64,
-    /// How sure you are of `recommended_iron`, from 0.0 to 1.0. Be honest: 1.0 means you
-    /// know THIS food's iron content; 0.0 means you are guessing from the category alone.
-    pub(crate) iron_confidence: f64,
-    /// The name of the REFERENCE entry this food matches, copied exactly as written
-    /// there, or NONE when the reference has nothing for it.
-    #[serde(default)]
-    pub(crate) reference_key: String,
-    /// One short sentence: why this amount. Keep it under 15 words.
-    pub(crate) reason: String,
-}
-
-
 // ── Профиль жира ─────────────────────────────────────────────────────────────
 //
 // Спрашиваются ДОЛИ от жира продукта, а не миллиграммы на 100 г: `Food::fat` у нас

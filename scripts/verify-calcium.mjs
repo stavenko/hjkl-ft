@@ -125,6 +125,13 @@ const CALCIUM_REFERENCE = [
   ["капуста белокочанная", 40.0],
   ["цветная капуста", 22.0],
   ["гречка сухая", 20.0],
+  ["гречка варёная", 7.0],
+  ["рис белый варёный", 3.0],
+  ["овсянка на воде", 8.0],
+  ["макароны варёные", 7.0],
+  ["чечевица варёная", 19.0],
+  ["фасоль варёная", 35.0],
+  ["нут варёный", 49.0],
   ["овсянка сухая", 52.0],
   ["перловка сухая", 29.0],
   ["пшено сухое", 27.0],
@@ -270,7 +277,9 @@ const calciumPrompt = (name, identity) =>
   "give a value that fits the row.\n\n" +
   CALCIUM_ROWS.map(([k, , , ex]) => `  ${k.padEnd(20)} — ${ex}`).join("\n") + "\n\n" +
   "For raw or dry as-sold products (grains, seeds, legumes, flour) use the RAW value unless " +
-  "the name says cooked, boiled or soaked.\n\n" +
+  "the name says cooked, boiled or soaked. THIS DECIDES THE ENTRY TOO: for a name that says " +
+  "nothing about cooking, «Овсянка» or «Гречка», the dry entry is the right one — a boiled " +
+  "entry may be picked only when the name itself says boiled.\n\n" +
   "Rules for choosing the row:\n" +
   "- Cheese goes by HARDNESS: hard and dry → cheese_hard, semi-hard and brined → cheese_semi, " +
   "soft and fresh → cheese_soft, melted/processed → cheese_processed.\n" +

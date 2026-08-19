@@ -659,6 +659,13 @@ pub(crate) const CALCIUM_REFERENCE: &[(&str, f64)] = &[
     ("капуста белокочанная", 40.0),
     ("цветная капуста", 22.0),
     ("гречка сухая", 20.0),
+    ("гречка варёная", 7.0),
+    ("рис белый варёный", 3.0),
+    ("овсянка на воде", 8.0),
+    ("макароны варёные", 7.0),
+    ("чечевица варёная", 19.0),
+    ("фасоль варёная", 35.0),
+    ("нут варёный", 49.0),
     ("овсянка сухая", 52.0),
     ("перловка сухая", 29.0),
     ("пшено сухое", 27.0),
@@ -782,7 +789,9 @@ pub async fn lookup_calcium(food_name: &str, identity: &str) -> Result<f64, Stri
          with NONE and give a value that fits the row.\n\n\
          {table}\n\n\
          For raw or dry as-sold products (grains, seeds, legumes, flour) use the RAW value \
-         unless the name says cooked, boiled or soaked.\n\n\
+         unless the name says cooked, boiled or soaked. THIS DECIDES THE ENTRY TOO: for a name \
+         that says nothing about cooking, «Овсянка» or «Гречка», the dry entry is the right \
+         one — a boiled entry may be picked only when the name itself says boiled.\n\n\
          Rules for choosing the row:\n\
          - Cheese goes by HARDNESS: hard and dry → cheese_hard, semi-hard and brined → \
            cheese_semi, soft and fresh → cheese_soft, melted/processed → cheese_processed.\n\
@@ -960,6 +969,14 @@ pub(crate) const IRON_REFERENCE: &[(&str, f64, f64)] = &[
     ("фасоль варёная", 2.9, 0.05),
     ("тофу", 5.4, 0.03),
     ("гречка сухая", 6.7, 0.04),
+    ("перловка сухая", 2.5, 0.04),
+    ("пшено сухое", 2.7, 0.04),
+    ("булгур сухой", 2.5, 0.04),
+    ("киноа сухая", 4.6, 0.04),
+    ("полба сухая", 4.4, 0.04),
+    ("манка сухая", 1.0, 0.08),
+    ("рис белый сухой", 0.8, 0.08),
+    ("макароны сухие", 1.3, 0.08),
     ("гречка варёная", 1.5, 0.04),
     ("овсянка сухая", 4.3, 0.04),
     ("овсянка на воде", 1.7, 0.04),

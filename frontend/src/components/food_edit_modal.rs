@@ -69,6 +69,9 @@ pub fn FoodEditModal(
     // колбасой, ни поправить.
     let f_red = create_rw_signal(food.is_red_meat);
     let f_processed = create_rw_signal(food.is_processed_meat);
+    // Яйцо — здесь же, хотя своей шкалы у него пока нет: признак виден человеку,
+    // значит он должен быть виден и правим, иначе спорить с ним не с чем.
+    let f_egg = create_rw_signal(food.is_egg);
 
     // Portal строит разметку повторно, значит всё внутри должно переживать
     // повторный вызов. Обычное замыкание уехало бы в on:click при первом же
@@ -115,6 +118,7 @@ pub fn FoodEditModal(
             is_heme: f_heme.get_untracked(),
             is_red_meat: f_red.get_untracked(),
             is_processed_meat: f_processed.get_untracked(),
+            is_egg: f_egg.get_untracked(),
         };
         let eid = entry_id.clone();
         spawn_local(async move {
@@ -313,6 +317,7 @@ pub fn FoodEditModal(
                             {flag_row("Источник гемового железа", f_heme)}
                             {flag_row("Красное мясо", f_red)}
                             {flag_row("Мясо глубокой переработки", f_processed)}
+                            {flag_row("Яйцо птицы", f_egg)}
                             // Весь состав жира, в граммах на 100 г продукта. Правке
                             // не подлежит: это доли профиля, умноженные на жир, —
                             // менять надо профиль, а не результат.

@@ -1077,6 +1077,7 @@ pub struct AiFoodData {
     pub is_heme: Option<bool>,
     pub is_red_meat: Option<bool>,
     pub is_processed_meat: Option<bool>,
+    pub is_egg: Option<bool>,
 }
 
 pub async fn edit_food_for_entry(
@@ -1099,18 +1100,19 @@ pub async fn edit_food_for_entry(
     let mut nutrients = ai.nutrients;
     // Мясные признаки сбрасываются вместе с остальными: они выведены из ТОГО ЖЕ
     // имени, и под новым именем «колбаса» от прежнего продукта осталась бы висеть.
-    let (is_veg_fruit, is_heme, is_red_meat, is_processed_meat, iron_mg, iron_absorption) =
+    let (is_veg_fruit, is_heme, is_red_meat, is_processed_meat, is_egg, iron_mg, iron_absorption) =
         if renamed {
             for key in crate::services::enrich::nutrient_names() {
                 nutrients.remove(key);
             }
-            (None, None, None, None, None, None)
+            (None, None, None, None, None, None, None)
         } else {
             (
                 ai.is_veg_fruit,
                 ai.is_heme,
                 ai.is_red_meat,
                 ai.is_processed_meat,
+                ai.is_egg,
                 ai.iron_mg,
                 ai.iron_absorption,
             )
@@ -1128,7 +1130,7 @@ pub async fn edit_food_for_entry(
         let copy = Food {
             id: new_id(),
             name, kcal, protein, fat, carbs, nutrients,
-            is_veg_fruit, is_heme, is_red_meat, is_processed_meat,
+            is_veg_fruit, is_heme, is_red_meat, is_processed_meat, is_egg,
             iron_mg, iron_absorption,
             created_at: now(),
             updated_at: now(),
@@ -1142,7 +1144,7 @@ pub async fn edit_food_for_entry(
     } else {
         let updated = Food {
             name, kcal, protein, fat, carbs, nutrients,
-            is_veg_fruit, is_heme, is_red_meat, is_processed_meat,
+            is_veg_fruit, is_heme, is_red_meat, is_processed_meat, is_egg,
             iron_mg, iron_absorption,
             updated_at: now(),
             ..food.clone()

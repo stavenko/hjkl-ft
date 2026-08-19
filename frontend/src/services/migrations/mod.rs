@@ -63,6 +63,7 @@ mod m015_recompute_indicators;
 mod m016_reask_heme_again;
 mod m017_reask_veg_fruit;
 mod m018_reask_processed_meat;
+mod m019_reask_calcium;
 
 #[cfg(test)]
 mod tests;
@@ -179,6 +180,11 @@ const ALL: &[Migration] = &[
         version: m018_reask_processed_meat::VERSION,
         description: m018_reask_processed_meat::DESCRIPTION,
         script: || Box::pin(m018_reask_processed_meat::script()),
+    },
+    Migration {
+        version: m019_reask_calcium::VERSION,
+        description: m019_reask_calcium::DESCRIPTION,
+        script: || Box::pin(m019_reask_calcium::script()),
     },
 ];
 

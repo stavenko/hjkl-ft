@@ -228,7 +228,19 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.iron_gate_title" => "Meet the iron target this week.",
         "dashboard.progress.iron_done_title" => "You have met the iron target.",
         "dashboard.progress.iron_done_progress" => "The next story opens in {n} {w}.",
-        "dashboard.progress.gate_progress" => "{n} {w} left.",
+        "dashboard.progress.fat_gate_title" => "Meet the omega-3 target this week.",
+        "dashboard.progress.fat_done_title" => "You have met the omega-3 target.",
+        "dashboard.progress.red_meat_gate_title" => "Keep red meat within the weekly limit.",
+        "dashboard.progress.red_meat_over_title" => "You have eaten too much red meat this week. We will try again next week.",
+        "dashboard.progress.week_left_progress" => "The week ends in {n} {w}.",
+        "dashboard.progress.days_left_progress" => "{n} {w} left.",
+        "dashboard.progress.gate_progress" => "{n} more green {w} to go.",
+        "dashboard.progress.next_week" => "After that you get the {week} with a new task.",
+        "dashboard.progress.week_steps" => "steps week",
+        "dashboard.progress.week_calcium" => "calcium week",
+        "dashboard.progress.week_iron" => "iron week",
+        "dashboard.progress.week_fat" => "fat week",
+        "dashboard.progress.week_red_meat" => "red meat week",
         "dashboard.progress.kcal_day" => "kcal/day",
         "dashboard.progress.done_hint" => "We'll adjust it as observations come in.",
         "dashboard.progress.help_1" => "Our algorithm will calculate your calorie target for you.",
@@ -1143,7 +1155,29 @@ fn ru(key: &str) -> &'static str {
         // сделал и ждёт только календаря, — иначе молчание читается как «не засчитано».
         "dashboard.progress.iron_done_title" => "Вы закрыли планку по железу.",
         "dashboard.progress.iron_done_progress" => "Следующая история откроется через {n} {w}.",
-        "dashboard.progress.gate_progress" => "Осталось {n} {w}.",
+        // Жиры: гейт закрывается по МОРСКИМ омега-3 (1.75 г за неделю), баланс жира в
+        // условие не входит, — поэтому и зовём к омега-3, а не к «жирам вообще».
+        "dashboard.progress.fat_gate_title" => "Наберите на этой неделе норму омега-3.",
+        "dashboard.progress.fat_done_title" => "Вы набрали норму омега-3.",
+        // Красное мясо: планка обратная, её не выполняют, а не превышают. Следующей
+        // главы за ней пока нет, поэтому про «следующую историю» здесь молчим.
+        "dashboard.progress.red_meat_gate_title" => "Удержите красное мясо в пределах недельной планки.",
+        "dashboard.progress.red_meat_over_title" => "Вы съели слишком много красного мяса на этой неделе. На следующей неделе попробуем ещё раз.",
+        "dashboard.progress.week_left_progress" => "Неделя закончится через {n} {w}.",
+        "dashboard.progress.days_left_progress" => "Осталось {n} {w}.",
+        // У гейтов зелёных дней счёт идёт НЕ по календарю: нужно семь зелёных дней в
+        // скользящем окне восьми суток. Прежнее «Осталось N дней» читалось обратным
+        // отсчётом — и застывшее число (индикатор не держится) или выросшее (зелёный
+        // день ушёл из окна) выглядели поломкой.
+        "dashboard.progress.gate_progress" => "Нужно ещё {n} {w}.",
+        // Что человека ждёт за текущим заданием. Без этой строки гейт выглядит
+        // требованием без причины: держите зелёным — а дальше что?
+        "dashboard.progress.next_week" => "После этого у вас будет {week} с новым заданием.",
+        "dashboard.progress.week_steps" => "неделя шагов",
+        "dashboard.progress.week_calcium" => "неделя кальция",
+        "dashboard.progress.week_iron" => "неделя железа",
+        "dashboard.progress.week_fat" => "неделя жиров",
+        "dashboard.progress.week_red_meat" => "неделя красного мяса",
         "dashboard.progress.kcal_day" => "ккал/день",
         "dashboard.progress.done_hint" => "Мы будем корректировать её по мере наблюдений.",
         "dashboard.progress.help_1" => "Наш алгоритм поможет рассчитать вам вашу планку по калориям.",

@@ -754,6 +754,39 @@ pub fn ProgressWidget() -> impl IntoView {
                                 && calcium_green < indicators::GREEN_GATE_DAYS
                             {
                                 Some(("dashboard.progress.calcium_gate_title", calcium_green))
+                            } else if let Some(w) = red_meat_week.get().flatten() {
+                                // Красное мясо — последняя открытая глава, и подпись
+                                // держится всё время, пока она идёт: следующей за ней
+                                // пока нет, ждать нечего, кроме конца своей недели.
+                                //
+                                // Планка тут ОБРАТНАЯ — её не выполняют, а превышают.
+                                // Перебрал — говорим об этом прямо и зовём на следующую
+                                // неделю; с её началом счётчик недели встаёт в первый
+                                // день, съеденное обнуляется, и подпись сама
+                                // возвращается к первой.
+                                let key = if w.grams > w.limit {
+                                    "dashboard.progress.red_meat_over_title"
+                                } else {
+                                    "dashboard.progress.red_meat_gate_title"
+                                };
+                                Some((key, w.day_of_week - 1))
+                            } else if let Some(w) = fat_week
+                                .get()
+                                .flatten()
+                                .filter(|_| !crate::services::red_meat::unlocked())
+                            {
+                                // Жиры: гейт закрывается по морским омега-3, поэтому и
+                                // заголовок про них, а не про жир вообще. Набранная
+                                // норма, как у железа, не гасит подпись, а меняет её.
+                                // Норма набрана — то же сравнение, что закрывает неделю
+                                // в `fats`: EPA+DHA за неделю против недельной нормы.
+                                // Данных нет — сумма ноль, и это честное «не набрано».
+                                let key = if w.acids.epa_dha_g >= w.epa_dha_target {
+                                    "dashboard.progress.fat_done_title"
+                                } else {
+                                    "dashboard.progress.fat_gate_title"
+                                };
+                                Some((key, w.day_of_week - 1))
                             } else if let Some(w) = iron_week
                                 .get()
                                 .flatten()
@@ -780,36 +813,78 @@ pub fn ProgressWidget() -> impl IntoView {
                             // Show DAYS REMAINING (not "5/7", which read ambiguously as
                             // done-or-left). Russian day-word agrees with the number.
                             let left = indicators::GREEN_GATE_DAYS.saturating_sub(done);
+                            // Вторая строка у каждой главы своя, и вместе с ней меняется
+                            // то, ЧТО считают дни:
+                            //
+                            // * гейты белка, шагов и кальция считают ЗЕЛЁНЫЕ дни — семь
+                            //   штук в скользящем окне восьми суток. Это не календарь:
+                            //   число стоит на месте, пока индикатор не держится, и
+                            //   растёт обратно, когда зелёный день уходит из окна.
+                            //   Поэтому и слово там «зелёных дней», а не «дней»;
+                            // * недельные главы (железо, жиры, мясо) считают настоящие
+                            //   дни до конца своей недели;
+                            // * закрытая планка не гасит подпись, а меняет её: молчание
+                            //   на этом месте читалось бы как «не засчитано».
+                            let progress_key = match title_key {
+                                "dashboard.progress.iron_done_title"
+                                | "dashboard.progress.fat_done_title" => {
+                                    "dashboard.progress.iron_done_progress"
+                                }
+                                "dashboard.progress.red_meat_gate_title"
+                                | "dashboard.progress.red_meat_over_title" => {
+                                    "dashboard.progress.week_left_progress"
+                                }
+                                "dashboard.progress.iron_gate_title"
+                                | "dashboard.progress.fat_gate_title" => {
+                                    "dashboard.progress.days_left_progress"
+                                }
+                                _ => "dashboard.progress.gate_progress",
+                            };
+                            let green_days = progress_key == "dashboard.progress.gate_progress";
                             let word = match crate::services::i18n::get_lang() {
                                 crate::services::i18n::Lang::En => if left == 1 { "day" } else { "days" },
                                 crate::services::i18n::Lang::Ru => {
                                     let (d10, d100) = (left % 10, left % 100);
                                     if d10 == 1 && d100 != 11 {
-                                        "день"
+                                        if green_days { "зелёный день" } else { "день" }
                                     } else if (2..=4).contains(&d10) && !(12..=14).contains(&d100) {
-                                        "дня"
+                                        if green_days { "зелёных дня" } else { "дня" }
+                                    } else if green_days {
+                                        "зелёных дней"
                                     } else {
                                         "дней"
                                     }
                                 }
                             };
-                            // У закрытой планки вторая строка говорит не «осталось
-                            // столько-то», а когда именно откроется следующая история:
-                            // ждать человеку больше нечего, кроме календаря.
-                            let progress_key = if title_key == "dashboard.progress.iron_done_title" {
-                                "dashboard.progress.iron_done_progress"
-                            } else {
-                                "dashboard.progress.gate_progress"
-                            };
                             let progress = t(progress_key)
                                 .replace("{n}", &left.to_string())
                                 .replace("{w}", word);
+                            // ЧТО БУДЕТ ДАЛЬШЕ — глава, которая откроется, названная по
+                            // имени. Без неё задание выглядит требованием без причины:
+                            // держите зелёным, а зачем — неизвестно.
+                            //
+                            // Только у заданий, которые ещё выполняются: у закрытой
+                            // планки своя строка уже говорит про следующую историю, а у
+                            // красного мяса следующей главы пока нет вовсе.
+                            let next_week_key = match title_key {
+                                "dashboard.progress.gate_title" => Some("dashboard.progress.week_steps"),
+                                "dashboard.progress.steps_gate_title" => Some("dashboard.progress.week_calcium"),
+                                "dashboard.progress.calcium_gate_title" => Some("dashboard.progress.week_iron"),
+                                "dashboard.progress.iron_gate_title" => Some("dashboard.progress.week_fat"),
+                                "dashboard.progress.fat_gate_title" => Some("dashboard.progress.week_red_meat"),
+                                _ => None,
+                            };
+                            let next_week = next_week_key.map(|week_key| {
+                                let line = t("dashboard.progress.next_week").replace("{week}", t(week_key));
+                                view! { <span class="is-size-7 has-text-grey">{line}</span> }
+                            });
                             view! {
                                 <div style="display: flex; flex-direction: column; gap: 2px;">
                                     <span class="is-size-7 has-text-weight-semibold">
                                         {move || t(title_key)}
                                     </span>
                                     <span class="is-size-7 has-text-grey">{progress}</span>
+                                    {next_week}
                                 </div>
                             }
                         });

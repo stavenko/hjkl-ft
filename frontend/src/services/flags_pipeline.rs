@@ -64,10 +64,15 @@ const IDENTITY_MIN_CONFIDENCE: f64 = 0.6;
 /// не знает, а словарь его не содержит.
 ///
 /// Числа она в этом случае ставит не еде, а СВОЕЙ ФОРМУЛИРОВКЕ: «Бубурек копчёный — a
-/// type of smoked bread» набирал 0.80 при честном «I do not know this word». С этим
-/// множителем такой ответ даёт 0.48 и до порога не дотягивает, а ответ с полной
-/// уверенностью — ровно 0.6 — проходит.
-const IDENTITY_UNKNOWN_PENALTY: f64 = 0.6;
+/// type of smoked bread» набирал 0.80 при честном признании.
+///
+/// Множитель откалиброван по замеру, а не выбран на глаз. С признанием на руках
+/// уверенность делится надвое: выдумка получает 0.70–0.80 («Зюзюбряк», «Квазилапша»,
+/// «Мормышка»), настоящая еда со странным словом в имени — 0.90–0.95 («Спиральчатый
+/// спагетти», «Экомилк Творожный сыр» из боевого дневника). Граница проходит между
+/// ними: 0.6 / 0.7 ≈ 0.857, то есть 0.90 проходит, 0.80 — нет. Прежние 0.6 ставили
+/// границу на 1.0 и рубили живые продукты вместе с выдумкой.
+const IDENTITY_UNKNOWN_PENALTY: f64 = 0.7;
 
 /// Имя аспекта опознания в следе попыток (`services::food_probe`). Устойчивое:
 /// по нему отбираются продукты, которые не удалось опознать вовсе.
@@ -176,6 +181,23 @@ const RARE_NAMES: &[(&str, &str, &[&str])] = &[
     ("бозбаш", "a SOUP of LAMB with chickpeas", &["bozbash"]),
     ("хаш", "a broth of beef or lamb TRIPE and shanks", &["khash"]),
     ("сациви", "CHICKEN or turkey in a walnut sauce", &["satsivi"]),
+    // ── Сладости и закуски, приходящие в дневник голым именем ──
+    ("козинак", "SEEDS or nuts — most often sunflower — set in hard caramel, a SWEET",
+        &["kozinaki", "seed brittle", "nut brittle"]),
+    ("халва", "a dense SWEET of ground sunflower seeds or sesame with sugar", &["halva"]),
+    ("унаги", "a Japanese sweet-soy SAUCE served with eel, and the grilled eel itself",
+        &["unagi sauce", "kabayaki sauce"]),
+    // ── Марки с этикеток ──
+    // Марка — не еда, но она стоит первым словом, и без строки в словаре модель
+    // отвечает «не знаю такого слова» и роняет опознание целиком. Живым путём так
+    // потерялись «Calve Майонез» и «Экомилк Творожный сыр»: майонез и творожный сыр
+    // модель знает прекрасно, споткнулась она о марку.
+    ("calve", "a BRAND of mayonnaise and sauces — the brand only, not a food",
+        &["Calve"]),
+    ("экомилк", "a BRAND of dairy — the brand only, not a food", &["Ekomilk"]),
+    ("даня", "a BRAND of children's quark and yoghurt desserts, not a name of a person",
+        &["Danya", "Danone kids"]),
+    ("жигули", "a BRAND of beer; «барное 0.0» is its alcohol-free lager", &["Zhiguli"]),
 ];
 
 /// Русские сокращения с этикеток. Их модель не знает и достраивает наугад: «Черника
@@ -255,7 +277,7 @@ pub struct FlagsCtx {
     /// Уверенность лучшего варианта опознания, 0…1.
     pub identity_confidence: f64,
     /// Модель ответила про своё знание словом UNKNOWN.
-    pub identity_unknown_to_model: bool,
+    pub identity_no_food_named: bool,
     /// В словаре редких имён ничего не нашлось (NONE).
     pub identity_dictionary_empty: bool,
     pub flags: Flags,
@@ -281,7 +303,7 @@ impl FlagsCtx {
             food_name: food_name.to_string(),
             identity: None,
             identity_confidence: 0.0,
-            identity_unknown_to_model: false,
+            identity_no_food_named: false,
             identity_dictionary_empty: false,
             flags: Flags::default(),
             fibre_g: None,
@@ -319,7 +341,7 @@ impl FlagsCtx {
     /// Понижаем ТОЛЬКО когда молчат оба: гольца модель своей памятью не знает, его
     /// опознаёт словарь, и штрафовать за это было бы наказанием за честность.
     fn identity_weight(&self) -> f64 {
-        let guessing = self.identity_unknown_to_model && self.identity_dictionary_empty;
+        let guessing = self.identity_no_food_named && self.identity_dictionary_empty;
         let penalty = if guessing { IDENTITY_UNKNOWN_PENALTY } else { 1.0 };
         self.identity_confidence * penalty
     }
@@ -421,10 +443,16 @@ struct IdentityAnswer {
     // вообще; потом — что нашла в словаре, и тут же, нашла ли. Два флага подряд
     // модель заполняет согласованно, и признание в одном тянет за собой другое.
     from_own_knowledge: String,
-    /// Слово не говорит модели ничего. Это и есть главный сигнал: на выдуманное имя
-    /// она отвечает честно, но версиям всё равно ставит 0.80 — числа выражают
-    /// уверенность в формулировке, а не в существовании такой еды.
-    i_dont_know_this_word: bool,
+    /// За именем не стоит еды, которую модель могла бы назвать. Это и есть главный
+    /// сигнал: на выдуманное имя она отвечает честно, но версиям всё равно ставит
+    /// 0.80 — числа выражают уверенность в формулировке, а не в существовании еды.
+    ///
+    /// Вопрос именно о ЕДЕ, а не о слове. Прежнее имя поля —
+    /// `i_dont_know_this_word` — спрашивало про слово, и модель отвечала буквально
+    /// верно: слова «Помбир» (опечатка в «пломбир») или «Спиральчатый» она правда
+    /// не знает. Признание тянуло штраф, и живые продукты отсекались — «ВкусВилл
+    /// Помбир Сэндвич» и «Спиральчатый спагетти» пришли из боевого дневника.
+    i_cannot_name_the_food_behind_this_name: bool,
     from_dictionary: String,
     /// Нашлась ли строка словаря ПРО ЭТУ еду. Булевым полем, а не разбором «NONE» из
     /// текста: строку она пишет по-разному — «NONE», «none», «NONE — nothing fits», —
@@ -509,18 +537,28 @@ impl Prompt for IdentifyPrompt {
              Answer five things about it.\n\
              1. \"from_own_knowledge\": the closest definition you can recall YOURSELF, without \
              the dictionary.\n\
-             2. \"i_dont_know_this_word\": true when the name means NOTHING to you — no \
-             memory, no resemblance, nothing but a guess from the way it sounds. False for \
-             ordinary foods you do know: творог, гречка, скумбрия, вишня.\n\
+             2. \"i_cannot_name_the_food_behind_this_name\": this asks about the FOOD, not \
+             about the words. Diary names are full of words nobody can be expected to know — \
+             makers («Экомилк», «Calve», «ВкусВилл»), misspellings («Помбир» for пломбир), \
+             percentages, cuts, packaging, dialect. None of that matters while a food you DO \
+             know still stands behind them: «Спиральчатый спагетти» is spaghetti, «ВкусВилл \
+             Помбир Сэндвич» is an ice cream sandwich, «Маасдам 45%» is maasdam cheese, \
+             «Жигули барное 0.0» is alcohol-free beer. For all of those the answer is FALSE — \
+             you can name the food. It is FALSE for plain foods too: творог, гречка, скумбрия.\n\
+             THIS ANSWER MUST AGREE WITH THE LINE YOU HAVE JUST WRITTEN. If \
+             \"from_own_knowledge\" names a food — «spaghetti», «пломбир», «cream cheese» — \
+             then you HAVE named the food, and this field is FALSE, however odd the wording \
+             of the name was.\n\
+             Answer TRUE only when nothing edible is left to name once the words you do \
+             understand are set aside. «Копчёный», «сладкая», «ассорти», «столовые», «45%» \
+             name no food: in «Бубурек копчёный» smoked is a way of cooking and бубурек is \
+             nothing you know — TRUE. And an unknown word GLUED to a food word is not a maker \
+             but an unknown food: «Квазилапша» is not lapsha by some «Квази» — TRUE.\n\
              3. \"from_dictionary\": the closest definition from the dictionary below, or NONE \
              if nothing in it fits this name.\n\
              4. \"i_see_this_food_in_the_dictionary\": true when a line of the dictionary is \
              about THIS food — the same word, in another grammatical case, in Latin letters or \
              misspelled. False when the dictionary holds nothing about it.\n\
-             A NAME OFTEN CARRIES AN ORDINARY WORD BESIDE THE UNKNOWN ONE — «копчёный», \
-             «сладкая», «филе». Reading the meaning off THAT word is still a guess: in \
-             «Бубурек копчёный» you know what smoked means, but you do not know what a \
-             бубурек is, and the answer there is true.\n\
              5. \"options\": the three most likely definitions of the food, the surest first, \
              each a sentence of five or six words, each with your confidence from 0.0 to \
              1.0.\n\n\
@@ -537,13 +575,13 @@ impl Prompt for IdentifyPrompt {
                 // Признакам уходят ВСЕ варианты с их достоверностью, а не только
                 // первый: пусть видно, что уверенности нет, — «голец» модель звала и
                 // рыбой, и кониной, и разница между 0.9 и 0.4 здесь и есть ответ.
-                ctx.identity_unknown_to_model = a.i_dont_know_this_word;
+                ctx.identity_no_food_named = a.i_cannot_name_the_food_behind_this_name;
                 ctx.identity_dictionary_empty = !a.i_see_this_food_in_the_dictionary;
                 leptos::logging::log!(
-                    "опознание «{}»: память — {} (не знает: {}) · словарь — {} (нашёл: {})",
+                    "опознание «{}»: память — {} (еду не назвать: {}) · словарь — {} (нашёл: {})",
                     ctx.food_name,
                     a.from_own_knowledge.trim(),
-                    a.i_dont_know_this_word,
+                    a.i_cannot_name_the_food_behind_this_name,
                     a.from_dictionary.trim(),
                     a.i_see_this_food_in_the_dictionary
                 );
@@ -1270,11 +1308,11 @@ pub async fn classify_all(food_name: &str, wanted: &[Aspect]) -> Result<Recognis
     if !ctx.recognised() {
         let what = ctx.identity.clone().unwrap_or_else(|| "(нет версий)".to_string());
         leptos::logging::log!(
-            "НЕ ОПОЗНАНО «{food_name}»: вес {:.2} (уверенность {:.2}, сама не знает: {}, \
+            "НЕ ОПОЗНАНО «{food_name}»: вес {:.2} (уверенность {:.2}, еду не назвать: {}, \
              словарь пуст: {}) — {what}",
             ctx.identity_weight(),
             ctx.identity_confidence,
-            ctx.identity_unknown_to_model,
+            ctx.identity_no_food_named,
             ctx.identity_dictionary_empty
         );
         crate::services::telemetry::report_detection(

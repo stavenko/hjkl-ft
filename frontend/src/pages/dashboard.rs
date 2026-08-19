@@ -850,9 +850,14 @@ pub fn DashboardPage() -> impl IntoView {
                                             <InfoHint text=reason/>
                                         </div>
                                         <DayBars series=Signal::derive(move || days.clone())
+                                            // Кальций — В МИЛЛИГРАММАХ, как и железо.
+                                            // Без своей строки он проваливался в
+                                            // «г», и дневные 550 мг подписывались
+                                            // как 550 г при норме 1000 мг.
                                             unit={match s.key {
                                                 "calories" => "ккал",
                                                 "iron" => "мг",
+                                                "calcium" => "мг",
                                                 "heme" => "",
                                                 "epa_dha" => "г",
                                                 "fat_ratio" => "",
@@ -864,8 +869,12 @@ pub fn DashboardPage() -> impl IntoView {
                                             // Баланс — знаковый ряд: столбики от
                                             // середины, как и шкала в виджете.
                                             signed=s.key == "fat_ratio"
+                                            // Миллиграммы и граммы мяса — целыми:
+                                            // десятая доля миллиграмма кальция
+                                            // ничего не говорит, а место занимает.
                                             decimals=if s.key == "fat_ratio" { 2 }
-                                                else if s.key == "red_meat" || s.key == "processed_meat" { 0 } else { 1 }
+                                                else if s.key == "red_meat" || s.key == "processed_meat"
+                                                    || s.key == "calcium" { 0 } else { 1 }
                                             met=s.met_days.clone()/>
                                     </div>
                                 }

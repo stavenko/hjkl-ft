@@ -48,8 +48,10 @@ const ask = async (name) => {
   try { return JSON.parse(out.trim()); } catch { return null; }
 };
 
-const REAL = ["Голец", "Полба", "Маш", "Кыстыбый", "Творог 5%", "Скумбрия х/к",
-  "Fuet truffle", "Мороженая вишня", "Куриная грудка", "Гречка", "Хачапури", "Топинамбур"];
+const REAL = (process.env.NAMES || [
+  "Голец", "Полба", "Маш", "Кыстыбый", "Творог 5%", "Скумбрия х/к",
+  "Fuet truffle", "Мороженая вишня", "Куриная грудка", "Гречка", "Хачапури", "Топинамбур",
+].join("|")).split("|");
 const FAKE = ["Зюзюбряк ассорти", "Бубурек копчёный", "Квазилапша", "Хряпундель", "Мормышка сладкая"];
 if (process.env.JITTER) {
   // ДРЕБЕЗГ: один продукт много раз подряд. Исход должен быть один и тот же — иначе
@@ -66,9 +68,9 @@ if (process.env.JITTER) {
         const opts = (a.options ?? []).filter((o) => o?.definition);
         const top = opts.reduce((x, y) => (Number(y.confidence) > Number(x.confidence) ? y : x),
           opts[0] ?? { confidence: 0 });
-        const unknown = a.i_dont_know_this_word === true;
+        const unknown = a.i_cannot_name_the_food_behind_this_name === true;
         const noDict = a.i_see_this_food_in_the_dictionary !== true;
-        const w = Number(top.confidence) * (unknown && noDict ? 0.6 : 1.0);
+        const w = Number(top.confidence) * (unknown && noDict ? 0.7 : 1.0);
         weights.push(w.toFixed(2));
         if (w >= 0.6) passed++;
       }
@@ -91,13 +93,13 @@ if (process.env.FIELD) {
         const a = await ask(name);
         total++;
         if (!a) continue;
-        const has = Object.prototype.hasOwnProperty.call(a, "i_dont_know_this_word")
+        const has = Object.prototype.hasOwnProperty.call(a, "i_cannot_name_the_food_behind_this_name")
           && Object.prototype.hasOwnProperty.call(a, "i_see_this_food_in_the_dictionary");
         if (has) present++;
-        if (typeof a.i_dont_know_this_word === "boolean"
+        if (typeof a.i_cannot_name_the_food_behind_this_name === "boolean"
             && typeof a.i_see_this_food_in_the_dictionary === "boolean") boolean++;
         cases++;
-        const saysUnknown = a.i_dont_know_this_word === true;
+        const saysUnknown = a.i_cannot_name_the_food_behind_this_name === true;
         // Для настоящей еды ждём false ЛИБО находку в словаре (голец: сам не знает).
         const dictHit = a.i_see_this_food_in_the_dictionary === true;
         const right = isReal ? (!saysUnknown || dictHit) : saysUnknown;
@@ -122,10 +124,10 @@ if (process.env.RULE) {
         const opts = (a.options ?? []).filter((o) => o?.definition);
         const top = opts.reduce((x, y) => (Number(y.confidence) > Number(x.confidence) ? y : x),
           opts[0] ?? { confidence: 0 });
-        const unknown = a.i_dont_know_this_word === true;
+        const unknown = a.i_cannot_name_the_food_behind_this_name === true;
         const noDict = a.i_see_this_food_in_the_dictionary !== true;
         // Та же формула, что в коде: признание понижает вес втрое-с-небольшим.
-        const weight = Number(top.confidence) * (unknown && noDict ? 0.6 : 1.0);
+        const weight = Number(top.confidence) * (unknown && noDict ? 0.7 : 1.0);
         const passed = weight >= 0.6;
         if (isReal) { real++; if (passed) okReal++; else bad.push(`${name}: отсечён (вес ${weight.toFixed(2)}, не знает: ${unknown}, словарь ${noDict ? "NONE" : "есть"})`); }
         else { fake++; if (!passed) okFake++; else bad.push(`${name}: ПРОШЁЛ (вес ${weight.toFixed(2)}, увер. ${Number(top.confidence).toFixed(2)}, не знает: ${unknown}) ${top.definition.slice(0, 34)}`); }

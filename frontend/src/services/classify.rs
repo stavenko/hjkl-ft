@@ -113,29 +113,6 @@ const FLAGS: &[(
     ("яйцо", |f| f.is_egg.is_none(), local::FoodFlag::Egg),
 ];
 
-/// Спрашивать признаки КОНВЕЙЕРОМ (опознание → пять вердиктов) вместо пяти
-/// отдельных запросов. Пока эксперимент: обе дороги живут рядом, чтобы мерить, а не
-/// спорить. `false` возвращает прежнее поведение целиком.
-const USE_PIPELINE: bool = true;
-
-/// Спросить у модели ровно этот признак.
-async fn ask(flag: local::FoodFlag, name: &str) -> Result<bool, String> {
-    let names = [name.to_string()];
-    let v = match flag {
-        local::FoodFlag::VegFruit => ai::classify_veg_fruit(&names).await?,
-        local::FoodFlag::Heme => ai::classify_heme(&names).await?,
-        local::FoodFlag::MilkGlobule => ai::classify_milk_globule(&names).await?,
-        local::FoodFlag::RedMeat => ai::classify_red_meat(&names).await?,
-        local::FoodFlag::ProcessedMeat => ai::classify_processed_meat(&names).await?,
-        // У яйца отдельного запроса СТАРОГО образца нет и не будет: признак заведён
-        // уже при конвейере. Старый путь для него просто не работает.
-        local::FoodFlag::Egg => {
-            return Err("яйцо спрашивается только конвейером".to_string());
-        }
-    };
-    v.into_iter().next().ok_or_else(|| "пустой ответ классификатора".to_string())
-}
-
 /// True if `food` still misses at least one of the asked flags — то есть работа для
 /// прохода вообще есть. Что именно спрашивать, решает [`FLAGS`], каждый сам за себя.
 fn needs_classification(food: &Food) -> bool {
@@ -181,18 +158,18 @@ async fn run_worker() {
             continue;
         }
 
-        // ЭКСПЕРИМЕНТ: конвейер вместо пяти отдельных запросов.
+        // ПРИЗНАКИ СПРАШИВАЕТ КОНВЕЙЕР, и другого пути больше нет.
         //
-        // Пять запросов опознают продукт пять раз, каждый в тон своему вопросу, —
-        // отсюда «Голец → horse meat» в вопросе про мясо. Конвейер опознаёт один раз
-        // и отдаёт опознание готовым (см. `flags_pipeline`). Схема данных та же:
-        // наружу выходят те же пять признаков и ложатся в те же поля.
+        // Раньше рядом жил старый: пять отдельных запросов, по одному на признак,
+        // каждый опознавал продукт заново и в тон своему вопросу — отсюда «Голец →
+        // horse meat» в вопросе про мясо и печень рыбы в вопросе про гем. Его
+        // оставляли, чтобы померить оба на одном наборе; конвейер выиграл, а ветка
+        // осталась и молча договаривала за него всё, чего он не дал. На неопознанной
+        // еде это выходило прямой ложью: «Кыстыбый» получал гем и красное мясо.
         //
-        // Старый путь оставлен рядом и включается этой константой — чтобы можно было
-        // померить оба на одном наборе, а не рассуждать о них.
-        // Опознание живёт до конца прохода: его ждут и железо, и жиры.
+        // Опознание живёт до конца прохода: его ждут и кальций, и железо, и жиры.
         let mut identity = String::new();
-        if USE_PIPELINE && needs_classification(&food) {
+        if needs_classification(&food) {
             let name = food.name.clone();
             if let Some(r) = with_retries(
                 move || {
@@ -249,25 +226,6 @@ async fn run_worker() {
                 food.is_red_meat = f.red_meat.or(food.is_red_meat);
                 food.is_processed_meat = f.processed_meat.or(food.is_processed_meat);
                 food.is_egg = f.egg.or(food.is_egg);
-            }
-        }
-
-        // Каждый признак — сам за себя: спрашивается только тот, которого нет, и
-        // записывается сразу. Упавший признак не мешает остальным разобраться.
-        for (_, missing, flag) in FLAGS {
-            if !missing(&food) {
-                continue;
-            }
-            let name = food.name.clone();
-            let flag = *flag;
-            if let Some(v) = with_retries(
-                move || { let n = name.clone(); async move { ask(flag, &n).await } },
-                errors::FoodAspect::Kind,
-                &food.name,
-            ).await
-            {
-                // Вердикт с обоснованием уже записан в лог самим запросом.
-                local::cache_food_flag(&id, flag, v).await;
             }
         }
 

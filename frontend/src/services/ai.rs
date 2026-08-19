@@ -562,13 +562,23 @@ pub(crate) fn fibre_reference_table() -> String {
         .join("\n")
 }
 
+/// Сравнение ключей справочника — БЕЗ УЧЁТА РЕГИСТРА И ДЛЯ КИРИЛЛИЦЫ ТОЖЕ.
+///
+/// `eq_ignore_ascii_case` приводит регистр только у латиницы: «Соя» и «соя» она
+/// считает РАЗНЫМИ строками, потому что кириллические байты не трогает. Ключи у нас
+/// русские, и любая заглавная буква в ответе модели молча роняла поиск записи —
+/// значение уходило на строку таблицы, как это было с соей.
+pub(crate) fn key_eq(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
 /// Запись справочника клетчатки по ключу, который назвала модель.
 pub(crate) fn fibre_reference_hit(key: &str) -> Option<&'static (&'static str, f64)> {
     let key = key.trim();
-    if key.is_empty() || key.eq_ignore_ascii_case("none") {
+    if key.is_empty() || key_eq(key, "none") {
         return None;
     }
-    FIBRE_REFERENCE.iter().find(|(name, _)| name.eq_ignore_ascii_case(key))
+    FIBRE_REFERENCE.iter().find(|(name, _)| key_eq(name, key))
 }
 
 /// Таблица кальция как текст промпта — из того же массива, что и проверка.
@@ -717,10 +727,10 @@ struct CalciumAnswer {
 /// Запись справочника по ключу, который назвала модель.
 fn calcium_reference_hit(key: &str) -> Option<&'static (&'static str, f64)> {
     let key = key.trim();
-    if key.is_empty() || key.eq_ignore_ascii_case("none") {
+    if key.is_empty() || key_eq(key, "none") {
         return None;
     }
-    CALCIUM_REFERENCE.iter().find(|(name, _)| name.eq_ignore_ascii_case(key))
+    CALCIUM_REFERENCE.iter().find(|(name, _)| key_eq(name, key))
 }
 
 /// Сколько кальция в продукте, мг на 100 г.
@@ -1290,10 +1300,10 @@ pub(crate) fn fat_reference_table() -> String {
 /// Запись справочника по ключу, который назвала модель.
 fn fat_reference_hit(key: &str) -> Option<&'static (&'static str, f64, f64, f64, f64)> {
     let key = key.trim();
-    if key.is_empty() || key.eq_ignore_ascii_case("none") {
+    if key.is_empty() || key_eq(key, "none") {
         return None;
     }
-    FAT_REFERENCE.iter().find(|(name, ..)| name.eq_ignore_ascii_case(key))
+    FAT_REFERENCE.iter().find(|(name, ..)| key_eq(name, key))
 }
 
 fn fat_row_table() -> String {
@@ -1721,48 +1731,7 @@ async fn lookup_dish_fat_profile(
 // FAIL LOUDLY: ошибка модели, разбора или несовпадение длины массива — это `Err`
 // (вызывающий его показывает; ничего не размечается молча наугад).
 
-/// Список продуктов для промпта: «0. имя». Механика, не текст.
-fn numbered(names: &[String]) -> String {
-    names
-        .iter()
-        .enumerate()
-        .map(|(i, n)| format!("{i}. {n}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
 
-/// Сверить длины, записать вердикты в лог и отправить их в телеметрию
-/// определений. Тоже механика: к модели отсюда не уходит ни одного слова.
-///
-/// `label` — для лога, по-русски; `kind` — устойчивый ключ, по которому вердикты
-/// группируются в аналитике и который нельзя менять задним числом. ПУСТОЙ `kind`
-/// значит «не отправлять»: у гема отсюда идут отдельные голоса, а в аналитику
-/// должен попасть их итог, иначе один продукт даст три записи с разными ответами.
-fn take_flags(
-    label: &str,
-    kind: &str,
-    names: &[String],
-    verdict: Vec<bool>,
-    reason: Vec<String>,
-) -> Result<Vec<bool>, String> {
-    let n = names.len();
-    if verdict.len() != n || reason.len() != n {
-        return Err(format!(
-            "{label}: length mismatch for {n} foods — verdict={}, reason={}",
-            verdict.len(),
-            reason.len()
-        ));
-    }
-    for (i, name) in names.iter().enumerate() {
-        leptos::logging::log!("{label} «{name}»: {} — {}", verdict[i], reason[i]);
-        if !kind.is_empty() {
-            crate::services::telemetry::report_detection(
-                kind, name, &verdict[i].to_string(), &reason[i], &[],
-            );
-        }
-    }
-    Ok(verdict)
-}
 
 // ── Овощ или фрукт ───────────────────────────────────────────────────────────
 
@@ -1803,415 +1772,6 @@ pub(crate) fn veg_fruit_from_category(category: &str) -> Result<bool, String> {
     Err(format!("фрукты/овощи: неизвестная категория «{category}»"))
 }
 
-/// Овощ или фрукт — свежий, приготовленный или очевидное овощное/фруктовое блюдо.
-///
-/// Прежний промпт был вопросом «да/нет» с отрицательным перечнем в хвосте, и он
-/// НЕ РАБОТАЛ: модель писала верную причину и ставила противоположный вердикт —
-/// «Яблоко → false, apple is a fruit», «Огурец → false, it is a cucumber». Замер
-/// живым путём давал 9/22, причём мимо шли самые обыкновенные яблоко с огурцом, а
-/// не спорные случаи. Виновата тощая форма: причина ограничивалась десятью словами
-/// и вырождалась в метку («apple»), вердикт рождался отдельным массивом, и следовать
-/// ему было не за чем.
-///
-/// Теперь та же форма, что у гема, где она даёт 22/22: опознание отдельным полем,
-/// категории заданы ПОЛОЖИТЕЛЬНО, причина называет подошедшую категорию.
-///
-/// Ягоды названы прямо. Именно на них сломался исходный случай — «Мороженая вишня»:
-/// модель опознавала её верно («frozen cherry»), но в вопросе «vegetable or fruit»
-/// ягоде места не находилось. Слова о заморозке и готовке сути продукта не меняют —
-/// сказано отдельно, как и в геме.
-pub async fn classify_veg_fruit(names: &[String]) -> Result<Vec<bool>, String> {
-    let prompt = format!(
-        "For each food below decide whether it belongs to one of the categories listed. Food \
-         names may be in ANY language — judge by meaning, not by wording.\n\n\
-         THE CATEGORIES:\n\
-         — VEGETABLES: any plant part eaten as a vegetable — roots, tubers, leaves, stalks, \
-         cabbages, squashes, onions, garlic, tomatoes, cucumbers, peppers, green beans, peas, \
-         mushrooms. A GRAIN is not a vegetable, whatever it was cooked into;\n\
-         — FRUITS, and BERRIES COUNT AS FRUITS: apples, pears, citrus, bananas, grapes, melons, \
-         and berries such as cherries, sour cherries, strawberries, raspberries, blueberries, \
-         currants, cranberries;\n\
-         — DISHES MADE MAINLY OF THEM: salads, stewed or roasted vegetables, vegetable soups, \
-         fruit salads.\n\n\
-         For EVERY food, answer in THREE fields, in this order.\n\
-         First, in \"what_the_person_most_likely_ate\": say what this food MOST LIKELY IS, \
-         WITHOUT yet thinking about the categories at all. Every name here was typed by a person \
-         into their FOOD DIARY, so it always names something eaten — never a material, a device \
-         or a term from another trade, however much the word may look like one. Say it in \
-         ENGLISH and say WHAT KIND of thing it is — \"cherry, a berry\", \"buckwheat, a grain\", \
-         \"cod, a fish\". Never merely repeat the name back: a name copied out is not an answer. \
-         And name it WHOLE — whatever the name says was added to it or made of it, syrup, sugar, \
-         batter, juice, belongs in your answer too, not just the main word.\n\
-         Second, in \"category_that_fits\": write the ONE word naming the category that fits \
-         what you have just named — VEGETABLES, FRUITS or DISH — or the word NONE if no category \
-         fits. Nothing else, one word. Never list the categories that do not fit: running \
-         through them turns into denying them all, the right one included.\n\
-         Each array holds exactly one item per food, never more.\n\n\
-         Sugar changes what a food is: jam, preserves, fruit in syrup, candied fruit and juices \
-         belong to none of the categories, however much fruit went into them. A composite dish \
-         belongs to a category only when vegetables or fruit are its MAIN part. Words about \
-         preparation, storage, freezing, packaging, cut, grade or country of origin never \
-         change what a food is — frozen, dried and cooked produce stays produce.\n\n\
-         Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object: the two arrays described above — \
-         one item per food in each — both in the SAME order as the foods above.",
-        list = numbered(names),
-    );
-    let n = names.len();
-    // Проверка ПЕРЕД разбором ответа: кривые длины и незнакомая категория стоят
-    // попытки и переспрашиваются, а не превращаются в тихое «нет».
-    let v: VegFruitAnswer = generate_validated(prompt, |_| {}, 3, move |a: &VegFruitAnswer| {
-        if a.what_the_person_most_likely_ate.len() != n || a.category_that_fits.len() != n {
-            return Err(format!(
-                "фрукты/овощи: length mismatch for {n} foods — what_ate={}, category={}",
-                a.what_the_person_most_likely_ate.len(),
-                a.category_that_fits.len()
-            ));
-        }
-        for c in &a.category_that_fits {
-            veg_fruit_from_category(c)?;
-        }
-        Ok(())
-    })
-    .await?;
-    let verdict = v
-        .category_that_fits
-        .iter()
-        .map(|c| veg_fruit_from_category(c))
-        .collect::<Result<Vec<bool>, String>>()?;
-    // Опознание идёт в лог и телеметрию вместе с категорией: именно оно объясняет
-    // промахи — по одной категории не видно, за что модель приняла продукт.
-    let reason = v
-        .what_the_person_most_likely_ate
-        .iter()
-        .zip(v.category_that_fits.iter())
-        .map(|(ate, cat)| format!("{ate} → {cat}"))
-        .collect();
-    take_flags("фрукты/овощи", "flag.veg_fruit", names, verdict, reason)
-}
-
-// ── Источник гемового железа ─────────────────────────────────────────────────
-
-// Комментарии обычные, а НЕ доковые: см. предупреждение над `VegFruitAnswer` —
-// док-комментарий уезжает в json_schema как "description" и возвращается моделью
-// вместо данных.
-//
-// Обоснование стоит ПЕРВЫМ — см. замер в шапке раздела. Опознание вынесено в СВОЁ
-// поле: раньше оно писалось в графу «почему продукт отнесён к источникам гема», а
-// имя поля модель видит в схеме, то есть оно работает как часть промпта — и
-// заставляло записывать «что это за еда» в графу, само название которой уже
-// утверждает вывод, причём в одну сторону.
-#[derive(Debug, Deserialize, JsonSchema)]
-struct HemeAnswer {
-    what_the_person_most_likely_ate: Vec<String>,
-    reason_why_this_product_classified_as_gem_source: Vec<String>,
-    verdict: Vec<bool>,
-}
-
-/// Богатый источник ГЕМОВОГО железа.
-///
-/// Промпт — ПЕРЕЧЕНЬ КАТЕГОРИЙ и один вопрос: относится ли продукт к одной из них.
-/// Ни шагов, ни списка исключений: и то и другое ставило модель перед ложным
-/// выбором между двумя знакомыми словами — «печень или курица», — и на границе
-/// («бедро куриное печёное») она выбирала слово, а не признак. Категории заданы
-/// положительно; всё, что в них не попало, не попало — перечислять это незачем.
-///
-/// Про рыбу в промпте нет НИ ОДНОГО названия: категории лишь говорят, куда рыбу
-/// отнести, если модель её узнает (печень — да, филе — нет). Опознание целиком на
-/// модели, и на редких промысловых названиях она его проваливала: «Голец» она
-/// сочла органом рыбы, отсюда и гем. Лечится не правилом, а рамкой — оговоркой,
-/// что слово взято из ДНЕВНИКА ПИТАНИЯ и потому означает съеденное, а не материал,
-/// прибор или термин чужого ремесла. Замер живым путём: набор редких рыб 1/10 → 10/10,
-/// основной набор не пострадал (старая формулировка 21/20/20, новая 21/20/19 из 22 —
-/// разница меньше разброса между прогонами одной и той же версии).
-///
-/// Категория названа МЯСОМ МЛЕКОПИТАЮЩИХ, а не красным мясом, хотя означает ровно
-/// его. С прежним названием «бедро куриное печёное» уходило в неё единогласно —
-/// дословно «Chicken thigh → RED MEAT», 3:0, то есть голосование тут не спасает.
-/// Оговорка про MAMMALS в теле правила стояла и тогда, но проигрывала внешнему
-/// знанию, где тёмное мясо птицы сплошь и рядом зовут красным. С названием
-/// категории это знание спорит, с определением внутри неё — нет, поэтому заменено
-/// именно название: под «мясо млекопитающих» курица не подходит никак.
-///
-/// Колбаса, сосиски и ветчина названы в категории прямо. Гем в них ЕСТЬ — по ГОСТ
-/// мясо занимает почти весь батон, — и признак говорит об этом честно: съевшему
-/// колбасы незачем добирать гем отдельно. Индикаторы существуют не затем, чтобы
-/// быть зелёными. То, что это ПРИ ЭТОМ мясо глубокой переработки, говорит свой
-/// индикатор — [`super::processed_meat`]; это разные разговоры и разные признаки.
-pub async fn classify_heme(names: &[String]) -> Result<Vec<bool>, String> {
-    let prompt = format!(
-        "For each food below decide whether it belongs to one of the categories listed. Food \
-         names may be in ANY language — judge by meaning, not by wording.\n\n\
-         THE CATEGORIES OF RICH HEME-IRON SOURCES:\n\
-         — LIVER itself — of any animal, bird or fish — and food made mainly of liver: pâté, \
-         liver sausage, liver cake;\n\
-         — OTHER INNER ORGANS themselves — hearts, kidneys, tongues, gizzards, lungs, blood \
-         sausage — of any animal, bird or fish. It is the ORGAN that belongs to this category, \
-         never the animal's flesh: a fish fillet, a bird's breast or leg is not an organ;\n\
-         — MEAT OF MAMMALS: beef, veal, pork, lamb, mutton, goat, and the meat of other farmed \
-         or wild mammals — venison, elk, boar, horse, rabbit — in any cut, ground or whole, raw \
-         or cooked, and food made mainly of such meat: sausage, frankfurters, ham, bacon, \
-         salami, mince, meatballs, cutlets, stew, canned meat. A creature that is not a mammal \
-         has no meat in this category;\n\
-         — MOLLUSCS OF THESE KINDS ONLY: mussels, oysters, clams and vongole, cockles, octopus, \
-         whelks, winkles. The category is these kinds, not the zoological class: a mollusc of \
-         another kind does not belong to it.\n\n\
-         For EVERY food, answer in THREE fields, in this order.\n\
-         First, in \"what_the_person_most_likely_ate\": say what this food MOST LIKELY IS, \
-         WITHOUT yet thinking about heme iron or the categories at all. Every name here was \
-         typed by a person into their FOOD DIARY, so it always names something eaten — never \
-         a material, a device or a term from another trade, however much the word may look \
-         like one. Name which animal, bird, fish or plant it comes from, and whether it is \
-         that creature's FLESH, an ORGAN, or something else entirely.\n\
-         Second, in the reason field: name the ONE category that fits what you have just \
-         named, or say that none fits. Name only the category that FITS — never list the ones \
-         that do not: running through them turns into denying them all, the right one \
-         included.\n\
-         Third, the verdict: true if it belongs to a category, false if it does not. Each \
-         array holds exactly one item per food, never more.\n\n\
-         Do not reason about how many milligrams of iron a food holds — you do not know those \
-         numbers, and the categories already account for them. A composite dish belongs to a \
-         category only when such an ingredient is its MAIN part. Words about preparation, \
-         storage, packaging, cut, grade or country of origin never change what a food is.\n\n\
-         Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object: the three arrays described above — \
-         one item per food in each — all in the SAME order as the foods above.",
-        list = numbered(names),
-    );
-    // Сколько раз спросить и взять большинство.
-    //
-    // Голосование заводилось, когда качалось «бедро куриное печёное»: в одном
-    // прогоне «нет», в другом «да». Потом выяснилось, что от той ошибки оно не
-    // защищало вовсе — бедро уходило в красное мясо единогласно, 3:0. Причина была
-    // в названии категории, и её починили названием; после этого замер дал 22/22
-    // три прогона подряд.
-    //
-    // Отсюда и проверка: нужно ли голосование теперь, когда промпт перестал
-    // ошибаться систематически. Цена ошибки прежняя — у бедра 73 г белка, и ложное
-    // «да» превращает его в 2.9 порции гема, то есть закрывает недельную планку
-    // одним блюдом, — но платится ОДИН раз на продукт за всю его жизнь.
-    const ROUNDS: usize = 1;
-    let mut votes: Vec<[u8; 2]> = vec![[0, 0]; names.len()];
-    let mut last_reason: Vec<String> = vec![String::new(); names.len()];
-    for _ in 0..ROUNDS {
-        let v: HemeAnswer = generate(prompt.clone(), |_| {}).await?;
-        if v.what_the_person_most_likely_ate.len() != names.len() {
-            return Err(format!(
-                "гем: length mismatch for {} foods — what_ate={}",
-                names.len(),
-                v.what_the_person_most_likely_ate.len()
-            ));
-        }
-        let verdict = take_flags(
-            "гем",
-            "", // в аналитику уйдёт ИТОГ голосования, а не каждый голос
-            names,
-            v.verdict,
-            v.reason_why_this_product_classified_as_gem_source.clone(),
-        )?;
-        for (i, yes) in verdict.into_iter().enumerate() {
-            votes[i][usize::from(yes)] += 1;
-            // Опознание хранится вместе с обоснованием: именно оно объясняет
-            // промахи вроде «Голец → печень рыбы», а по одной категории этого
-            // не видно.
-            last_reason[i] = format!(
-                "{} → {}",
-                v.what_the_person_most_likely_ate[i],
-                v.reason_why_this_product_classified_as_gem_source[i]
-            );
-        }
-    }
-    let verdict: Vec<bool> = votes.iter().map(|v| v[1] > v[0]).collect();
-    for (i, name) in names.iter().enumerate() {
-        leptos::logging::log!(
-            "гем «{name}»: {} голосами {}:{} — {}",
-            verdict[i], votes[i][1], votes[i][0], last_reason[i]
-        );
-        // Голоса уходят вместе с вердиктом: единогласное «да» и «да» со счётом
-        // 2:1 — разные вещи, и вторая как раз и есть повод для своего замера.
-        crate::services::telemetry::report_detection(
-            "flag.heme",
-            name,
-            &verdict[i].to_string(),
-            &last_reason[i],
-            &[votes[i][1].into(), votes[i][0].into()],
-        );
-    }
-    Ok(verdict)
-}
-
-// ── Молочно-жировая глобула ──────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize, JsonSchema)]
-struct MilkGlobuleAnswer {
-    reason_why_this_product_classified_as_milk_fat_globule: Vec<String>,
-    verdict: Vec<bool>,
-}
-
-/// Жир продукта заключён в целую молочно-жировую глобулу.
-///
-/// Граница ровно одна и она механическая: мембрану рвёт СБИВАНИЕ и вытапливание.
-/// Всё, что ими получено (масло сливочное, топлёное, безводный молочный жир,
-/// молочный жир внутри кондитерки), глобулы не имеет; всё остальное молочное —
-/// молоко, сливки, сыр, творог, йогурт, кефир — имеет.
-pub async fn classify_milk_globule(names: &[String]) -> Result<Vec<bool>, String> {
-    let prompt = format!(
-        "Answer ONE yes/no question about each food below, and nothing else. Food names may be \
-         in ANY language — judge by meaning, not by wording.\n\n\
-         QUESTION: is the fat of this food still enclosed in INTACT MILK FAT GLOBULES?\n\
-         Milk fat leaves the udder wrapped in a membrane. Only three things destroy that \
-         membrane: CHURNING, RENDERING and MELTING WITH EMULSIFYING SALTS. Nothing else does — \
-         not fermenting, not souring, not heating, not ageing, not salting, not freezing, not \
-         drying, not concentrating.\n\
-         Decide in THIS ORDER and STOP at the first step that matches.\n\
-         STEP 1 — does this food contain MILK FAT at all? If it is not dairy — meat, poultry, \
-         fish, eggs, vegetable oils, nuts, seeds, plants, or a plant «milk» made of soy, oat, \
-         almond or coconut — then FALSE, there is no milk fat to ask about.\n\
-         STEP 2 — was that milk fat CHURNED out (butter, buttermilk-made spreads), RENDERED \
-         (ghee, clarified butter, butter oil, anhydrous milk fat) or MELTED WITH EMULSIFYING \
-         SALTS (processed cheese, cheese spread, cheese in a tub)? Then FALSE. The same applies \
-         when a cook or a factory added the milk fat AS BUTTER rather than as milk or cream: \
-         milk chocolate, buttercream, shortcrust pastry, croissants, waffles, biscuits are \
-         FALSE.\n\
-         STEP 3 — otherwise the fat is still in its native globules: TRUE. This is the normal \
-         case for dairy, and it holds however the product was processed short of churning — \
-         milk of any fat content, cream, sour cream, kefir, ryazhenka, ayran, acidophilus, \
-         drinking and thick yogurt, cottage cheese of any fat content including fat-free, curd \
-         mass, ricotta, natural cheeses (hard, semi-hard, soft, brined), condensed and powdered \
-         milk, whey, ice cream, and dishes whose fat comes mainly from these (cheesecake made \
-         of cottage cheese, creamy sauce, milk porridge). Do NOT hedge here: a cheese or a \
-         cottage cheese that was not churned HAS intact globules, even though the curd was \
-         pressed, salted, aged or heated.\n\
-         The answer depends ONLY on WHAT THE FOOD IS and whether its milk fat was churned, \
-         rendered or salt-melted out; fat percentage, brand, packaging and country never change \
-         it.\n\n\
-         For EVERY food fill the reason field FIRST — name the step that matched, in one short \
-         sentence, at most 10 words — and let the verdict follow from it.\n\n\
-         Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object: the reason array — one string per \
-         food — and \"verdict\" — one boolean per food, both in the SAME order as the foods \
-         above.",
-        list = numbered(names),
-    );
-    let v: MilkGlobuleAnswer = generate(prompt, |_| {}).await?;
-    take_flags(
-        "молочная глобула",
-        "flag.milk_globule",
-        names,
-        v.verdict,
-        v.reason_why_this_product_classified_as_milk_fat_globule,
-    )
-}
-
-// ── Красное мясо ─────────────────────────────────────────────────────────────
-
-/// Обоснование первым — как у остальных признаков.
-#[derive(Debug, Deserialize, JsonSchema)]
-struct RedMeatAnswer {
-    reason_why_this_product_classified_as_red_meat: Vec<String>,
-    verdict: Vec<bool>,
-}
-
-/// Красное мясо — мышечная ткань млекопитающих и страуса.
-///
-/// Промпт устроен как гемовый: перечень категорий и один вопрос о принадлежности.
-/// Отличие от гема — здесь считается ИМЕННО МЯСО, а не органы: печень и сердце в
-/// гем входят, а в недельные граммы красного мяса нет, и путать их нельзя.
-pub async fn classify_red_meat(names: &[String]) -> Result<Vec<bool>, String> {
-    let prompt = format!(
-        "For each food below decide whether it belongs to one of the categories listed. Food \
-         names may be in ANY language — judge by meaning, not by wording.\n\n\
-         THE CATEGORIES OF RED MEAT:\n\
-         — THE FLESH of MAMMALS: beef, veal, pork, lamb, mutton, goat, horse, rabbit, and the \
-         flesh of wild mammals — venison, elk, boar. Any cut, whole or ground, raw or cooked;\n\
-         — FOOD MADE MAINLY OF SUCH FLESH: sausages, frankfurters, ham, bacon, salami, mince, \
-         meatballs, cutlets, stew, canned meat — whatever the flesh has been through.\n\n\
-         It is MUSCLE that belongs to these categories. A TONGUE and a HEART are muscle, so \
-         beef tongue, pork heart and dishes made mainly of them DO belong. Organs that are NOT \
-         muscle stay outside — liver, kidneys, lungs, tripe, brain — however red they look. \
-         BIRDS are outside whatever the part: chicken, turkey, duck, goose, ostrich, and a \
-         chicken heart with them, because a bird is not a mammal. Fish, seafood, eggs, dairy \
-         and anything from a plant are outside too.\n\n\
-         For EVERY food, first THINK IT THROUGH in the reason field: whose flesh is this, and \
-         is it flesh at all? Name the category, or say that none of them fits. One short \
-         sentence, at most 10 words. Then give the verdict: true if it belongs to a category, \
-         false if it does not.\n\n\
-         A composite dish belongs to a category only when such flesh is its MAIN part. Words \
-         about preparation, storage, packaging, cut, grade or country of origin never change \
-         what a food is.\n\n\
-         Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object: the reason array — one string per \
-         food — and \"verdict\" — one boolean per food, both in the SAME order as the foods \
-         above.",
-        list = numbered(names),
-    );
-    let v: RedMeatAnswer = generate(prompt, |_| {}).await?;
-    take_flags(
-        "красное мясо",
-        "flag.red_meat",
-        names,
-        v.verdict,
-        v.reason_why_this_product_classified_as_red_meat,
-    )
-}
-
-// ── Мясо глубокой переработки ────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize, JsonSchema)]
-struct ProcessedMeatAnswer {
-    reason_why_this_product_classified_as_processed_meat: Vec<String>,
-    verdict: Vec<bool>,
-}
-
-/// Мясо глубокой переработки — консервированное ради хранения, а не просто
-/// приготовленное.
-///
-/// Граница механическая, как у молочной глобулы: важно не «полуфабрикат ли это» и
-/// не «вредно ли», а прошло ли мясо КОНСЕРВАЦИЮ — засол с нитритом, копчение,
-/// вяление, ферментацию. Домашняя котлета из фарша её не проходила, магазинная
-/// сосиска проходила, и различие между ними именно в этом, а не в том, где куплено.
-pub async fn classify_processed_meat(names: &[String]) -> Result<Vec<bool>, String> {
-    let prompt = format!(
-        "Answer ONE yes/no question about each food below, and nothing else. Food names may be \
-         in ANY language — judge by meaning, not by wording.\n\n\
-         QUESTION: is this meat PRESERVED — cured, smoked, salted, dried or fermented for \
-         keeping? Meat here is the flesh of a MAMMAL or a BIRD.\n\n\
-         Meat is preserved when it has been through one of these: CURING with nitrite or \
-         nitrate salt, SMOKING, prolonged SALTING, AIR-DRYING, or FERMENTATION. Cooking is not \
-         preserving: boiling, frying, baking, stewing, grilling, mincing, freezing and \
-         packaging leave meat unpreserved, however industrial the process.\n\n\
-         PRESERVED, therefore TRUE: sausages and frankfurters, wieners, salami and other dry \
-         sausages — fuet, chorizo, sobrassada, soppressata, sujuk, kabanos, landjäger, \
-         pepperoni, whatever else they are called abroad — ham, bacon, gammon, pastrami, \
-         prosciutto and jamon, bresaola, basturma, \
-         smoked and cured brisket, liver sausage and pâté made with cure, hot dogs, corned \
-         beef, canned luncheon meat, jerky. Also a dish whose MAIN meat part is one of these — \
-         pizza with salami, pasta carbonara, sausage in a bun, solyanka.\n\n\
-         NOT PRESERVED, therefore FALSE: fresh and frozen meat of any kind, mince, cutlets and \
-         meatballs, home-made or shop-bought, boiled or baked meat, roast, stew, kebab, \
-         dumplings, canned meat that was merely boiled in the tin, poultry that went through \
-         none of the treatments above. FISH, SEAFOOD AND ROE are false ALWAYS, however they \
-         were treated: smoked mackerel, salted herring, lightly salted salmon, dried cod, \
-         canned sprats, caviar — a fish that was smoked is a smoked fish, never a preserved \
-         meat.\n\n\
-         For EVERY food, first THINK IT THROUGH in the reason field: is there meat here, and \
-         was it preserved — by what treatment? One short sentence, at most 10 words. Then give \
-         the verdict.\n\n\
-         Foods (index. name):\n{list}\n\n\
-         Respond with ONLY a single minified JSON object: the reason array — one string per \
-         food — and \"verdict\" — one boolean per food, both in the SAME order as the foods \
-         above.",
-        list = numbered(names),
-    );
-    let v: ProcessedMeatAnswer = generate(prompt, |_| {}).await?;
-    take_flags(
-        "переработанное мясо",
-        "flag.processed_meat",
-        names,
-        v.verdict,
-        v.reason_why_this_product_classified_as_processed_meat,
-    )
-}
 
 // ── Support-chat: tools + agentic tool-use loop ──
 //

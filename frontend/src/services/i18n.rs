@@ -219,7 +219,6 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.intro" => "Very soon your {word} process will begin. Our algorithm will calculate the amount of calories you should eat every day. For the calculation to be accurate, you need to log all your food in the app, weigh yourself every day, and record your steps.",
         "dashboard.progress.nutrition" => "Nutrition",
         "dashboard.progress.calculate" => "Calculate my target",
-        "dashboard.progress.done_title" => "Your daily target",
         "dashboard.progress.gate_title" => "Keep these indicators green to unlock the {week}.",
         "dashboard.progress.steps_gate_title" => "Keep the steps indicator green to unlock the {week}.",
         "dashboard.progress.calcium_gate_title" => "Keep the calcium indicator green to unlock the {week}.",
@@ -1143,7 +1142,6 @@ fn ru(key: &str) -> &'static str {
         "dashboard.progress.intro" => "Очень скоро начнётся процесс вашего {word}. Наш алгоритм сам рассчитает вам необходимое количество калорий, которые вы должны будете употреблять ежедневно. Для того чтобы расчёт был точным, вам надо вносить всю еду в программу, каждый день взвешиваться и записывать ваши шаги.",
         "dashboard.progress.nutrition" => "Питание",
         "dashboard.progress.calculate" => "Рассчитать мою планку",
-        "dashboard.progress.done_title" => "Ваша дневная планка",
         // ЗАДАНИЕ НЕДЕЛИ — одной формой на все главы: что держать, ради чего, и
         // сколько осталось. «Чтобы открыть {week}» подставляется рядом с заданием, а
         // не отдельным предложением: цель без задания не читается.

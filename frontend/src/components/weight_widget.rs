@@ -17,9 +17,32 @@ pub const TILE_LABEL: &str = "position: absolute; left: 50%; bottom: 6px; transf
     color: var(--bulma-text-weak); font-size: 11px; line-height: 1.4; white-space: nowrap; \
     pointer-events: none;";
 
+/// Тот же бабл, но у ВЕРХНЕГО края: там стоит само число — последний вес, среднее
+/// за неделю по шагам. Цвет текста задаётся отдельно, поэтому его здесь нет.
+pub const TILE_VALUE: &str = "position: absolute; left: 50%; top: 6px; transform: translateX(-50%); \
+    z-index: 2; padding: 2px 10px; border-radius: 999px; background: var(--bulma-scheme-main-bis); \
+    font-size: 13px; font-weight: 600; line-height: 1.4; white-space: nowrap; pointer-events: none;";
+
 #[component]
 pub fn WeightWidget(entries: Signal<Vec<WeightEntry>>) -> impl IntoView {
     let unit = weight_unit_signal();
+
+    // Последняя записанная величина — в единицах, выбранных человеком.
+    let last_value = move || {
+        let mut es = entries.get();
+        es.sort_by(|a, b| a.date.cmp(&b.date));
+        match es.last() {
+            Some(last) => {
+                let u = unit.get();
+                let ul = match u {
+                    WeightUnit::Kg => t("weight.unit_kg"),
+                    WeightUnit::Lbs => t("weight.unit_lbs"),
+                };
+                format!("{:.1} {}", u.from_kg(last.weight_kg), ul)
+            }
+            None => "—".to_string(),
+        }
+    };
 
     view! {
         <div style=CARD>
@@ -29,10 +52,14 @@ pub fn WeightWidget(entries: Signal<Vec<WeightEntry>>) -> impl IntoView {
                 if entries.get().len() < 2 {
                     view! { <EmptyPrompt text_key="weight.empty_prompt"/> }.into_view()
                 } else {
-                    // Числа на плитке нет — его говорит раскрытая панель. Подпись
-                    // есть, но лежит на графике баблом, а не отнимает у него строку.
+                    // Последний вес — баблом у верхнего края, цветом линии: число и
+                    // рисунок говорят об одном, и цвет их связывает.
                     view! {
                         <div style="flex: 1; min-height: 0;" inner_html=move || chart_svg(&entries.get(), unit.get())></div>
+                        <span attr:data-testid="weight-widget-value"
+                            style=move || format!("{TILE_VALUE} color: {};", trend_color(&entries.get()))>
+                            {last_value}
+                        </span>
                         <span style=TILE_LABEL>{move || t("weight.widget_title")}</span>
                     }.into_view()
                 }

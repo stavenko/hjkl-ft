@@ -566,6 +566,18 @@ pub fn DashboardPage() -> impl IntoView {
     };
 
     let overlay = create_rw_signal(Overlay::None);
+    // Нажали «Главную» в меню — значит хотят главную, а не панель, раскрытую поверх
+    // неё пять минут назад. Роутер на переход в то же место не отвечает, поэтому
+    // слушаем сам факт нажатия.
+    let home_taps = crate::services::nav::home_taps();
+    create_effect(move |seen: Option<u32>| {
+        let n = home_taps.get();
+        // Первый прогон эффекта — не нажатие, а подписка: закрывать нечего.
+        if seen.is_some() && overlay.get_untracked() != Overlay::None {
+            overlay.set(Overlay::None);
+        }
+        n
+    });
     // Где палец коснулся карточки прогресса. По расстоянию до места, где его
     // подняли, тап отличается от прокрутки — см. обработчики у самой карточки.
     let press_at = create_rw_signal::<Option<(i32, i32)>>(None);

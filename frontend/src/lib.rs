@@ -61,6 +61,7 @@ pub fn main() {
         services::classify::init(); // reset the background food-classification queue
         services::errors::init(); // background-error log signal at the root
         services::stories::init(); // stories seen-set + tray-ring version signal
+        services::nav::init(); // счётчики нажатий на пункты нижнего меню
         services::letters::init(); // program-letters inbox version signal (mail widget)
         services::sync::init(); // migration-progress signal at the root
 

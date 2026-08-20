@@ -398,7 +398,12 @@ pub fn App() -> impl IntoView {
             // bypass the auth overlays, which would otherwise surface this app-shell
             // nav before the user has registered.
             <nav style:display=move || { let p = use_location().pathname.get(); if p == "/onboard" || p == "/onboard-tg" { "none" } else { "flex" } } style="position: fixed; bottom: 0.75rem; left: 50%; transform: translateX(-50%); z-index: 40; background: var(--bulma-scheme-main); display: flex; justify-content: space-around; align-items: center; height: 3.5rem; width: min(26rem, calc(100% - 2rem), calc(480px - 2rem)); border-radius: 1rem; box-shadow: 0 4px 24px rgba(0,0,0,0.15);">
-                <a attr:data-testid="nav-dashboard" href="/" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
+                // Пункт меню ведёт туда, где человек, возможно, уже стоит, и роутер
+                // тогда не делает ничего. Поэтому он ещё и СОБЫТИЕ: дашборд по нему
+                // закрывает раскрытую панель, дневник возвращается на сегодня.
+                <a attr:data-testid="nav-dashboard" href="/"
+                    on:click=|_| crate::services::nav::tap_home()
+                    style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="3" y="3" width="7" height="7" rx="1.5" />
                         <rect x="14" y="3" width="7" height="7" rx="1.5" />
@@ -407,7 +412,9 @@ pub fn App() -> impl IntoView {
                     </svg>
                     <span style="font-size: 0.6rem; margin-top: 2px;">{move || t("nav.dashboard")}</span>
                 </a>
-                <a attr:data-testid="nav-diary" href="/diary" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
+                <a attr:data-testid="nav-diary" href="/diary"
+                    on:click=|_| crate::services::nav::tap_diary()
+                    style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; height: 100%; color: var(--bulma-text); text-decoration: none;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="3" y="4" width="18" height="18" rx="2" />
                         <line x1="3" y1="10" x2="21" y2="10" />

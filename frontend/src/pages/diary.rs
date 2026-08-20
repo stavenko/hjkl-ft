@@ -123,6 +123,21 @@ pub fn DiaryPage() -> impl IntoView {
     // (gated by `is_today()`) and none of the new day's entries. When the app is
     // resumed (visibilitychange / window focus), if the user is still on what WAS
     // today (not a past day they navigated to), snap `date` forward to the new today.
+    // Нажали «Дневник» в меню — возвращаемся на сегодня, каким бы днём человек ни
+    // листал. Роутер на переход в то же место не отвечает, поэтому слушаем нажатие.
+    let diary_taps = crate::services::nav::diary_taps();
+    create_effect(move |seen: Option<u32>| {
+        let n = diary_taps.get();
+        // Первый прогон — подписка, а не нажатие: сбрасывать нечего.
+        if seen.is_some() {
+            let now = local::today();
+            if date.get_untracked() != now {
+                date.set(now);
+            }
+        }
+        n
+    });
+
     let known_today = store_value(today_str);
     let resync_today = move || {
         let now = local::today();

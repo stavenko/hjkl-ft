@@ -227,7 +227,7 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.calcium_gate_title" => "Keep the calcium indicator green to unlock the {week}.",
         "dashboard.progress.iron_gate_title" => "Meet the iron target to unlock the {week}.",
         "dashboard.progress.iron_done_title" => "You have met the iron target.",
-        "dashboard.progress.iron_done_progress" => "The next story opens in {n} {w}.",
+        "dashboard.progress.iron_done_progress" => "{week} opens in {n} {w}.",
         "dashboard.progress.fat_gate_title" => "Meet the omega-3 target to unlock the {week}.",
         "dashboard.progress.fat_done_title" => "You have met the omega-3 target.",
         "dashboard.progress.red_meat_gate_title" => "Keep red meat within the weekly limit.",
@@ -238,6 +238,8 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.week_iron" => "iron week",
         "dashboard.progress.week_fat" => "fat week",
         "dashboard.progress.week_red_meat" => "red meat week",
+        "dashboard.progress.week_fat_nom" => "The fat week",
+        "dashboard.progress.week_red_meat_nom" => "The red meat week",
         "dashboard.progress.kcal_day" => "kcal/day",
         "dashboard.progress.done_hint" => "We'll adjust it as observations come in.",
         "dashboard.progress.help_1" => "Our algorithm will calculate your calorie target for you.",
@@ -1154,7 +1156,11 @@ fn ru(key: &str) -> &'static str {
         // Планка закрыта, но неделя ещё идёт: человеку надо сказать, что он своё
         // сделал и ждёт только календаря, — иначе молчание читается как «не засчитано».
         "dashboard.progress.iron_done_title" => "Вы закрыли планку по железу.",
-        "dashboard.progress.iron_done_progress" => "Следующая история откроется через {n} {w}.",
+        // Глава названа по имени и здесь: «следующая история» ничего человеку не
+        // говорила. Название стоит подлежащим, поэтому берётся ИМЕНИТЕЛЬНАЯ форма —
+        // отдельными строками ниже; винительная («чтобы открыть неделю жиров») сюда
+        // не годится.
+        "dashboard.progress.iron_done_progress" => "{week} откроется через {n} {w}.",
         // Жиры: гейт закрывается по МОРСКИМ омега-3 (1.75 г за неделю), баланс жира в
         // условие не входит, — поэтому и зовём к омега-3, а не к «жирам вообще».
         "dashboard.progress.fat_gate_title" => "Наберите норму омега-3, чтобы открыть {week}.",
@@ -1174,6 +1180,10 @@ fn ru(key: &str) -> &'static str {
         "dashboard.progress.week_iron" => "неделю железа",
         "dashboard.progress.week_fat" => "неделю жиров",
         "dashboard.progress.week_red_meat" => "неделю красного мяса",
+        // Именительные формы — только у тех двух глав, что подставляются подлежащим
+        // в строку про открытие: за железом идут жиры, за жирами — красное мясо.
+        "dashboard.progress.week_fat_nom" => "Неделя жиров",
+        "dashboard.progress.week_red_meat_nom" => "Неделя красного мяса",
         "dashboard.progress.kcal_day" => "ккал/день",
         "dashboard.progress.done_hint" => "Мы будем корректировать её по мере наблюдений.",
         "dashboard.progress.help_1" => "Наш алгоритм поможет рассчитать вам вашу планку по калориям.",

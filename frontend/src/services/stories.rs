@@ -1379,7 +1379,7 @@ const S8: &[Frame] = &[
     // 2 — белок.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("eggs-hay.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Eggs: protein", ru: "Яйца: белок" },
         title: Loc { en: "", ru: "" },
@@ -1394,7 +1394,7 @@ const S8: &[Frame] = &[
     // 3 — жиры.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("eggs-yolk.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Eggs: fats", ru: "Яйца: жиры" },
         title: Loc { en: "", ru: "" },
@@ -1407,10 +1407,11 @@ const S8: &[Frame] = &[
                  холестерина в крови.",
         },
     },
-    // 4 — микронутриенты.
+    // 4 — микронутриенты. Названия веществ вписаны В САМУ фотографию, а не выведены
+    // разметкой: снимок под ними размыт сильнее исходного, чтобы буквы читались.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("eggs-hands.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Eggs: micronutrients", ru: "Яйца: микронутриенты" },
         title: Loc { en: "", ru: "" },

@@ -1428,7 +1428,7 @@ const S8: &[Frame] = &[
     // 5 — лютеин и зеаксантин.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("eggs-eye.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Lutein and zeaxanthin", ru: "Лютеин и зеаксантин" },
         title: Loc { en: "", ru: "" },
@@ -1443,7 +1443,7 @@ const S8: &[Frame] = &[
     // 6 — холестерин: где он на самом деле.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("eggs-heart.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Cholesterol: where it really is", ru: "Холестерин: где он на самом деле" },
         title: Loc { en: "", ru: "" },
@@ -1459,7 +1459,7 @@ const S8: &[Frame] = &[
     // 7 — съеденный холестерин и холестерин крови.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("eggs-doctor.jpg"),
         accent: AMBER,
         kicker: Loc {
             en: "Cholesterol in food and in blood are not the same",
@@ -1479,7 +1479,7 @@ const S8: &[Frame] = &[
     // 8 — что влияет по-настоящему.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("eggs-fish-capsules.jpg"),
         accent: AMBER,
         kicker: Loc { en: "What really moves it", ru: "Что влияет по-настоящему" },
         title: Loc { en: "", ru: "" },
@@ -1496,7 +1496,7 @@ const S8: &[Frame] = &[
     // 9 — что изменилось в рекомендациях.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("eggs-council.jpg"),
         accent: AMBER,
         kicker: Loc { en: "What changed in the guidelines", ru: "Что изменилось в рекомендациях" },
         title: Loc { en: "", ru: "" },
@@ -1510,10 +1510,11 @@ const S8: &[Frame] = &[
                  лимита не содержат вовсе.",
         },
     },
-    // 10 — сама планка.
+    // 10 — сама планка, показанная на экране: подсвечены и шкала недели, и значок
+    // в ряду индикаторов, — человеку надо узнать оба места, а не одно.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::ShotBand("eggs-highlight.gif"),
         accent: AMBER,
         kicker: Loc { en: "New indicator: 7 eggs a week", ru: "Новый индикатор: 7 яиц в неделю" },
         title: Loc { en: "", ru: "" },

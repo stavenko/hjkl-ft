@@ -23,7 +23,7 @@ pub fn WeightWidget(entries: Signal<Vec<WeightEntry>>) -> impl IntoView {
                     // график, а что это вес — видно по нему же. Число доступно в
                     // раскрытой панели, куда плитка и ведёт.
                     view! {
-                        <div inner_html=move || chart_svg(&entries.get(), unit.get())></div>
+                        <div style="flex: 1; min-height: 0;" inner_html=move || chart_svg(&entries.get(), unit.get())></div>
                     }.into_view()
                 }
             }}

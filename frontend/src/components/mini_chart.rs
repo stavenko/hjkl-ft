@@ -29,6 +29,39 @@ impl ChartSize {
     fn labels(self) -> bool {
         self == ChartSize::Full
     }
+
+    /// Как SVG вписывается в отведённое место.
+    ///
+    /// В панели высота считается от ширины — рисунок сохраняет пропорции, под ним
+    /// стоят подписи. В плитке подписей нет, и график ДОЛЖЕН ЗАНЯТЬ ВСЮ высоту:
+    /// иначе он висит узкой полосой посреди пустой карточки. Пропорции там не
+    /// важны — это не карта, а форма кривой, поэтому `preserveAspectRatio=none`.
+    fn svg_style(self) -> &'static str {
+        match self {
+            ChartSize::Full => r#"style="width: 100%; height: auto; display: block;""#,
+            ChartSize::Tile => {
+                r#"style="width: 100%; height: 100%; display: block;" preserveAspectRatio="none""#
+            }
+        }
+    }
+
+    /// Обёртка вокруг SVG: в плитке она отдаёт ему всю свою высоту, в панели
+    /// ничего не задаёт — там высоту диктует сам рисунок.
+    fn wrap_style(self) -> &'static str {
+        match self {
+            ChartSize::Full => "",
+            ChartSize::Tile => "height: 100%;",
+        }
+    }
+
+    /// Радиус точки на линии. В растянутой плитке кружок превратился бы в
+    /// заметный овал, поэтому там точек нет вовсе — форму держит сама линия.
+    fn dot_r(self) -> f64 {
+        match self {
+            ChartSize::Full => 2.5,
+            ChartSize::Tile => 0.0,
+        }
+    }
 }
 
 /// Y axis, X axis and two faint gridlines — drawn in every chart (with or
@@ -104,16 +137,15 @@ pub fn chart_block_coloured(
     color: &str,
 ) -> String {
     let h = size.h();
+    let (wrap, st) = (size.wrap_style(), size.svg_style());
     if values.is_empty() {
         let (vb, ax) = (view_box(h), axes(h));
         let row = labels_row(size, &[]);
-        return format!(
-            r#"<div><svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">{ax}</svg>{row}</div>"#
-        );
+        return format!(r#"<div style="{wrap}"><svg viewBox="{vb}" {st}>{ax}</svg>{row}</div>"#);
     }
-    let svg = line_chart_svg_with_planka(values, planka, h, color);
+    let svg = line_chart_svg_with_planka(values, planka, size, color);
     let row = labels_row(size, dates);
-    format!(r#"<div>{svg}{row}</div>"#)
+    format!(r#"<div style="{wrap}">{svg}{row}</div>"#)
 }
 
 // ── Steps histogram ─────────────────────────────────────────────────────────
@@ -142,16 +174,15 @@ pub fn steps_bar_block(
     size: ChartSize,
 ) -> String {
     let h = size.h();
+    let (wrap, st) = (size.wrap_style(), size.svg_style());
     if values.is_empty() {
         let (vb, ax) = (view_box(h), axes(h));
         let row = labels_row(size, &[]);
-        return format!(
-            r#"<div><svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">{ax}</svg>{row}</div>"#
-        );
+        return format!(r#"<div style="{wrap}"><svg viewBox="{vb}" {st}>{ax}</svg>{row}</div>"#);
     }
-    let svg = steps_bar_svg(values, plankas, h);
+    let svg = steps_bar_svg(values, plankas, size);
     let row = labels_row(size, dates);
-    format!(r#"<div>{svg}{row}</div>"#)
+    format!(r#"<div style="{wrap}">{svg}{row}</div>"#)
 }
 
 /// Average over the logged days EXCLUDING today (the last point — a still-partial
@@ -173,8 +204,8 @@ pub fn avg_past(values: &[f64]) -> Option<f64> {
 ///
 /// Линия планок СТУПЕНЧАТАЯ, а не одна горизонтальная: планка меняется по неделям,
 /// и прямая через весь график врала бы о прошлом — в старых днях она стояла ниже.
-fn steps_bar_svg(values: &[f64], plankas: &[Option<f64>], h: f64) -> String {
-    let w = CH_W;
+fn steps_bar_svg(values: &[f64], plankas: &[Option<f64>], size: ChartSize) -> String {
+    let (h, w) = (size.h(), CH_W);
     let n = values.len();
 
     let planka_at = |i: usize| plankas.get(i).copied().flatten();
@@ -247,9 +278,9 @@ fn steps_bar_svg(values: &[f64], plankas: &[Option<f64>], h: f64) -> String {
         segments.join("\n")
     };
 
-    let (vb, ax) = (view_box(h), axes(h));
+    let (vb, ax, st) = (view_box(h), axes(h), size.svg_style());
     format!(
-        r#"<svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">
+        r#"<svg viewBox="{vb}" {st}>
   {ax}
   {bars}
   {target}
@@ -260,9 +291,10 @@ fn steps_bar_svg(values: &[f64], plankas: &[Option<f64>], h: f64) -> String {
 fn line_chart_svg_with_planka(
     values: &[f64],
     planka: &[Option<f64>],
-    h: f64,
+    size: ChartSize,
     color: &str,
 ) -> String {
+    let h = size.h();
     let min_val = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max_val = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let range = (max_val - min_val).max(0.5);
@@ -300,9 +332,13 @@ fn line_chart_svg_with_planka(
         String::new()
     };
 
+    // В плитке точек нет: там рисунок растянут по вертикали, и кружок вышел бы
+    // заметным овалом. Форму держит сама линия.
+    let r = size.dot_r();
     let dots: String = points
         .iter()
-        .map(|(x, y)| format!(r#"<circle cx="{:.1}" cy="{:.1}" r="2.5" fill="{color}"/>"#, x, y))
+        .filter(|_| r > 0.0)
+        .map(|(x, y)| format!(r#"<circle cx="{:.1}" cy="{:.1}" r="{r}" fill="{color}"/>"#, x, y))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -369,9 +405,9 @@ fn line_chart_svg_with_planka(
     // раньше, и накрывали цифры.
     let (planka_path, planka_labels) = planka_path;
 
-    let (vb, ax) = (view_box(h), axes(h));
+    let (vb, ax, st) = (view_box(h), axes(h), size.svg_style());
     format!(
-        r#"<svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">
+        r#"<svg viewBox="{vb}" {st}>
   {ax}
   {fill}
   {planka_path}

@@ -29,7 +29,7 @@ pub fn StepsWidget(entries: Signal<Vec<StepEntry>>) -> impl IntoView {
                     // Ни подписи «Шаги», ни сегодняшнего числа: на плитке говорят
                     // столбики и линия планок. Числа — в раскрытой панели.
                     view! {
-                        <div inner_html=move || chart_svg_steps(&entries.get(), &history)></div>
+                        <div style="flex: 1; min-height: 0;" inner_html=move || chart_svg_steps(&entries.get(), &history)></div>
                     }.into_view()
                 }
             }}

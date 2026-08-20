@@ -4,36 +4,12 @@ use api_types::WeightEntry;
 use crate::services::i18n::{t, weight_unit_signal, WeightUnit};
 use crate::services::weight_trend::{weight_trend, BalanceState, DEFAULT_WINDOW_DAYS};
 
-const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; padding: 10px 12px; height: 100%; box-sizing: border-box;";
+const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; padding: 10px 12px; height: 100%; \
+    box-sizing: border-box; display: flex; flex-direction: column; justify-content: center;";
 
 #[component]
 pub fn WeightWidget(entries: Signal<Vec<WeightEntry>>) -> impl IntoView {
     let unit = weight_unit_signal();
-
-    let last_value = move || {
-        let mut es = entries.get();
-        es.sort_by(|a, b| a.date.cmp(&b.date));
-        match es.last() {
-            Some(last) => {
-                let u = unit.get();
-                let val = u.from_kg(last.weight_kg);
-                let ul = match u {
-                    WeightUnit::Kg => t("weight.unit_kg"),
-                    WeightUnit::Lbs => t("weight.unit_lbs"),
-                };
-                format!("{:.1} {}", val, ul)
-            }
-            None => "—".to_string(),
-        }
-    };
-
-    // Colour the current weight by energy balance inferred from the trend:
-    // green = deficit (losing), pink = surplus (gaining), default = maintenance.
-    let weight_color = move || match weight_trend(&entries.get(), DEFAULT_WINDOW_DAYS).balance() {
-        BalanceState::Deficit => "var(--bulma-success)",
-        BalanceState::Surplus => "#e0699b",
-        BalanceState::Maintenance => "var(--bulma-text)",
-    };
 
     view! {
         <div style=CARD>
@@ -43,16 +19,27 @@ pub fn WeightWidget(entries: Signal<Vec<WeightEntry>>) -> impl IntoView {
                 if entries.get().len() < 2 {
                     view! { <EmptyPrompt text_key="weight.empty_prompt"/> }.into_view()
                 } else {
+                    // Ни подписи «Вес», ни сегодняшнего числа: на плитке говорит сам
+                    // график, а что это вес — видно по нему же. Число доступно в
+                    // раскрытой панели, куда плитка и ведёт.
                     view! {
-                        <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px;">
-                            <span class="is-size-7 has-text-grey">{move || t("weight.widget_title")}</span>
-                            <span attr:data-testid="weight-widget-value" class="is-size-6 has-text-weight-semibold" style:color=weight_color>{last_value}</span>
-                        </div>
                         <div inner_html=move || chart_svg(&entries.get(), unit.get())></div>
                     }.into_view()
                 }
             }}
         </div>
+    }
+}
+
+/// Цвет линии веса — направление, а не величина.
+///
+/// Зелёный — вес снижается, красный — растёт, синий — направление не определено:
+/// колебания в пределах шума, и утверждать что-либо нельзя.
+fn trend_color(entries: &[api_types::WeightEntry]) -> &'static str {
+    match weight_trend(entries, DEFAULT_WINDOW_DAYS).balance() {
+        BalanceState::Deficit => "#1fa463",
+        BalanceState::Surplus => "#e0304f",
+        BalanceState::Maintenance => "var(--bulma-link)",
     }
 }
 
@@ -74,8 +61,19 @@ pub fn EmptyPrompt(text_key: &'static str) -> impl IntoView {
 
 /// Chart block (placeholder or real chart) for an unsorted set of weight entries.
 pub fn chart_svg(entries: &[WeightEntry], unit: WeightUnit) -> String {
-    // Плитка на дашборде — половинной высоты: место там дороже подробности.
-    chart_svg_sized(entries, unit, &[], crate::components::mini_chart::ChartSize::Tile)
+    // Плитка на дашборде — половинной высоты: место там дороже подробности. Цвет
+    // линии говорит о направлении, раз числа рядом больше нет.
+    let mut es = entries.to_vec();
+    es.sort_by(|a, b| a.date.cmp(&b.date));
+    let dates: Vec<&str> = es.iter().map(|e| e.date.as_str()).collect();
+    let values: Vec<f64> = es.iter().map(|e| unit.from_kg(e.weight_kg)).collect();
+    crate::components::mini_chart::chart_block_coloured(
+        &dates,
+        &values,
+        &[],
+        crate::components::mini_chart::ChartSize::Tile,
+        trend_color(entries),
+    )
 }
 
 /// То же, плюс история КАЛОРИЙНОЙ планки поверх — по одному значению на точку веса

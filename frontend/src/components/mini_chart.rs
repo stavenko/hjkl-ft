@@ -91,6 +91,18 @@ pub fn chart_block_with_planka(
     planka: &[Option<f64>],
     size: ChartSize,
 ) -> String {
+    chart_block_coloured(dates, values, planka, size, "var(--bulma-link)")
+}
+
+/// То же, но линия, точки и заливка — заданного цвета. На плитке дашборда цвет
+/// несёт смысл: вес снижается, растёт или держится.
+pub fn chart_block_coloured(
+    dates: &[&str],
+    values: &[f64],
+    planka: &[Option<f64>],
+    size: ChartSize,
+    color: &str,
+) -> String {
     let h = size.h();
     if values.is_empty() {
         let (vb, ax) = (view_box(h), axes(h));
@@ -99,7 +111,7 @@ pub fn chart_block_with_planka(
             r#"<div><svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">{ax}</svg>{row}</div>"#
         );
     }
-    let svg = line_chart_svg_with_planka(values, planka, h);
+    let svg = line_chart_svg_with_planka(values, planka, h, color);
     let row = labels_row(size, dates);
     format!(r#"<div>{svg}{row}</div>"#)
 }
@@ -111,6 +123,13 @@ pub fn chart_block_with_planka(
 const STEPS_LINE: &str = "#1fa463"; // the planka line (green)
 const STEPS_AVG: &str = "#e0699b"; // the average line (before a planka is set)
 
+/// Цвет столбика дня, когда планка была и человек её ВЫПОЛНИЛ.
+const BAR_MET: &str = "#1fa463";
+/// Цвет столбика дня, когда планка была и осталась невыполненной.
+const BAR_MISSED: &str = "#f5a524";
+/// Цвет столбика дня, на который планки ещё не было: судить нечем.
+const BAR_NO_PLANKA: &str = "var(--bulma-link)";
+
 /// Steps histogram block (compact bars + HTML date labels) with a reference line:
 /// - `planka: Some(p)` → a GREEN target line at `p`.
 /// - `planka: None`    → a PINK average line over the logged past days (today
@@ -119,7 +138,7 @@ const STEPS_AVG: &str = "#e0699b"; // the average line (before a planka is set)
 pub fn steps_bar_block(
     dates: &[&str],
     values: &[f64],
-    planka: Option<f64>,
+    plankas: &[Option<f64>],
     size: ChartSize,
 ) -> String {
     let h = size.h();
@@ -130,7 +149,7 @@ pub fn steps_bar_block(
             r#"<div><svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">{ax}</svg>{row}</div>"#
         );
     }
-    let svg = steps_bar_svg(values, planka, h);
+    let svg = steps_bar_svg(values, plankas, h);
     let row = labels_row(size, dates);
     format!(r#"<div>{svg}{row}</div>"#)
 }
@@ -146,19 +165,30 @@ pub fn avg_past(values: &[f64]) -> Option<f64> {
     (!logged.is_empty()).then(|| logged.iter().sum::<f64>() / logged.len() as f64)
 }
 
-fn steps_bar_svg(values: &[f64], planka: Option<f64>, h: f64) -> String {
+/// Столбики шагов, раскрашенные ПО ДНЮ, и ступенчатая линия истории планок.
+///
+/// `plankas` — планка, действовавшая в каждый день (та же длина, что и `values`).
+/// Столбик зелёный, когда планка в этот день выполнена, оранжевый — когда нет, и
+/// нейтрально-синий там, где планки ещё не было: судить такой день нечем.
+///
+/// Линия планок СТУПЕНЧАТАЯ, а не одна горизонтальная: планка меняется по неделям,
+/// и прямая через весь график врала бы о прошлом — в старых днях она стояла ниже.
+fn steps_bar_svg(values: &[f64], plankas: &[Option<f64>], h: f64) -> String {
     let w = CH_W;
     let n = values.len();
 
-    // Reference line: the planka once it's set, otherwise the running average.
-    let line = planka.or_else(|| avg_past(values));
-    // Bars grow from zero, scaled to the tallest day OR the reference line (so the
-    // line always fits on the chart).
+    let planka_at = |i: usize| plankas.get(i).copied().flatten();
+    // Средняя за прошлые дни — запасная линия, пока планки нет ни на один день.
+    let fallback = plankas.iter().all(Option::is_none).then(|| avg_past(values)).flatten();
+    // Столбики растут от нуля; масштаб — по самому высокому дню ИЛИ по самой
+    // высокой планке, чтобы линия всегда помещалась в поле.
+    let top_planka = plankas.iter().flatten().copied().fold(0.0_f64, f64::max);
     let max_val = values
         .iter()
         .copied()
         .fold(0.0_f64, f64::max)
-        .max(line.unwrap_or(0.0))
+        .max(top_planka)
+        .max(fallback.unwrap_or(0.0))
         .max(1.0);
 
     let slot = w / n as f64;
@@ -171,8 +201,13 @@ fn steps_bar_svg(values: &[f64], planka: Option<f64>, h: f64) -> String {
             let cx = (i as f64 + 0.5) * slot;
             let bh = (v / max_val) * h;
             let y = h - bh;
+            let fill = match planka_at(i) {
+                Some(p) if v >= p => BAR_MET,
+                Some(_) => BAR_MISSED,
+                None => BAR_NO_PLANKA,
+            };
             format!(
-                r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="1" fill="var(--bulma-link)"/>"#,
+                r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="1" fill="{fill}"/>"#,
                 cx - bar_w / 2.0,
                 y,
                 bar_w,
@@ -182,16 +217,35 @@ fn steps_bar_svg(values: &[f64], planka: Option<f64>, h: f64) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Reference line ON TOP of the bars: green for the planka, pink for the average.
-    let line_color = if planka.is_some() { STEPS_LINE } else { STEPS_AVG };
-    let target = line
-        .map(|p| {
+    // ЛИНИЯ ПЛАНОК поверх столбиков: ступенька на каждый день, у которого планка
+    // была. Дни без планки в линию не входят — она там просто прерывается.
+    let target = if let Some(p) = fallback {
+        let y = h - (p / max_val) * h;
+        format!(
+            r#"<line x1="0" y1="{y:.1}" x2="{w:.0}" y2="{y:.1}" stroke="{STEPS_AVG}" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>"#
+        )
+    } else {
+        let mut segments: Vec<String> = Vec::new();
+        for i in 0..n {
+            let Some(p) = planka_at(i) else { continue };
             let y = h - (p / max_val) * h;
-            format!(
-                r#"<line x1="0" y1="{y:.1}" x2="{w:.0}" y2="{y:.1}" stroke="{line_color}" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>"#
-            )
-        })
-        .unwrap_or_default();
+            let (x1, x2) = (i as f64 * slot, (i + 1) as f64 * slot);
+            segments.push(format!(
+                r#"<line x1="{x1:.1}" y1="{y:.1}" x2="{x2:.1}" y2="{y:.1}" stroke="{STEPS_LINE}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>"#
+            ));
+            // Вертикальная перемычка на смене планки — иначе ступеньки повисают
+            // в воздухе и читаются как отдельные чёрточки.
+            if let Some(prev) = planka_at(i.wrapping_sub(1)).filter(|_| i > 0) {
+                if (prev - p).abs() > f64::EPSILON {
+                    let y_prev = h - (prev / max_val) * h;
+                    segments.push(format!(
+                        r#"<line x1="{x1:.1}" y1="{y_prev:.1}" x2="{x1:.1}" y2="{y:.1}" stroke="{STEPS_LINE}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>"#
+                    ));
+                }
+            }
+        }
+        segments.join("\n")
+    };
 
     let (vb, ax) = (view_box(h), axes(h));
     format!(
@@ -203,7 +257,12 @@ fn steps_bar_svg(values: &[f64], planka: Option<f64>, h: f64) -> String {
     )
 }
 
-fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>], h: f64) -> String {
+fn line_chart_svg_with_planka(
+    values: &[f64],
+    planka: &[Option<f64>],
+    h: f64,
+    color: &str,
+) -> String {
     let min_val = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max_val = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let range = (max_val - min_val).max(0.5);
@@ -236,14 +295,14 @@ fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>], h: f64) ->
     // The area fill and the connecting line only make sense for 2+ points.
     let fill = if n >= 2 {
         let fill_path = format!("{} L{:.1},{:.1} L0,{:.1} Z", path, w, h, h);
-        format!(r#"<path d="{fill_path}" fill="var(--bulma-link)" opacity="0.1"/>"#)
+        format!(r#"<path d="{fill_path}" fill="{color}" opacity="0.1"/>"#)
     } else {
         String::new()
     };
 
     let dots: String = points
         .iter()
-        .map(|(x, y)| format!(r#"<circle cx="{:.1}" cy="{:.1}" r="2.5" fill="var(--bulma-link)"/>"#, x, y))
+        .map(|(x, y)| format!(r#"<circle cx="{:.1}" cy="{:.1}" r="2.5" fill="{color}"/>"#, x, y))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -316,7 +375,7 @@ fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>], h: f64) ->
   {ax}
   {fill}
   {planka_path}
-  <path d="{path}" fill="none" stroke="var(--bulma-link)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+  <path d="{path}" fill="none" stroke="{color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
   {dots}
   {planka_labels}
 </svg>"#

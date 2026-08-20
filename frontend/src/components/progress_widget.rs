@@ -583,17 +583,9 @@ pub fn ProgressWidget() -> impl IntoView {
     );
     let calcium_gate_s = move || sticky(&CALCIUM_GATE_CACHE, calcium_gate.get());
 
+    // Считается ли планка прямо сейчас — общий замок для обоих расчётов ниже:
+    // первого и пересчёта при смене цели. Ручного расчёта нет, кнопку убрали.
     let busy = create_rw_signal(false);
-    let calculate = move |_| {
-        busy.set(true);
-        spawn_local(async move {
-            if let Some(n) = local::calorie_planka_suggestion().await {
-                local::set_calorie_goal(n).await;
-                sync::push_background();
-            }
-            busy.set(false);
-        });
-    };
 
     // AUTO first planka: the moment the observation week completes (7/7/7 across
     // food/weight/steps) and no planka exists yet, compute and set it — no button.
@@ -628,9 +620,36 @@ pub fn ProgressWidget() -> impl IntoView {
             });
         }
     });
-    // Raised when the course goal changes → the calorie planka no longer fits, so
-    // the widget prompts a recompute instead of showing the (stale) calorie gauge.
+    // ПЕРЕСЧЁТ ПРИ СМЕНЕ ЦЕЛИ — тоже сам, без кнопки.
+    //
+    // Смена курса (похудение / набор / поддержание) поднимает флаг «планка больше не
+    // отвечает цели». Раньше на этом месте карточка показывала предупреждение и
+    // кнопку «Пересчитать планку»; кнопки в продукте нет и не подразумевается, а
+    // человека нельзя оставлять со старой планкой и без способа её обновить.
+    // Поэтому считаем заново тем же алгоритмом, что и первую, — и флаг снимается
+    // внутри `set_calorie_goal`.
     let planka_stale = local::planka_stale_signal();
+    let stale_tried = create_rw_signal(false);
+    create_effect(move |_| {
+        if !planka_stale.get() || busy.get_untracked() || stale_tried.get_untracked() {
+            return;
+        }
+        // Планки ещё нет вовсе — это дело эффекта выше, он посчитает первую.
+        if matches!(planka.get(), Some(None) | None) {
+            return;
+        }
+        stale_tried.set(true);
+        busy.set(true);
+        spawn_local(async move {
+            if let Some(n) = local::calorie_planka_suggestion().await {
+                local::set_calorie_goal(n).await;
+                sync::push_background();
+            }
+            busy.set(false);
+            // Цель может смениться ещё раз — тогда пересчитать надо снова.
+            stale_tried.set(false);
+        });
+    });
 
     let goal_word = move || match profile::get_goal() {
         CourseGoal::Lose => t("dashboard.progress.word_lose"),
@@ -668,26 +687,7 @@ pub fn ProgressWidget() -> impl IntoView {
                         // in place of the old plain number. Green while under the
                         // target, red once over (it's an «at most» goal).
                         Some(n) => {
-                            let calorie = if planka_stale.get() {
-                                // Goal changed → the planka is out of date. Show a prompt +
-                                // recompute button in place of the calorie gauge.
-                                view! {
-                                    <div style="display: flex; flex-direction: column; gap: 10px;">
-                                        <span class="is-size-7 has-text-grey has-text-weight-medium">
-                                            {move || t("dashboard.progress.done_title")}
-                                        </span>
-                                        <p class="is-size-7" style="margin: 0; line-height: 1.4;">
-                                            {move || t("dashboard.progress.recalc_needed")}
-                                        </p>
-                                        <button class="button is-link is-fullwidth"
-                                            prop:disabled=move || busy.get()
-                                            on:pointerup=|ev: web_sys::PointerEvent| ev.stop_propagation()
-                                            on:click=calculate>
-                                            {move || t("dashboard.progress.recalc")}
-                                        </button>
-                                    </div>
-                                }.into_view()
-                            } else {
+                            let calorie = {
                                 let eaten = today_kcal.get().unwrap_or(0.0);
                                 let color = if eaten > n { "#e0304f" } else { "#1fa463" }.to_string();
                                 view! {

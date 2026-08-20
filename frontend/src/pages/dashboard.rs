@@ -493,6 +493,13 @@ thread_local! {
 
 // Bare 4×3 tile wrapper: the weight/steps widgets bring their own card, so this
 // button is transparent and just fills the grid area to open the chart modal.
+/// Насколько палец может уехать, чтобы жест всё ещё считался тапом, в пикселях.
+///
+/// Десять — обычная величина для пальца: попасть в точку не выходит ни у кого, а
+/// прокрутка на столько не ограничивается. Меньше — и тап не засчитается людям с
+/// дрожащей рукой, больше — короткий рывок прокрутки снова начнёт открывать карточку.
+const TAP_SLOP: i32 = 10;
+
 const WIDGET_TILE: &str = "appearance: none; -webkit-appearance: none; border: none; background: none; \
     padding: 0; margin: 0; cursor: pointer; font: inherit; color: inherit; text-align: left; display: block;";
 
@@ -559,6 +566,9 @@ pub fn DashboardPage() -> impl IntoView {
     };
 
     let overlay = create_rw_signal(Overlay::None);
+    // Где палец коснулся карточки прогресса. По расстоянию до места, где его
+    // подняли, тап отличается от прокрутки — см. обработчики у самой карточки.
+    let press_at = create_rw_signal::<Option<(i32, i32)>>(None);
     // Persona takes over the whole screen on the first run OR when re-opened.
     let persona_full = move || persona_first_run() || overlay.get() == Overlay::Persona;
     // The cycle widget is female-only.
@@ -1014,7 +1024,32 @@ pub fn DashboardPage() -> impl IntoView {
                         // `pointerup` (native, fires on iOS unlike a delegated <div>
                         // click); the help link/buttons inside stop propagation so
                         // they keep their own action.
-                        <div on:pointerup=move |_| overlay.set(Overlay::Progress)>
+                        //
+                        // ОТКРЫВАЕТ ТОЛЬКО ТАП, а не всякое поднятие пальца. Виджет
+                        // высокий, страница прокручивается, и палец над карточкой
+                        // часто держат именно ради прокрутки — `pointerup` прилетал и
+                        // в конце протяжки, распахивая «Калории» на ровном месте. У
+                        // веса и шагов этого не было: они `<button on:click>`, а
+                        // браузер клик после протяжки не выдаёт. Кнопкой обернуть
+                        // нельзя — внутри свои кнопки, вложенность запрещена, — поэтому
+                        // тап отличается вручную: палец не должен уехать дальше
+                        // [`TAP_SLOP`] от места нажатия.
+                        <div
+                            on:pointerdown=move |ev: web_sys::PointerEvent| {
+                                press_at.set(Some((ev.client_x(), ev.client_y())));
+                            }
+                            // Прокрутка отбирает жест у страницы своим `pointercancel`:
+                            // после него поднятие пальца тапом уже не считается.
+                            on:pointercancel=move |_| press_at.set(None)
+                            on:pointerup=move |ev: web_sys::PointerEvent| {
+                                let Some((x, y)) = press_at.get_untracked() else { return };
+                                press_at.set(None);
+                                let (dx, dy) = (ev.client_x() - x, ev.client_y() - y);
+                                if dx * dx + dy * dy <= TAP_SLOP * TAP_SLOP {
+                                    overlay.set(Overlay::Progress);
+                                }
+                            }
+                        >
                             <ProgressWidget/>
                         </div>
 

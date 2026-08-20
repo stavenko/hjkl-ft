@@ -262,7 +262,7 @@ fn steps_bar_svg(values: &[f64], plankas: &[Option<f64>], size: ChartSize) -> St
             let y = h - (p / max_val) * h;
             let (x1, x2) = (i as f64 * slot, (i + 1) as f64 * slot);
             segments.push(format!(
-                r#"<line x1="{x1:.1}" y1="{y:.1}" x2="{x2:.1}" y2="{y:.1}" stroke="{STEPS_LINE}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>"#
+                r#"<line x1="{x1:.1}" y1="{y:.1}" x2="{x2:.1}" y2="{y:.1}" stroke="{STEPS_LINE}" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>"#
             ));
             // Вертикальная перемычка на смене планки — иначе ступеньки повисают
             // в воздухе и читаются как отдельные чёрточки.
@@ -270,7 +270,7 @@ fn steps_bar_svg(values: &[f64], plankas: &[Option<f64>], size: ChartSize) -> St
                 if (prev - p).abs() > f64::EPSILON {
                     let y_prev = h - (prev / max_val) * h;
                     segments.push(format!(
-                        r#"<line x1="{x1:.1}" y1="{y_prev:.1}" x2="{x1:.1}" y2="{y:.1}" stroke="{STEPS_LINE}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>"#
+                        r#"<line x1="{x1:.1}" y1="{y_prev:.1}" x2="{x1:.1}" y2="{y:.1}" stroke="{STEPS_LINE}" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>"#
                     ));
                 }
             }

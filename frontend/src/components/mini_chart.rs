@@ -8,13 +8,28 @@ const LABEL_ROW: &str = "display: flex; justify-content: space-between; font-siz
 /// высота, растягивать рисунок по горизонтали незачем.
 const CH_W: f64 = 300.0;
 
-/// Высота поля в раскрытой панели — та, что была у графика всегда.
-pub const CH_FULL: f64 = 80.0;
+/// Где рисуется график — от этого зависят и высота поля, и подписи дат.
+#[derive(Clone, Copy, PartialEq)]
+pub enum ChartSize {
+    /// Раскрытая панель: поле прежней высоты, под ним крайние даты.
+    Full,
+    /// Плитка дашборда: поле вдвое ниже и БЕЗ дат. Место там дороже подробности,
+    /// а числа под графиком в этом размере читаются хуже, чем занимают места.
+    Tile,
+}
 
-/// Половинная высота — для плиток на дашборде, где место дороже подробности.
-/// Рисунок тот же, просто ниже: форма кривой читается, а плитка занимает вдвое
-/// меньше экрана.
-pub const CH_HALF: f64 = 40.0;
+impl ChartSize {
+    fn h(self) -> f64 {
+        match self {
+            ChartSize::Full => 80.0,
+            ChartSize::Tile => 40.0,
+        }
+    }
+
+    fn labels(self) -> bool {
+        self == ChartSize::Full
+    }
+}
 
 /// Y axis, X axis and two faint gridlines — drawn in every chart (with or
 /// without data). Доли высоты сохранены от исходных 20 и 50 при 80.
@@ -45,7 +60,22 @@ pub fn short_date(date_str: &str) -> String {
 /// A self-contained chart block (SVG line + HTML date labels). Shows the empty
 /// axes placeholder only when there's no data at all; one point already draws.
 pub fn chart_block(dates: &[&str], values: &[f64]) -> String {
-    chart_block_with_planka(dates, values, &[], CH_FULL)
+    chart_block_with_planka(dates, values, &[], ChartSize::Full)
+}
+
+/// Строка подписей под графиком: крайние даты. В плитке её нет вовсе — вместе с
+/// ней уходит и её высота.
+fn labels_row(size: ChartSize, dates: &[&str]) -> String {
+    if !size.labels() {
+        return String::new();
+    }
+    let first = short_date(dates.first().copied().unwrap_or(""));
+    let last = if dates.len() > 1 {
+        short_date(dates.last().copied().unwrap_or(""))
+    } else {
+        String::new()
+    };
+    format!(r#"<div style="{LABEL_ROW}"><span>{first}</span><span>{last}</span></div>"#)
 }
 
 /// То же, плюс ИСТОРИЯ планки поверх — по одному значению на точку графика.
@@ -59,24 +89,19 @@ pub fn chart_block_with_planka(
     dates: &[&str],
     values: &[f64],
     planka: &[Option<f64>],
-    h: f64,
+    size: ChartSize,
 ) -> String {
+    let h = size.h();
     if values.is_empty() {
         let (vb, ax) = (view_box(h), axes(h));
+        let row = labels_row(size, &[]);
         return format!(
-            r#"<div><svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">{ax}</svg><div style="{LABEL_ROW}"><span></span><span></span></div></div>"#
+            r#"<div><svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">{ax}</svg>{row}</div>"#
         );
     }
     let svg = line_chart_svg_with_planka(values, planka, h);
-    let first = short_date(dates.first().copied().unwrap_or(""));
-    let last = if dates.len() > 1 {
-        short_date(dates.last().copied().unwrap_or(""))
-    } else {
-        String::new()
-    };
-    format!(
-        r#"<div>{svg}<div style="{LABEL_ROW}"><span>{first}</span><span>{last}</span></div></div>"#
-    )
+    let row = labels_row(size, dates);
+    format!(r#"<div>{svg}{row}</div>"#)
 }
 
 // ── Steps histogram ─────────────────────────────────────────────────────────
@@ -91,23 +116,23 @@ const STEPS_AVG: &str = "#e0699b"; // the average line (before a planka is set)
 /// - `planka: None`    → a PINK average line over the logged past days (today
 ///   excluded), shown BEFORE the steps planka has been computed/applied.
 /// Bars are always the neutral link colour.
-pub fn steps_bar_block(dates: &[&str], values: &[f64], planka: Option<f64>, h: f64) -> String {
+pub fn steps_bar_block(
+    dates: &[&str],
+    values: &[f64],
+    planka: Option<f64>,
+    size: ChartSize,
+) -> String {
+    let h = size.h();
     if values.is_empty() {
         let (vb, ax) = (view_box(h), axes(h));
+        let row = labels_row(size, &[]);
         return format!(
-            r#"<div><svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">{ax}</svg><div style="{LABEL_ROW}"><span></span><span></span></div></div>"#
+            r#"<div><svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">{ax}</svg>{row}</div>"#
         );
     }
     let svg = steps_bar_svg(values, planka, h);
-    let first = short_date(dates.first().copied().unwrap_or(""));
-    let last = if dates.len() > 1 {
-        short_date(dates.last().copied().unwrap_or(""))
-    } else {
-        String::new()
-    };
-    format!(
-        r#"<div>{svg}<div style="{LABEL_ROW}"><span>{first}</span><span>{last}</span></div></div>"#
-    )
+    let row = labels_row(size, dates);
+    format!(r#"<div>{svg}{row}</div>"#)
 }
 
 /// Average over the logged days EXCLUDING today (the last point — a still-partial

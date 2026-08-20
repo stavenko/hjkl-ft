@@ -75,7 +75,7 @@ pub fn EmptyPrompt(text_key: &'static str) -> impl IntoView {
 /// Chart block (placeholder or real chart) for an unsorted set of weight entries.
 pub fn chart_svg(entries: &[WeightEntry], unit: WeightUnit) -> String {
     // Плитка на дашборде — половинной высоты: место там дороже подробности.
-    chart_svg_sized(entries, unit, &[], crate::components::mini_chart::CH_HALF)
+    chart_svg_sized(entries, unit, &[], crate::components::mini_chart::ChartSize::Tile)
 }
 
 /// То же, плюс история КАЛОРИЙНОЙ планки поверх — по одному значению на точку веса
@@ -86,20 +86,20 @@ pub fn chart_svg_with_planka(
     unit: WeightUnit,
     planka: &[Option<f64>],
 ) -> String {
-    chart_svg_sized(entries, unit, planka, crate::components::mini_chart::CH_FULL)
+    chart_svg_sized(entries, unit, planka, crate::components::mini_chart::ChartSize::Full)
 }
 
-/// То же, с явной высотой поля: на дашборде график вдвое ниже, чем в раскрытой
-/// панели, — плитки веса и шагов там занимают половину прежнего места.
+/// То же, с явным размером: на дашборде график вдвое ниже и без дат, в раскрытой
+/// панели — прежний, с подписями.
 pub fn chart_svg_sized(
     entries: &[WeightEntry],
     unit: WeightUnit,
     planka: &[Option<f64>],
-    h: f64,
+    size: crate::components::mini_chart::ChartSize,
 ) -> String {
     let mut es = entries.to_vec();
     es.sort_by(|a, b| a.date.cmp(&b.date));
     let dates: Vec<&str> = es.iter().map(|e| e.date.as_str()).collect();
     let values: Vec<f64> = es.iter().map(|e| unit.from_kg(e.weight_kg)).collect();
-    crate::components::mini_chart::chart_block_with_planka(&dates, &values, planka, h)
+    crate::components::mini_chart::chart_block_with_planka(&dates, &values, planka, size)
 }

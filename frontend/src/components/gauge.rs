@@ -315,11 +315,22 @@ pub fn Gauge(
     let bar_h = if value_inside { height.max(18.0) } else { height };
     let radius = if value_inside { bar_h / 2.0 } else { radius };
     let inside = value_inside.then(|| {
+        // ПЛАНКА ВЫПОЛНЕНА — полоса залита целиком, и текст на ней белый. Пока она
+        // не набрана, цифры лежат частью на заливке, частью на пустом фоне, и
+        // белый на светлом пропал бы — там обычный тёмный.
+        //
+        // Прежде здесь стоял `mix-blend-mode: luminosity`, чтобы один цвет годился
+        // для обоих фонов. На половине заполнения он рвал строку ровно по границе
+        // заливки: половина цифр читалась, половина мылилась.
+        let met = frac >= 1.0;
+        let color = if met { "#ffffff" } else { "var(--bulma-text)" };
         view! {
             <span class="is-size-7 has-text-weight-semibold"
-                style="position: absolute; inset: 0; display: flex; align-items: center; \
-                       justify-content: center; white-space: nowrap; pointer-events: none; \
-                       color: var(--bulma-text); mix-blend-mode: luminosity;">
+                style=format!(
+                    "position: absolute; inset: 0; display: flex; align-items: center; \
+                     justify-content: center; white-space: nowrap; pointer-events: none; \
+                     color: {color};"
+                )>
                 {numbers.clone()}
             </span>
         }
@@ -335,7 +346,12 @@ pub fn Gauge(
 
     view! {
         <div attr:data-gauge=label.clone() style="position: relative; display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0;">
-            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;">
+            // Когда числа внутри полосы, справа в этой строке пусто — и подпись
+            // встаёт ПО ЦЕНТРУ над своей шкалой, а не жмётся к левому краю.
+            <div style=format!(
+                "display: flex; justify-content: {}; align-items: baseline; gap: 8px;",
+                if value_inside { "center" } else { "space-between" },
+            )>
                 <span style="display: inline-flex; align-items: center; gap: 6px;">
                     <span class="is-size-7 has-text-weight-medium" style="color: var(--bulma-text-weak);">{label}</span>
                     {hint_btn}

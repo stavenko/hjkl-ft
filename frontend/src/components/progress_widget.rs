@@ -421,6 +421,7 @@ fn next_week_name(title_key: &str) -> &'static str {
         "dashboard.progress.calcium_gate_title" => t("dashboard.progress.week_iron"),
         "dashboard.progress.iron_gate_title" => t("dashboard.progress.week_fat"),
         "dashboard.progress.fat_gate_title" => t("dashboard.progress.week_red_meat"),
+        "dashboard.progress.red_meat_gate_title" => t("dashboard.progress.week_egg"),
         "dashboard.progress.iron_done_title" => t("dashboard.progress.week_fat_nom"),
         "dashboard.progress.fat_done_title" => t("dashboard.progress.week_red_meat_nom"),
         _ => "",
@@ -514,6 +515,13 @@ pub fn ProgressWidget() -> impl IntoView {
     let red_meat_week = create_local_resource(
         move || (food_ver.get(), foods_ver.get()),
         |_| async { crate::services::red_meat::weekly_progress().await },
+    );
+    // Гейт красного мяса: закрыта ли уже хотя бы одна неделя. Условие исполнено —
+    // счётчик встаёт на ноль и там остаётся: неделя яиц ещё не сделана, открывать
+    // по этому гейту пока нечего.
+    let red_meat_gate = create_local_resource(
+        move || (food_ver.get(), foods_ver.get()),
+        |_| async { crate::services::red_meat::week_closed_since_open().await },
     );
     let iron_week = create_local_resource(
         move || (food_ver.get(), foods_ver.get()),
@@ -785,12 +793,16 @@ pub fn ProgressWidget() -> impl IntoView {
                                 // неделю; с её началом счётчик недели встаёт в первый
                                 // день, съеденное обнуляется, и подпись сама
                                 // возвращается к первой.
-                                let key = if w.grams > w.limit {
-                                    "dashboard.progress.red_meat_over_title"
+                                if w.grams > w.limit {
+                                    Some(("dashboard.progress.red_meat_over_title", w.day_of_week - 1))
+                                } else if red_meat_gate.get().unwrap_or(false) {
+                                    // Неделю уже удержали — гейт пройден, и срок больше
+                                    // ни к чему не ведёт: неделя яиц не готова. Счётчик
+                                    // показывает ноль и стоит на нём.
+                                    Some(("dashboard.progress.red_meat_gate_title", indicators::GREEN_GATE_DAYS))
                                 } else {
-                                    "dashboard.progress.red_meat_gate_title"
-                                };
-                                Some((key, w.day_of_week - 1))
+                                    Some(("dashboard.progress.red_meat_gate_title", w.day_of_week - 1))
+                                }
                             } else if let Some(w) = fat_week
                                 .get()
                                 .flatten()

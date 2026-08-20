@@ -230,7 +230,7 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.iron_done_progress" => "{week} opens in {n} {w}.",
         "dashboard.progress.fat_gate_title" => "Meet the omega-3 target to unlock the {week}.",
         "dashboard.progress.fat_done_title" => "You have met the omega-3 target.",
-        "dashboard.progress.red_meat_gate_title" => "Keep red meat within the weekly limit.",
+        "dashboard.progress.red_meat_gate_title" => "Keep red meat within the weekly limit to unlock the {week}.",
         "dashboard.progress.red_meat_over_title" => "You have eaten too much red meat this week. We will try again next week.",
         "dashboard.progress.days_left_progress" => "Left: {n} {w}.",
         "dashboard.progress.week_steps" => "steps week",
@@ -238,6 +238,7 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.week_iron" => "iron week",
         "dashboard.progress.week_fat" => "fat week",
         "dashboard.progress.week_red_meat" => "red meat week",
+        "dashboard.progress.week_egg" => "egg week",
         "dashboard.progress.week_fat_nom" => "The fat week",
         "dashboard.progress.week_red_meat_nom" => "The red meat week",
         "dashboard.progress.kcal_day" => "kcal/day",
@@ -1165,9 +1166,8 @@ fn ru(key: &str) -> &'static str {
         // условие не входит, — поэтому и зовём к омега-3, а не к «жирам вообще».
         "dashboard.progress.fat_gate_title" => "Наберите норму омега-3, чтобы открыть {week}.",
         "dashboard.progress.fat_done_title" => "Вы набрали норму омега-3.",
-        // Красное мясо: планка обратная, её не выполняют, а не превышают. Следующей
-        // главы за ней пока нет — открывать нечего, поэтому и цели в задании нет.
-        "dashboard.progress.red_meat_gate_title" => "Удержите красное мясо в пределах недельной планки.",
+        // Красное мясо: планка обратная, её не выполняют, а не превышают.
+        "dashboard.progress.red_meat_gate_title" => "Удержите красное мясо в пределах недельной планки, чтобы открыть {week}.",
         "dashboard.progress.red_meat_over_title" => "Вы съели слишком много красного мяса на этой неделе. На следующей неделе попробуем ещё раз.",
         // Срок задания — одной строкой на все главы. У недельных глав это дни до
         // конца недели, у гейтов — недостающие ЗЕЛЁНЫЕ дни (семь штук в скользящем
@@ -1180,6 +1180,7 @@ fn ru(key: &str) -> &'static str {
         "dashboard.progress.week_iron" => "неделю железа",
         "dashboard.progress.week_fat" => "неделю жиров",
         "dashboard.progress.week_red_meat" => "неделю красного мяса",
+        "dashboard.progress.week_egg" => "неделю яиц",
         // Именительные формы — только у тех двух глав, что подставляются подлежащим
         // в строку про открытие: за железом идут жиры, за жирами — красное мясо.
         "dashboard.progress.week_fat_nom" => "Неделя жиров",

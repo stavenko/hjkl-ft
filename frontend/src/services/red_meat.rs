@@ -145,6 +145,39 @@ pub async fn weekly_progress() -> Option<WeeklyRedMeat> {
     })
 }
 
+/// Закрыта ли хотя бы одна ЗАВЕРШЁННАЯ неделя красного мяса с тех пор, как тема
+/// открылась, — условие перехода к следующей главе, неделе яиц.
+///
+/// Тот же гейт, что у жиров (`fats::week_closed_since_open`), и считается так же:
+/// от дня открытия темы до последней завершённой недели. Текущая не судится — «ещё
+/// не перебрал» не то же самое, что «уложился».
+///
+/// Неделя, в которую человек не вёл дневник, не идёт в счёт: пустой дневник даёт
+/// ноль граммов, и неделя выглядела бы удержанной, хотя её просто не было.
+///
+/// НЕДЕЛЯ ЯИЦ ЕЩЁ НЕ СДЕЛАНА, и открывать по этому условию пока нечего: гейт
+/// показывается человеку счётчиком, который на нуле и останавливается.
+pub async fn week_closed_since_open() -> bool {
+    let today = local::today_date();
+    let (Some(open), Some((cur_start, _))) = (week_open_date(), week_bounds(today)) else {
+        return false;
+    };
+    let diary_days: std::collections::HashSet<String> =
+        local::list_diary_dates().await.into_iter().collect();
+    let mut s = open;
+    while s < cur_start {
+        let e = s + Duration::days(6);
+        let logged = (0..7).any(|d| {
+            diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
+        });
+        if logged && raw_grams_between(s, e).await <= WEEKLY_LIMIT_RAW_G {
+            return true;
+        }
+        s += Duration::days(7);
+    }
+    false
+}
+
 /// Цвет индикатора по ЗАВЕРШЁННЫМ неделям — общее недельное правило, то же, что у
 /// железа, гема и омега-3. Неделя закрыта, если человек в неё уложился.
 ///

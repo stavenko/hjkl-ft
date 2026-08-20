@@ -207,6 +207,12 @@ pub fn Gauge(
     /// Pace markers for a period gauge (see [`GaugePace`]). `None` → a plain bar,
     /// exactly as before.
     #[prop(default = None)] pace: Option<GaugePace>,
+    /// ЧИСЛА ВНУТРИ ПОЛОСЫ, а не строкой над ней.
+    ///
+    /// Три дневные шкалы стоят в один ряд, и на ширине телефона строка «подпись —
+    /// число» в каждой трети не помещается: подписи переносятся, числа упираются в
+    /// край. Внутри полосы место есть — над ней остаётся только название.
+    #[prop(default = false)] value_inside: bool,
 ) -> impl IntoView {
     let value_style = value_color
         .map(|c| format!("color: {c};"))
@@ -298,6 +304,35 @@ pub fn Gauge(
             .collect_view()
     });
 
+    // Числа: либо строкой над полосой, либо внутри неё. Текст один и тот же, меняется
+    // только место, поэтому и собирается он один раз.
+    let numbers = format!(
+        "{v} / {t} {unit}",
+        v = format!("{value:.*}", decimals),
+        t = format!("{target:.*}", decimals),
+    );
+    // Внутри полосы она должна быть достаточно толстой, чтобы буквы не резались.
+    let bar_h = if value_inside { height.max(18.0) } else { height };
+    let radius = if value_inside { bar_h / 2.0 } else { radius };
+    let inside = value_inside.then(|| {
+        view! {
+            <span class="is-size-7 has-text-weight-semibold"
+                style="position: absolute; inset: 0; display: flex; align-items: center; \
+                       justify-content: center; white-space: nowrap; pointer-events: none; \
+                       color: var(--bulma-text); mix-blend-mode: luminosity;">
+                {numbers.clone()}
+            </span>
+        }
+    });
+    let above = (!value_inside).then(|| {
+        view! {
+            <span class="is-size-7" style="white-space: nowrap;">
+                <span class="has-text-weight-bold" style=value_style>{format!("{value:.*}", decimals)}</span>
+                <span class="has-text-grey">{format!(" / {:.*} {unit}", decimals, target)}</span>
+            </span>
+        }
+    });
+
     view! {
         <div attr:data-gauge=label.clone() style="position: relative; display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0;">
             <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;">
@@ -305,15 +340,13 @@ pub fn Gauge(
                     <span class="is-size-7 has-text-weight-medium" style="color: var(--bulma-text-weak);">{label}</span>
                     {hint_btn}
                 </span>
-                <span class="is-size-7" style="white-space: nowrap;">
-                    <span class="has-text-weight-bold" style=value_style>{format!("{value:.*}", decimals)}</span>
-                    <span class="has-text-grey">{format!(" / {:.*} {unit}", decimals, target)}</span>
-                </span>
+                {above}
             </div>
-            <div style=format!("height: {height}px; border-radius: {radius}px; background: var(--bulma-border-weak); \
+            <div style=format!("height: {bar_h}px; border-radius: {radius}px; background: var(--bulma-border-weak); \
                     overflow: hidden; position: relative; {track_glow}")>
                 <div style=format!("height: 100%; width: {pct:.1}%; background: {color}; border-radius: {radius}px; transition: width 0.4s;")></div>
                 {pace_dots}
+                {inside}
             </div>
             {hint_popup}
         </div>

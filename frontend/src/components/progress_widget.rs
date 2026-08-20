@@ -252,8 +252,14 @@ fn daily_gauges_grid(
     red_meat: Option<crate::services::red_meat::WeeklyRedMeat>,
     egg: Option<crate::services::egg::WeeklyEggs>,
 ) -> impl IntoView {
+    // ДНЕВНЫЕ — В ОДНУ СТРОКУ. Их всего три (белок, фрукты с овощами, кальций), и
+    // они про один и тот же сегодняшний день: строка держит их вместе и отделяет
+    // от недельных, которые идут ниже парами. Колонок ровно столько, сколько шкал —
+    // пока кальций не открыт, их две, и пустого места справа не остаётся.
+    let daily_cols = gauges.len().max(1);
     view! {
-        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 14px;">
+        <div style=format!("display: grid; grid-template-columns: repeat({daily_cols}, 1fr); \
+                            gap: 12px 14px; margin-bottom: 12px;")>
             {gauges.into_iter().map(|g| {
                 // At-least goals: neutral until met, green when met (bar + value).
                 let (bar, val) = crate::components::gauge::at_least_colors(g.value, g.target);
@@ -263,10 +269,14 @@ fn daily_gauges_grid(
                         label=gauge_label(g.key).to_string()
                         unit=g.unit.to_string()
                         color=bar.to_string()
+                        // Числа внутри полосы: втроём в ряд они иначе не помещаются.
+                        value_inside=true
                         value_color=val.map(String::from)/>
                 }
             }).collect_view()}
-            // Недельное железо — последней ячейкой, чтобы встать напротив кальция.
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 14px;">
+            // Недельное железо — первой ячейкой второй сетки.
             {iron.map(weekly_iron_gauge)}
             // Порции гемовых продуктов — следующей ячейкой, рядом с железом:
             // это две стороны одного разговора, и врозь они читаются хуже.

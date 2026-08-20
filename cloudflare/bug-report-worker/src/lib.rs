@@ -395,11 +395,24 @@ async fn send_unknown_digest(env: &Env) -> Result<()> {
     let mut resp = do_get(&stub, "/unknown-digest?hours=24").await?;
     let body: serde_json::Value = resp.json().await?;
     let foods = body.get("foods").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+
+    // ОТКУДА ПРИЛЕТЕЛО. Прод и дев шлют в один и тот же чат, и без пометки сводки
+    // неразличимы: имена в них бывают одни и те же — на деве их набивают замеры.
+    let where_from = env
+        .var("ENVIRONMENT")
+        .map(|v| v.to_string())
+        .unwrap_or_else(|_| "dev".to_string());
+    let mark = if where_from == "prod" { "[прод]" } else { "[дев]" };
+
+    // ПУСТАЯ СВОДКА ТОЖЕ УХОДИТ. Молчание двусмысленно: то ли еда вся опозналась,
+    // то ли отвалился крон, воркер или бот, — а разница между этими случаями
+    // ровно противоположная.
     if foods.is_empty() {
-        return Ok(());
+        let text = format!("{mark} За последние сутки не было неудачных попыток опознать еду.");
+        return send_telegram(&token, &chat_id, &text).await;
     }
 
-    let mut lines = vec![format!("Не опознано за сутки: {} продукт(ов)", foods.len())];
+    let mut lines = vec![format!("{mark} Не опознано за сутки: {} продукт(ов)", foods.len())];
     for f in foods.iter().take(20) {
         let subject = f.get("subject").and_then(|v| v.as_str()).unwrap_or("?");
         let people = f.get("people").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -409,8 +422,15 @@ async fn send_unknown_digest(env: &Env) -> Result<()> {
     lines.push(String::new());
     lines.push("Каждое имя — повод пополнить словарь редких имён.".to_string());
 
+    send_telegram(&token, &chat_id, &lines.join("\n")).await
+}
+
+/// Отправить сообщение боту-оповещателю. Ошибка доставки уходит в лог и НЕ роняет
+/// вызывающего: сводка — дело второе, а крон, упавший на ней, не выполнит и того,
+/// что делает следом.
+async fn send_telegram(token: &str, chat_id: &str, text: &str) -> Result<()> {
     let url = format!("https://api.telegram.org/bot{token}/sendMessage");
-    let payload = serde_json::json!({ "chat_id": chat_id, "text": lines.join("\n") });
+    let payload = serde_json::json!({ "chat_id": chat_id, "text": text });
     let headers = Headers::new();
     headers.set("Content-Type", "application/json")?;
     let mut init = RequestInit::new();

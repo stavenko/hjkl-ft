@@ -8,6 +8,7 @@ pub mod auth;
 pub mod config;
 pub mod curator_share;
 pub mod db;
+pub mod egg;
 pub mod enrich;
 pub mod errors;
 pub mod fats;

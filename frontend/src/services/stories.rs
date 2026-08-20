@@ -40,6 +40,11 @@ pub enum Bg {
     /// `Dark`, но в бордово-винных тонах: тема узнаётся до того, как прочитан
     /// первый кадр, и не путается с предыдущими главами.
     Meat,
+    /// Тёмно-янтарный градиент — фон недели яиц. Тот же рисунок, что у `Dark` и
+    /// `Meat`: у каждой главы свой цвет, и тема узнаётся до первого прочитанного
+    /// слова. Жёлток в тёмном исполнении — тёплая охра сверху, почти чёрная
+    /// умбра внизу, чтобы белый текст читался так же, как на синем и бордовом.
+    Egg,
     /// Full-bleed photo — asset path served under `/story-img/`.
     Photo(&'static str),
 }
@@ -104,6 +109,7 @@ impl Frame {
         match self.bg {
             Bg::Dark => s.push_str("dark"),
             Bg::Meat => s.push_str("meat"),
+            Bg::Egg => s.push_str("egg"),
             Bg::Photo(p) => {
                 s.push_str("photo:");
                 s.push_str(p);
@@ -177,6 +183,9 @@ pub enum Appears {
     AfterFatWeek,
     /// Видна, когда открылась неделя КРАСНОГО МЯСА — после закрытой недели жиров.
     AfterRedMeatWeek,
+    /// Видна, когда открылась неделя ЯИЦ — после недели мяса, которую человек
+    /// удержал в пределах планки.
+    AfterEggWeek,
 }
 
 pub struct Story {
@@ -301,6 +310,7 @@ pub fn visible(
     iron_unlocked: bool,
     fat_unlocked: bool,
     red_meat_unlocked: bool,
+    egg_unlocked: bool,
 ) -> Vec<&'static Story> {
     STORIES
         .iter()
@@ -312,6 +322,7 @@ pub fn visible(
             Appears::AfterIronWeek => iron_unlocked,
             Appears::AfterFatWeek => fat_unlocked,
             Appears::AfterRedMeatWeek => red_meat_unlocked,
+            Appears::AfterEggWeek => egg_unlocked,
         })
         .collect()
 }
@@ -1348,6 +1359,204 @@ const S7: &[Frame] = &[
     },
 ];
 
+// --- Story 8: НЕДЕЛЯ ЯИЦ, видна, когда открылась восьмая глава
+// (Appears::AfterEggWeek).
+//
+// Русский текст авторский, перенесён дословно; правлена только типографика.
+// Половина главы — про холестерин: яйцо десятилетиями считалось запретным, и без
+// этого разговора планка «семь штук в неделю» читалась бы как вредный совет.
+//
+// Обложек у главы нет — фотографий яиц в наборе не заведено, поэтому кадры идут на
+// одном фоне, с эмодзи только в первом.
+
+const S8: &[Frame] = &[
+    // 1 — поздравление: мясо позади, впереди яйца. Акцент на названии главы —
+    // бело-жёлтый градиент `^…^`, белок и желток.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::Emoji("🎉"),
+        accent: AMBER,
+        kicker: Loc { en: "Eggs", ru: "Яйца" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "You have dealt with the red meat week. It is a very useful marker: it will \
+                 spare you big trouble when you are older.\n\nAnd we move on towards a healthy \
+                 diet. The next week is the ^egg week^.",
+            ru: "Вы справились с неделей красного мяса. Это очень полезный маркер, который \
+                 позволит вам избежать больших проблем, когда вы станете постарше.\n\nА мы \
+                 двигаемся дальше к здоровому рациону. И следующая неделя это ^неделя яиц^.",
+        },
+    },
+    // 2 — белок.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Eggs: protein", ru: "Яйца: белок" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Egg protein is the reference standard. In digestibility and amino-acid \
+                 composition it beats meat, fish and dairy (DIAAS 1.13). One egg — 6.3 g of \
+                 protein for 78 kcal.",
+            ru: "Яичный белок — эталон. По усвояемости и составу аминокислот он превосходит \
+                 мясо, рыбу и молочное (DIAAS 1.13). Одно яйцо — 6.3 г белка на 78 ккал.",
+        },
+    },
+    // 3 — жиры.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Eggs: fats", ru: "Яйца: жиры" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "5 g of fat per egg, of which saturated is only 1.6 g — that is 8% of your \
+                 daily allowance. The rest is mono- and polyunsaturated, the very ones that \
+                 work to lower blood cholesterol.",
+            ru: "5 г жира на яйцо, из них насыщенных всего 1.6 г — это 8% вашей дневной нормы. \
+                 Остальное — моно- и полиненасыщенные, те самые, которые работают на снижение \
+                 холестерина в крови.",
+        },
+    },
+    // 4 — микронутриенты.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Eggs: micronutrients", ru: "Яйца: микронутриенты" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "One egg covers a third of the daily choline, 28% of selenium, 19% of B12 and \
+                 16% of iodine. Choline matters especially: the liver and the nervous system \
+                 need it, and there is almost nowhere else to get it — dense sources in an \
+                 ordinary diet are few.",
+            ru: "Одно яйцо закрывает треть суточной нормы холина, 28% селена, 19% B12, 16% \
+                 йода. Холин особенно важен: он нужен печени и нервной системе, а получить его \
+                 больше почти неоткуда — плотных источников в обычном рационе единицы.",
+        },
+    },
+    // 5 — лютеин и зеаксантин.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Lutein and zeaxanthin", ru: "Лютеин и зеаксантин" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "These are the pigments of the retina that protect eyesight. They are found in \
+                 greens, but from the yolk they are absorbed far better — the egg's fatty base \
+                 works as transport.",
+            ru: "Это пигменты сетчатки, защищающие зрение. Они есть в зелени, но из желтка \
+                 усваиваются в разы лучше — жировая основа яйца работает как транспорт.",
+        },
+    },
+    // 6 — холестерин: где он на самом деле.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "Cholesterol: where it really is", ru: "Холестерин: где он на самом деле" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "An egg holds 186 mg of cholesterol — more than 100 g of meat. But cholesterol \
+                 is in every animal product: meat, fish, curd, cheese, prawns. Most of all — in \
+                 liver and other offal.",
+            ru: "В яйце 186 мг холестерина — больше, чем в 100 г мяса. Но холестерин есть во \
+                 всех животных продуктах: мясе, рыбе, твороге, сыре, креветках. Больше всего — \
+                 в печени и других субпродуктах.",
+        },
+    },
+    // 7 — съеденный холестерин и холестерин крови.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc {
+            en: "Cholesterol in food and in blood are not the same",
+            ru: "Холестерин в еде и холестерин в крови — не одно и то же",
+        },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Your body itself produces 700–1000 mg of cholesterol a day — two to three \
+                 times more than comes with food. When there is less of it in the diet, the \
+                 body simply synthesizes more. That is why the link between what is eaten and \
+                 the blood test is weaker than it seems.",
+            ru: "Ваше тело само производит 700–1000 мг холестерина в сутки — в 2–3 раза больше, \
+                 чем приходит с едой. Когда с пищей его меньше, организм просто синтезирует \
+                 больше. Поэтому связь между съеденным и анализом крови слабее, чем кажется.",
+        },
+    },
+    // 8 — что влияет по-настоящему.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "What really moves it", ru: "Что влияет по-настоящему" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "Blood cholesterol is moved by saturated fats, trans fats and fibre — and we \
+                 already manage all three. You have been holding the fat balance since the \
+                 first week, and fibre through vegetables, fruit and wholegrains. These are the \
+                 levers that work.",
+            ru: "На холестерин в крови работают насыщенные жиры, трансжиры и клетчатка — и мы \
+                 уже управляем всеми тремя. Баланс жиров вы держите с первой недели, клетчатку \
+                 — через овощи, фрукты и цельные крупы. Это и есть рабочие рычаги.",
+        },
+    },
+    // 9 — что изменилось в рекомендациях.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "What changed in the guidelines", ru: "Что изменилось в рекомендациях" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "The 300 mg daily cholesterol limit had been in force since the 1960s. It was \
+                 dropped: research showed that for most people restricting dietary cholesterol \
+                 has minimal effect. The current US guidelines contain no numeric limit at all.",
+            ru: "Лимит в 300 мг холестерина в сутки действовал с 1960-х. Его отменили: \
+                 исследования показали, что для большинства людей ограничение пищевого \
+                 холестерина даёт минимальный эффект. Действующие рекомендации США числового \
+                 лимита не содержат вовсе.",
+        },
+    },
+    // 10 — сама планка.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc { en: "New indicator: 7 eggs a week", ru: "Новый индикатор: 7 яиц в неделю" },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "This is a minimum, not a ceiling. Such an amount reliably covers choline and \
+                 selenium, adds quality protein and takes up only 8% of your saturated fat \
+                 limit. One egg a day is a familiar and safe reference point.",
+            ru: "Это минимум, а не потолок. Такое количество надёжно закрывает холин и селен, \
+                 добавляет качественного белка и занимает всего 8% вашего лимита насыщенных \
+                 жиров. Одно яйцо в день — привычный и безопасный ориентир.",
+        },
+    },
+    // 11 — врачебное назначение важнее нашей планки.
+    Frame {
+        bg: Bg::Egg,
+        media: Media::None,
+        accent: AMBER,
+        kicker: Loc {
+            en: "If your doctor has advised otherwise",
+            ru: "Если у вас есть рекомендация врача",
+        },
+        title: Loc { en: "", ru: "" },
+        body: Loc {
+            en: "With raised cholesterol your doctor may have prescribed fewer eggs. Follow \
+                 their advice — they see your situation, which the system does not. Write to us \
+                 in the support chat and we will set your indicator to the prescribed amount.",
+            ru: "При повышенном холестерине врач мог назначить вам меньше яиц. Следуйте его \
+                 рекомендации — он видит вашу ситуацию, которую система не видит. Напишите нам \
+                 в чат поддержки, и мы настроим ваш индикатор под назначенное количество.",
+        },
+    },
+];
+
 static STORIES: &[Story] = &[
     Story {
         id: "welcome",
@@ -1396,5 +1605,11 @@ static STORIES: &[Story] = &[
         appears: Appears::AfterRedMeatWeek,
         badge: Loc { en: "7", ru: "7" },
         frames: S7,
+    },
+    Story {
+        id: "week8",
+        appears: Appears::AfterEggWeek,
+        badge: Loc { en: "8", ru: "8" },
+        frames: S8,
     },
 ];

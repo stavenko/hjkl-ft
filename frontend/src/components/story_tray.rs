@@ -35,7 +35,8 @@ pub fn StoryTray() -> impl IntoView {
                     let iron = crate::services::iron::unlocked();
                     let fats = crate::services::fats::unlocked();
                     let red_meat = crate::services::red_meat::unlocked();
-                    let mut list = stories::visible(planka_set, activity, calcium, iron, fats, red_meat);
+                    let egg = crate::services::egg::unlocked();
+                    let mut list = stories::visible(planka_set, activity, calcium, iron, fats, red_meat, egg);
                     // Stories with UNREAD frames shift left to draw attention; fully-read
                     // ones follow. Stable sort → each group keeps its natural appearance
                     // order. `unviewed_count` tracks the seen-version signal, so the tray
@@ -395,6 +396,10 @@ fn FrameView(frame: Frame) -> impl IntoView {
             <div style="position: absolute; inset: 0; \
                         background: radial-gradient(120% 80% at 50% 15%, #5c1524 0%, #2a0a12 60%, #140609 100%);" />
         }.into_view(),
+        Bg::Egg => view! {
+            <div style="position: absolute; inset: 0; \
+                        background: radial-gradient(120% 80% at 50% 15%, #6b4a10 0%, #2e2007 60%, #150f04 100%);" />
+        }.into_view(),
         Bg::Photo(p) => view! {
             <img src=format!("/story-img/{p}")
                 style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;" />
@@ -504,6 +509,7 @@ fn FrameView(frame: Frame) -> impl IntoView {
     // сойтись с фоном, иначе под фотографией видна граница чужого цвета.
     let (r, g, bl, solid) = match frame.bg {
         Bg::Meat => (20, 6, 9, "#140609"),
+        Bg::Egg => (21, 15, 4, "#150f04"),
         _ => (7, 13, 20, "#070d14"),
     };
     let scrim = if matches!(frame.media, Media::Cover(_)) {

@@ -172,6 +172,8 @@ pub fn icon_for(k: &str) -> Icon {
         // СВОИ силуэты: три похожих мясных значка в ряд не различить.
         "red_meat" => stroked(IC_STEAK, "Кр. мясо"),
         "processed_meat" => glyph(IC_SAUSAGE, "Колбасы"),
+        // Яйцо — свой силуэт, значок уже есть в наборе.
+        "egg" => stroked(IC_EGG, "Яйца"),
         "veg_fruit" => stroked(IC_APPLE, "Фр/овощи"),
         "steps" => stroked(IC_STEPS, "Шаги"),
         "fiber" => stroked(IC_WHEAT, "Клетчатка"),
@@ -248,6 +250,7 @@ fn daily_gauges_grid(
     heme: Option<crate::services::heme::WeeklyHeme>,
     fats: Option<crate::services::fats::WeeklyFats>,
     red_meat: Option<crate::services::red_meat::WeeklyRedMeat>,
+    egg: Option<crate::services::egg::WeeklyEggs>,
 ) -> impl IntoView {
     view! {
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 14px;">
@@ -274,7 +277,41 @@ fn daily_gauges_grid(
             // Красное мясо — единственная шкала-ОГРАНИЧЕНИЕ: полная означает не
             // достижение, а перебор.
             {red_meat.map(weekly_red_meat_gauge)}
+            // Яйца — снова шкала-ЦЕЛЬ: семь штук за неделю набирают, а не удерживают
+            // под ними. Стоит следом за мясом, потому что и открывается следом.
+            {egg.map(weekly_egg_gauge)}
         </div>
+    }
+}
+
+/// Недельные яйца — ячейка той же сетки. Планка здесь МИНИМУМ: полная полоса
+/// означает набранную неделю, а не перебор, — поэтому цвет берётся из самой недели,
+/// которая знает и про темп: одно яйцо к пятнице значит отставание, а к вторнику
+/// нет.
+///
+/// Штуки, а не граммы: человек ест яйца штуками, а мы восстанавливаем их число по
+/// белку (`egg::eggs_from_protein`). Дробная десятая честна — половина омлета это
+/// полтора яйца, и округлять её до целого значило бы приписывать съеденное.
+fn weekly_egg_gauge(w: crate::services::egg::WeeklyEggs) -> impl IntoView {
+    use indicators::IndicatorState;
+    let (bar, val) = match w.state() {
+        IndicatorState::Orange => ("#f5a524", Some("#f5a524")),
+        _ => ("#20c997", None),
+    };
+    let pace = crate::components::gauge::GaugePace {
+        segments: 7,
+        passed: w.day_of_week.saturating_sub(1),
+    };
+    view! {
+        <crate::components::gauge::Gauge
+            value=w.eggs target=w.target
+            label="Яйца/нед".to_string()
+            unit="шт".to_string()
+            color=bar.to_string()
+            height=12.0
+            decimals=1
+            pace=Some(pace)
+            value_color=val.map(String::from)/>
     }
 }
 
@@ -523,6 +560,16 @@ pub fn ProgressWidget() -> impl IntoView {
         move || (food_ver.get(), foods_ver.get()),
         |_| async { crate::services::red_meat::week_closed_since_open().await },
     );
+    let egg_week = create_local_resource(
+        move || (food_ver.get(), foods_ver.get()),
+        |_| async { crate::services::egg::weekly_progress().await },
+    );
+    // Гейт яиц: закрыта ли уже хотя бы одна неделя. Следующей главы за яйцами пока
+    // нет, поэтому счётчик, как было у мяса, встаёт на ноль и там остаётся.
+    let egg_gate = create_local_resource(
+        move || (food_ver.get(), foods_ver.get()),
+        |_| async { crate::services::egg::week_closed_since_open().await },
+    );
     let iron_week = create_local_resource(
         move || (food_ver.get(), foods_ver.get()),
         |_| async { crate::services::iron::weekly_progress().await },
@@ -660,7 +707,7 @@ pub fn ProgressWidget() -> impl IntoView {
                             view! {
                                 {calorie}
                                 // Daily-nutrient bars below the calorie one.
-                                {move || gauges_s().map(|g| daily_gauges_grid(g, iron_week.get().flatten(), heme_week.get().flatten(), fat_week.get().flatten(), red_meat_week.get().flatten()))}
+                                {move || gauges_s().map(|g| daily_gauges_grid(g, iron_week.get().flatten(), heme_week.get().flatten(), fat_week.get().flatten(), red_meat_week.get().flatten(), egg_week.get().flatten()))}
                             }.into_view()
                         },
                         // Before the first food entry: explain how to add food + «?».
@@ -783,7 +830,25 @@ pub fn ProgressWidget() -> impl IntoView {
                                 && calcium_green < indicators::GREEN_GATE_DAYS
                             {
                                 Some(("dashboard.progress.calcium_gate_title", calcium_green))
-                            } else if let Some(w) = red_meat_week.get().flatten() {
+                            } else if let Some(w) = egg_week.get().flatten() {
+                                // Яйца — последняя открытая глава, и подпись держится
+                                // всю её: следующей за ней пока нет, ждать нечего,
+                                // кроме конца своей недели.
+                                //
+                                // Планка ПРЯМАЯ, её набирают. Набрал — счётчик уже ни
+                                // к чему не ведёт и встаёт на ноль, как было у мяса до
+                                // появления этой главы.
+                                let done = if egg_gate.get().unwrap_or(false) {
+                                    indicators::GREEN_GATE_DAYS
+                                } else {
+                                    w.day_of_week - 1
+                                };
+                                Some(("dashboard.progress.egg_gate_title", done))
+                            } else if let Some(w) = red_meat_week
+                                .get()
+                                .flatten()
+                                .filter(|_| !crate::services::egg::unlocked())
+                            {
                                 // Красное мясо — последняя открытая глава, и подпись
                                 // держится всё время, пока она идёт: следующей за ней
                                 // пока нет, ждать нечего, кроме конца своей недели.

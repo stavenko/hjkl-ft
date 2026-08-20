@@ -239,6 +239,11 @@ pub fn displayed_indicators() -> Vec<&'static str> {
         v.push("red_meat");
         v.push("processed_meat");
     }
+    // Яйца — недельная планка, но обратная мясной: её надо НАБРАТЬ, а не удержаться
+    // ниже. Открывается после закрытой недели мяса.
+    if crate::services::egg::unlocked() {
+        v.push("egg");
+    }
     v
 }
 
@@ -445,6 +450,46 @@ pub async fn open_red_meat_week() {
     crate::services::app_flags::set_bool(red_meat::RED_MEAT_UNLOCKED_KEY, true);
     // Мясные признаки собираются с первого дня, но у кого-то из продуктов их может
     // не быть — например, они заведены сборкой, где признаков ещё не существовало.
+    crate::services::classify::sweep_unprocessed().await;
+}
+
+/// Открыть НЕДЕЛЮ ЯИЦ, когда закрыта неделя красного мяса: поставить якорь своей
+/// недели, поднять флаг (шкала и индикатор появляются) и добрать признаки у уже
+/// заведённых продуктов.
+///
+/// Последнее звено цепочки: кальций → железо → жиры → красное мясо → яйца. Условие —
+/// хотя бы одна ЗАВЕРШЁННАЯ неделя мяса, в которую человек уложился в планку
+/// (`red_meat::week_closed_since_open`), то есть ровно тот гейт, счётчик которого
+/// виджет уже показывает.
+///
+/// Идемпотентно и монотонно, как остальные гейты. Возвращает `true`, если открытие
+/// произошло именно сейчас — по этому признаку показывается история про яйца.
+pub async fn maybe_unlock_egg_week() -> bool {
+    use crate::services::{egg, red_meat};
+    if egg::unlocked() {
+        return false;
+    }
+    if !red_meat::unlocked() {
+        return false; // неделя мяса должна открыться первой
+    }
+    if !red_meat::week_closed_since_open().await {
+        return false; // ни одной закрытой недели мяса с начала темы
+    }
+    open_egg_week().await;
+    true
+}
+
+/// САМО открытие недели яиц, без проверки условия (см. `open_activity_week`).
+pub async fn open_egg_week() {
+    use crate::services::egg;
+    if egg::unlocked() {
+        return;
+    }
+    let today = crate::services::local::today_date();
+    crate::services::app_flags::set(egg::EGG_WEEK_OPEN_KEY, &fmt(today));
+    crate::services::app_flags::set_bool(egg::EGG_UNLOCKED_KEY, true);
+    // Признак яйца собирается с первого дня, но у продуктов, заведённых сборкой без
+    // него, его нет — иначе первая неделя мерилась бы по пустому множеству.
     crate::services::classify::sweep_unprocessed().await;
 }
 
@@ -865,6 +910,10 @@ pub async fn indicator_state(key: &str) -> IndicatorState {
     if key == "red_meat" {
         return crate::services::red_meat::indicator_state().await;
     }
+    // Яйца: недельная планка штук, считанных через белок, — тоже мимо дневного пути.
+    if key == "egg" {
+        return crate::services::egg::indicator_state().await;
+    }
     if key == "processed_meat" {
         return crate::services::processed_meat::indicator_state().await;
     }
@@ -1129,6 +1178,10 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
         // дневное, но считается не через кэш вердиктов: величина там двоичная.
         if key == "red_meat" {
             out.push(crate::services::red_meat::weekly_series().await);
+            continue;
+        }
+        if key == "egg" {
+            out.push(crate::services::egg::weekly_series().await);
             continue;
         }
         if key == "processed_meat" {

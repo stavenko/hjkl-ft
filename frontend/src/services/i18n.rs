@@ -232,9 +232,7 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.fat_done_title" => "You have met the omega-3 target.",
         "dashboard.progress.red_meat_gate_title" => "Keep red meat within the weekly limit.",
         "dashboard.progress.red_meat_over_title" => "You have eaten too much red meat this week. We will try again next week.",
-        "dashboard.progress.week_left_progress" => "Left: {n} {w}.",
         "dashboard.progress.days_left_progress" => "Left: {n} {w}.",
-        "dashboard.progress.gate_progress" => "Left: {n} green {w}.",
         "dashboard.progress.week_steps" => "steps week",
         "dashboard.progress.week_calcium" => "calcium week",
         "dashboard.progress.week_iron" => "iron week",
@@ -1165,13 +1163,11 @@ fn ru(key: &str) -> &'static str {
         // главы за ней пока нет — открывать нечего, поэтому и цели в задании нет.
         "dashboard.progress.red_meat_gate_title" => "Удержите красное мясо в пределах недельной планки.",
         "dashboard.progress.red_meat_over_title" => "Вы съели слишком много красного мяса на этой неделе. На следующей неделе попробуем ещё раз.",
-        "dashboard.progress.week_left_progress" => "Осталось: {n} {w}.",
+        // Срок задания — одной строкой на все главы. У недельных глав это дни до
+        // конца недели, у гейтов — недостающие ЗЕЛЁНЫЕ дни (семь штук в скользящем
+        // окне восьми суток), но человеку они называются просто днями: разбираться в
+        // механике окна ему незачем.
         "dashboard.progress.days_left_progress" => "Осталось: {n} {w}.",
-        // У гейтов зелёных дней счёт идёт НЕ по календарю: нужно семь зелёных дней в
-        // скользящем окне восьми суток. Отсюда и «зелёных дней» в слове — застывшее
-        // число (индикатор не держится) или выросшее (зелёный день ушёл из окна) без
-        // этого выглядели бы поломкой.
-        "dashboard.progress.gate_progress" => "Осталось: {n} {w}.",
         // Названия недель — в винительном падеже: они подставляются в «чтобы открыть».
         "dashboard.progress.week_steps" => "неделю шагов",
         "dashboard.progress.week_calcium" => "неделю кальция",

@@ -813,52 +813,46 @@ pub fn ProgressWidget() -> impl IntoView {
                             // Show DAYS REMAINING (not "5/7", which read ambiguously as
                             // done-or-left). Russian day-word agrees with the number.
                             let left = indicators::GREEN_GATE_DAYS.saturating_sub(done);
-                            // Вторая строка у каждой главы своя, и вместе с ней меняется
-                            // то, ЧТО считают дни:
+                            // Вторая строка — срок. Считаются в ней разные вещи: у
+                            // недельных глав дни до конца недели, у гейтов —
+                            // недостающие ЗЕЛЁНЫЕ дни (семь в скользящем окне восьми
+                            // суток), отчего число может стоять на месте или расти
+                            // обратно. Человеку они называются просто днями.
                             //
-                            // * гейты белка, шагов и кальция считают ЗЕЛЁНЫЕ дни — семь
-                            //   штук в скользящем окне восьми суток. Это не календарь:
-                            //   число стоит на месте, пока индикатор не держится, и
-                            //   растёт обратно, когда зелёный день уходит из окна.
-                            //   Поэтому и слово там «зелёных дней», а не «дней»;
-                            // * недельные главы (железо, жиры, мясо) считают настоящие
-                            //   дни до конца своей недели;
-                            // * закрытая планка не гасит подпись, а меняет её: молчание
-                            //   на этом месте читалось бы как «не засчитано».
+                            // Отдельная строка только у закрытой планки: она не гасит
+                            // подпись, а меняет её, — молчание читалось бы как «не
+                            // засчитано».
+            //
+                            // У перебранного мяса срока нет вовсе: неделя уже потеряна,
+                            // и обратный отсчёт по ней — счётчик до конца наказания. Всё
+                            // нужное сказано в самом тексте: попробуем на следующей.
                             let progress_key = match title_key {
                                 "dashboard.progress.iron_done_title"
                                 | "dashboard.progress.fat_done_title" => {
-                                    "dashboard.progress.iron_done_progress"
+                                    Some("dashboard.progress.iron_done_progress")
                                 }
-                                "dashboard.progress.red_meat_gate_title"
-                                | "dashboard.progress.red_meat_over_title" => {
-                                    "dashboard.progress.week_left_progress"
-                                }
-                                "dashboard.progress.iron_gate_title"
-                                | "dashboard.progress.fat_gate_title" => {
-                                    "dashboard.progress.days_left_progress"
-                                }
-                                _ => "dashboard.progress.gate_progress",
+                                "dashboard.progress.red_meat_over_title" => None,
+                                _ => Some("dashboard.progress.days_left_progress"),
                             };
-                            let green_days = progress_key == "dashboard.progress.gate_progress";
                             let word = match crate::services::i18n::get_lang() {
                                 crate::services::i18n::Lang::En => if left == 1 { "day" } else { "days" },
                                 crate::services::i18n::Lang::Ru => {
                                     let (d10, d100) = (left % 10, left % 100);
                                     if d10 == 1 && d100 != 11 {
-                                        if green_days { "зелёный день" } else { "день" }
+                                        "день"
                                     } else if (2..=4).contains(&d10) && !(12..=14).contains(&d100) {
-                                        if green_days { "зелёных дня" } else { "дня" }
-                                    } else if green_days {
-                                        "зелёных дней"
+                                        "дня"
                                     } else {
                                         "дней"
                                     }
                                 }
                             };
-                            let progress = t(progress_key)
-                                .replace("{n}", &left.to_string())
-                                .replace("{w}", word);
+                            let progress = progress_key.map(|key| {
+                                let line = t(key)
+                                    .replace("{n}", &left.to_string())
+                                    .replace("{w}", word);
+                                view! { <span class="is-size-7 has-text-grey">{line}</span> }
+                            });
                             // РАДИ ЧЕГО задание — глава, которая за ним откроется,
                             // названная по имени. Без неё требование висит без причины:
                             // держите зелёным, а зачем — неизвестно.
@@ -886,7 +880,7 @@ pub fn ProgressWidget() -> impl IntoView {
                             view! {
                                 <div style="display: flex; flex-direction: column; gap: 2px;">
                                     <span class="is-size-7 has-text-weight-semibold">{title}</span>
-                                    <span class="is-size-7 has-text-grey">{progress}</span>
+                                    {progress}
                                 </div>
                             }
                         });

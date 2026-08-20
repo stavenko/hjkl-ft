@@ -36,15 +36,6 @@ impl Loc {
 pub enum Bg {
     /// Dark gradient backdrop (used behind the chart and screenshot cards).
     Dark,
-    /// Тёмно-мясной градиент — фон недели красного мяса. Тот же рисунок, что у
-    /// `Dark`, но в бордово-винных тонах: тема узнаётся до того, как прочитан
-    /// первый кадр, и не путается с предыдущими главами.
-    Meat,
-    /// Тёмно-янтарный градиент — фон недели яиц. Тот же рисунок, что у `Dark` и
-    /// `Meat`: у каждой главы свой цвет, и тема узнаётся до первого прочитанного
-    /// слова. Жёлток в тёмном исполнении — тёплая охра сверху, почти чёрная
-    /// умбра внизу, чтобы белый текст читался так же, как на синем и бордовом.
-    Egg,
     /// Full-bleed photo — asset path served under `/story-img/`.
     Photo(&'static str),
 }
@@ -108,8 +99,6 @@ impl Frame {
         s.push('|');
         match self.bg {
             Bg::Dark => s.push_str("dark"),
-            Bg::Meat => s.push_str("meat"),
-            Bg::Egg => s.push_str("egg"),
             Bg::Photo(p) => {
                 s.push_str("photo:");
                 s.push_str(p);
@@ -1266,7 +1255,7 @@ const S6: &[Frame] = &[
 const S7: &[Frame] = &[
     // 1 — поздравление: жиры позади. Как и в остальных историях, с хлопушкой.
     Frame {
-        bg: Bg::Meat,
+        bg: Bg::Dark,
         media: Media::Emoji("🎉"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1280,7 +1269,7 @@ const S7: &[Frame] = &[
     },
     // 2 — сама планка и почему она есть.
     Frame {
-        bg: Bg::Meat,
+        bg: Bg::Dark,
         media: Media::Cover("meat-steaks.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1295,7 +1284,7 @@ const S7: &[Frame] = &[
     },
     // 3 — переработанное мясо: тот же разговор, но отдельный.
     Frame {
-        bg: Bg::Meat,
+        bg: Bg::Dark,
         media: Media::Cover("meat-sausages.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1309,7 +1298,7 @@ const S7: &[Frame] = &[
     },
     // 4 — почему мы ничего не запрещаем.
     Frame {
-        bg: Bg::Meat,
+        bg: Bg::Dark,
         media: Media::Cover("meat-feast.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1326,7 +1315,7 @@ const S7: &[Frame] = &[
     // метафора, а снимок дашборда. Индикатор ИМЕННО КОЛБАС: у него нет шкалы, он
     // про частоту, — поэтому подсвечен один значок в ряду.
     Frame {
-        bg: Bg::Meat,
+        bg: Bg::Dark,
         media: Media::Shot("processed-meat-highlight.gif"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1341,7 +1330,7 @@ const S7: &[Frame] = &[
     // 6 — второй индикатор, недельный, и задание недели. Здесь ШКАЛА, поэтому и
     // подсветка своя: у предыдущего кадра шкалы нет и быть не может.
     Frame {
-        bg: Bg::Meat,
+        bg: Bg::Dark,
         media: Media::ShotTop("red-meat-highlight.gif"),
         accent: AMBER,
         kicker: Loc { en: "Red meat", ru: "Красное мясо" },
@@ -1373,7 +1362,7 @@ const S8: &[Frame] = &[
     // 1 — поздравление: мясо позади, впереди яйца. Акцент на названии главы —
     // бело-жёлтый градиент `^…^`, белок и желток.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::Emoji("🎉"),
         accent: AMBER,
         kicker: Loc { en: "Eggs", ru: "Яйца" },
@@ -1389,7 +1378,7 @@ const S8: &[Frame] = &[
     },
     // 2 — белок.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::None,
         accent: AMBER,
         kicker: Loc { en: "Eggs: protein", ru: "Яйца: белок" },
@@ -1404,7 +1393,7 @@ const S8: &[Frame] = &[
     },
     // 3 — жиры.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::None,
         accent: AMBER,
         kicker: Loc { en: "Eggs: fats", ru: "Яйца: жиры" },
@@ -1420,7 +1409,7 @@ const S8: &[Frame] = &[
     },
     // 4 — микронутриенты.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::None,
         accent: AMBER,
         kicker: Loc { en: "Eggs: micronutrients", ru: "Яйца: микронутриенты" },
@@ -1437,7 +1426,7 @@ const S8: &[Frame] = &[
     },
     // 5 — лютеин и зеаксантин.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::None,
         accent: AMBER,
         kicker: Loc { en: "Lutein and zeaxanthin", ru: "Лютеин и зеаксантин" },
@@ -1452,7 +1441,7 @@ const S8: &[Frame] = &[
     },
     // 6 — холестерин: где он на самом деле.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::None,
         accent: AMBER,
         kicker: Loc { en: "Cholesterol: where it really is", ru: "Холестерин: где он на самом деле" },
@@ -1468,7 +1457,7 @@ const S8: &[Frame] = &[
     },
     // 7 — съеденный холестерин и холестерин крови.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::None,
         accent: AMBER,
         kicker: Loc {
@@ -1488,7 +1477,7 @@ const S8: &[Frame] = &[
     },
     // 8 — что влияет по-настоящему.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::None,
         accent: AMBER,
         kicker: Loc { en: "What really moves it", ru: "Что влияет по-настоящему" },
@@ -1505,7 +1494,7 @@ const S8: &[Frame] = &[
     },
     // 9 — что изменилось в рекомендациях.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::None,
         accent: AMBER,
         kicker: Loc { en: "What changed in the guidelines", ru: "Что изменилось в рекомендациях" },
@@ -1522,7 +1511,7 @@ const S8: &[Frame] = &[
     },
     // 10 — сама планка.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::None,
         accent: AMBER,
         kicker: Loc { en: "New indicator: 7 eggs a week", ru: "Новый индикатор: 7 яиц в неделю" },
@@ -1538,7 +1527,7 @@ const S8: &[Frame] = &[
     },
     // 11 — врачебное назначение важнее нашей планки.
     Frame {
-        bg: Bg::Egg,
+        bg: Bg::Dark,
         media: Media::None,
         accent: AMBER,
         kicker: Loc {

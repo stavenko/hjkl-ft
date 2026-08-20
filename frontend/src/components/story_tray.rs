@@ -389,17 +389,6 @@ fn FrameView(frame: Frame) -> impl IntoView {
             <div style="position: absolute; inset: 0; \
                         background: radial-gradient(120% 80% at 50% 15%, #14314a 0%, #0b1622 60%, #070d14 100%);" />
         }.into_view(),
-        // Тот же рисунок градиента, что у Dark, но по мясу: тёплый бордовый в
-        // подсвеченной верхушке, винная середина, почти чёрный низ — чтобы белый
-        // текст с тенью читался так же, как на синем.
-        Bg::Meat => view! {
-            <div style="position: absolute; inset: 0; \
-                        background: radial-gradient(120% 80% at 50% 15%, #5c1524 0%, #2a0a12 60%, #140609 100%);" />
-        }.into_view(),
-        Bg::Egg => view! {
-            <div style="position: absolute; inset: 0; \
-                        background: radial-gradient(120% 80% at 50% 15%, #6b4a10 0%, #2e2007 60%, #150f04 100%);" />
-        }.into_view(),
         Bg::Photo(p) => view! {
             <img src=format!("/story-img/{p}")
                 style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;" />
@@ -507,11 +496,7 @@ fn FrameView(frame: Frame) -> impl IntoView {
     //
     // Цвет затемнения — НИЗ ФОНА этого кадра, а не всегда синий: шторка обязана
     // сойтись с фоном, иначе под фотографией видна граница чужого цвета.
-    let (r, g, bl, solid) = match frame.bg {
-        Bg::Meat => (20, 6, 9, "#140609"),
-        Bg::Egg => (21, 15, 4, "#150f04"),
-        _ => (7, 13, 20, "#070d14"),
-    };
+    let (r, g, bl, solid) = (7, 13, 20, "#070d14");
     let scrim = if matches!(frame.media, Media::Cover(_)) {
         format!(
             "position: absolute; left: 0; right: 0; bottom: 0; height: 66%; z-index: 1; \

@@ -90,20 +90,6 @@ impl Frame {
     /// Stable content hash. Changes iff the frame's text or media change, so
     /// replacing a frame re-arms the tray ring for everyone who'd seen the old one.
     pub fn hash(&self) -> String {
-        let token = match self.bg {
-            Bg::Dark => "dark".to_string(),
-            Bg::Photo(p) => format!("photo:{p}"),
-        };
-        self.hash_with_bg(&token)
-    }
-
-    /// Хеш кадра с ПОДСТАВЛЕННЫМ обозначением фона.
-    ///
-    /// Нужен там, где фон у кадра сменился, а содержание осталось прежним: по
-    /// старому обозначению считается хеш, под которым просмотр уже записан, и
-    /// отметку можно перенести на новый — см. миграцию 22. Обычному коду нужен
-    /// [`Frame::hash`].
-    pub fn hash_with_bg(&self, bg_token: &str) -> String {
         let mut s = String::with_capacity(256);
         s.push_str(self.kicker.ru);
         s.push('|');
@@ -111,7 +97,13 @@ impl Frame {
         s.push('|');
         s.push_str(self.body.ru);
         s.push('|');
-        s.push_str(bg_token);
+        match self.bg {
+            Bg::Dark => s.push_str("dark"),
+            Bg::Photo(p) => {
+                s.push_str("photo:");
+                s.push_str(p);
+            }
+        }
         s.push('|');
         match self.media {
             Media::None => s.push_str("none"),
@@ -269,11 +261,6 @@ fn version() -> RwSignal<u32> {
 
 fn is_viewed(hash: &str) -> bool {
     VIEWED.with(|v| v.borrow().as_ref().is_some_and(|s| s.set.contains(hash)))
-}
-
-/// Записан ли этот хеш как просмотренный. Для миграций, переносящих отметки.
-pub fn seen(hash: &str) -> bool {
-    is_viewed(hash)
 }
 
 /// Record a frame's hash as seen (idempotent). Persists the set and bumps the

@@ -66,7 +66,6 @@ mod m018_reask_processed_meat;
 mod m019_reask_calcium;
 mod m020_reask_calcium_again;
 mod m021_reask_veg_fruit_again;
-mod m022_keep_meat_story_seen;
 
 #[cfg(test)]
 mod tests;
@@ -198,11 +197,6 @@ const ALL: &[Migration] = &[
         version: m021_reask_veg_fruit_again::VERSION,
         description: m021_reask_veg_fruit_again::DESCRIPTION,
         script: || Box::pin(m021_reask_veg_fruit_again::script()),
-    },
-    Migration {
-        version: m022_keep_meat_story_seen::VERSION,
-        description: m022_keep_meat_story_seen::DESCRIPTION,
-        script: || Box::pin(m022_keep_meat_story_seen::script()),
     },
 ];
 

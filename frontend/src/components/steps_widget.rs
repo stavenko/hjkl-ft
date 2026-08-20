@@ -55,5 +55,6 @@ pub fn chart_svg_steps(entries: &[StepEntry], planka: Option<f64>) -> String {
     es.sort_by(|a, b| a.date.cmp(&b.date));
     let dates: Vec<&str> = es.iter().map(|e| e.date.as_str()).collect();
     let values: Vec<f64> = es.iter().map(|e| e.steps as f64).collect();
-    steps_bar_block(&dates, &values, planka)
+    // Плитка на дашборде — половинной высоты, как и у веса.
+    steps_bar_block(&dates, &values, planka, crate::components::mini_chart::CH_HALF)
 }

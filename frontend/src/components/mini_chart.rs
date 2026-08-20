@@ -4,12 +4,35 @@
 
 const LABEL_ROW: &str = "display: flex; justify-content: space-between; font-size: 10px; color: var(--bulma-text-weak); margin-top: 2px; min-height: 12px;";
 
+/// Ширина поля графика в координатах SVG. Одна на все размеры: ужимается только
+/// высота, растягивать рисунок по горизонтали незачем.
+const CH_W: f64 = 300.0;
+
+/// Высота поля в раскрытой панели — та, что была у графика всегда.
+pub const CH_FULL: f64 = 80.0;
+
+/// Половинная высота — для плиток на дашборде, где место дороже подробности.
+/// Рисунок тот же, просто ниже: форма кривой читается, а плитка занимает вдвое
+/// меньше экрана.
+pub const CH_HALF: f64 = 40.0;
+
 /// Y axis, X axis and two faint gridlines — drawn in every chart (with or
-/// without data).
-const AXES: &str = r#"<line x1="0" y1="20" x2="300" y2="20" stroke="var(--bulma-border-weak)" stroke-width="1" stroke-dasharray="3 4" vector-effect="non-scaling-stroke" opacity="0.7"/>
-  <line x1="0" y1="50" x2="300" y2="50" stroke="var(--bulma-border-weak)" stroke-width="1" stroke-dasharray="3 4" vector-effect="non-scaling-stroke" opacity="0.7"/>
-  <line x1="0" y1="0" x2="0" y2="80" stroke="var(--bulma-border)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
-  <line x1="0" y1="80" x2="300" y2="80" stroke="var(--bulma-border)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>"#;
+/// without data). Доли высоты сохранены от исходных 20 и 50 при 80.
+fn axes(h: f64) -> String {
+    let (g1, g2) = (h * 0.25, h * 0.625);
+    format!(
+        r#"<line x1="0" y1="{g1:.1}" x2="{CH_W:.0}" y2="{g1:.1}" stroke="var(--bulma-border-weak)" stroke-width="1" stroke-dasharray="3 4" vector-effect="non-scaling-stroke" opacity="0.7"/>
+  <line x1="0" y1="{g2:.1}" x2="{CH_W:.0}" y2="{g2:.1}" stroke="var(--bulma-border-weak)" stroke-width="1" stroke-dasharray="3 4" vector-effect="non-scaling-stroke" opacity="0.7"/>
+  <line x1="0" y1="0" x2="0" y2="{h:.0}" stroke="var(--bulma-border)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+  <line x1="0" y1="{h:.0}" x2="{CH_W:.0}" y2="{h:.0}" stroke="var(--bulma-border)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>"#
+    )
+}
+
+/// `viewBox` поля: четыре пикселя полей со всех сторон, чтобы точки и штрихи на
+/// краю не срезались.
+fn view_box(h: f64) -> String {
+    format!("-4 -4 {:.0} {:.0}", CH_W + 8.0, h + 8.0)
+}
 
 pub fn short_date(date_str: &str) -> String {
     if let Ok(d) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
@@ -22,7 +45,7 @@ pub fn short_date(date_str: &str) -> String {
 /// A self-contained chart block (SVG line + HTML date labels). Shows the empty
 /// axes placeholder only when there's no data at all; one point already draws.
 pub fn chart_block(dates: &[&str], values: &[f64]) -> String {
-    chart_block_with_planka(dates, values, &[])
+    chart_block_with_planka(dates, values, &[], CH_FULL)
 }
 
 /// То же, плюс ИСТОРИЯ планки поверх — по одному значению на точку графика.
@@ -32,13 +55,19 @@ pub fn chart_block(dates: &[&str], values: &[f64]) -> String {
 /// НОРМИРУЕТСЯ: собственный диапазон планки растягивается на ту же высоту, что и
 /// график. Видна не величина, а форма — когда планка росла, когда падала и как это
 /// легло на вес. Постоянная планка рисуется посередине.
-pub fn chart_block_with_planka(dates: &[&str], values: &[f64], planka: &[Option<f64>]) -> String {
+pub fn chart_block_with_planka(
+    dates: &[&str],
+    values: &[f64],
+    planka: &[Option<f64>],
+    h: f64,
+) -> String {
     if values.is_empty() {
+        let (vb, ax) = (view_box(h), axes(h));
         return format!(
-            r#"<div><svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">{AXES}</svg><div style="{LABEL_ROW}"><span></span><span></span></div></div>"#
+            r#"<div><svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">{ax}</svg><div style="{LABEL_ROW}"><span></span><span></span></div></div>"#
         );
     }
-    let svg = line_chart_svg_with_planka(values, planka);
+    let svg = line_chart_svg_with_planka(values, planka, h);
     let first = short_date(dates.first().copied().unwrap_or(""));
     let last = if dates.len() > 1 {
         short_date(dates.last().copied().unwrap_or(""))
@@ -62,13 +91,14 @@ const STEPS_AVG: &str = "#e0699b"; // the average line (before a planka is set)
 /// - `planka: None`    → a PINK average line over the logged past days (today
 ///   excluded), shown BEFORE the steps planka has been computed/applied.
 /// Bars are always the neutral link colour.
-pub fn steps_bar_block(dates: &[&str], values: &[f64], planka: Option<f64>) -> String {
+pub fn steps_bar_block(dates: &[&str], values: &[f64], planka: Option<f64>, h: f64) -> String {
     if values.is_empty() {
+        let (vb, ax) = (view_box(h), axes(h));
         return format!(
-            r#"<div><svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">{AXES}</svg><div style="{LABEL_ROW}"><span></span><span></span></div></div>"#
+            r#"<div><svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">{ax}</svg><div style="{LABEL_ROW}"><span></span><span></span></div></div>"#
         );
     }
-    let svg = steps_bar_svg(values, planka);
+    let svg = steps_bar_svg(values, planka, h);
     let first = short_date(dates.first().copied().unwrap_or(""));
     let last = if dates.len() > 1 {
         short_date(dates.last().copied().unwrap_or(""))
@@ -91,9 +121,8 @@ pub fn avg_past(values: &[f64]) -> Option<f64> {
     (!logged.is_empty()).then(|| logged.iter().sum::<f64>() / logged.len() as f64)
 }
 
-fn steps_bar_svg(values: &[f64], planka: Option<f64>) -> String {
-    let w = 300.0_f64;
-    let h = 80.0_f64;
+fn steps_bar_svg(values: &[f64], planka: Option<f64>, h: f64) -> String {
+    let w = CH_W;
     let n = values.len();
 
     // Reference line: the planka once it's set, otherwise the running average.
@@ -139,16 +168,17 @@ fn steps_bar_svg(values: &[f64], planka: Option<f64>) -> String {
         })
         .unwrap_or_default();
 
+    let (vb, ax) = (view_box(h), axes(h));
     format!(
-        r#"<svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">
-  {AXES}
+        r#"<svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">
+  {ax}
   {bars}
   {target}
 </svg>"#
     )
 }
 
-fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>]) -> String {
+fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>], h: f64) -> String {
     let min_val = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max_val = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let range = (max_val - min_val).max(0.5);
@@ -156,8 +186,7 @@ fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>]) -> String 
     let y_min = min_val - padding;
     let y_range = (max_val + padding) - y_min;
 
-    let w = 300.0_f64;
-    let h = 80.0_f64;
+    let w = CH_W;
     let n = values.len();
 
     let points: Vec<(f64, f64)> = values
@@ -256,9 +285,10 @@ fn line_chart_svg_with_planka(values: &[f64], planka: &[Option<f64>]) -> String 
     // раньше, и накрывали цифры.
     let (planka_path, planka_labels) = planka_path;
 
+    let (vb, ax) = (view_box(h), axes(h));
     format!(
-        r#"<svg viewBox="-4 -4 308 88" style="width: 100%; height: auto; display: block;">
-  {AXES}
+        r#"<svg viewBox="{vb}" style="width: 100%; height: auto; display: block;">
+  {ax}
   {fill}
   {planka_path}
   <path d="{path}" fill="none" stroke="var(--bulma-link)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>

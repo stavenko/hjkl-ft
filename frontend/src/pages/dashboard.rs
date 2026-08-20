@@ -1002,14 +1002,14 @@ pub fn DashboardPage() -> impl IntoView {
 
                         // Weight & steps widgets: 4×3 tiles side by side.
                         <div style=GRID>
-                            <button style=format!("{WIDGET_TILE} grid-column: 1 / 5; grid-row: 1 / 4;")
+                            <button style=format!("{WIDGET_TILE} grid-column: 1 / 5; grid-row: 1 / 3;")
                                 attr:data-testid="dash-weight-widget"
                                 on:click=move |_| overlay.set(Overlay::Weight)>
                                 // Empty until the first data load (then sticky keeps it
                                 // filled across navigations) — no placeholder flash.
                                 {move || weight_data().map(|_| view! { <WeightWidget entries=Signal::derive(weight_entries)/> })}
                             </button>
-                            <button style=format!("{WIDGET_TILE} grid-column: 5 / 9; grid-row: 1 / 4;")
+                            <button style=format!("{WIDGET_TILE} grid-column: 5 / 9; grid-row: 1 / 3;")
                                 attr:data-testid="dash-steps-widget"
                                 on:click=move |_| overlay.set(Overlay::Steps)>
                                 {move || steps_data().map(|_| view! { <StepsWidget entries=Signal::derive(steps_entries)/> })}

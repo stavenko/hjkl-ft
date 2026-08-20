@@ -222,20 +222,19 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.recalc_needed" => "Your goal changed — the target needs recalculating.",
         "dashboard.progress.recalc" => "Recalculate the target",
         "dashboard.progress.done_title" => "Your daily target",
-        "dashboard.progress.gate_title" => "Keep these indicators green for a week.",
-        "dashboard.progress.steps_gate_title" => "Keep the steps indicator green for 7 days.",
-        "dashboard.progress.calcium_gate_title" => "Keep the calcium indicator green for 7 days.",
-        "dashboard.progress.iron_gate_title" => "Meet the iron target this week.",
+        "dashboard.progress.gate_title" => "Keep these indicators green to unlock the {week}.",
+        "dashboard.progress.steps_gate_title" => "Keep the steps indicator green to unlock the {week}.",
+        "dashboard.progress.calcium_gate_title" => "Keep the calcium indicator green to unlock the {week}.",
+        "dashboard.progress.iron_gate_title" => "Meet the iron target to unlock the {week}.",
         "dashboard.progress.iron_done_title" => "You have met the iron target.",
         "dashboard.progress.iron_done_progress" => "The next story opens in {n} {w}.",
-        "dashboard.progress.fat_gate_title" => "Meet the omega-3 target this week.",
+        "dashboard.progress.fat_gate_title" => "Meet the omega-3 target to unlock the {week}.",
         "dashboard.progress.fat_done_title" => "You have met the omega-3 target.",
         "dashboard.progress.red_meat_gate_title" => "Keep red meat within the weekly limit.",
         "dashboard.progress.red_meat_over_title" => "You have eaten too much red meat this week. We will try again next week.",
-        "dashboard.progress.week_left_progress" => "The week ends in {n} {w}.",
-        "dashboard.progress.days_left_progress" => "{n} {w} left.",
-        "dashboard.progress.gate_progress" => "{n} more green {w} to go.",
-        "dashboard.progress.next_week" => "After that you get the {week} with a new task.",
+        "dashboard.progress.week_left_progress" => "Left: {n} {w}.",
+        "dashboard.progress.days_left_progress" => "Left: {n} {w}.",
+        "dashboard.progress.gate_progress" => "Left: {n} green {w}.",
         "dashboard.progress.week_steps" => "steps week",
         "dashboard.progress.week_calcium" => "calcium week",
         "dashboard.progress.week_iron" => "iron week",
@@ -1147,37 +1146,38 @@ fn ru(key: &str) -> &'static str {
         "dashboard.progress.recalc_needed" => "Цель изменилась — планка должна быть пересчитана.",
         "dashboard.progress.recalc" => "Пересчитать планку",
         "dashboard.progress.done_title" => "Ваша дневная планка",
-        "dashboard.progress.gate_title" => "Держите эти индикаторы зелёными в течение недели.",
-        "dashboard.progress.steps_gate_title" => "Держите индикатор планки по шагам зелёным 7 дней.",
-        "dashboard.progress.calcium_gate_title" => "Держите индикатор кальция зелёным 7 дней.",
-        "dashboard.progress.iron_gate_title" => "Выполните планку по железу за эту неделю.",
+        // ЗАДАНИЕ НЕДЕЛИ — одной формой на все главы: что держать, ради чего, и
+        // сколько осталось. «Чтобы открыть {week}» подставляется рядом с заданием, а
+        // не отдельным предложением: цель без задания не читается.
+        "dashboard.progress.gate_title" => "Держите эти индикаторы зелёными, чтобы открыть {week}.",
+        "dashboard.progress.steps_gate_title" => "Держите индикатор планки по шагам зелёным, чтобы открыть {week}.",
+        "dashboard.progress.calcium_gate_title" => "Держите индикатор кальция зелёным, чтобы открыть {week}.",
+        "dashboard.progress.iron_gate_title" => "Выполните планку по железу, чтобы открыть {week}.",
         // Планка закрыта, но неделя ещё идёт: человеку надо сказать, что он своё
         // сделал и ждёт только календаря, — иначе молчание читается как «не засчитано».
         "dashboard.progress.iron_done_title" => "Вы закрыли планку по железу.",
         "dashboard.progress.iron_done_progress" => "Следующая история откроется через {n} {w}.",
         // Жиры: гейт закрывается по МОРСКИМ омега-3 (1.75 г за неделю), баланс жира в
         // условие не входит, — поэтому и зовём к омега-3, а не к «жирам вообще».
-        "dashboard.progress.fat_gate_title" => "Наберите на этой неделе норму омега-3.",
+        "dashboard.progress.fat_gate_title" => "Наберите норму омега-3, чтобы открыть {week}.",
         "dashboard.progress.fat_done_title" => "Вы набрали норму омега-3.",
         // Красное мясо: планка обратная, её не выполняют, а не превышают. Следующей
-        // главы за ней пока нет, поэтому про «следующую историю» здесь молчим.
+        // главы за ней пока нет — открывать нечего, поэтому и цели в задании нет.
         "dashboard.progress.red_meat_gate_title" => "Удержите красное мясо в пределах недельной планки.",
         "dashboard.progress.red_meat_over_title" => "Вы съели слишком много красного мяса на этой неделе. На следующей неделе попробуем ещё раз.",
-        "dashboard.progress.week_left_progress" => "Неделя закончится через {n} {w}.",
-        "dashboard.progress.days_left_progress" => "Осталось {n} {w}.",
+        "dashboard.progress.week_left_progress" => "Осталось: {n} {w}.",
+        "dashboard.progress.days_left_progress" => "Осталось: {n} {w}.",
         // У гейтов зелёных дней счёт идёт НЕ по календарю: нужно семь зелёных дней в
-        // скользящем окне восьми суток. Прежнее «Осталось N дней» читалось обратным
-        // отсчётом — и застывшее число (индикатор не держится) или выросшее (зелёный
-        // день ушёл из окна) выглядели поломкой.
-        "dashboard.progress.gate_progress" => "Нужно ещё {n} {w}.",
-        // Что человека ждёт за текущим заданием. Без этой строки гейт выглядит
-        // требованием без причины: держите зелёным — а дальше что?
-        "dashboard.progress.next_week" => "После этого у вас будет {week} с новым заданием.",
-        "dashboard.progress.week_steps" => "неделя шагов",
-        "dashboard.progress.week_calcium" => "неделя кальция",
-        "dashboard.progress.week_iron" => "неделя железа",
-        "dashboard.progress.week_fat" => "неделя жиров",
-        "dashboard.progress.week_red_meat" => "неделя красного мяса",
+        // скользящем окне восьми суток. Отсюда и «зелёных дней» в слове — застывшее
+        // число (индикатор не держится) или выросшее (зелёный день ушёл из окна) без
+        // этого выглядели бы поломкой.
+        "dashboard.progress.gate_progress" => "Осталось: {n} {w}.",
+        // Названия недель — в винительном падеже: они подставляются в «чтобы открыть».
+        "dashboard.progress.week_steps" => "неделю шагов",
+        "dashboard.progress.week_calcium" => "неделю кальция",
+        "dashboard.progress.week_iron" => "неделю железа",
+        "dashboard.progress.week_fat" => "неделю жиров",
+        "dashboard.progress.week_red_meat" => "неделю красного мяса",
         "dashboard.progress.kcal_day" => "ккал/день",
         "dashboard.progress.done_hint" => "Мы будем корректировать её по мере наблюдений.",
         "dashboard.progress.help_1" => "Наш алгоритм поможет рассчитать вам вашу планку по калориям.",

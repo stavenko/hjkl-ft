@@ -859,13 +859,18 @@ pub fn ProgressWidget() -> impl IntoView {
                             let progress = t(progress_key)
                                 .replace("{n}", &left.to_string())
                                 .replace("{w}", word);
-                            // ЧТО БУДЕТ ДАЛЬШЕ — глава, которая откроется, названная по
-                            // имени. Без неё задание выглядит требованием без причины:
+                            // РАДИ ЧЕГО задание — глава, которая за ним откроется,
+                            // названная по имени. Без неё требование висит без причины:
                             // держите зелёным, а зачем — неизвестно.
                             //
-                            // Только у заданий, которые ещё выполняются: у закрытой
-                            // планки своя строка уже говорит про следующую историю, а у
-                            // красного мяса следующей главы пока нет вовсе.
+                            // Подставляется В САМО задание («…, чтобы открыть неделю
+                            // кальция»), а не отдельной строкой: цель в отрыве от
+                            // задания читается обрывком.
+                            //
+                            // Только там, где задание ещё выполняется: у закрытой планки
+                            // своя строка уже говорит про следующую историю, а у красного
+                            // мяса следующей главы пока нет вовсе — и в его тексте места
+                            // под подстановку нет.
                             let next_week_key = match title_key {
                                 "dashboard.progress.gate_title" => Some("dashboard.progress.week_steps"),
                                 "dashboard.progress.steps_gate_title" => Some("dashboard.progress.week_calcium"),
@@ -874,17 +879,14 @@ pub fn ProgressWidget() -> impl IntoView {
                                 "dashboard.progress.fat_gate_title" => Some("dashboard.progress.week_red_meat"),
                                 _ => None,
                             };
-                            let next_week = next_week_key.map(|week_key| {
-                                let line = t("dashboard.progress.next_week").replace("{week}", t(week_key));
-                                view! { <span class="is-size-7 has-text-grey">{line}</span> }
-                            });
+                            let title = match next_week_key {
+                                Some(week_key) => t(title_key).replace("{week}", t(week_key)),
+                                None => t(title_key).to_string(),
+                            };
                             view! {
                                 <div style="display: flex; flex-direction: column; gap: 2px;">
-                                    <span class="is-size-7 has-text-weight-semibold">
-                                        {move || t(title_key)}
-                                    </span>
+                                    <span class="is-size-7 has-text-weight-semibold">{title}</span>
                                     <span class="is-size-7 has-text-grey">{progress}</span>
-                                    {next_week}
                                 </div>
                             }
                         });

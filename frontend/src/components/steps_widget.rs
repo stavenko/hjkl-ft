@@ -2,11 +2,12 @@ use leptos::*;
 use api_types::StepEntry;
 
 use crate::components::mini_chart::steps_bar_block;
-use crate::components::weight_widget::EmptyPrompt;
+use crate::components::weight_widget::{EmptyPrompt, TILE_LABEL};
+use crate::services::i18n::t;
 use crate::services::{db, local};
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; padding: 10px 12px; height: 100%; \
-    box-sizing: border-box; display: flex; flex-direction: column; justify-content: center;";
+    box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; position: relative;";
 
 #[component]
 pub fn StepsWidget(entries: Signal<Vec<StepEntry>>) -> impl IntoView {
@@ -26,10 +27,11 @@ pub fn StepsWidget(entries: Signal<Vec<StepEntry>>) -> impl IntoView {
                     view! { <EmptyPrompt text_key="steps.empty_prompt"/> }.into_view()
                 } else {
                     let history: Vec<api_types::PlankaEntry> = plankas.get().unwrap_or_default();
-                    // Ни подписи «Шаги», ни сегодняшнего числа: на плитке говорят
-                    // столбики и линия планок. Числа — в раскрытой панели.
+                    // Числа на плитке нет — оно в раскрытой панели. Подпись лежит на
+                    // графике баблом, как и у веса.
                     view! {
                         <div style="flex: 1; min-height: 0;" inner_html=move || chart_svg_steps(&entries.get(), &history)></div>
+                        <span style=TILE_LABEL>{move || t("steps.title")}</span>
                     }.into_view()
                 }
             }}

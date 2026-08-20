@@ -5,7 +5,17 @@ use crate::services::i18n::{t, weight_unit_signal, WeightUnit};
 use crate::services::weight_trend::{weight_trend, BalanceState, DEFAULT_WINDOW_DAYS};
 
 const CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12px; padding: 10px 12px; height: 100%; \
-    box-sizing: border-box; display: flex; flex-direction: column; justify-content: center;";
+    box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; position: relative;";
+
+/// Подпись плитки — «бабл» по центру у нижнего края, ПОВЕРХ графика.
+///
+/// Заголовок строкой сверху отнимал бы у графика высоту, а место на дашборде
+/// дорого. Здесь подпись ничего не занимает: она лежит на рисунке, а собственный
+/// фон и скругление отделяют её от линий под ней.
+pub const TILE_LABEL: &str = "position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); \
+    z-index: 2; padding: 2px 10px; border-radius: 999px; background: var(--bulma-scheme-main-bis); \
+    color: var(--bulma-text-weak); font-size: 11px; line-height: 1.4; white-space: nowrap; \
+    pointer-events: none;";
 
 #[component]
 pub fn WeightWidget(entries: Signal<Vec<WeightEntry>>) -> impl IntoView {
@@ -19,11 +29,11 @@ pub fn WeightWidget(entries: Signal<Vec<WeightEntry>>) -> impl IntoView {
                 if entries.get().len() < 2 {
                     view! { <EmptyPrompt text_key="weight.empty_prompt"/> }.into_view()
                 } else {
-                    // Ни подписи «Вес», ни сегодняшнего числа: на плитке говорит сам
-                    // график, а что это вес — видно по нему же. Число доступно в
-                    // раскрытой панели, куда плитка и ведёт.
+                    // Числа на плитке нет — его говорит раскрытая панель. Подпись
+                    // есть, но лежит на графике баблом, а не отнимает у него строку.
                     view! {
                         <div style="flex: 1; min-height: 0;" inner_html=move || chart_svg(&entries.get(), unit.get())></div>
+                        <span style=TILE_LABEL>{move || t("weight.widget_title")}</span>
                     }.into_view()
                 }
             }}

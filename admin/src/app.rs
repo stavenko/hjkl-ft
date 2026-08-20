@@ -728,7 +728,12 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                 {move || messages.get().into_iter().map(|m| {
                     let is_expert = m.sender == "expert";
                     let side_cls = if is_expert { "bubble--me" } else { "bubble--them" };
-                    match m.kind.as_str() {
+                    // Время сообщения — строкой под пузырём. Эксперту важно, КОГДА
+                    // человек написал: на «час назад» и «в прошлый вторник» отвечают
+                    // по-разному, а в ленте это было ниоткуда не видно.
+                    let row_cls = if is_expert { "msg-row msg-row--me" } else { "msg-row msg-row--them" };
+                    let stamp = fmt_msg_time(&m.created_at);
+                    let bubble = match m.kind.as_str() {
                         // The user shared data: render one labelled button per dataset;
                         // tap opens the modal. A broken payload surfaces loudly.
                         "data_share" => {
@@ -820,6 +825,12 @@ fn Thread(view: RwSignal<View>, user_id: String, label: String) -> impl IntoView
                                 {m.text}
                             </div>
                         }.into_view(),
+                    };
+                    view! {
+                        <div class=row_cls>
+                            {bubble}
+                            <span attr:data-testid="msg-time" class="msg-time">{stamp}</span>
+                        </div>
                     }
                 }).collect_view()}
             </div>
@@ -1289,6 +1300,29 @@ fn dataset_ru(key: &str) -> String {
 /// ms-epoch → coarse "N назад" label for the payments worklist.
 /// Absolute local date-time `DD.MM.YYYY HH:MM` — for fields that can be in the FUTURE
 /// (e.g. a subscription's `period_end`), where the relative `since_label` is wrong.
+/// Время сообщения под пузырём: часы и минуты, а для не-сегодняшнего ещё и дата.
+///
+/// `created_at` приходит строкой ISO из воркера; разбирает её сам браузер, он же
+/// переводит в местный пояс. Непонятную строку показываем как есть, а не прячем:
+/// пустое место на её месте читалось бы как «времени нет».
+fn fmt_msg_time(iso: &str) -> String {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(iso));
+    if d.get_time().is_nan() {
+        return iso.to_string();
+    }
+    let two = |n: u32| if n < 10 { format!("0{n}") } else { n.to_string() };
+    let hm = format!("{}:{}", two(d.get_hours()), two(d.get_minutes()));
+    let now = js_sys::Date::new_0();
+    let same_day = d.get_full_year() == now.get_full_year()
+        && d.get_month() == now.get_month()
+        && d.get_date() == now.get_date();
+    if same_day {
+        hm
+    } else {
+        format!("{}.{} {hm}", two(d.get_date()), two(d.get_month() + 1))
+    }
+}
+
 fn fmt_ts(ms: i64) -> String {
     if ms <= 0 {
         return "—".to_string();

@@ -208,6 +208,13 @@
         .bubble--me { align-self: flex-end; background: var(--accent); color: var(--accent-ink);
             border-bottom-right-radius: 6px; }
         @keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.98); } }
+        /* Время под сообщением: своей строкой, у того же края, что и пузырь. Эксперту
+           надо видеть, когда человек написал — «час назад» и «в прошлый вторник»
+           требуют разного ответа. */
+        .msg-row { display: flex; flex-direction: column; gap: 2px; }
+        .msg-row--me { align-items: flex-end; }
+        .msg-row--them { align-items: flex-start; }
+        .msg-time { font-size: .72rem; color: var(--muted, #8a93a6); padding: 0 6px; }
 
         /* ── Composer (sticky bottom of Thread) ── */
         .composer { position: sticky; bottom: 0; display: flex; gap: 8px; align-items: flex-end;

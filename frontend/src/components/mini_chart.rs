@@ -152,7 +152,10 @@ pub fn chart_block_coloured(
 // The bars stay neutral blue; the planka/average is conveyed by the LINE colour
 // only (green planka line vs pink average line). Green bars on a green line all
 // blended together, so the target is shown by the line, not by recolouring bars.
-const STEPS_LINE: &str = "#1fa463"; // the planka line (green)
+// Линия планки СЕРАЯ, а не зелёная: цвет здесь уже занят столбиками — они и
+// говорят, выполнен день или нет. Планка же просто ориентир, и красить её в тот
+// же зелёный значило бы спорить с ними за внимание.
+const STEPS_LINE: &str = "var(--bulma-text-weak)";
 const STEPS_AVG: &str = "#e0699b"; // the average line (before a planka is set)
 
 /// Цвет столбика дня, когда планка была и человек её ВЫПОЛНИЛ.
@@ -262,7 +265,7 @@ fn steps_bar_svg(values: &[f64], plankas: &[Option<f64>], size: ChartSize) -> St
             let y = h - (p / max_val) * h;
             let (x1, x2) = (i as f64 * slot, (i + 1) as f64 * slot);
             segments.push(format!(
-                r#"<line x1="{x1:.1}" y1="{y:.1}" x2="{x2:.1}" y2="{y:.1}" stroke="{STEPS_LINE}" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>"#
+                r#"<line x1="{x1:.1}" y1="{y:.1}" x2="{x2:.1}" y2="{y:.1}" stroke="{STEPS_LINE}" stroke-width="2" stroke-linecap="round" stroke-dasharray="0.1 4" vector-effect="non-scaling-stroke"/>"#
             ));
             // Вертикальная перемычка на смене планки — иначе ступеньки повисают
             // в воздухе и читаются как отдельные чёрточки.
@@ -270,7 +273,7 @@ fn steps_bar_svg(values: &[f64], plankas: &[Option<f64>], size: ChartSize) -> St
                 if (prev - p).abs() > f64::EPSILON {
                     let y_prev = h - (prev / max_val) * h;
                     segments.push(format!(
-                        r#"<line x1="{x1:.1}" y1="{y_prev:.1}" x2="{x1:.1}" y2="{y:.1}" stroke="{STEPS_LINE}" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>"#
+                        r#"<line x1="{x1:.1}" y1="{y_prev:.1}" x2="{x1:.1}" y2="{y:.1}" stroke="{STEPS_LINE}" stroke-width="2" stroke-linecap="round" stroke-dasharray="0.1 4" vector-effect="non-scaling-stroke"/>"#
                     ));
                 }
             }

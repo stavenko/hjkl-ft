@@ -70,7 +70,9 @@ if (process.env.JITTER) {
           opts[0] ?? { confidence: 0 });
         const unknown = a.i_cannot_name_the_food_behind_this_name === true;
         const noDict = a.i_see_this_food_in_the_dictionary !== true;
-        const w = Number(top.confidence) * (unknown && noDict ? 0.7 : 1.0);
+        const fw = String(a.known_food_word_in_the_name || "").trim().toLowerCase();
+        const noWord = !fw || fw.startsWith("none");
+        const w = Number(top.confidence) * (unknown && noDict && noWord ? 0.7 : 1.0);
         weights.push(w.toFixed(2));
         if (w >= 0.6) passed++;
       }
@@ -126,8 +128,10 @@ if (process.env.RULE) {
           opts[0] ?? { confidence: 0 });
         const unknown = a.i_cannot_name_the_food_behind_this_name === true;
         const noDict = a.i_see_this_food_in_the_dictionary !== true;
+        const fw = String(a.known_food_word_in_the_name || "").trim().toLowerCase();
+        const noWord = !fw || fw.startsWith("none");
         // Та же формула, что в коде: признание понижает вес втрое-с-небольшим.
-        const weight = Number(top.confidence) * (unknown && noDict ? 0.7 : 1.0);
+        const weight = Number(top.confidence) * (unknown && noDict && noWord ? 0.7 : 1.0);
         const passed = weight >= 0.6;
         if (isReal) { real++; if (passed) okReal++; else bad.push(`${name}: отсечён (вес ${weight.toFixed(2)}, не знает: ${unknown}, словарь ${noDict ? "NONE" : "есть"})`); }
         else { fake++; if (!passed) okFake++; else bad.push(`${name}: ПРОШЁЛ (вес ${weight.toFixed(2)}, увер. ${Number(top.confidence).toFixed(2)}, не знает: ${unknown}) ${top.definition.slice(0, 34)}`); }

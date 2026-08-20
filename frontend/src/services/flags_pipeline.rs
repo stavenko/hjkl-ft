@@ -198,6 +198,7 @@ const RARE_NAMES: &[(&str, &str, &[&str])] = &[
     ("даня", "a BRAND of children's quark and yoghurt desserts, not a name of a person",
         &["Danya", "Danone kids"]),
     ("жигули", "a BRAND of beer; «барное 0.0» is its alcohol-free lager", &["Zhiguli"]),
+    ("балтика", "a BRAND of beer; «0.0» is its alcohol-free lager", &["Baltika"]),
 ];
 
 /// Русские сокращения с этикеток. Их модель не знает и достраивает наугад: «Черника
@@ -280,6 +281,8 @@ pub struct FlagsCtx {
     pub identity_no_food_named: bool,
     /// В словаре редких имён ничего не нашлось (NONE).
     pub identity_dictionary_empty: bool,
+    /// В самом имени нашлось слово, которое модель знает как еду.
+    pub identity_food_word: bool,
     pub flags: Flags,
     /// Клетчатка, г на 100 г. Её отдаёт растительный узел вместе с частью растения:
     /// продукт там уже опознан, и отдельный запрос за ней был лишними деньгами.
@@ -305,6 +308,7 @@ impl FlagsCtx {
             identity_confidence: 0.0,
             identity_no_food_named: false,
             identity_dictionary_empty: false,
+            identity_food_word: false,
             flags: Flags::default(),
             fibre_g: None,
             wanted: Vec::new(),
@@ -338,10 +342,18 @@ impl FlagsCtx {
     /// меньше. Множитель `IDENTITY_UNKNOWN_PENALTY` оставляет дорогу только тем
     /// ответам, где модель уверена полностью.
     ///
-    /// Понижаем ТОЛЬКО когда молчат оба: гольца модель своей памятью не знает, его
-    /// опознаёт словарь, и штрафовать за это было бы наказанием за честность.
+    /// Понижаем ТОЛЬКО когда молчат ВСЕ ТРИ: гольца модель своей памятью не знает,
+    /// его опознаёт словарь, и штрафовать за это было бы наказанием за честность.
+    ///
+    /// Третье — слово-еда в самом имени. «SPAR Чипсы нори» и «ВкусВилл Десерт
+    /// картошка» модель разбирала верно, но признавалась, что слов не знает, и
+    /// ставила себе 0.80 — ровно столько же, сколько выдумке вроде «Зюзюбряк
+    /// ассорти». По числам они неразличимы; различает их то, что в живом имени еда
+    /// названа своим словом, а в выдуманном — нет.
     fn identity_weight(&self) -> f64 {
-        let guessing = self.identity_no_food_named && self.identity_dictionary_empty;
+        let guessing = self.identity_no_food_named
+            && self.identity_dictionary_empty
+            && !self.identity_food_word;
         let penalty = if guessing { IDENTITY_UNKNOWN_PENALTY } else { 1.0 };
         self.identity_confidence * penalty
     }
@@ -458,6 +470,15 @@ struct IdentityAnswer {
     /// текста: строку она пишет по-разному — «NONE», «none», «NONE — nothing fits», —
     /// и любое отклонение молча означало бы «словарь нашёл», сняв штраф с выдумки.
     i_see_this_food_in_the_dictionary: bool,
+    /// Слово ИЗ САМОГО ИМЕНИ, которое модель знает как еду, или NONE.
+    ///
+    /// Последняя опора, когда всё остальное молчит: слова незнакомы, словарь пуст,
+    /// уверенность средняя. У живого имени такое слово почти всегда есть — «SPAR
+    /// Чипсы нори» это чипсы, «ВкусВилл Десерт картошка» это десерт, — а у
+    /// выдуманного нет: в «Зюзюбряк ассорти» и «Бубурек копчёный» еды не названо
+    /// ни одним словом. Числа в этих случаях одинаковы (0.80 у всех), и различить
+    /// их можно только так.
+    known_food_word_in_the_name: String,
     options: Vec<IdentityOption>,
 }
 
@@ -556,10 +577,22 @@ impl Prompt for IdentifyPrompt {
              but an unknown food: «Квазилапша» is not lapsha by some «Квази» — TRUE.\n\
              3. \"from_dictionary\": the closest definition from the dictionary below, or NONE \
              if nothing in it fits this name.\n\
+             THE DICTIONARY ANSWERS ABOUT THE SAME WORD, NEVER ABOUT A SIMILAR-SOUNDING ONE. \
+             Russian words rhyme constantly, and a shared ending is not a match: «огурец» is a \
+             cucumber and has nothing to do with «голец» the fish, «морковь» is not «морошка», \
+             «крахмал» is not «кальмар». A line fits only when it is about the very same food \
+             — the same word in another grammatical case, in Latin letters or misspelled. If \
+             the closest line is merely a rhyme, answer NONE: you already know what a cucumber \
+             is, and the dictionary is there for words you do NOT know.\n\
              4. \"i_see_this_food_in_the_dictionary\": true when a line of the dictionary is \
-             about THIS food — the same word, in another grammatical case, in Latin letters or \
-             misspelled. False when the dictionary holds nothing about it.\n\
-             5. \"options\": the three most likely definitions of the food, the surest first, \
+             about THIS food. False when the dictionary holds nothing about it — including the \
+             case where the nearest line only sounds alike.\n\
+             5. \"known_food_word_in_the_name\": one word COPIED FROM THE NAME that you know \
+             as a food or a dish, or NONE if the name holds no such word. Not the maker, not \
+             the way it was cooked, not the packaging: in «SPAR Чипсы нори» it is «Чипсы», in \
+             «ВкусВилл Десерт картошка» it is «Десерт», in «Бубурек копчёный» it is NONE — \
+             smoked names no food, and бубурек is nothing you know.\n\
+             6. \"options\": the three most likely definitions of the food, the surest first, \
              each a sentence of five or six words, each with your confidence from 0.0 to \
              1.0.\n\n\
              {rare}Respond with ONLY a minified JSON object and nothing else.",
@@ -577,6 +610,10 @@ impl Prompt for IdentifyPrompt {
                 // рыбой, и кониной, и разница между 0.9 и 0.4 здесь и есть ответ.
                 ctx.identity_no_food_named = a.i_cannot_name_the_food_behind_this_name;
                 ctx.identity_dictionary_empty = !a.i_see_this_food_in_the_dictionary;
+                // NONE в любом написании значит «слова-еды в имени нет».
+                let word = a.known_food_word_in_the_name.trim();
+                ctx.identity_food_word =
+                    !word.is_empty() && !word.to_lowercase().starts_with("none");
                 leptos::logging::log!(
                     "опознание «{}»: память — {} (еду не назвать: {}) · словарь — {} (нашёл: {})",
                     ctx.food_name,
@@ -603,6 +640,23 @@ impl Prompt for IdentifyPrompt {
                         .fold(0.0_f64, f64::max);
                     ctx.identity = Some(opts.join("; "));
                     ctx.last_error = None;
+                    // УСПЕШНОЕ опознание тоже уходит в телеметрию — с уверенностью и
+                    // с весом после штрафа. Раньше мы видели только отказы, а
+                    // опасны и те, что прошли ЕДВА: продукт разобран, признаки
+                    // проставлены, и ошибка в них не видна ниоткуда. Теперь по
+                    // числам можно спросить, кто прошёл впритык к порогу.
+                    crate::services::telemetry::report_detection(
+                        "identity.ok",
+                        &ctx.food_name,
+                        opts.first().map(String::as_str).unwrap_or(""),
+                        &format!(
+                            "память: {} · словарь: {} · слово-еда: {}",
+                            a.from_own_knowledge.trim(),
+                            a.from_dictionary.trim(),
+                            a.known_food_word_in_the_name.trim(),
+                        ),
+                        &[ctx.identity_confidence, ctx.identity_weight()],
+                    );
                 }
             }
             Err(e) => ctx.last_error = Some(format!("опознание не разобрано: {e}, ответ: {raw}")),

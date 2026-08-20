@@ -60,6 +60,31 @@ if (!byFood.length) {
   }
 }
 
+// ПРОШЛИ, НО ЕДВА. Отказ виден сразу, а вот продукт, разобранный на весе чуть
+// выше порога, молча получает признаки — и ошибка в них не всплывает нигде.
+// double1 — уверенность лучшей версии, double2 — вес после штрафа за признание.
+const SHAKY = 0.75;
+const shaky = await sql(
+  `SELECT blob1 AS food, min(double2) AS weight, min(double1) AS conf, count() AS n,
+          any(blob2) AS verdict
+   FROM ${DATASET}
+   WHERE index1 = 'identity.ok' AND double2 < ${SHAKY}
+     AND timestamp > NOW() - INTERVAL '${DAYS}' DAY
+   GROUP BY food ORDER BY weight ASC LIMIT 25`,
+);
+if (shaky.length) {
+  console.log(`\nопознано ВПРИТЫК (вес ниже ${SHAKY}):`);
+  console.log("продукт                             вес  увер.  что решили");
+  for (const r of shaky) {
+    console.log(
+      `  ${String(r.food).slice(0, 34).padEnd(34)} ${Number(r.weight).toFixed(2)}  ` +
+        `${Number(r.conf).toFixed(2)}  ${String(r.verdict).slice(0, 40)}`,
+    );
+  }
+} else {
+  console.log(`\nвпритык (вес ниже ${SHAKY}) — ничего`);
+}
+
 const byDay = await sql(
   `SELECT toDate(timestamp) AS day, count() AS n
    FROM ${DATASET} WHERE ${WHERE} GROUP BY day ORDER BY day`,

@@ -165,6 +165,14 @@ async fn run_worker() {
             continue;
         }
 
+        // ОДИН ПРОДУКТ — ОДИН ПРОХОД. Вкладок у приложения может быть несколько, и
+        // очередь у каждой своя: без общего замка две вкладки берут один продукт и
+        // задают модели одинаковые вопросы. Аренда живёт в той же таблице следов и
+        // протухает сама, если вкладку закрыли посреди работы.
+        if !super::food_probe::claim(&id).await {
+            continue;
+        }
+
         // ПРИЗНАКИ СПРАШИВАЕТ КОНВЕЙЕР, и другого пути больше нет.
         //
         // Раньше рядом жил старый: пять отдельных запросов, по одному на признак,
@@ -188,22 +196,36 @@ async fn run_worker() {
                 wanted.push(*aspect);
             }
         }
-        // Опознание — впереди всего, и оно решает судьбу прохода. Если продукт не
-        // опознали меньше суток назад, нового разговора не будет: ни признаков, ни
-        // нутриентов, ни железа, ни жиров — их всё равно спрашивать не о чем.
-        let may_identify =
-            super::food_probe::may_ask(&id, super::flags_pipeline::ASPECT_IDENTITY).await;
-        if !wanted.is_empty() && !may_identify {
-            continue;
-        }
+        // ЧТО ДЕЛАТЬ С ОПОЗНАНИЕМ — решает `food_probe`, по одному правилу на всё
+        // приложение (порядок и оговорки — в доке `identity_plan`):
+        //   запомненное уверенное → берём готовым, модель не трогаем;
+        //   ничего не запомнено   → спрашиваем;
+        //   спрашивали недавно    → ждём сутки и не начинаем проход вовсе.
+        let known = match super::food_probe::identity_plan_for(&id).await {
+            super::food_probe::IdentityPlan::UseCached(identity, weight) => {
+                Some((identity, weight))
+            }
+            super::food_probe::IdentityPlan::Ask => None,
+            super::food_probe::IdentityPlan::Wait => {
+                if !wanted.is_empty() {
+                    super::food_probe::release(&id).await;
+                    continue;
+                }
+                None
+            }
+        };
         if !wanted.is_empty() {
             let name = food.name.clone();
             let ask = wanted.clone();
+            let cached = known.clone();
             if let Some(r) = with_retries(
                 move || {
                     let n = name.clone();
                     let a = ask.clone();
-                    async move { super::flags_pipeline::classify_all(&n, &a).await }
+                    let k = cached.clone();
+                    async move {
+                        super::flags_pipeline::classify_all_with_identity(&n, &a, k).await
+                    }
                 },
                 errors::FoodAspect::Kind,
                 &food.name,
@@ -229,13 +251,15 @@ async fn run_worker() {
                         &food.name,
                     )
                     .await;
+                    super::food_probe::release(&id).await;
                     continue;
                 }
-                super::food_probe::record(
+                // Уверенное опознание запоминается — следующий недостающий признак
+                // этого продукта уже не будет платить за него снова.
+                super::food_probe::record_identity(
                     &id,
-                    super::flags_pipeline::ASPECT_IDENTITY,
-                    true,
-                    "",
+                    r.identity.as_deref().unwrap_or(""),
+                    r.identity_weight,
                 )
                 .await;
                 let (f, fibre, ident) = (r.flags, r.fibre_g, r.identity);
@@ -307,19 +331,30 @@ async fn run_worker() {
         let needs_identity = super::enrich::needs_enrichment(&food)
             || food.fat_profile.is_none()
             || super::iron::needs_iron(&food);
+        // Тому же правилу подчиняется и опознание ради нутриентов, железа и жиров:
+        // «Wait» здесь означает, что кальций и железо пойдут по одному имени, а не
+        // что мы задаём дорогой вопрос повторно.
         if identity.is_empty() && needs_identity {
-            let name = food.name.clone();
-            if let Some(ident) = with_retries(
-                move || {
-                    let n = name.clone();
-                    async move { super::flags_pipeline::identify(&n).await }
-                },
-                errors::FoodAspect::Kind,
-                &food.name,
-            )
-            .await
-            {
-                identity = ident.unwrap_or_default();
+            let plan = super::food_probe::identity_plan_for(&id).await;
+            if let super::food_probe::IdentityPlan::UseCached(cached, _) = plan {
+                identity = cached;
+            } else if plan == super::food_probe::IdentityPlan::Ask {
+                let name = food.name.clone();
+                if let Some(ident) = with_retries(
+                    move || {
+                        let n = name.clone();
+                        async move { super::flags_pipeline::identify_weighed(&n).await }
+                    },
+                    errors::FoodAspect::Kind,
+                    &food.name,
+                )
+                .await
+                {
+                    if let Some((text, weight)) = ident {
+                        super::food_probe::record_identity(&id, &text, weight).await;
+                        identity = text;
+                    }
+                }
             }
         }
 
@@ -380,6 +415,10 @@ async fn run_worker() {
                 &food.name,
             ).await;
         }
+
+        // Проход по продукту кончился — отпускаем его. Остальные выходы из цикла
+        // делают то же самое перед своим `continue`.
+        super::food_probe::release(&id).await;
     }
 }
 

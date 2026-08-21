@@ -1302,6 +1302,9 @@ pub struct Recognised {
     pub flags: Flags,
     pub fibre_g: Option<f64>,
     pub identity: Option<String>,
+    /// Вес опознания после штрафа — по нему решается, стоит ли класть опознание в
+    /// кэш (см. `food_probe`). У опознания, взятого из кэша, это его прежний вес.
+    pub identity_weight: f64,
     /// false — продукт не опознан: признаков нет и спрашивать их нечем.
     pub recognised: bool,
 }
@@ -1347,15 +1350,28 @@ impl Aspect {
 /// которые сегодня ещё не спрашивали: остальные не трогаем, чтобы готовый вердикт не
 /// переписывался новым, который может с ним и разойтись.
 pub async fn classify_all(food_name: &str, wanted: &[Aspect]) -> Result<Recognised, String> {
+    classify_all_with_identity(food_name, wanted, None).await
+}
+
+/// То же, но с УЖЕ ИЗВЕСТНЫМ опознанием: `(что это за еда, вес опознания)`.
+///
+/// Опознание — самый дорогой вопрос прохода: его задают модели покрупнее, и он
+/// повторяется для одного и того же продукта каждый раз, когда не хватает
+/// очередного признака. Между этими разами продукт не меняется — меняется только
+/// то, чего мы о нём ещё не спросили. Поэтому уверенное опознание кладётся в
+/// `food_probe` и отсюда подставляется готовым: конвейер начинается сразу с
+/// признаков, узел опознания не запускается вовсе.
+pub async fn classify_all_with_identity(
+    food_name: &str,
+    wanted: &[Aspect],
+    known: Option<(String, f64)>,
+) -> Result<Recognised, String> {
     // Thinking ON. В остальных запросах он выключен: qwen3 паркует короткий ответ в
     // канал размышления и отдаёт пустой контент. Здесь пробуем включить, потому что
     // узлам достались настоящие противоречия — «язык это мышца, но орган», «копчёная
     // рыба консервирована, но не мясо», — и их надо продумать, а не угадать. Лимит
     // токенов в режиме рассуждения вчетверо больше (8000), так что ответу есть место.
-    let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode {
-        executor: build_identity_executor()?,
-        flags_executor: build_executor_think(true)?,
-    })));
+    let flags_executor = build_executor_think(true)?;
 
     let mut ctx = FlagsCtx::new(food_name);
     // Порядок узлов сохраняем свой, а не тот, в котором попросили: у шагов он выверен
@@ -1367,6 +1383,31 @@ pub async fn classify_all(food_name: &str, wanted: &[Aspect]) -> Result<Recognis
     .into_iter()
     .filter(|s| wanted.iter().any(|a| a.step() == *s))
     .collect();
+
+    // С готовым опознанием конвейер начинается с ПЕРВОГО ЗАПРОШЕННОГО признака.
+    // Гейт `recognised()` ниже смотрит на вес, поэтому кэш кладёт и его.
+    let pipeline = match &known {
+        Some((identity, weight)) => {
+            let Some(first) = ctx.wanted.first().copied() else {
+                return Err("опознание есть, а спрашивать нечего".to_string());
+            };
+            ctx.identity = Some(identity.clone());
+            ctx.identity_confidence = *weight;
+            // Штрафу неоткуда взяться: этот вес уже прошёл через него, когда
+            // опознание получали живьём.
+            ctx.identity_no_food_named = false;
+            ctx.identity_dictionary_empty = false;
+            ctx.identity_food_word = true;
+            Pipeline::new(Box::new(NodeWrapper::new(FlagNode {
+                executor: flags_executor.clone(),
+                step: first,
+            })))
+        }
+        None => Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode {
+            executor: build_identity_executor()?,
+            flags_executor: flags_executor.clone(),
+        }))),
+    };
 
     let mut stream = run_pipeline(pipeline, ctx);
     let mut last: Option<FlagsCtx> = None;
@@ -1401,12 +1442,14 @@ pub async fn classify_all(food_name: &str, wanted: &[Aspect]) -> Result<Recognis
             flags: Flags::default(),
             fibre_g: None,
             identity: None,
+            identity_weight: ctx.identity_weight(),
             recognised: false,
         });
     }
     let f = ctx.flags;
     let fibre = ctx.fibre_g;
     let identity = ctx.identity.clone();
+    let weight = ctx.identity_weight();
     let got = [f.veg_fruit, f.heme, f.red_meat, f.processed_meat, f.milk_globule, f.egg]
         .iter()
         .filter(|v| v.is_some())
@@ -1421,7 +1464,7 @@ pub async fn classify_all(food_name: &str, wanted: &[Aspect]) -> Result<Recognis
         ctx.identity.clone().unwrap_or_else(|| "(не опознано)".to_string()),
         ctx.reasons.join(" · ")
     );
-    Ok(Recognised { flags: f, fibre_g: fibre, identity, recognised: true })
+    Ok(Recognised { flags: f, fibre_g: fibre, identity, identity_weight: weight, recognised: true })
 }
 
 /// ТОЛЬКО опознание, без признаков.
@@ -1432,6 +1475,13 @@ pub async fn classify_all(food_name: &str, wanted: &[Aspect]) -> Result<Recognis
 /// модели с голым именем из дневника — тем самым, из-за которого «Голец» получал
 /// 120 мг кальция как «жидкий молочный продукт вроде кефира».
 pub async fn identify(food_name: &str) -> Result<Option<String>, String> {
+    Ok(identify_weighed(food_name).await?.map(|(identity, _)| identity))
+}
+
+/// То же опознание, но с ВЕСОМ — по нему решается, класть ли ответ в кэш
+/// (`food_probe::record_identity`). Без веса кэшировать нельзя: продукт, разобранный
+/// впритык к порогу, запоминать не за чем.
+pub async fn identify_weighed(food_name: &str) -> Result<Option<(String, f64)>, String> {
     let mut ctx = FlagsCtx::new(food_name);
     ctx.identify_only = true;
     let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode {
@@ -1461,7 +1511,8 @@ pub async fn identify(food_name: &str) -> Result<Option<String>, String> {
         "опознание «{food_name}»: {}",
         ctx.identity.clone().unwrap_or_else(|| "(не опознано)".to_string())
     );
-    Ok(ctx.identity)
+    let weight = ctx.identity_weight();
+    Ok(ctx.identity.map(|i| (i, weight)))
 }
 
 // ── Выгрузка промптов для замеров ────────────────────────────────────────────

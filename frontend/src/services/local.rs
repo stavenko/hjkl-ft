@@ -1213,6 +1213,11 @@ pub async fn update_draft_fields(draft_id: &str, food: &Food) {
         // Only the editable fields change; id / flags / timestamps are preserved.
         if let Some(fid) = linked_food_id {
             if let Some(mut f) = db::get::<Food>("foods", &fid).await {
+                // Имя — это то, О ЧЁМ мы спрашивали модель. Изменилось оно —
+                // прошлый разговор больше не про этот продукт: запомненное
+                // опознание и следы попыток забываются, иначе новое имя получит
+                // признаки, выведенные из старого.
+                let renamed = f.name != food.name;
                 f.name = food.name.clone();
                 f.kcal = food.kcal;
                 f.protein = food.protein;
@@ -1222,6 +1227,9 @@ pub async fn update_draft_fields(draft_id: &str, food: &Food) {
                 f.package_weight = food.package_weight;
                 f.updated_at = now();
                 db::put("foods", &f).await;
+                if renamed {
+                    super::food_probe::forget(&fid).await;
+                }
             }
         }
     }

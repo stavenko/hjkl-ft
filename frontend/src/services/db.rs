@@ -561,6 +561,51 @@ pub async fn get<T: DeserializeOwned>(store_name: &str, id: &str) -> Option<T> {
     result.and_then(|js_val| decode_row(store_name, js_val))
 }
 
+/// Прочитать строку и, если решение положительное, записать новую — В ОДНОЙ
+/// транзакции. Возвращает `true`, если запись состоялась.
+///
+/// Нужно там, где на строку претендуют двое: две вкладки приложения делят одну
+/// IndexedDB, и обычная пара `get` + `put` — это две транзакции, между которыми
+/// вторая вкладка успевает прочитать то же самое. На этом стоит «аренда» продукта
+/// перед классификацией (см. `food_probe::claim`): без неё две вкладки задают
+/// модели один и тот же вопрос и платят за него дважды.
+///
+/// НЕ ЖУРНАЛИРУЕТСЯ в outbox — только для локальных, несинкаемых сторов.
+pub async fn update_atomic<T, F>(store_name: &str, id: &str, decide: F) -> bool
+where
+    T: Serialize + DeserializeOwned,
+    F: FnOnce(Option<T>) -> Option<T>,
+{
+    debug_assert!(
+        !is_synced_store(store_name),
+        "update_atomic не журналирует изменения — синкаемым сторам не подходит"
+    );
+    let Some(tx) = with_db_opt(|db| {
+        db.transaction(&[store_name], TransactionMode::ReadWrite)
+            .expect("failed to create transaction")
+    }) else {
+        no_db("update", store_name);
+        return false;
+    };
+    let store = tx.store(store_name).expect("store not found");
+    let current = store
+        .get(JsValue::from_str(id))
+        .await
+        .expect("get failed")
+        .and_then(|js_val| decode_row::<T>(store_name, js_val));
+    let Some(next) = decide(current) else {
+        // Решение отрицательное: строку не трогаем, транзакцию закрываем.
+        tx.done().await.expect("transaction failed");
+        return false;
+    };
+    let ser = serde_wasm_bindgen::Serializer::json_compatible();
+    let js_val = next.serialize(&ser).expect("serialize failed");
+    store.put(&js_val, None).await.expect("put failed");
+    tx.done().await.expect("transaction failed");
+    bump(store_name);
+    true
+}
+
 /// Tracked delete: removes the row AND journals the deletion into the outbox.
 pub async fn delete(store_name: &str, id: &str) {
     delete_untracked(store_name, id).await;

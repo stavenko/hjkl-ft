@@ -480,10 +480,10 @@ pub fn FoodEditor(
                 // while `queued`, then SWITCH to the SSE STREAM while `processing`.
                 let input = AiVisionInput { images, custom_nutrients: nutrients_list };
 
-                // ПРЯМОЙ ПУТЬ: модель задана в конфиге — картинка уходит в наш
-                // ai-worker одним запросом, без очереди и опроса статуса. Прогресс
-                // тот же (рассуждение/ответ), просто приходит сразу потоком.
-                if ai::direct_vision_model().is_some() {
+                // ПРЯМОЙ ПУТЬ: свой сервер молчит — картинка уходит в наш ai-worker
+                // одним запросом, без очереди и опроса статуса. Прогресс тот же
+                // (рассуждение/ответ), просто приходит сразу потоком.
+                if ai::pick_vision_route().await == ai::VisionRoute::Direct {
                     let on_progress = move |ph: u8, tt: u32, at: u32| match ph {
                         1 => { phase.set(1); think.set(tt); vision_msg.set(String::new()); }
                         2 => { phase.set(2); answer.set(at); vision_msg.set(String::new()); }
@@ -663,9 +663,9 @@ pub fn FoodEditor(
 
             let mut detected: Option<Vec<DetectedFood>> = None;
 
-            // ПРЯМОЙ ПУТЬ (как у этикетки): модель задана в конфиге — фото уходит в
+            // ПРЯМОЙ ПУТЬ (как у этикетки): свой сервер молчит — фото уходит в
             // ai-worker одним запросом, очередь не участвует.
-            if ai::direct_vision_model().is_some() {
+            if ai::pick_vision_route().await == ai::VisionRoute::Direct {
                 let on_progress = move |ph: u8, tt: u32, at: u32| match ph {
                     1 => { fitems_phase.set(1); fitems_think.set(tt); fitems_vision_msg.set(String::new()); }
                     2 => { fitems_phase.set(2); fitems_answer.set(at); fitems_vision_msg.set(String::new()); }

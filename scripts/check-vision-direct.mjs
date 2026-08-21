@@ -47,11 +47,18 @@ const ctx = await b.newContext({ viewport: { width: 430, height: 920 }, serviceW
 const page = await ctx.newPage();
 page.on("console", (m) => { if (m.type() === "error") console.log("CONSOLE ERROR:", m.text().slice(0, 300)); });
 
+// DEAD=1 — подменить ответ очереди о живости поллера, чтобы проверить ветку
+// «свой сервер молчит» не трогая настоящий он-прем.
+if (process.env.DEAD === "1") {
+  await page.route("**/poller-status", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ alive: false, last_seen_ms: 0, age_ms: -1 }) }));
+}
+
 // Куда реально уходят картинки — это и есть предмет проверки.
 const calls = [];
 page.on("request", (r) => {
   const u = r.url();
-  if (u.includes("/chat/completions") || u.includes("ocr-queue")) calls.push(`${r.method()} ${u}`);
+  if (u.includes("/chat/completions") || u.includes("ocr-queue") || u.includes("poller")) calls.push(`${r.method()} ${u}`);
 });
 
 await page.goto(FE, { waitUntil: "domcontentloaded" });

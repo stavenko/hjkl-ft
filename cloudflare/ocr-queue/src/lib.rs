@@ -253,6 +253,16 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         return Response::from_json(&serde_json::json!({ "ok": true }));
     }
 
+    // ── Жив ли он-прем ──
+    // Приложение спрашивает это ПЕРЕД отправкой картинки: живой поллер — работаем
+    // очередью, молчащий — уходим на платное распознавание. Ответ не содержит
+    // ничего, кроме времени последнего обращения поллера, поэтому ручка открыта
+    // так же, как /health, — приложению нужен ответ и на экране без сессии.
+    if path == "/poller-status" && method == Method::Get {
+        let res = do_get(&stub, "https://do/poller-status").await?;
+        return relay_cors(res).await;
+    }
+
     if path == "/submit" && method == Method::Post {
         let token = bearer(&req);
         let jwt_secret = secret_or_var(env, "JWT_SECRET").await.map_err(Error::RustError)?;

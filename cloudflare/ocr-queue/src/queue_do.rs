@@ -15,6 +15,18 @@ const STALE_MS: i64 = 120_000;
 /// image that keeps hanging the model), so the client stops waiting.
 const MAX_ATTEMPTS: i64 = 3;
 
+/// Ключ с временем ПОСЛЕДНЕГО обращения поллера (мс эпохи). Пишется на каждом
+/// `/claim` — поллер стучится туда независимо от того, есть ли работа.
+const POLLER_SEEN_KEY: &str = "poller_seen_ms";
+
+/// Насколько давно поллер мог молчать, чтобы его всё ещё считать живым.
+///
+/// Поллер опрашивает `/claim` раз в POLL_INTERVAL (3 с) и ходит по очередям по
+/// кругу, так что на ОДНУ очередь приходится удар раз в несколько секунд. Минуты
+/// хватает, чтобы пережить перезапуск процесса и обрыв туннеля, и при этом не
+/// гнать людей на платное распознавание, пока свой сервер жив.
+const POLLER_ALIVE_MS: i64 = 60_000;
+
 fn now_ms() -> i64 {
     Date::now().as_millis() as i64
 }
@@ -295,8 +307,31 @@ impl DurableObject for QueueDO {
             return Response::from_json(&serde_json::json!({ "ok": true }));
         }
 
+        // ---- /poller-status ----
+        // Жив ли он-прем: когда он в последний раз забирал работу. По этому ответу
+        // приложение решает, слать картинку в очередь или платно на сторону.
+        if path == "/poller-status" {
+            let seen: i64 = self
+                .state
+                .storage()
+                .get::<i64>(POLLER_SEEN_KEY)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+            let age = if seen > 0 { now_ms() - seen } else { -1 };
+            return Response::from_json(&serde_json::json!({
+                "alive": seen > 0 && age >= 0 && age <= POLLER_ALIVE_MS,
+                "last_seen_ms": seen,
+                "age_ms": age,
+                "alive_window_ms": POLLER_ALIVE_MS,
+            }));
+        }
+
         // ---- /claim ----
         if path == "/claim" {
+            // Отметка живости: сам факт обращения поллера и есть его пульс.
+            self.state.storage().put(POLLER_SEEN_KEY, now_ms()).await?;
             // Self-heal first: recover jobs the poller dropped mid-flight.
             self.requeue_stale().await?;
             let mut q = self.queue_ids().await?;

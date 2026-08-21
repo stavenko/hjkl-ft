@@ -3100,6 +3100,50 @@ pub fn direct_vision_model() -> Option<&'static str> {
     (!m.is_empty()).then_some(m)
 }
 
+/// Каким путём отправлять картинку.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VisionRoute {
+    /// Очередь ocr-queue и свой сервер — путь по умолчанию, пока он жив.
+    Queue,
+    /// Прямо в ai-worker к стороннему провайдеру — за деньги, поэтому только
+    /// когда свой сервер молчит.
+    Direct,
+}
+
+/// Спросить очередь, давно ли приходил поллер, и выбрать путь.
+///
+/// Свой сервер бесплатный, поэтому он всегда в приоритете: на сторону уходим
+/// ТОЛЬКО когда поллер молчит дольше своего окна (решает сама очередь) или когда
+/// её воркер недоступен. Если прямой путь не настроен моделью, выбора нет —
+/// работаем очередью и получаем её обычную ошибку.
+pub async fn pick_vision_route() -> VisionRoute {
+    if direct_vision_model().is_none() {
+        return VisionRoute::Queue;
+    }
+    match poller_alive().await {
+        Some(true) => VisionRoute::Queue,
+        // Молчит или до очереди не достучаться — картинке нужен другой путь.
+        _ => VisionRoute::Direct,
+    }
+}
+
+/// `Some(true|false)` — очередь ответила; `None` — до неё не достучаться.
+async fn poller_alive() -> Option<bool> {
+    let base = &config::get().ocr_queue_base_url;
+    let url = format!("{base}/poller-status");
+    let window = web_sys::window()?;
+    let resp_val = JsFuture::from(window.fetch_with_str(&url)).await.ok()?;
+    let resp: web_sys::Response = resp_val.dyn_into().ok()?;
+    if !resp.ok() {
+        return None;
+    }
+    let text = JsFuture::from(resp.text().ok()?).await.ok()?.as_string()?;
+    serde_json::from_str::<serde_json::Value>(&text)
+        .ok()?
+        .get("alive")
+        .and_then(|v| v.as_bool())
+}
+
 /// Потолок ответа для картиночных запросов: этикетка — короткий JSON, список еды
 /// с тарелки — десяток строк. Столько хватает обоим с запасом.
 const VISION_MAX_TOKENS: u32 = 2000;

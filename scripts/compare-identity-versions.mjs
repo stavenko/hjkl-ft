@@ -14,6 +14,8 @@ const AI = "https://ai-worker-dev.vg-stavenko.workers.dev";
 const PAY = "https://payment-worker-dev.vg-stavenko.workers.dev";
 const SECRET = "dev-secret-change-in-production";
 const SC = process.env.SCRATCH || ".";
+/// Модель замера: по умолчанию та, на которой работает приложение.
+const MODEL = process.env.MODEL || "@cf/qwen/qwen3-30b-a3b-fp8";
 
 /// Порог один во всех версиях — менялось только то, чем его сбивают.
 const MIN = 0.6;
@@ -47,6 +49,9 @@ const VERSIONS = [
   },
 ];
 
+// ONLY=<подстрока> — прогнать только подходящие версии (замер стоит денег).
+const PICKED = VERSIONS.filter((v) => !process.env.ONLY || v.name.includes(process.env.ONLY));
+
 const b64 = (b) => Buffer.from(b).toString("base64url");
 const now = Math.floor(Date.now() / 1000);
 const head = b64(JSON.stringify({ alg: "HS256", typ: "JWT" })) + "." +
@@ -71,7 +76,7 @@ const ask = async (file, food) => {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({
-      model: "@cf/qwen/qwen3-30b-a3b-fp8",
+      model: MODEL,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_schema", json_schema: { name: "identity", schema } },
       stream: true, think: false, max_tokens: 2000,
@@ -85,7 +90,11 @@ const ask = async (file, food) => {
     if (!p || p === "[DONE]") continue;
     try { out += JSON.parse(p)?.choices?.[0]?.delta?.content ?? ""; } catch {}
   }
-  try { return JSON.parse(out.trim()); } catch { return null; }
+  try {
+    const v = JSON.parse(out.trim());
+    // Обёртку-массив вокруг единственного объекта снимаем так же, как приложение.
+    return Array.isArray(v) ? (v[0] ?? null) : v;
+  } catch { return null; }
 };
 
 const REPEATS = Number(process.argv[2] || 3);
@@ -95,12 +104,12 @@ if (!NAMES.length) {
   process.exit(1);
 }
 
-console.log(`повторов на имя: ${REPEATS} · порог ${MIN}\n`);
-const header = "продукт".padEnd(32) + VERSIONS.map((v) => v.name.padEnd(30)).join("");
+console.log(`модель ${MODEL} · повторов на имя: ${REPEATS} · порог ${MIN}\n`);
+const header = "продукт".padEnd(32) + PICKED.map((v) => v.name.padEnd(30)).join("");
 console.log(header);
 for (const food of NAMES) {
   const cells = [];
-  for (const v of VERSIONS) {
+  for (const v of PICKED) {
     let passed = 0;
     const ws = [];
     for (let i = 0; i < REPEATS; i++) {

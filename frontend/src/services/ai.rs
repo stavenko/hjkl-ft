@@ -139,6 +139,27 @@ pub(crate) fn build_executor_think(think: bool) -> Result<Qwen, String> {
     Ok(executor)
 }
 
+/// Исполнитель для узла ОПОЗНАНИЯ. Отличается от общего только моделью: если в
+/// конфиге задан `identity_model`, вопрос уходит ей — ai-worker сам увезёт его к
+/// стороннему провайдеру. Пусто — ровно тот же исполнитель, что у признаков.
+///
+/// Рассуждение здесь всегда выключено: рассуждая, модель уговаривает себя, и
+/// незнание перестаёт быть незнанием (см. `IdentifyNode`).
+pub(crate) fn build_identity_executor() -> Result<Qwen, String> {
+    let model = config::get().identity_model.trim();
+    if model.is_empty() {
+        return build_executor_think(false);
+    }
+    let token = auth::get_token().ok_or_else(|| "not authenticated".to_string())?;
+    Ok(Qwen::builder()
+        .api_base(&config::get().ai_base_url)
+        .api_key(token)
+        .model(model)
+        .think(false)
+        .max_tokens(2000)
+        .build())
+}
+
 /// Shared skeleton for both nutrition-lookup prompts. The only thing that differs
 /// between the two use cases is `form_clause` (raw/as-sold vs cooked/as-served),
 /// so the identical structure (naming rules, per-100 g, JSON contract) lives here

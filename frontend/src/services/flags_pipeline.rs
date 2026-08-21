@@ -58,7 +58,7 @@ use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::ai::{build_executor_think, veg_fruit_from_category};
+use super::ai::{build_executor_think, build_identity_executor, veg_fruit_from_category};
 
 /// НИЖЕ ЭТОЙ УВЕРЕННОСТИ ОПОЗНАНИЕ СЧИТАЕТСЯ НЕСОСТОЯВШИМСЯ.
 ///
@@ -1348,7 +1348,7 @@ pub async fn classify_all(food_name: &str, wanted: &[Aspect]) -> Result<Recognis
     // рыба консервирована, но не мясо», — и их надо продумать, а не угадать. Лимит
     // токенов в режиме рассуждения вчетверо больше (8000), так что ответу есть место.
     let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode {
-        executor: build_executor_think(false)?,
+        executor: build_identity_executor()?,
         flags_executor: build_executor_think(true)?,
     })));
 
@@ -1430,7 +1430,7 @@ pub async fn identify(food_name: &str) -> Result<Option<String>, String> {
     let mut ctx = FlagsCtx::new(food_name);
     ctx.identify_only = true;
     let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode {
-        executor: build_executor_think(false)?,
+        executor: build_identity_executor()?,
         flags_executor: build_executor_think(true)?,
     })));
 

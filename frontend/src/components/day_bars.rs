@@ -38,6 +38,9 @@ const PB: f64 = 92.0; // bar baseline; weekday labels sit below
 const BAR_NEUTRAL: &str = "#cfd8e3"; // unevaluable day (no target)
 const BAR_MET: &str = "#1fa463"; // green — target met (ratio ≥ 1.0)
 const BAR_ACTIVE: &str = "#3b6fd4";
+/// Высота столбика для НУЛЕВОГО провала — чтобы «ноль» читался как красная неделя,
+/// а не как её отсутствие.
+const ZERO_MISS_H: f64 = 4.0;
 
 /// Bar colour: green when the day met its target (ratio ≥ 1.0), neutral grey when
 /// unevaluable (no target), otherwise `miss_color` — the single per-chart colour the
@@ -148,6 +151,17 @@ pub fn DayBars(
                             (y0.min(base), (y0 - base).abs())
                         } else {
                             (y0, (PB - y0).max(0.0))
+                        };
+                        // НОЛЬ ТОЖЕ ВИДЕН, если это провал. Неделя без единой порции
+                        // гема — самая красная из всех, а рисовалась пустым местом:
+                        // высота нулевая, и от «нечего судить» её было не отличить.
+                        // Пустая неделя (вердикта нет) так и остаётся пустой.
+                        let missed_here = matches!(met.as_ref().and_then(|m| m.get(i).copied()), Some(Some(false)))
+                            || (met.is_none() && matches!(ratio, Some(r) if *r < 1.0));
+                        let (y, h) = if !signed && missed_here && h < ZERO_MISS_H {
+                            (PB - ZERO_MISS_H, ZERO_MISS_H)
+                        } else {
+                            (y, h)
                         };
                         // Per-day verdict from the caller (the indicator's own rule)
                         // when provided; the generic ratio rule otherwise. У знакового

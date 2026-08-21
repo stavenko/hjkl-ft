@@ -58,7 +58,7 @@ use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::ai::{build_executor_think, strip_code_fences, veg_fruit_from_category};
+use super::ai::{build_executor_think, veg_fruit_from_category};
 
 /// НИЖЕ ЭТОЙ УВЕРЕННОСТИ ОПОЗНАНИЕ СЧИТАЕТСЯ НЕСОСТОЯВШИМСЯ.
 ///
@@ -619,7 +619,7 @@ impl Prompt for IdentifyPrompt {
 
     fn update_context(&self, mut ctx: Self::Context, raw: Self::Output) -> Self::Context {
         ctx.tries[0] += 1;
-        match serde_json::from_str::<IdentityAnswer>(strip_code_fences(raw.trim())) {
+        match crate::services::ai::parse_one::<IdentityAnswer>(&raw) {
             Ok(a) => {
                 // Признакам уходят ВСЕ варианты с их достоверностью, а не только
                 // первый: пусть видно, что уверенности нет, — «голец» модель звала и
@@ -1125,7 +1125,7 @@ impl Prompt for FlagPrompt {
     fn update_context(&self, mut ctx: Self::Context, raw: Self::Output) -> Self::Context {
         ctx.tries[self.step.slot()] += 1;
         if self.step.as_plant() {
-            match serde_json::from_str::<PlantAnswer>(strip_code_fences(raw.trim())) {
+            match crate::services::ai::parse_one::<PlantAnswer>(&raw) {
                 Ok(a) => {
                     // «Овощи и фрукты» — это растение, но НЕ корень, не боб, не зерно
                     // и не семя. Решает наш код, а не модель: у неё спрашивают только
@@ -1177,20 +1177,20 @@ impl Prompt for FlagPrompt {
             return ctx;
         }
         let parsed: Result<(bool, String), String> = if self.step.as_egg() {
-            serde_json::from_str::<EggAnswer>(strip_code_fences(raw.trim()))
+            crate::services::ai::parse_one::<EggAnswer>(&raw)
                 .map(|a| (a.is_this_product_of_bird_eggs, a.reason))
                 .map_err(|e| format!("яйцо не разобрано: {e}, ответ: {raw}"))
         } else if self.step.as_category() {
             // Вердикт выводим САМИ из названной категории: пока его ставила модель,
             // она называла «FRUITS» и отвечала «да» на вишню в сиропе.
-            serde_json::from_str::<CategoryAnswer>(strip_code_fences(raw.trim()))
+            crate::services::ai::parse_one::<CategoryAnswer>(&raw)
                 .map_err(|e| format!("категория не разобрана: {e}, ответ: {raw}"))
                 .and_then(|a| {
                     veg_fruit_from_category(&a.category_that_fits)
                         .map(|v| (v, a.category_that_fits))
                 })
         } else {
-            serde_json::from_str::<FlagAnswer>(strip_code_fences(raw.trim()))
+            crate::services::ai::parse_one::<FlagAnswer>(&raw)
                 .map(|a| (a.verdict, a.reason))
                 .map_err(|e| format!("{} не разобран: {e}, ответ: {raw}", self.step.label()))
         };

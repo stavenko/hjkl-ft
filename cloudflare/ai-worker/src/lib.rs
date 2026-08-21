@@ -392,12 +392,59 @@ const THIRDPARTY_FIELDS: [&str; 5] = ["model", "messages", "max_tokens", "temper
 
 /// Привести наш `response_format` к виду OpenAI: там у `json_schema` ОБЯЗАТЕЛЬНО
 /// есть `name`, а схема должна быть без `$ref` (провайдеры их не разворачивают).
+///
+/// `strict` просим явно: у Workers AI схема ЗАДАЁТ грамматику, а у стороннего
+/// провайдера без этого флага она читается как пожелание.
 fn openai_response_format(rf: &serde_json::Value) -> Option<serde_json::Value> {
     let schema = rf.get("json_schema").and_then(|js| js.get("schema"))?;
     Some(serde_json::json!({
         "type": "json_schema",
-        "json_schema": { "name": "answer", "schema": inline_schema(schema) },
+        "json_schema": { "name": "answer", "schema": inline_schema(schema), "strict": true },
     }))
+}
+
+/// Та же инструкция о форме, что уходит в промпт на пути Workers AI, плюс запрет
+/// заворачивать ответ в массив.
+///
+/// Провайдер соблюдает схему не как грамматику: замер на qwen3.8-27b поймал, что
+/// примерно каждый третий ответ приезжает как `[{…}]` вместо `{…}` — поля те же,
+/// форма другая, и разбор на стороне приложения падает.
+fn thirdparty_json_instruction(schema: &serde_json::Value) -> String {
+    let inlined = strip_schema_meta(&inline_schema(schema));
+    let schema_json = serde_json::to_string(&inlined).unwrap_or_default();
+    format!(
+        "\n\nYou MUST respond with ONLY valid JSON (no markdown, no explanation, no code fences). \
+Respond with ONE object, never an array of objects. \
+The JSON MUST conform to this exact schema:\n{schema_json}"
+    )
+}
+
+/// Дописать инструкцию к первому системному сообщению со строковым содержимым, а
+/// если такого нет — поставить системное сообщение в начало.
+fn append_system_instruction(messages: &mut Vec<serde_json::Value>, text: &str) {
+    let sys = messages
+        .iter()
+        .position(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
+        .filter(|i| messages[*i].get("content").and_then(|c| c.as_str()).is_some());
+    match sys {
+        Some(i) => {
+            let content = messages[i]
+                .get("content")
+                .and_then(|c| c.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let mut m = messages[i].as_object().cloned().unwrap_or_default();
+            m.insert(
+                "content".to_string(),
+                serde_json::Value::String(format!("{content}{text}")),
+            );
+            messages[i] = serde_json::Value::Object(m);
+        }
+        None => messages.insert(
+            0,
+            serde_json::json!({ "role": "system", "content": format!("You are a helpful assistant.{text}") }),
+        ),
+    }
 }
 
 /// Расход у стороннего провайдера считается В ТОКЕНАХ: нейронов там нет, это не
@@ -467,9 +514,34 @@ async fn proxy_thirdparty(
             out.insert(field.to_string(), v.clone());
         }
     }
-    if let Some(rf) = body.get("response_format").and_then(openai_response_format) {
-        out.insert("response_format".to_string(), rf);
+    // Схема уходит провайдеру ДВАЖДЫ: полем `response_format` и текстом в промпте —
+    // ровно как на пути Workers AI. Одного поля мало: у стороннего оно соблюдается
+    // не всегда, и ответ приезжает то объектом, то массивом объектов.
+    if let Some(rf) = body.get("response_format") {
+        if let Some(schema) = rf.get("json_schema").and_then(|js| js.get("schema")) {
+            let mut messages: Vec<serde_json::Value> = body
+                .get("messages")
+                .and_then(|m| m.as_array())
+                .cloned()
+                .unwrap_or_default();
+            append_system_instruction(&mut messages, &thirdparty_json_instruction(schema));
+            out.insert("messages".to_string(), serde_json::Value::Array(messages));
+        }
+        if let Some(rf) = openai_response_format(rf) {
+            out.insert("response_format".to_string(), rf);
+        }
     }
+    // РАССУЖДЕНИЕ. У Workers AI им управляет `chat_template_kwargs`, у Alibaba —
+    // top-level `enable_thinking`. Наши вызовы говорят про это одним флагом `think`,
+    // так что переводим его, а явный `enable_thinking` от клиента уважаем как есть.
+    // Гибридным qwen3 (32b, 30b-a3b, 235b-a22b) это не роскошь: без `false` они
+    // отказывают на не-потоковом запросе с 400.
+    if let Some(v) = body.get("enable_thinking").or_else(|| body.get("think")) {
+        if let Some(b) = v.as_bool() {
+            out.insert("enable_thinking".to_string(), serde_json::Value::Bool(b));
+        }
+    }
+
     let want_stream = body.get("stream").and_then(|s| s.as_bool()).unwrap_or(true);
     out.insert("stream".to_string(), serde_json::Value::Bool(want_stream));
     if want_stream {

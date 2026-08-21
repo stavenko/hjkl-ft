@@ -79,6 +79,26 @@ pub(crate) fn strip_code_fences(s: &str) -> &str {
     }
 }
 
+/// Разобрать ОДИН объект ответа модели, каким бы он ни приехал.
+///
+/// Модель просят ответить единственным объектом, и Workers AI держит эту форму
+/// грамматикой. Сторонний провайдер соблюдает схему как пожелание: замер на
+/// qwen3.8-27b показал 3 массива `[{…}]` из 8 ответов — поля внутри те же, обёртка
+/// лишняя. Ни `response_format: strict`, ни прямая просьба «one object, never an
+/// array» этого не убрали, поэтому обёртку снимаем здесь: ответ модели — это её
+/// содержание, а не скобки вокруг него.
+///
+/// Массив ИЗ НЕСКОЛЬКИХ элементов — не обёртка, а другой ответ, и он ошибка.
+pub(crate) fn parse_one<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, String> {
+    let value: serde_json::Value = serde_json::from_str(strip_code_fences(raw.trim()))
+        .map_err(|e| format!("{e}"))?;
+    let value = match value {
+        serde_json::Value::Array(mut items) if items.len() == 1 => items.remove(0),
+        other => other,
+    };
+    serde_json::from_value(value).map_err(|e| format!("{e}"))
+}
+
 /// Which stream a token belongs to, reported to the caller as lookup progresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiPhase {
@@ -2911,9 +2931,15 @@ fn strip_parens(s: &str) -> String {
 }
 
 /// Parse the RAW label-OCR model text into a `QueueResult`.
+///
+/// Обёртку-массив вокруг единственного объекта снимаем так же, как в [`parse_one`]:
+/// сторонний провайдер иногда отдаёт этикетку как `[{…}]`.
 fn parse_label_result(raw: &str) -> Result<QueueResult, String> {
-    serde_json::from_value(extract_json_value(raw)?)
-        .map_err(|e| format!("label result parse error: {e}"))
+    let value = match extract_json_value(raw)? {
+        serde_json::Value::Array(mut items) if items.len() == 1 => items.remove(0),
+        other => other,
+    };
+    serde_json::from_value(value).map_err(|e| format!("label result parse error: {e}"))
 }
 
 /// Parse the RAW food-items model text into a `DetectedFood` list. Requires an
@@ -3206,6 +3232,20 @@ async fn vision_chat(
         return Err(format!("HTTP {status}: {text}"));
     }
 
+    collect_sse(resp, on_progress).await
+}
+
+/// Собрать ответ из потока SSE (кадры OpenAI): `delta.content` склеивается в ответ,
+/// `reasoning_content` только считается — в ответ рассуждение не попадает.
+///
+/// `on_progress(фаза, токены рассуждения, токены ответа)`: 1 — рассуждение, 2 — ответ.
+/// Передавайте `|_, _, _| {}`, если показывать прогресс некому.
+///
+/// ВСЕ запросы к моделям — потоковые, поэтому разбор ответа живёт здесь один на всех.
+async fn collect_sse(
+    resp: web_sys::Response,
+    on_progress: impl Fn(u8, u32, u32),
+) -> Result<String, String> {
     let stream = resp.body().ok_or_else(|| "no stream body".to_string())?;
     let reader: web_sys::ReadableStreamDefaultReader =
         stream.get_reader().dyn_into().map_err(|_| "no stream reader".to_string())?;
@@ -3509,6 +3549,29 @@ mod tests {
     fn print_schema() {
         let schema = schemars::schema_for!(NutritionResponse);
         println!("{}", serde_json::to_string_pretty(&schema).unwrap());
+    }
+
+    #[derive(serde::Deserialize, Debug, PartialEq)]
+    struct Otvet {
+        verdict: bool,
+        reason: String,
+    }
+
+    #[test]
+    fn otvet_obyektom_i_v_obyortke_massiva_odno_i_to_zhe() {
+        let obj = r#"{"verdict":true,"reason":"мясо"}"#;
+        let arr = r#"[{"verdict":true,"reason":"мясо"}]"#;
+        let fenced = "```json\n[{\"verdict\":true,\"reason\":\"мясо\"}]\n```";
+        let want = Otvet { verdict: true, reason: "мясо".into() };
+        assert_eq!(parse_one::<Otvet>(obj).unwrap(), want);
+        assert_eq!(parse_one::<Otvet>(arr).unwrap(), want);
+        assert_eq!(parse_one::<Otvet>(fenced).unwrap(), want);
+    }
+
+    #[test]
+    fn massiv_iz_dvuh_otvetov_eto_oshibka_a_ne_obyortka() {
+        let two = r#"[{"verdict":true,"reason":"а"},{"verdict":false,"reason":"б"}]"#;
+        assert!(parse_one::<Otvet>(two).is_err());
     }
 
     #[test]

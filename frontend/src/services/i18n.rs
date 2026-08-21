@@ -219,7 +219,7 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.intro" => "Very soon your {word} process will begin. Our algorithm will calculate the amount of calories you should eat every day. For the calculation to be accurate, you need to log all your food in the app, weigh yourself every day, and record your steps.",
         "dashboard.progress.nutrition" => "Nutrition",
         "dashboard.progress.calculate" => "Calculate my target",
-        "dashboard.progress.gate_title" => "Keep these indicators green to unlock the {week}.",
+        "dashboard.progress.gate_title" => "Keep the calories, fruit/veg and protein indicators green to unlock the {week}.",
         "dashboard.progress.steps_gate_title" => "Keep the steps indicator green to unlock the {week}.",
         "dashboard.progress.calcium_gate_title" => "Keep the calcium indicator green to unlock the {week}.",
         "dashboard.progress.iron_gate_title" => "Meet the iron target to unlock the {week}.",
@@ -1145,7 +1145,7 @@ fn ru(key: &str) -> &'static str {
         // ЗАДАНИЕ НЕДЕЛИ — одной формой на все главы: что держать, ради чего, и
         // сколько осталось. «Чтобы открыть {week}» подставляется рядом с заданием, а
         // не отдельным предложением: цель без задания не читается.
-        "dashboard.progress.gate_title" => "Держите эти индикаторы зелёными, чтобы открыть {week}.",
+        "dashboard.progress.gate_title" => "Держите индикаторы калорий, фруктов/овощей и белка зелёными, чтобы открыть {week}.",
         "dashboard.progress.steps_gate_title" => "Держите индикатор планки по шагам зелёным, чтобы открыть {week}.",
         "dashboard.progress.calcium_gate_title" => "Держите индикатор кальция зелёным, чтобы открыть {week}.",
         "dashboard.progress.iron_gate_title" => "Выполните планку по железу, чтобы открыть {week}.",

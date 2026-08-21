@@ -7,11 +7,13 @@
 //!   the days the per-day target was missed.
 //!     0 misses → green · 1–3 → orange · ≥4 → red.
 //!
-//! * **Weekly-goal** (omega-3, eggs, red/processed meat, iron): judged over the last
-//!   8 COMPLETED weeks — the week in progress is never judged, so «not yet reached»
-//!   can't read as a failure.
-//!     every week closed → green · half or more unclosed → red · otherwise orange.
-//!   "Missed" for a LIMIT goal (red meat) means the amount went OVER the limit.
+//! * **Weekly-goal** (omega-3, eggs, red/processed meat, iron): судится по ДВУМ
+//!   ПОСЛЕДНИМ завершённым неделям — неделя в разгаре не судится никогда, чтобы
+//!   «ещё не набрано» не читалось как провал.
+//!     последняя закрыта → green · последняя пропущена → orange ·
+//!     две подряд пропущены → red.
+//!   История за восемь недель никуда не делась: она показывается в подробностях
+//!   виджета. "Missed" for a LIMIT goal (red meat) means the amount went OVER the limit.
 //!
 //! `Unknown` (grey) is used when a nutrient has no data at all yet (e.g. calcium is
 //! never present on any logged food until the nutrient-fill pipeline exists).
@@ -111,34 +113,37 @@ fn day_missed(key: &str, value: f64, ratio: Option<f64>) -> bool {
 /// window for orange and for red.
 pub const WEEKLY_WINDOW: usize = 8;
 
-/// Weekly-goal colour from the last [`WEEKLY_WINDOW`] COMPLETED weeks, newest last.
-/// `history_met[i]` = that week's goal was met.
+/// Weekly-goal colour by the TWO LAST completed weeks. `history_met` — the last
+/// [`WEEKLY_WINDOW`] weeks, newest LAST; `history_met[i]` = that week's goal was met.
+///
+///   последняя закрыта                  → green
+///   последняя не закрыта               → orange
+///   две последние подряд не закрыты    → red
+///
+/// Цвет говорит о том, ЧТО СЕЙЧАС, а не о среднем за два месяца. Прежнее правило
+/// считало доли по всему окну, и из него выходили две несуразности: неделя, взятая
+/// после провала, не возвращала зелёный (доля-то осталась), а человек, закрывший
+/// последние четыре недели подряд, продолжал видеть красный из-за четырёх старых.
+/// Историю за всё окно никто не отменял — она рисуется в подробностях виджета,
+/// восемью клетками; цвет же отвечает за последнюю неделю и за то, повторился ли
+/// промах.
 ///
 /// The week IN PROGRESS is deliberately NOT here. Judging it would paint every
 /// indicator orange each Monday morning — «not yet reached» is not a failure, and a
 /// user who closed eight weeks in a row must stay green while the ninth is running.
-///
-///   всё закрыто            → green
-///   половина и более не закрыта → red
-///   иначе хотя бы одна не закрыта → orange
 ///
 /// Empty history → `Unknown`: no completed week means nothing to judge yet.
 ///
 /// Shared by every weekly indicator — omega-3, eggs, red meat and iron (whose weeks
 /// are cut from the day its story opened rather than Mon–Sun). One rule, one place.
 pub(crate) fn weekly_state(history_met: &[bool]) -> IndicatorState {
-    if history_met.is_empty() {
-        return IndicatorState::Unknown;
-    }
-    let missed = history_met.iter().filter(|m| !**m).count();
-    if missed == 0 {
-        return IndicatorState::Green;
-    }
-    // Chronic: half of the assessed weeks or more went unclosed.
-    if missed * 2 >= history_met.len() {
-        IndicatorState::Red
-    } else {
-        IndicatorState::Orange
+    let mut back = history_met.iter().rev();
+    match (back.next(), back.next()) {
+        (None, _) => IndicatorState::Unknown,
+        (Some(true), _) => IndicatorState::Green,
+        // Промах повторился — это уже не случайность.
+        (Some(false), Some(false)) => IndicatorState::Red,
+        (Some(false), _) => IndicatorState::Orange,
     }
 }
 
@@ -1363,28 +1368,27 @@ mod tests {
     }
 
     #[test]
-    fn weekly_all_closed_is_green() {
+    fn poslednyaya_nedelya_zakryta_znachit_zelyonyj() {
         assert_eq!(weekly_state(&[true]), IndicatorState::Green);
         assert_eq!(weekly_state(&[true; 8]), IndicatorState::Green);
+        // Прошлые провалы цвет не держат: неделя взята — индикатор зелёный.
+        assert_eq!(weekly_state(&[false, false, false, true]), IndicatorState::Green);
     }
 
     #[test]
-    fn weekly_one_miss_is_orange() {
-        // Хотя бы одна незакрытая неделя — оранжевый, пока их меньше половины.
-        assert_eq!(weekly_state(&[true, true, true, false]), IndicatorState::Orange);
-        assert_eq!(weekly_state(&[true, true, true, true, true, true, true, false]), IndicatorState::Orange);
-        assert_eq!(weekly_state(&[false, true, true]), IndicatorState::Orange);
+    fn odna_propushchennaya_nedelya_eto_oranzhevyj() {
+        assert_eq!(weekly_state(&[false]), IndicatorState::Orange);
+        assert_eq!(weekly_state(&[true, false]), IndicatorState::Orange);
+        assert_eq!(weekly_state(&[false, false, true, false]), IndicatorState::Orange);
     }
 
     #[test]
-    fn weekly_half_unclosed_is_red() {
-        // РОВНО половина — уже красный.
-        assert_eq!(weekly_state(&[true, false]), IndicatorState::Red);
+    fn dve_propushchennye_podryad_eto_krasnyj() {
+        assert_eq!(weekly_state(&[false, false]), IndicatorState::Red);
         assert_eq!(weekly_state(&[true, true, false, false]), IndicatorState::Red);
-        assert_eq!(weekly_state(&[true, true, true, true, false, false, false, false]), IndicatorState::Red);
-        // Больше половины — тем более.
-        assert_eq!(weekly_state(&[false, false, true]), IndicatorState::Red);
-        assert_eq!(weekly_state(&[false]), IndicatorState::Red);
+        // Порядок важен: свежий промах — последний в списке.
+        assert_eq!(weekly_state(&[true; 6].iter().copied().chain([false, false]).collect::<Vec<_>>().as_slice()),
+                   IndicatorState::Red);
     }
 
     #[test]

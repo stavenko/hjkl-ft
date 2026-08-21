@@ -14,6 +14,8 @@
 // Промпт и схема берутся из кода (scripts/prompts.json), копий здесь нет.
 import { promptFor } from "./lib/prompts.mjs";
 const AI = "https://ai-worker-dev.vg-stavenko.workers.dev";
+/// Модель замера: по умолчанию та, на которой работает приложение.
+const MODEL = process.env.MODEL || "@cf/qwen/qwen3-30b-a3b-fp8";
 const PAY = "https://payment-worker-dev.vg-stavenko.workers.dev";
 const SECRET = "dev-secret-change-in-production";
 const b64 = (b) => Buffer.from(b).toString("base64url");
@@ -33,7 +35,7 @@ const ask = async (name) => {
   const { prompt, schema } = promptFor("flags", "identify", name);
   const r = await fetch(`${AI}/chat/completions`, { method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ model: "@cf/qwen/qwen3-30b-a3b-fp8",
+    body: JSON.stringify({ model: MODEL,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_schema", json_schema: { name: "identity", schema } },
       stream: true, think: false, max_tokens: 2000 }) });
@@ -45,14 +47,23 @@ const ask = async (name) => {
     if (!p || p === "[DONE]") continue;
     try { out += JSON.parse(p)?.choices?.[0]?.delta?.content ?? ""; } catch {}
   }
-  try { return JSON.parse(out.trim()); } catch { return null; }
+  try {
+    const v = JSON.parse(out.trim());
+    // Часть моделей оборачивает единственный объект в массив — форма другая, ответ
+    // тот же. Разворачиваем, иначе замер посчитал бы это пустым ответом.
+    return Array.isArray(v) ? (v[0] ?? null) : v;
+  } catch { return null; }
 };
 
 const REAL = (process.env.NAMES || [
   "Голец", "Полба", "Маш", "Кыстыбый", "Творог 5%", "Скумбрия х/к",
   "Fuet truffle", "Мороженая вишня", "Куриная грудка", "Гречка", "Хачапури", "Топинамбур",
 ].join("|")).split("|");
-const FAKE = ["Зюзюбряк ассорти", "Бубурек копчёный", "Квазилапша", "Хряпундель", "Мормышка сладкая"];
+// Выдуманные имена — контроль «выдумка не проходит». FAKE="" отключает их, когда
+// замер идёт только по конкретному разбираемому набору.
+const FAKE = process.env.FAKE !== undefined
+  ? process.env.FAKE.split("|").filter(Boolean)
+  : ["Зюзюбряк ассорти", "Бубурек копчёный", "Квазилапша", "Хряпундель", "Мормышка сладкая"];
 if (process.env.JITTER) {
   // ДРЕБЕЗГ: один продукт много раз подряд. Исход должен быть один и тот же — иначе
   // человек получит признаки то так, то этак, а мы не сможем верить ни одному замеру.

@@ -30,6 +30,12 @@ new_sqlite_classes = ["QueueDO"]
 binding = "PAYMENT"
 service = "payment-worker-dev"
 
+# Оповещение о простое он-према уходит через bug-report-worker: бот и чат
+# настроены там, и здесь о них знать незачем.
+[[services]]
+binding = "BUG_REPORT"
+service = "bug-report-worker-dev"
+
 [vars]
 # Client requests are authenticated with the shared app JWT.
 JWT_SECRET = "dev-secret-change-in-production"
@@ -62,6 +68,10 @@ class_name = "QueueDO"
 [[env.production.services]]
 binding = "PAYMENT"
 service = "payment-worker-prod"
+
+[[env.production.services]]
+binding = "BUG_REPORT"
+service = "bug-report-worker-prod"
 
 # JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
 # [vars] value above). The binding name MUST equal the env name the code reads.

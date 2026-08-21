@@ -19,6 +19,16 @@ const MAX_ATTEMPTS: i64 = 3;
 /// `/claim` — поллер стучится туда независимо от того, есть ли работа.
 const POLLER_SEEN_KEY: &str = "poller_seen_ms";
 
+/// Молчание, после которого в Telegram уходит оповещение. Отдельно от окна
+/// живости: маршрут переключается сразу, как только поллер выпал из минуты, а
+/// будить человека стоит только когда стало ясно, что это не заминка.
+const POLLER_ALERT_MS: i64 = 120_000;
+/// Как часто сторож просыпается проверить молчание.
+const WATCH_TICK_MS: i64 = 60_000;
+/// Флаг «об этом простое уже оповестили» — чтобы сообщение было ОДНО, а не
+/// каждую минуту. Снимается, когда поллер снова пришёл за работой.
+const POLLER_ALERTED_KEY: &str = "poller_alerted";
+
 /// Насколько давно поллер мог молчать, чтобы его всё ещё считать живым.
 ///
 /// Поллер опрашивает `/claim` раз в POLL_INTERVAL (3 с) и ходит по очередям по
@@ -193,6 +203,66 @@ impl QueueDO {
         }
         Ok(())
     }
+
+    /// Завести будильник сторожа, если он ещё не заведён.
+    async fn arm_watch(&self) -> Result<()> {
+        if self.state.storage().get_alarm().await?.is_none() {
+            self.state
+                .storage()
+                .set_alarm(std::time::Duration::from_millis(WATCH_TICK_MS as u64))
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Время последнего обращения поллера; 0 — не приходил ни разу.
+    async fn poller_seen(&self) -> i64 {
+        self.state
+            .storage()
+            .get::<i64>(POLLER_SEEN_KEY)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0)
+    }
+
+    /// Сказать в Telegram, что свой сервер молчит. Отправляет bug-report-worker —
+    /// бот и чат настроены там, и знать о них этому воркеру незачем. Доставка
+    /// best-effort: не дошло — строка в лог, очередь работает дальше.
+    async fn alert_offline(&self, age_ms: i64) {
+        let minutes = age_ms / 60_000;
+        let text = format!(
+            "Он-прем распознавание молчит: поллер не забирал работу {minutes} мин. \
+             Картинки идут в платную модель."
+        );
+        if let Err(e) = self.post_alert(&text).await {
+            console_error!("оповещение о простое поллера не ушло: {e}");
+        }
+    }
+
+    async fn post_alert(&self, text: &str) -> Result<()> {
+        let key = crate::token::secret_or_var(&self.env, "INTERNAL_PUSH_KEY")
+            .await
+            .map_err(Error::RustError)?;
+        let headers = Headers::new();
+        headers.set("Content-Type", "application/json")?;
+        headers.set("X-Internal-Key", &key)?;
+        let body = serde_json::json!({ "text": text }).to_string();
+        let mut init = RequestInit::new();
+        init.with_method(Method::Post)
+            .with_headers(headers)
+            .with_body(Some(JsValue::from_str(&body)));
+        // Хост нужен именно этот: внутренние ручки bug-report-worker открыты только
+        // для вызова через сервис-биндинг и проверяют его.
+        let req = Request::new_with_init("https://bug-report-worker/internal/alert", &init)?;
+        let mut res = self.env.service("BUG_REPORT")?.fetch_request(req).await?;
+        let status = res.status_code();
+        if status != 200 {
+            let text = res.text().await.unwrap_or_default();
+            return Err(Error::RustError(format!("bug-report-worker вернул {status}: {text}")));
+        }
+        Ok(())
+    }
 }
 
 impl DurableObject for QueueDO {
@@ -320,11 +390,29 @@ impl DurableObject for QueueDO {
                 .flatten()
                 .unwrap_or(0);
             let age = if seen > 0 { now_ms() - seen } else { -1 };
+            let fired: i64 = self
+                .state
+                .storage()
+                .get::<i64>("watch_fired_ms")
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+            let alerted = self
+                .state
+                .storage()
+                .get::<bool>(POLLER_ALERTED_KEY)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(false);
             return Response::from_json(&serde_json::json!({
                 "alive": seen > 0 && age >= 0 && age <= POLLER_ALIVE_MS,
                 "last_seen_ms": seen,
                 "age_ms": age,
                 "alive_window_ms": POLLER_ALIVE_MS,
+                "watch_fired_ms": fired,
+                "alerted": alerted,
             }));
         }
 
@@ -332,6 +420,11 @@ impl DurableObject for QueueDO {
         if path == "/claim" {
             // Отметка живости: сам факт обращения поллера и есть его пульс.
             self.state.storage().put(POLLER_SEEN_KEY, now_ms()).await?;
+            // Пришёл — значит следующий простой будет новым поводом сказать о нём.
+            self.state.storage().put(POLLER_ALERTED_KEY, false).await?;
+            // Сторож живёт цепочкой будильников и обрывается, когда оповещение уже
+            // отправлено; возвращение поллера заводит цепочку заново.
+            self.arm_watch().await?;
             // Self-heal first: recover jobs the poller dropped mid-flight.
             self.requeue_stale().await?;
             let mut q = self.queue_ids().await?;
@@ -543,5 +636,44 @@ impl DurableObject for QueueDO {
         }
 
         Response::error("Not found", 404)
+    }
+
+    /// СТОРОЖ ЗА СВОИМ СЕРВЕРОМ. Просыпается раз в минуту и смотрит, давно ли
+    /// приходил поллер.
+    ///
+    /// Оповещение уходит ОДИН раз на простой: дальше будильник не заводится, и
+    /// цепочку возобновляет сам поллер, когда вернётся за работой (`/claim` заодно
+    /// снимает флаг). Пока он молчит, будить некого — сообщение уже отправлено.
+    async fn alarm(&self) -> Result<Response> {
+        let seen = self.poller_seen().await;
+        // След срабатывания в самом хранилище: события будильника в `wrangler tail`
+        // не показываются, и без этой отметки проверить сторожа нечем.
+        self.state.storage().put("watch_fired_ms", now_ms()).await?;
+        // Поллер не приходил ни разу: очередь только что развёрнута или её никто
+        // не обслуживает. Тревожить нечем — не о чем сообщать.
+        if seen == 0 {
+            return Response::ok("");
+        }
+        let age = now_ms() - seen;
+        if age < POLLER_ALERT_MS {
+            self.state
+                .storage()
+                .set_alarm(std::time::Duration::from_millis(WATCH_TICK_MS as u64))
+                .await?;
+            return Response::ok("");
+        }
+        let alerted = self
+            .state
+            .storage()
+            .get::<bool>(POLLER_ALERTED_KEY)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(false);
+        if !alerted {
+            self.alert_offline(age).await;
+            self.state.storage().put(POLLER_ALERTED_KEY, true).await?;
+        }
+        Response::ok("")
     }
 }

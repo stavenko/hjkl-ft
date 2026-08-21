@@ -211,6 +211,34 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         return Response::from_json(&serde_json::json!({ "ok": true }));
     }
 
+    // ── Чужой алерт в тот же чат. Бот и получатель настроены ЗДЕСЬ, поэтому
+    // другим воркерам незачем знать ни токена, ни чата: они присылают текст, а
+    // отправляет его этот. Дверь та же, что у user-wipe: только через сервис-
+    // биндинг (по хосту) и с общим внутренним ключом. ──
+    if method == Method::Post && path == "/internal/alert" {
+        if url.host_str() != Some("bug-report-worker") {
+            return Response::error("Not found", 404);
+        }
+        let key = token::secret_or_var(env, "INTERNAL_PUSH_KEY")
+            .await
+            .map_err(Error::RustError)?;
+        let provided = req
+            .headers()
+            .get("X-Internal-Key")
+            .map_err(|e| Error::RustError(format!("{e}")))?
+            .unwrap_or_default();
+        if key.is_empty() || provided != key {
+            return Response::error("unauthorized", 403);
+        }
+        let body: serde_json::Value = req.json().await.unwrap_or(serde_json::json!({}));
+        let text = body.get("text").and_then(|v| v.as_str()).unwrap_or_default();
+        if text.is_empty() {
+            return Response::error("missing text", 400);
+        }
+        send_alert(env, text).await?;
+        return Response::from_json(&serde_json::json!({ "ok": true }));
+    }
+
     // ── Admin read: gather the collected reports. Gated by ADMIN_KEY (a developer
     // tool), NOT a user JWT — so one signed-in user can't read others' reports. ──
     if method == Method::Get && path == "/reports" {
@@ -423,6 +451,25 @@ async fn send_unknown_digest(env: &Env) -> Result<()> {
     lines.push("Каждое имя — повод пополнить словарь редких имён.".to_string());
 
     send_telegram(&token, &chat_id, &lines.join("\n")).await
+}
+
+/// Отправить чужой текст в тот же чат, с пометкой окружения впереди. Бот или чат
+/// не заданы — молча ничего не делаем: это незаданная настройка, а не сбой.
+async fn send_alert(env: &Env, text: &str) -> Result<()> {
+    let token = match token::secret_or_var(env, "TELEGRAM_ALERT_BOT_TOKEN").await {
+        Ok(t) if !t.is_empty() => t,
+        _ => return Ok(()),
+    };
+    let chat_id = match token::secret_or_var(env, "TELEGRAM_ALERT_CHAT_ID").await {
+        Ok(c) if !c.is_empty() => c,
+        _ => return Ok(()),
+    };
+    let where_from = env
+        .var("ENVIRONMENT")
+        .map(|v| v.to_string())
+        .unwrap_or_else(|_| "dev".to_string());
+    let mark = if where_from == "prod" { "[прод]" } else { "[дев]" };
+    send_telegram(&token, &chat_id, &format!("{mark} {text}")).await
 }
 
 /// Отправить сообщение боту-оповещателю. Ошибка доставки уходит в лог и НЕ роняет

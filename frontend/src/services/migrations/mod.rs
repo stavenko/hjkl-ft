@@ -67,6 +67,7 @@ mod m019_reask_calcium;
 mod m020_reask_calcium_again;
 mod m021_reask_veg_fruit_again;
 mod m022_reask_heme_red_meat;
+mod m023_reask_fat_profile;
 
 #[cfg(test)]
 mod tests;
@@ -203,6 +204,11 @@ const ALL: &[Migration] = &[
         version: m022_reask_heme_red_meat::VERSION,
         description: m022_reask_heme_red_meat::DESCRIPTION,
         script: || Box::pin(m022_reask_heme_red_meat::script()),
+    },
+    Migration {
+        version: m023_reask_fat_profile::VERSION,
+        description: m023_reask_fat_profile::DESCRIPTION,
+        script: || Box::pin(m023_reask_fat_profile::script()),
     },
 ];
 

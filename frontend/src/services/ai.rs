@@ -1230,7 +1230,8 @@ pub(crate) const FAT_ROWS: &[FatRow] = &[
         epa_dha: (0.0, 0.0),
         examples: "подсолнечное масло, кукурузное масло, соевое масло, масло виноградных \
                    семечек, семечки подсолнуха, тыквенные семечки, кунжут, тахини, майонез, \
-                   маргарин" },
+                   маргарин, чипсы (картофельные, овощные, из водорослей и нори) — у снека, \
+                   обжаренного или политого маслом, жир берётся из МАСЛА" },
     FatRow { key: "high_oleic_oils", sfa: (7.0, 12.0), mufa: (75.0, 85.0), pufa: (5.0, 12.0),
         epa_dha: (0.0, 0.0),
         examples: "высокоолеиновое подсолнечное, высокоолеиновое сафлоровое, \
@@ -1459,13 +1460,23 @@ struct CompositeAnswer {
 }
 
 /// Шапка всех трёх запросов о жире: что человек записал и что об этом известно.
-fn fat_head(food_name: &str, identity: &str) -> String {
+fn fat_head(food_name: &str, identity: &str, fat_g: Option<f64>) -> String {
     let known = if identity.trim().is_empty() {
         String::new()
     } else {
         format!("Our automatic classifier says this product is: {identity}\n\n")
     };
-    format!("A person wrote this into their food diary: {food_name}\n\n{known}")
+    // СКОЛЬКО В НЁМ ЖИРА — из карточки продукта, то есть с этикетки или из ответа
+    // модели о КБЖУ. Без этого числа спрашиваемый видел одно имя и на «SPAR Чипсы
+    // нори» отвечал «жира нет», хотя жира там треть массы: доли считать не от чего,
+    // и весь жир снека пропадал из недельного баланса.
+    let amount = match fat_g {
+        Some(g) if g > 0.0 => format!(
+            "This product contains {g:.1} g of fat per 100 g — the profile below splits THAT fat.\n\n"
+        ),
+        _ => String::new(),
+    };
+    format!("A person wrote this into their food diary: {food_name}\n\n{amount}{known}")
 }
 
 /// Текст развилки «продукт или блюдо» — отдельной функцией ради замеров.
@@ -1500,7 +1511,7 @@ pub async fn is_composite_dish(food_name: &str, identity: &str) -> Result<bool, 
     // FAT come from several sources», модель трижды из трёх отвечала про борщ «нет,
     // жир от говядины» — она понимала вопрос как «какой источник преобладает». Про
     // сам продукт — «сварено ли это из нескольких продуктов» — ответ однозначен.
-    let prompt = composite_prompt(food_name, &fat_head(food_name, identity));
+    let prompt = composite_prompt(food_name, &fat_head(food_name, identity, None));
     let v: CompositeAnswer = generate(prompt, |_| {}).await?;
     leptos::logging::log!(
         "составное «{food_name}»: {} — {}",
@@ -1523,11 +1534,12 @@ pub async fn is_composite_dish(food_name: &str, identity: &str) -> Result<bool, 
 pub async fn lookup_fat_profile(
     food_name: &str,
     identity: &str,
+    fat_g: Option<f64>,
 ) -> Result<api_types::FatProfile, String> {
     if is_composite_dish(food_name, identity).await? {
-        return lookup_dish_fat_profile(food_name, identity).await;
+        return lookup_dish_fat_profile(food_name, identity, fat_g).await;
     }
-    lookup_basic_fat_profile(food_name, identity).await
+    lookup_basic_fat_profile(food_name, identity, fat_g).await
 }
 
 /// Текст запроса о профиле жира базового продукта — отдельной функцией ради замеров.
@@ -1593,12 +1605,13 @@ fn basic_fat_prompt(food_name: &str, head: &str, lang: &str) -> String {
 pub async fn lookup_basic_fat_profile(
     food_name: &str,
     identity: &str,
+    fat_g: Option<f64>,
 ) -> Result<api_types::FatProfile, String> {
     let lang = match crate::services::i18n::get_lang() {
         crate::services::i18n::Lang::Ru => "Russian",
         crate::services::i18n::Lang::En => "English",
     };
-    let prompt = basic_fat_prompt(food_name, &fat_head(food_name, identity), lang);
+    let prompt = basic_fat_prompt(food_name, &fat_head(food_name, identity, fat_g), lang);
 
     let v: FatProfileAnswer = generate_validated(prompt, |_| {}, 4, |v: &FatProfileAnswer| {
         // Запись справочника снимает вопрос о строке: числа всё равно возьмутся оттуда.
@@ -1730,6 +1743,7 @@ fn pessimise_dish_fat(sfa: f64, mufa: f64, pufa: f64) -> api_types::FatProfile {
 async fn lookup_dish_fat_profile(
     food_name: &str,
     identity: &str,
+    fat_g: Option<f64>,
 ) -> Result<api_types::FatProfile, String> {
     let lang = match crate::services::i18n::get_lang() {
         crate::services::i18n::Lang::Ru => "Russian",
@@ -1752,7 +1766,7 @@ async fn lookup_dish_fat_profile(
          them.\n\n\
          Respond with ONLY a single minified JSON object and nothing else — no markdown, no \
          prose.",
-        head = fat_head(food_name, identity),
+        head = fat_head(food_name, identity, fat_g),
     );
 
     let v: DishFatAnswer = generate_validated(prompt, |_| {}, 4, |v: &DishFatAnswer| {
@@ -3792,6 +3806,9 @@ pub(crate) fn prompt_dump() -> serde_json::Value {
     const FOOD: &str = "{{FOOD}}";
     const IDENT: &str = "{{IDENTITY}}";
     let known = format!("Our automatic classifier says this product is: {IDENT}\n\n");
+    // Шапка жиров строится ТОЙ ЖЕ функцией, что в бою, — иначе замер меряет не то,
+    // что работает у людей. `{{FAT_G}}` подставляет замер.
+    let fat_known = fat_head(FOOD, IDENT, Some(1.0)).replace("1.0 g of fat", "{{FAT_G}} g of fat");
 
     serde_json::json!({
         "calcium": {
@@ -3803,7 +3820,7 @@ pub(crate) fn prompt_dump() -> serde_json::Value {
             "schema": schemars::schema_for!(CompositeAnswer),
         },
         "fat_profile": {
-            "prompt": basic_fat_prompt(FOOD, &known, "Russian"),
+            "prompt": basic_fat_prompt(FOOD, &fat_known, "Russian"),
             "schema": schemars::schema_for!(FatProfileAnswer),
         },
     })

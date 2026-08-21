@@ -404,11 +404,13 @@ async fn run_worker() {
         if ask_fats {
             let name = food.name.clone();
             let ident_for_fat = identity.clone();
+            // Граммы жира идут вместе с именем: профиль — это ДОЛИ от них.
+            let fat_g = food.fat;
             let profile = with_retries(
                 move || {
                     let n = name.clone();
                     let id = ident_for_fat.clone();
-                    async move { super::ai::lookup_fat_profile(&n, &id).await }
+                    async move { super::ai::lookup_fat_profile(&n, &id, Some(fat_g)).await }
                 },
                 errors::FoodAspect::Fats,
                 &food.name,

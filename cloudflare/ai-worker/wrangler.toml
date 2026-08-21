@@ -25,6 +25,20 @@ JWT_SECRET = "dev-secret-change-in-production"
 # required secret (its absence only skips reporting, never blocks the AI request).
 INTERNAL_PUSH_KEY = "dev-internal-push-key"
 
+# ── Сторонние модели (картинки) ───────────────────────────────────────────────
+# Реестр провайдеров лежит в ГЛОБАЛЬНОМ Secrets Store — и в деве, и в проде: там
+# и адреса ручек, и ИМЕНА секретов с ключами. В репозитории нет ни того, ни
+# другого. Формат значения секрета `thirdparty-providers`:
+#
+#   [{"models":["<модель>"],"url":"https://…/chat/completions","key":"<ИМЯ_СЕКРЕТА>"}]
+#
+# Каждое имя из поля `key` должно быть объявлено ОТДЕЛЬНЫМ биндингом Secrets Store
+# (ниже — по одному на провайдера), иначе запрос к такой модели вернёт 503.
+[[secrets_store_secrets]]
+binding = "THIRDPARTY_PROVIDERS"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "thirdparty-providers"
+
 # ── Production (separate worker on ai.renorma.app) ──
 # Deploy: wrangler deploy --env production
 # Secrets: wrangler secret put JWT_SECRET --env production
@@ -58,3 +72,9 @@ secret_name = "jwt-secret"
 binding = "INTERNAL_PUSH_KEY"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "internal-push-key"
+
+# Реестр сторонних провайдеров — тот же секрет, что и в деве (см. комментарий выше).
+[[env.production.secrets_store_secrets]]
+binding = "THIRDPARTY_PROVIDERS"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "thirdparty-providers"

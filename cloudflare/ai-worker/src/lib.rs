@@ -349,10 +349,42 @@ fn is_workers_ai(model: &str) -> bool {
     model.starts_with("@cf/")
 }
 
-/// ПОЛНЫЙ адрес ручки провайдера, вместе с `/chat/completions`.
-const THIRDPARTY_URL: &str = "THIRDPARTY_API_URL";
-/// Ключ провайдера. Уходит в заголовке `Authorization: Bearer …`.
-const THIRDPARTY_KEY: &str = "THIRDPARTY_API_KEY";
+/// РЕЕСТР сторонних провайдеров: какая модель куда идёт и ИМЕНЕМ какого секрета
+/// открывается. Сам реестр — тоже секрет (в проде из глобального Secrets Store),
+/// поэтому ни адреса, ни имена ключей в репозитории не лежат. Формат — массив:
+///
+/// ```json
+/// [
+///   {"models":["gpt-4o-mini"],"url":"https://api.openai.com/v1/chat/completions","key":"OPENAI_API_KEY"},
+///   {"models":["*"],"url":"https://openrouter.ai/api/v1/chat/completions","key":"OPENROUTER_API_KEY"}
+/// ]
+/// ```
+///
+/// `key` — ИМЯ биндинга, под которым сам ключ лежит в Secrets Store (в деве —
+/// var/secret воркера с тем же именем). Ключи в реестре не хранятся: там только
+/// их именование.
+const THIRDPARTY_PROVIDERS: &str = "THIRDPARTY_PROVIDERS";
+
+/// Один провайдер из реестра.
+#[derive(serde::Deserialize)]
+struct Provider {
+    /// Модели этого провайдера. `*` — «любая»: такой провайдер берётся, только
+    /// если модель не назвал никто поимённо.
+    #[serde(default)]
+    models: Vec<String>,
+    /// ПОЛНЫЙ адрес ручки, вместе с `/chat/completions`.
+    url: String,
+    /// Имя секрета с ключом провайдера.
+    key: String,
+}
+
+/// Провайдер для модели: сначала поимённое совпадение, затем `*`.
+fn pick_provider<'a>(providers: &'a [Provider], model: &str) -> Option<&'a Provider> {
+    providers
+        .iter()
+        .find(|p| p.models.iter().any(|m| m == model))
+        .or_else(|| providers.iter().find(|p| p.models.iter().any(|m| m == "*")))
+}
 
 /// Поля запроса, которые имеют смысл у стороннего провайдера. Всё
 /// Workers-AI-специфичное (`think`, `chat_template_kwargs`) отбрасывается.
@@ -398,18 +430,33 @@ async fn proxy_thirdparty(
     env: &Env,
     ctx: &Context,
     user_id: &str,
+    model: &str,
 ) -> Result<Response> {
-    let url = match secret_or_var(env, THIRDPARTY_URL).await {
-        Ok(u) => u,
+    let registry = match secret_or_var(env, THIRDPARTY_PROVIDERS).await {
+        Ok(r) => r,
         Err(reason) => {
             console_error!("thirdparty: {reason}");
             return Ok(error_response("thirdparty_not_configured", 503));
         }
     };
-    let key = match secret_or_var(env, THIRDPARTY_KEY).await {
+    let providers: Vec<Provider> = match serde_json::from_str(&registry) {
+        Ok(p) => p,
+        Err(e) => {
+            console_error!("thirdparty: реестр {THIRDPARTY_PROVIDERS} не разбирается: {e}");
+            return Ok(error_response("thirdparty_not_configured", 503));
+        }
+    };
+    let Some(provider) = pick_provider(&providers, model) else {
+        console_error!("thirdparty: модель '{model}' не значится ни у одного провайдера");
+        return Ok(error_response(&format!("unknown model: {model}"), 400));
+    };
+    let url = provider.url.clone();
+    // Ключ лежит под ИМЕНЕМ из реестра: в проде это биндинг Secrets Store, в деве —
+    // var/secret воркера.
+    let key = match secret_or_var(env, &provider.key).await {
         Ok(k) => k,
         Err(reason) => {
-            console_error!("thirdparty: {reason}");
+            console_error!("thirdparty: ключ '{}': {reason}", provider.key);
             return Ok(error_response("thirdparty_not_configured", 503));
         }
     };
@@ -612,7 +659,8 @@ async fn handle_chat_completions(
     // здесь — клиенту он не виден, гейт подписки уже пройден выше.
     if let Some(model) = body.get("model").and_then(|m| m.as_str()) {
         if !is_workers_ai(model) {
-            return proxy_thirdparty(body, env, ctx, user_id).await;
+            let model = model.to_string();
+            return proxy_thirdparty(body, env, ctx, user_id, &model).await;
         }
     }
 
@@ -878,4 +926,53 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
     headers.set("Content-Type", "text/event-stream")?;
     headers.set("Cache-Control", "no-cache")?;
     Ok(resp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn registry() -> Vec<Provider> {
+        serde_json::from_str(
+            r#"[
+                {"models":["alpha-vision","alpha-mini"],"url":"https://alpha/v1/chat/completions","key":"ALPHA_KEY"},
+                {"models":["beta-vision"],"url":"https://beta/v1/chat/completions","key":"BETA_KEY"}
+            ]"#,
+        )
+        .expect("реестр разбирается")
+    }
+
+    #[test]
+    fn modeli_raskidyvayutsya_po_svoim_klyucham() {
+        let providers = registry();
+        let a = pick_provider(&providers, "alpha-mini").expect("альфа найдена");
+        assert_eq!(a.key, "ALPHA_KEY");
+        let b = pick_provider(&providers, "beta-vision").expect("бета найдена");
+        assert_eq!(b.key, "BETA_KEY");
+        assert_eq!(b.url, "https://beta/v1/chat/completions");
+    }
+
+    #[test]
+    fn neizvestnaya_model_bez_zvezdochki_ne_marshrutiziruetsya() {
+        assert!(pick_provider(&registry(), "gamma-vision").is_none());
+    }
+
+    #[test]
+    fn zvezdochka_beryotsya_tolko_posle_poimyonnyh() {
+        let providers: Vec<Provider> = serde_json::from_str(
+            r#"[
+                {"models":["*"],"url":"https://any/v1/chat/completions","key":"ANY_KEY"},
+                {"models":["alpha-vision"],"url":"https://alpha/v1/chat/completions","key":"ALPHA_KEY"}
+            ]"#,
+        )
+        .expect("реестр разбирается");
+        assert_eq!(pick_provider(&providers, "alpha-vision").unwrap().key, "ALPHA_KEY");
+        assert_eq!(pick_provider(&providers, "что-угодно").unwrap().key, "ANY_KEY");
+    }
+
+    #[test]
+    fn modeli_workers_ai_ne_uhodyat_naruzhu() {
+        assert!(is_workers_ai("@cf/qwen/qwen3-30b-a3b-fp8"));
+        assert!(!is_workers_ai("alpha-vision"));
+    }
 }

@@ -120,6 +120,17 @@ const FLAGS: &[(
         super::flags_pipeline::Aspect::Egg),
 ];
 
+/// Аспекты, которые спрашиваются ВНЕ конвейера признаков, — у каждого свой след
+/// попыток, как у признаков.
+///
+/// Без него эти три прохода шли к модели при каждом запуске и каждом возвращении
+/// из фона: продукт, о котором модель не смогла сказать (боевой случай — «SPAR
+/// Чипсы нори» и жирные кислоты), спрашивался снова и снова, и человек получал в
+/// журнал одну и ту же ошибку столбиком.
+const ASPECT_NUTRIENTS: &str = "nutrients";
+const ASPECT_FATS: &str = "fats";
+const ASPECT_IRON: &str = "iron";
+
 /// True if `food` still misses at least one of the asked flags — то есть работа для
 /// прохода вообще есть. Что именно спрашивать, решает [`FLAGS`], каждый сам за себя.
 fn needs_classification(food: &Food) -> bool {
@@ -328,9 +339,16 @@ async fn run_worker() {
         // железо и жиры идут к модели с голым именем из дневника. Живой прогон
         // поймал это дословно: «Голец» получил 120 мг кальция как «жидкий молочный
         // продукт вроде кефира» — при том, что первым проходом ему верно дали 25.
-        let needs_identity = super::enrich::needs_enrichment(&food)
-            || food.fat_profile.is_none()
-            || super::iron::needs_iron(&food);
+        // Что из этих трёх мы СЕГОДНЯ вообще будем спрашивать — с учётом суточного
+        // следа. Считается один раз: ниже те же признаки решают, идти ли к модели,
+        // и опознание не должно заказываться ради вопроса, который не прозвучит.
+        let ask_nutrients = super::enrich::needs_enrichment(&food)
+            && super::food_probe::may_ask(&id, ASPECT_NUTRIENTS).await;
+        let ask_fats =
+            food.fat_profile.is_none() && super::food_probe::may_ask(&id, ASPECT_FATS).await;
+        let ask_iron =
+            super::iron::needs_iron(&food) && super::food_probe::may_ask(&id, ASPECT_IRON).await;
+        let needs_identity = ask_nutrients || ask_fats || ask_iron;
         // Тому же правилу подчиняется и опознание ради нутриентов, железа и жиров:
         // «Wait» здесь означает, что кальций и железо пойдут по одному имени, а не
         // что мы задаём дорогой вопрос повторно.
@@ -360,10 +378,10 @@ async fn run_worker() {
 
         // `food.nutrients` is unchanged by classification, so the loaded copy is
         // still current for the enrichment gate.
-        if super::enrich::needs_enrichment(&food) {
+        if ask_nutrients {
             let f = food.clone();
             let ident_for_calcium = identity.clone();
-            with_retries(
+            let got = with_retries(
                 move || {
                     let f = f.clone();
                     let id = ident_for_calcium.clone();
@@ -372,6 +390,8 @@ async fn run_worker() {
                 errors::FoodAspect::Nutrients,
                 &food.name,
             ).await;
+            super::food_probe::record(&id, ASPECT_NUTRIENTS, got.is_some(), "нутриенты не выяснены")
+                .await;
         }
 
         // Жиры — свой проход: спрашивается ПРОФИЛЬ (доли от жира), а не количество,
@@ -381,10 +401,10 @@ async fn run_worker() {
         // постепенно, а СОБИРАТЬ данные надо сразу: иначе в день открытия вся
         // съеденная за месяцы еда разом уходит в очередь к модели — шквал запросов,
         // и человек смотрит на пустые шкалы, пока он разгребается.
-        if food.fat_profile.is_none() {
+        if ask_fats {
             let name = food.name.clone();
             let ident_for_fat = identity.clone();
-            if let Some(profile) = with_retries(
+            let profile = with_retries(
                 move || {
                     let n = name.clone();
                     let id = ident_for_fat.clone();
@@ -393,8 +413,10 @@ async fn run_worker() {
                 errors::FoodAspect::Fats,
                 &food.name,
             )
-            .await
-            {
+            .await;
+            super::food_probe::record(&id, ASPECT_FATS, profile.is_some(), "профиль жира не выяснен")
+                .await;
+            if let Some(profile) = profile {
                 local::cache_food_fat_profile(&id, profile).await;
             }
         }
@@ -402,10 +424,10 @@ async fn run_worker() {
         // Iron is its OWN pass: it needs the absorbed fraction alongside the
         // amount, so it can't ride the generic nutrient request (see `iron.rs`).
         // Тоже с первого дня — по той же причине, что и жиры.
-        if super::iron::needs_iron(&food) {
+        if ask_iron {
             let f = food.clone();
             let ident_for_iron = identity.clone();
-            with_retries(
+            let got = with_retries(
                 move || {
                     let f = f.clone();
                     let id = ident_for_iron.clone();
@@ -414,6 +436,7 @@ async fn run_worker() {
                 errors::FoodAspect::Iron,
                 &food.name,
             ).await;
+            super::food_probe::record(&id, ASPECT_IRON, got.is_some(), "железо не выяснено").await;
         }
 
         // Проход по продукту кончился — отпускаем его. Остальные выходы из цикла

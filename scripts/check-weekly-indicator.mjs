@@ -53,7 +53,10 @@ await page.evaluate(async ({ u, plan }) => {
     q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
   });
   const nowIso = new Date().toISOString();
-  const iso = (d) => d.toISOString().slice(0, 10);
+  // ДАТА БЕРЁТСЯ ЛОКАЛЬНАЯ. `toISOString` переводит в UTC, и при часовом поясе
+  // восточнее Гринвича сев уезжает на день назад: недели тогда не совпадают с
+  // сеткой приложения, и «закрытая» неделя размазывается по двум соседним.
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
   await new Promise((res) => {
     const tx = db.transaction(["app_flags"], "readwrite");
@@ -63,7 +66,10 @@ await page.evaluate(async ({ u, plan }) => {
      // Недели яиц режутся ОТ ДНЯ ОТКРЫТИЯ, а не пн–вс: без этой даты история пуста
      // и индикатор серый. Ставим её на девять недель назад — восемь завершённых
      // недель и текущая.
-     ["egg_week_opened_at", (() => { const d = new Date(); d.setDate(d.getDate() - 63); return d.toISOString().slice(0, 10); })()],
+     ["egg_week_opened_at", (() => {
+       const n = new Date();
+       const d = new Date(new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime() - 63 * 864e5);
+       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })()],
      ["ft_subscription", JSON.stringify({ plan: "monthly", end: Date.now() + 30 * 864e5, active: true,
        start: Date.now(), status: "paid", no_renew: false, provider: "lava" })]]
       .forEach(([key, value]) => os.put({ key, value }));
@@ -99,23 +105,23 @@ await page.evaluate(async ({ u, plan }) => {
     tx.oncomplete = res;
   });
 
-  // Сетка недель: недели считаются пн–вс и только ЗАВЕРШЁННЫЕ.
+  // СЕТКА НЕДЕЛЬ ЯИЦ — от дня открытия, а не пн–вс: неделя k это open+7k…+6.
+  // Считаем миллисекундами от полуночи, иначе `setDate` поверх «сегодня» уводит
+  // начало недели, и четырнадцать яиц делятся между двумя соседними неделями.
   const today = new Date();
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+  const midnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const open = new Date(midnight.getTime() - 63 * 864e5);
   const entries = [];
   plan.split("").forEach((mark, i) => {
-    const back = plan.length - i; // самая старая неделя — самая дальняя
-    const start = new Date(monday);
-    start.setDate(monday.getDate() - 7 * back);
+    // Восемь завершённых недель — это k = 1…8; текущая (k = 9) начинается сегодня.
+    const start = new Date(open.getTime() + 7 * (i + 1) * 864e5);
     // КАЖДЫЙ день недели: сетка приложения может быть сдвинута относительно нашей
     // на день (часовой пояс), и «восемь яиц в первые дни» тогда переползают в
     // соседнюю неделю. Ровный по дням сев от этого не зависит.
     //   закрытая  — два яйца в день (14 за неделю против нормы 7);
     //   незакрытая — овсянка, яиц нет вовсе; запись нужна, иначе неделя не судится.
     for (let n = 0; n < 7; n++) {
-      const d = new Date(start);
-      d.setDate(start.getDate() + n);
+      const d = new Date(start.getTime() + n * 864e5);
       if (mark === "+") {
         entries.push({ id: `e${i}-${n}a`, food_id: "egg1", date: iso(d), time: null, grams: 120,
           waste_grams: 0, meal_label: null, deleted: false, created_at: nowIso, updated_at: nowIso });
@@ -131,8 +137,7 @@ await page.evaluate(async ({ u, plan }) => {
   const weights = [];
   const steps = [];
   for (let back = 0; back < 8; back++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - back);
+    const d = new Date(midnight.getTime() - back * 864e5);
     entries.push({ id: `cur-${back}`, food_id: "oat1", date: iso(d), time: null, grams: 200,
       waste_grams: 0, meal_label: null, deleted: false, created_at: nowIso, updated_at: nowIso });
     weights.push({ id: `w-${back}`, date: iso(d), weight_kg: 80 - back * 0.1, no_water: true,
@@ -191,13 +196,40 @@ const panel = page.locator('[data-ind-panel="egg"]');
 const shown = await panel.count();
 if (shown) {
   await panel.scrollIntoViewIfNeeded();
+  // Нижнее меню висит поверх и срезает панель — на время снимка убираем его.
+  await page.addStyleTag({ content: "nav, [class*='bottom'], footer { display: none !important; }" });
   await page.waitForTimeout(400);
-  // Нижнее меню перекрывает панель, если она у самого низа — снимаем страницу
-  // целиком, там видно и значок в ряду, и восемь клеток истории.
-  await page.screenshot({ path: SHOT, fullPage: true });
+  await panel.screenshot({ path: SHOT });
 } else {
   await page.screenshot({ path: SHOT, fullPage: true });
 }
+// Что реально легло в дневник — по сетке недель ПРИЛОЖЕНИЯ (от дня открытия).
+const dump = await page.evaluate(async (u) => {
+  const db = await new Promise((res, rej) => {
+    const q = indexedDB.open(`hjkl-ft-${u}`);
+    q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+  });
+  const rows = await new Promise((res) => {
+    const rq = db.transaction(["diary"]).objectStore("diary").getAll();
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
+  });
+  const flag = await new Promise((res) => {
+    const rq = db.transaction(["app_flags"]).objectStore("app_flags").get("egg_week_opened_at");
+    rq.onsuccess = () => res(rq.result?.value); rq.onerror = () => res(null);
+  });
+  db.close();
+  const open = new Date(flag + "T00:00:00");
+  const byWeek = {};
+  for (const r of rows) {
+    if (r.food_id !== "egg1") continue;
+    const d = new Date(r.date + "T00:00:00");
+    const k = Math.floor((d - open) / (7 * 864e5));
+    byWeek[k] = Math.round(((byWeek[k] || 0) + r.grams / 60) * 10) / 10;
+  }
+  return { open: flag, byWeek };
+}, uid);
+console.log(`  открытие недели яиц ${dump.open} · яиц по неделям ${JSON.stringify(dump.byWeek)}`);
+
 console.log(`сценарий ${PLAN} · панель яиц: ${shown ? "есть" : "НЕ НАЙДЕНА"} · цвет: ${colour} (${tint})`);
 console.log(`снимок: ${SHOT}`);
 await browser.close();

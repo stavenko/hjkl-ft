@@ -1,10 +1,14 @@
 //! Interactive per-day bar chart. Each point is `(date, value, ratio)` where `ratio`
 //! is the FROZEN `value / target` for that day (so met/unmet doesn't shift when the
 //! target later changes): a met day (ratio ≥ 1.0) is GREEN, an unevaluable day
-//! (`None`) neutral grey, and a MISSED day is drawn in `miss_color` — a single colour
-//! for the whole chart, chosen by the caller from the indicator's overall state
-//! (orange or red by how chronic the miss is), NOT per-day. The day-of-week sits
-//! under each bar; tap / drag moves a cursor showing that day's date + value.
+//! (`None`) neutral grey, and a MISSED day is drawn in `miss_color`. The day-of-week
+//! sits under each bar; tap / drag moves a cursor showing that day's date + value.
+//!
+//! ЦВЕТ СТОЛБИКА НЕ ЗАВИСИТ ОТ ЦВЕТА ИНДИКАТОРА. У столбика вопрос двоичный —
+//! закрыто или нет, — а индикатор считается по своему правилу поверх этих же
+//! недель. Раньше сюда передавали цвет состояния, и стоило индикатору позеленеть,
+//! как незакрытые недели зеленели вместе с ним: неделя с 1.2 порции гема при норме
+//! 3 выглядела точно так же, как взятая.
 
 use leptos::*;
 
@@ -38,6 +42,8 @@ const PB: f64 = 92.0; // bar baseline; weekday labels sit below
 const BAR_NEUTRAL: &str = "#cfd8e3"; // unevaluable day (no target)
 const BAR_MET: &str = "#1fa463"; // green — target met (ratio ≥ 1.0)
 const BAR_ACTIVE: &str = "#3b6fd4";
+/// Цвет ПРОМАХА — один и тот же всегда: столбик отвечает на двоичный вопрос.
+pub const BAR_MISS: &str = "#e0304f";
 /// Высота столбика для НУЛЕВОГО провала — чтобы «ноль» читался как красная неделя,
 /// а не как её отсутствие.
 const ZERO_MISS_H: f64 = 4.0;

@@ -1267,7 +1267,11 @@ pub(crate) const FAT_ROWS: &[FatRow] = &[
     FatRow { key: "grain_legume", sfa: (15.0, 22.0), mufa: (12.0, 25.0), pufa: (45.0, 60.0),
         epa_dha: (0.0, 0.0),
         examples: "крупы, хлеб, макароны, рис, овсянка, бобовые, чечевица, нут, соя, тофу" },
-    FatRow { key: "no_fat", sfa: (0.0, 0.0), mufa: (0.0, 0.0), pufa: (0.0, 0.0),
+    // Имя строки — «овощи и фрукты», а не «без жира»: на «Цветную капусту» модель
+    // упорно отвечала «vegetable» — строки с таким именем не было, и продукт трижды
+    // уходил в ошибку. Спорить с ней об этом бессмысленно: она называет ЕДУ, а не
+    // наш признак, и имя строки должно быть про еду.
+    FatRow { key: "vegetable_fruit_no_fat", sfa: (0.0, 0.0), mufa: (0.0, 0.0), pufa: (0.0, 0.0),
         epa_dha: (0.0, 0.0),
         examples: "овощи, фрукты, зелень, сахар, мёд, вода, чай, кофе, алкоголь, желатин, \
                    специи — всё, где жира практически нет" },
@@ -1365,6 +1369,28 @@ fn fat_reference_hit(key: &str) -> Option<&'static (&'static str, f64, f64, f64,
         return None;
     }
     FAT_REFERENCE.iter().find(|(name, ..)| key_eq(name, key))
+}
+
+/// Строка таблицы по ответу модели. Точное имя, а если такого нет — ЕДИНСТВЕННАЯ
+/// строка, чьё имя содержит ответ или содержится в нём.
+///
+/// Модель называет строку своими словами: «vegetable» вместо
+/// `vegetable_fruit_no_fat`. Пока сходилось только точное имя, три овоща подряд
+/// уходили в ошибку с «unknown fat row». Неоднозначный ответ («fish» — а строк с
+/// рыбой три) по-прежнему ошибка: угадывать за модель нельзя.
+pub(crate) fn fat_row_by_key(answer: &str) -> Option<&'static FatRow> {
+    let k = answer.trim().to_ascii_lowercase().replace([' ', '-', '/'], "_");
+    if k.is_empty() {
+        return None;
+    }
+    if let Some(r) = FAT_ROWS.iter().find(|r| r.key == k) {
+        return Some(r);
+    }
+    let mut hits = FAT_ROWS
+        .iter()
+        .filter(|r| r.key.contains(&k) || k.contains(r.key));
+    let first = hits.next()?;
+    hits.next().is_none().then_some(first)
 }
 
 fn fat_row_table() -> String {
@@ -1549,7 +1575,9 @@ fn basic_fat_prompt(food_name: &str, head: &str, lang: &str) -> String {
            and DHA, while warm-water and farmed pond fish carry mostly linoleic acid and very \
            little n-3. A fish you do not recognise as a cold-water sea species goes to \
            fish_warm_low_n3.\n\
-         - Anything with practically no fat goes to no_fat; its profile is irrelevant, report \
+         - Vegetables, fruit, greens and anything else with practically no fat go to \
+           vegetable_fruit_no_fat — tenths of a gram are still «no fat». Its profile is \
+           irrelevant, report \
            the row and zeros.\n\n\
          Fill \"reason\" FIRST, then the two keys, then the numbers.\n\n\
          Respond with ONLY a single minified JSON object and nothing else — no markdown, no \
@@ -1577,8 +1605,7 @@ pub async fn lookup_basic_fat_profile(
         if fat_reference_hit(&v.reference_key).is_some() {
             return Ok(());
         }
-        let key = v.category.trim().to_ascii_lowercase();
-        if !FAT_ROWS.iter().any(|r| r.key == key) {
+        if fat_row_by_key(&v.category).is_none() {
             return Err(format!("unknown fat row «{}» for «{food_name}»", v.category));
         }
         // Больше ста процентов жира не бывает. Нижнего порога у суммы НЕТ: у постной
@@ -1607,10 +1634,7 @@ pub async fn lookup_basic_fat_profile(
             format!("справочник «{name}»"),
         ),
         None => {
-            let key = v.category.trim().to_ascii_lowercase();
-            let row = FAT_ROWS
-                .iter()
-                .find(|r| r.key == key)
+            let row = fat_row_by_key(&v.category)
                 .ok_or_else(|| format!("unknown fat row «{}»", v.category))?;
             let clamp = |x: f64, (lo, hi): (f64, f64)| x.clamp(lo, hi);
             let pufa = clamp(v.pufa_pct, row.pufa);
@@ -3593,6 +3617,33 @@ mod tests {
     fn massiv_iz_dvuh_otvetov_eto_oshibka_a_ne_obyortka() {
         let two = r#"[{"verdict":true,"reason":"а"},{"verdict":false,"reason":"б"}]"#;
         assert!(parse_one::<Otvet>(two).is_err());
+    }
+
+    #[test]
+    fn stroka_zhira_nahoditsya_po_tochnomu_imeni() {
+        assert_eq!(fat_row_by_key("dairy_fat").map(|r| r.key), Some("dairy_fat"));
+        assert_eq!(fat_row_by_key("  Dairy_Fat  ").map(|r| r.key), Some("dairy_fat"));
+    }
+
+    #[test]
+    fn ovoshch_nahodit_svoyu_stroku_hotya_model_nazvala_eyo_inache() {
+        // Боевой случай: «Цветная капуста» → «vegetable», строки с таким именем нет.
+        assert_eq!(
+            fat_row_by_key("vegetable").map(|r| r.key),
+            Some("vegetable_fruit_no_fat")
+        );
+        assert_eq!(
+            fat_row_by_key("fruit").map(|r| r.key),
+            Some("vegetable_fruit_no_fat")
+        );
+    }
+
+    #[test]
+    fn neodnoznachnyj_otvet_ostayotsya_oshibkoj() {
+        // Строк с рыбой три — угадывать за модель нельзя.
+        assert!(fat_row_by_key("fish").is_none());
+        assert!(fat_row_by_key("").is_none());
+        assert!(fat_row_by_key("нечто").is_none());
     }
 
     #[test]

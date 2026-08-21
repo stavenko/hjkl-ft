@@ -3084,6 +3084,171 @@ fn map_result(input: &AiVisionInput, r: QueueResult) -> AiLookupOutput {
     }
 }
 
+// --- Картинки НАПРЯМУЮ через ai-worker (сторонний провайдер) ------------------
+//
+// Второй путь для фотографий, помимо очереди ocr-queue: изображение уходит в наш
+// ai-worker обычным `/chat/completions`, а он по имени модели маршрутизирует
+// запрос стороннему провайдеру. Очереди и опроса статуса здесь нет — запрос
+// живёт ровно столько, сколько отвечает модель, а прогресс идёт потоком SSE.
+//
+// Путь включается ИМЕНЕМ МОДЕЛИ в конфиге (`vision_model`): пусто — работает
+// прежняя очередь, задано — картинки идут сюда.
+
+/// Модель для картинок, если прямой путь включён конфигом.
+pub fn direct_vision_model() -> Option<&'static str> {
+    let m = config::get().vision_model.trim();
+    (!m.is_empty()).then_some(m)
+}
+
+/// Потолок ответа для картиночных запросов: этикетка — короткий JSON, список еды
+/// с тарелки — десяток строк. Столько хватает обоим с запасом.
+const VISION_MAX_TOKENS: u32 = 2000;
+
+/// Один запрос «промпт + картинки» в ai-worker, потоком. Возвращает СЫРОЙ текст
+/// ответа модели — разбор остаётся на месте вызова, как и в очереди.
+///
+/// `on_progress(phase, thinking_tokens, answer_tokens)`: 1 = рассуждение,
+/// 2 = ответ — те же фазы, что рисует кнопка распознавания.
+async fn vision_chat(
+    prompt: &str,
+    images: &[String],
+    on_progress: impl Fn(u8, u32, u32),
+) -> Result<String, String> {
+    let model = direct_vision_model().ok_or_else(|| "vision_model not configured".to_string())?;
+    let base = &config::get().ai_base_url;
+    let url = format!("{base}/chat/completions");
+    let token = auth::get_token().ok_or_else(|| "not authenticated".to_string())?;
+
+    // Картинки лежат как голый base64 (см. `file_to_jpeg_base64`), а провайдер ждёт
+    // data-URL.
+    let mut parts = vec![serde_json::json!({ "type": "text", "text": prompt })];
+    for img in images {
+        parts.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": { "url": format!("data:image/jpeg;base64,{img}") },
+        }));
+    }
+    let body = serde_json::json!({
+        "model": model,
+        "stream": true,
+        "max_tokens": VISION_MAX_TOKENS,
+        "messages": [{ "role": "user", "content": parts }],
+    });
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    opts.set_body(&JsValue::from_str(&body.to_string()));
+    let headers = web_sys::Headers::new().map_err(|e| format!("{e:?}"))?;
+    headers.set("Content-Type", "application/json").map_err(|e| format!("{e:?}"))?;
+    headers.set("Authorization", &format!("Bearer {token}")).map_err(|e| format!("{e:?}"))?;
+    opts.set_headers(&headers);
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts).map_err(|e| format!("{e:?}"))?;
+    let window = web_sys::window().expect("no window");
+    let resp_val = match JsFuture::from(window.fetch_with_request(&request)).await {
+        Ok(v) => v,
+        Err(e) => {
+            super::net::note_failure(super::net::Worker::Ai);
+            return Err(format!("{e:?}"));
+        }
+    };
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
+    if !resp.ok() {
+        let status = resp.status();
+        let text = JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?)
+            .await
+            .ok()
+            .and_then(|t| t.as_string())
+            .unwrap_or_default();
+        return Err(format!("HTTP {status}: {text}"));
+    }
+
+    let stream = resp.body().ok_or_else(|| "no stream body".to_string())?;
+    let reader: web_sys::ReadableStreamDefaultReader =
+        stream.get_reader().dyn_into().map_err(|_| "no stream reader".to_string())?;
+
+    let mut buf = String::new();
+    let mut answer = String::new();
+    let (mut think_tokens, mut answer_tokens) = (0u32, 0u32);
+    loop {
+        let chunk = JsFuture::from(reader.read()).await.map_err(|e| format!("stream read: {e:?}"))?;
+        let done = js_sys::Reflect::get(&chunk, &JsValue::from_str("done"))
+            .ok()
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false);
+        if done {
+            break;
+        }
+        let value = js_sys::Reflect::get(&chunk, &JsValue::from_str("value")).map_err(|e| format!("{e:?}"))?;
+        let bytes = js_sys::Uint8Array::new(&value).to_vec();
+        buf.push_str(&String::from_utf8_lossy(&bytes));
+
+        // Событие SSE кончается пустой строкой; неполный хвост ждёт следующего чанка.
+        while let Some(idx) = buf.find('\n') {
+            let line = buf[..idx].trim().to_string();
+            buf.replace_range(..idx + 1, "");
+            let Some(data) = line.strip_prefix("data:") else { continue };
+            let data = data.trim();
+            if data.is_empty() || data == "[DONE]" {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else { continue };
+            // Ошибку провайдера воркер кладёт в поток тем же кадром.
+            if let Some(err) = v.get("error") {
+                let msg = err
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("stream error");
+                return Err(msg.to_string());
+            }
+            let Some(delta) = v.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("delta")) else {
+                continue;
+            };
+            // Рассуждение приезжает в своём поле — у разных провайдеров под разными
+            // именами; в ответ оно не попадает.
+            if let Some(r) = delta
+                .get("reasoning_content")
+                .or_else(|| delta.get("reasoning"))
+                .and_then(|r| r.as_str())
+            {
+                if !r.is_empty() {
+                    think_tokens += 1;
+                    on_progress(1, think_tokens, answer_tokens);
+                }
+            }
+            if let Some(c) = delta.get("content").and_then(|c| c.as_str()) {
+                if !c.is_empty() {
+                    answer.push_str(c);
+                    answer_tokens += 1;
+                    on_progress(2, think_tokens, answer_tokens);
+                }
+            }
+        }
+    }
+
+    if answer.trim().is_empty() {
+        return Err("empty response from vision model".to_string());
+    }
+    Ok(answer)
+}
+
+/// Этикетка НАПРЯМУЮ: тот же промпт и тот же разбор, что у очереди, но без неё.
+pub async fn vision_direct(
+    input: &AiVisionInput,
+    on_progress: impl Fn(u8, u32, u32),
+) -> Result<AiLookupOutput, String> {
+    let raw = vision_chat(&label_prompt(&input.custom_nutrients), &input.images, on_progress).await?;
+    Ok(map_result(input, parse_label_result(&raw)?))
+}
+
+/// Фото блюда НАПРЯМУЮ: список распознанной еды, тот же промпт и разбор.
+pub async fn food_items_direct(
+    images: &[String],
+    on_progress: impl Fn(u8, u32, u32),
+) -> Result<Vec<DetectedFood>, String> {
+    let raw = vision_chat(&food_items_prompt(), images, on_progress).await?;
+    parse_food_items(&raw)
+}
+
 // --- Food-items (dish photo → list of foods) ---------------------------------
 //
 // Same ocr-queue plumbing as label OCR (`submit_vision`/`poll_queue`/`stream_vision`)

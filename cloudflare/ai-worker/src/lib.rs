@@ -256,7 +256,7 @@ async fn report_usage(env: &Env, user_id: &str, model: &str, prompt: i64, comple
         }
     };
     if let Err(e) =
-        report_usage_inner(env, &key, user_id, prompt, completion, in_neurons, out_neurons).await
+        report_usage_inner(env, &key, user_id, "text", prompt, completion, in_neurons, out_neurons).await
     {
         console_error!("usage-report failed (best-effort, swallowed): {e:?}");
     }
@@ -267,6 +267,7 @@ async fn report_usage_inner(
     env: &Env,
     key: &str,
     user_id: &str,
+    source: &str,
     in_tokens: i64,
     out_tokens: i64,
     in_neurons: i64,
@@ -276,7 +277,7 @@ async fn report_usage_inner(
     headers.set("X-Internal-Key", key)?;
     headers.set("Content-Type", "application/json")?;
     let body = serde_json::json!({
-        "userId": user_id, "source": "text",
+        "userId": user_id, "source": source,
         "inTokens": in_tokens, "outTokens": out_tokens,
         "inNeurons": in_neurons, "outNeurons": out_neurons,
     });
@@ -334,6 +335,182 @@ fn runaway_sse_tail() -> Vec<u8> {
     format!("data: {payload}\n\ndata: [DONE]\n\n").into_bytes()
 }
 
+
+// ── Сторонний провайдер (thirdparty) ──────────────────────────────────────────
+//
+// Картинки на Workers AI не идут: там нет модели, которая читает этикетку так, как
+// нам нужно. Поэтому запрос с чужой моделью уходит по HTTP наружу — по тому же
+// OpenAI-совместимому протоколу, адрес и ключ берутся из переменных воркера.
+// Ключ НИКОГДА не покидает воркер: клиент шлёт только имя модели, а подписку он к
+// этому моменту уже прошёл (гейт стоит выше по стеку).
+
+/// Модель Cloudflare Workers AI. Всё остальное — сторонний провайдер.
+fn is_workers_ai(model: &str) -> bool {
+    model.starts_with("@cf/")
+}
+
+/// ПОЛНЫЙ адрес ручки провайдера, вместе с `/chat/completions`.
+const THIRDPARTY_URL: &str = "THIRDPARTY_API_URL";
+/// Ключ провайдера. Уходит в заголовке `Authorization: Bearer …`.
+const THIRDPARTY_KEY: &str = "THIRDPARTY_API_KEY";
+
+/// Поля запроса, которые имеют смысл у стороннего провайдера. Всё
+/// Workers-AI-специфичное (`think`, `chat_template_kwargs`) отбрасывается.
+const THIRDPARTY_FIELDS: [&str; 5] = ["model", "messages", "max_tokens", "temperature", "top_p"];
+
+/// Привести наш `response_format` к виду OpenAI: там у `json_schema` ОБЯЗАТЕЛЬНО
+/// есть `name`, а схема должна быть без `$ref` (провайдеры их не разворачивают).
+fn openai_response_format(rf: &serde_json::Value) -> Option<serde_json::Value> {
+    let schema = rf.get("json_schema").and_then(|js| js.get("schema"))?;
+    Some(serde_json::json!({
+        "type": "json_schema",
+        "json_schema": { "name": "answer", "schema": inline_schema(schema) },
+    }))
+}
+
+/// Расход у стороннего провайдера считается В ТОКЕНАХ: нейронов там нет, это не
+/// Cloudflare. Пишем их отдельным источником (`vision`), чтобы не подмешивать в
+/// нейроны Workers AI. Best-effort, как и текстовый учёт.
+async fn report_thirdparty_usage(env: &Env, user_id: &str, prompt: i64, completion: i64) {
+    let (prompt, completion) = (prompt.max(0), completion.max(0));
+    if prompt + completion <= 0 || user_id.is_empty() {
+        return;
+    }
+    let key = match secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) => k,
+        Err(reason) => {
+            console_error!("usage-report skipped: INTERNAL_PUSH_KEY unset: {reason}");
+            return;
+        }
+    };
+    if let Err(e) =
+        report_usage_inner(env, &key, user_id, "vision", prompt, completion, 0, 0).await
+    {
+        console_error!("usage-report failed (best-effort, swallowed): {e:?}");
+    }
+}
+
+/// Проксировать запрос стороннему провайдеру. Стрим отдаётся клиенту байт в байт
+/// (как и путь Workers AI — ничего не переразбираем), по дороге строки SSE
+/// просматриваются ради последнего чанка с `usage`.
+async fn proxy_thirdparty(
+    body: serde_json::Value,
+    env: &Env,
+    ctx: &Context,
+    user_id: &str,
+) -> Result<Response> {
+    let url = match secret_or_var(env, THIRDPARTY_URL).await {
+        Ok(u) => u,
+        Err(reason) => {
+            console_error!("thirdparty: {reason}");
+            return Ok(error_response("thirdparty_not_configured", 503));
+        }
+    };
+    let key = match secret_or_var(env, THIRDPARTY_KEY).await {
+        Ok(k) => k,
+        Err(reason) => {
+            console_error!("thirdparty: {reason}");
+            return Ok(error_response("thirdparty_not_configured", 503));
+        }
+    };
+
+    let mut out = serde_json::Map::new();
+    for field in THIRDPARTY_FIELDS {
+        if let Some(v) = body.get(field) {
+            out.insert(field.to_string(), v.clone());
+        }
+    }
+    if let Some(rf) = body.get("response_format").and_then(openai_response_format) {
+        out.insert("response_format".to_string(), rf);
+    }
+    let want_stream = body.get("stream").and_then(|s| s.as_bool()).unwrap_or(true);
+    out.insert("stream".to_string(), serde_json::Value::Bool(want_stream));
+    if want_stream {
+        out.insert(
+            "stream_options".to_string(),
+            serde_json::json!({ "include_usage": true }),
+        );
+    }
+
+    let headers = Headers::new();
+    headers.set("Authorization", &format!("Bearer {key}"))?;
+    headers.set("Content-Type", "application/json")?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(wasm_bindgen::JsValue::from_str(
+            &serde_json::Value::Object(out).to_string(),
+        )));
+    let req = Request::new_with_init(&url, &init)?;
+    let mut res = Fetch::Request(req).send().await?;
+
+    let status = res.status_code();
+    if status < 200 || status >= 300 {
+        // Причину показываем как есть: 401/429/400 провайдера должны быть видны в
+        // логе и в приложении, а не прятаться за общей пятисоткой.
+        let text = res.text().await.unwrap_or_default();
+        console_error!("thirdparty → {status}: {text}");
+        return Ok(error_response(&format!("thirdparty {status}: {text}"), status));
+    }
+
+    if !want_stream {
+        let val: serde_json::Value = res.json().await?;
+        if let Some((p, c)) = usage_split(&val) {
+            let env = env.clone();
+            let user_id = user_id.to_string();
+            ctx.wait_until(async move { report_thirdparty_usage(&env, &user_id, p, c).await });
+        }
+        return Response::from_json(&val);
+    }
+
+    // Один потребитель, как и на пути Workers AI: байты идут клиенту нетронутыми,
+    // а по дороге собираются полные строки SSE — из них берётся последний `usage`.
+    let (tx, mut rx) = futures_channel::mpsc::unbounded::<(i64, i64)>();
+    {
+        let env = env.clone();
+        let user_id = user_id.to_string();
+        ctx.wait_until(async move {
+            let mut last: Option<(i64, i64)> = None;
+            while let Some(u) = futures_util::StreamExt::next(&mut rx).await {
+                last = Some(u);
+            }
+            match last {
+                Some((p, c)) => report_thirdparty_usage(&env, &user_id, p, c).await,
+                None => console_error!("usage-report: no usage chunk in thirdparty stream"),
+            }
+        });
+    }
+
+    let watched = futures_util::StreamExt::scan(
+        res.stream()?,
+        Vec::<u8>::new(),
+        move |carry, chunk: Result<Vec<u8>>| {
+            if let Ok(bytes) = &chunk {
+                carry.extend_from_slice(bytes);
+                let mut consumed = 0usize;
+                for line in carry.split_inclusive(|b| *b == b'\n') {
+                    if !line.ends_with(b"\n") {
+                        break;
+                    }
+                    consumed += line.len();
+                    if let Some(u) = usage_from_sse_line(&String::from_utf8_lossy(line)) {
+                        let _ = tx.unbounded_send(u);
+                    }
+                }
+                carry.drain(..consumed.min(carry.len()));
+                if carry.len() > 64 * 1024 {
+                    carry.clear();
+                }
+            }
+            futures_util::future::ready(Some(chunk))
+        },
+    );
+    let resp = Response::from_stream(watched)?;
+    let headers = resp.headers();
+    headers.set("Content-Type", "text/event-stream")?;
+    headers.set("Cache-Control", "no-cache")?;
+    Ok(resp)
+}
 
 // ── Chat completions request massaging ────────────────────────────────────────
 
@@ -428,6 +605,16 @@ async fn handle_chat_completions(
     user_id: &str,
 ) -> Result<Response> {
     let body: serde_json::Value = req.json().await?;
+
+    // МАРШРУТИЗАЦИЯ ПО МОДЕЛИ. Всё, что не Workers AI (`@cf/…`), уходит по HTTP к
+    // стороннему провайдеру: тот же OpenAI-совместимый протокол, только адрес и
+    // ключ берутся из THIRDPARTY_API_URL / THIRDPARTY_API_KEY. Ключ живёт ТОЛЬКО
+    // здесь — клиенту он не виден, гейт подписки уже пройден выше.
+    if let Some(model) = body.get("model").and_then(|m| m.as_str()) {
+        if !is_workers_ai(model) {
+            return proxy_thirdparty(body, env, ctx, user_id).await;
+        }
+    }
 
     // Clone the messages array we will (possibly) massage.
     let mut messages: Vec<serde_json::Value> = body

@@ -479,6 +479,27 @@ pub fn FoodEditor(
                 // Vision is async: submit, then a 2-state machine — POLL the queue
                 // while `queued`, then SWITCH to the SSE STREAM while `processing`.
                 let input = AiVisionInput { images, custom_nutrients: nutrients_list };
+
+                // ПРЯМОЙ ПУТЬ: модель задана в конфиге — картинка уходит в наш
+                // ai-worker одним запросом, без очереди и опроса статуса. Прогресс
+                // тот же (рассуждение/ответ), просто приходит сразу потоком.
+                if ai::direct_vision_model().is_some() {
+                    let on_progress = move |ph: u8, tt: u32, at: u32| match ph {
+                        1 => { phase.set(1); think.set(tt); vision_msg.set(String::new()); }
+                        2 => { phase.set(2); answer.set(at); vision_msg.set(String::new()); }
+                        _ => { phase.set(0); vision_msg.set(t("food_editor.ai_recognizing").to_string()); }
+                    };
+                    vision_msg.set(t("food_editor.ai_recognizing").to_string());
+                    match ai::vision_direct(&input, on_progress).await {
+                        Ok(out) => {
+                            apply_result(&out);
+                            persist_result();
+                            finish(None);
+                        }
+                        Err(e) => finish(Some(e)),
+                    }
+                    return;
+                }
                 // UPLOAD state: the image upload can take a while; show it.
                 phase.set(0);
                 vision_msg.set(t("food_editor.ai_uploading").to_string());
@@ -639,53 +660,70 @@ pub fn FoodEditor(
 
             let input = AiFoodItemsInput { images };
             fitems_phase.set(0);
-            fitems_vision_msg.set(t("food_editor.ai_uploading").to_string());
-            let job_id = match ai::submit_food_items(&input).await {
-                Ok(id) => id,
-                Err(e) => { finish(Some(e)); return; }
-            };
 
-            // QUEUED: poll until processing / done / error.
-            let mut processing = false;
             let mut detected: Option<Vec<DetectedFood>> = None;
-            for _ in 0..600 {
-                match ai::poll_food_items(&job_id).await {
-                    Ok(ai::FoodItemsPhase::Done(items)) => { detected = Some(items); break; }
-                    Ok(ai::FoodItemsPhase::Error(e)) => { finish(Some(e)); return; }
-                    Ok(ai::FoodItemsPhase::Processing { since_ms }) => {
-                        if since_ms > 0.0 { fitems_vision_start.set(since_ms); }
-                        processing = true;
-                        break;
-                    }
-                    Ok(ai::FoodItemsPhase::Queued { position, since_ms }) => {
-                        if since_ms > 0.0 { fitems_vision_start.set(since_ms); }
-                        fitems_phase.set(0);
-                        fitems_vision_msg.set(if position > 0 {
-                            format!("{} {}", t("food_editor.ai_queue"), position)
-                        } else {
-                            t("food_editor.ai_recognizing").to_string()
-                        });
-                    }
-                    Err(_) => {} // transient; keep waiting
-                }
-                ai::sleep_ms(1500).await;
-            }
 
-            // PROCESSING: stream live LLM phase/tokens until the result arrives.
-            if detected.is_none() {
-                if !processing {
-                    finish(Some(t("food_editor.ai_timeout").to_string()));
-                    return;
-                }
-                fitems_vision_msg.set(String::new());
+            // ПРЯМОЙ ПУТЬ (как у этикетки): модель задана в конфиге — фото уходит в
+            // ai-worker одним запросом, очередь не участвует.
+            if ai::direct_vision_model().is_some() {
                 let on_progress = move |ph: u8, tt: u32, at: u32| match ph {
                     1 => { fitems_phase.set(1); fitems_think.set(tt); fitems_vision_msg.set(String::new()); }
                     2 => { fitems_phase.set(2); fitems_answer.set(at); fitems_vision_msg.set(String::new()); }
                     _ => { fitems_phase.set(0); fitems_vision_msg.set(t("food_editor.ai_recognizing").to_string()); }
                 };
-                match ai::stream_food_items(&job_id, on_progress).await {
+                fitems_vision_msg.set(t("food_editor.ai_recognizing").to_string());
+                match ai::food_items_direct(&input.images, on_progress).await {
                     Ok(items) => detected = Some(items),
                     Err(e) => { finish(Some(e)); return; }
+                }
+            } else {
+                fitems_vision_msg.set(t("food_editor.ai_uploading").to_string());
+                let job_id = match ai::submit_food_items(&input).await {
+                    Ok(id) => id,
+                    Err(e) => { finish(Some(e)); return; }
+                };
+
+                // QUEUED: poll until processing / done / error.
+                let mut processing = false;
+                for _ in 0..600 {
+                    match ai::poll_food_items(&job_id).await {
+                        Ok(ai::FoodItemsPhase::Done(items)) => { detected = Some(items); break; }
+                        Ok(ai::FoodItemsPhase::Error(e)) => { finish(Some(e)); return; }
+                        Ok(ai::FoodItemsPhase::Processing { since_ms }) => {
+                            if since_ms > 0.0 { fitems_vision_start.set(since_ms); }
+                            processing = true;
+                            break;
+                        }
+                        Ok(ai::FoodItemsPhase::Queued { position, since_ms }) => {
+                            if since_ms > 0.0 { fitems_vision_start.set(since_ms); }
+                            fitems_phase.set(0);
+                            fitems_vision_msg.set(if position > 0 {
+                                format!("{} {}", t("food_editor.ai_queue"), position)
+                            } else {
+                                t("food_editor.ai_recognizing").to_string()
+                            });
+                        }
+                        Err(_) => {} // transient; keep waiting
+                    }
+                    ai::sleep_ms(1500).await;
+                }
+
+                // PROCESSING: stream live LLM phase/tokens until the result arrives.
+                if detected.is_none() {
+                    if !processing {
+                        finish(Some(t("food_editor.ai_timeout").to_string()));
+                        return;
+                    }
+                    fitems_vision_msg.set(String::new());
+                    let on_progress = move |ph: u8, tt: u32, at: u32| match ph {
+                        1 => { fitems_phase.set(1); fitems_think.set(tt); fitems_vision_msg.set(String::new()); }
+                        2 => { fitems_phase.set(2); fitems_answer.set(at); fitems_vision_msg.set(String::new()); }
+                        _ => { fitems_phase.set(0); fitems_vision_msg.set(t("food_editor.ai_recognizing").to_string()); }
+                    };
+                    match ai::stream_food_items(&job_id, on_progress).await {
+                        Ok(items) => detected = Some(items),
+                        Err(e) => { finish(Some(e)); return; }
+                    }
                 }
             }
 

@@ -39,6 +39,11 @@ pub struct FrontendConfig {
     /// unavailable). Differs per env (renorma-fit-dev.pages.dev vs fit.renorma.app).
     #[serde(default)]
     pub app_origin: String,
+    /// Модель стороннего провайдера для КАРТИНОК (этикетка, фото блюда). Уходит в
+    /// наш ai-worker, который по имени модели маршрутизирует запрос наружу. Пусто —
+    /// картинки идут прежним путём: очередь ocr-queue и свой сервер с Qwen2.5-VL.
+    #[serde(default)]
+    pub vision_model: String,
 }
 
 thread_local! {

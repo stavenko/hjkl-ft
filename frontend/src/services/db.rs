@@ -352,6 +352,32 @@ where
     DB.with(|cell| cell.borrow().as_ref().map(f))
 }
 
+/// СОЕДИНЕНИЕ УМЕРЛО, а не операция не удалась.
+///
+/// iOS принудительно закрывает IndexedDB у свёрнутого PWA. Задачи, начатые до
+/// сворачивания (фоновая классификация, синк, обогащение), просыпаются вместе с
+/// приложением и обращаются к УЖЕ ЗАКРЫТОМУ соединению: WebKit отвечает
+/// «Attempt to get a record from database without an in-progress transaction».
+/// Раньше на этом стоял `.expect`, то есть паника, — а паника в wasm убивает и
+/// исполнитель фьючерсов (следом сыпалось «RefCell already borrowed»), и
+/// приложение до перезагрузки не работало вовсе. Пачки таких паник видны в
+/// телеметрии каждый день, всегда на iOS и всегда в момент возвращения.
+fn is_dead_connection(err: &str) -> bool {
+    let e = err.to_ascii_lowercase();
+    e.contains("in-progress transaction")
+        || e.contains("transaction is not active")
+        || e.contains("database connection is closing")
+        || e.contains("invalidstateerror")
+}
+
+/// Сообщить о сорвавшейся операции хранилища: громко в консоль и в телеметрию.
+/// Молча ронять данные нельзя, но и ронять приложение из-за уснувшей вкладки —
+/// тоже.
+fn db_failed(op: &str, store_name: &str, err: &str) {
+    leptos::logging::error!("db::{op}({store_name}) не удалось: {err}");
+    crate::services::telemetry::report_internal("db.operation_failed", store_name, err);
+}
+
 /// Сообщить, что обращение к хранилищу случилось до входа.
 ///
 /// ЧТЕНИЕ до входа законно: виджеты строятся раньше, чем выясняется, есть ли
@@ -507,19 +533,12 @@ pub async fn put<T: Serialize>(store_name: &str, value: &T) {
 /// json-compatible serializer: the default serde_wasm_bindgen turns JSON maps
 /// into JS `Map` objects, whose IndexedDB keyPath evaluation fails.
 pub async fn put_json_untracked(store_name: &str, value: &serde_json::Value) {
-    let Some(tx) = with_db_opt(|db| {
-        db.transaction(&[store_name], TransactionMode::ReadWrite)
-            .expect("failed to create transaction")
-    }) else {
-        no_db("write", store_name);
+    let ser = serde_wasm_bindgen::Serializer::json_compatible();
+    let Ok(js_val) = value.serialize(&ser) else {
+        db_failed("write", store_name, "строка не сериализуется");
         return;
     };
-    let store = tx.store(store_name).expect("store not found");
-    let ser = serde_wasm_bindgen::Serializer::json_compatible();
-    let js_val = value.serialize(&ser).expect("serialize failed");
-    store.put(&js_val, None).await.expect("put failed");
-    tx.done().await.expect("transaction failed");
-    bump(store_name);
+    write_value(store_name, js_val, "write").await;
 }
 
 /// Untracked write — ONLY for sync-apply paths (remote data must not re-enter
@@ -532,33 +551,109 @@ pub async fn put_json_untracked(store_name: &str, value: &serde_json::Value) {
 /// снаружи `Object.keys()` у `Map` даёт ноль, и на этом легко заключить, что данных
 /// нет вовсе.
 pub async fn put_untracked<T: Serialize>(store_name: &str, value: &T) {
-    let Some(tx) = with_db_opt(|db| {
-        db.transaction(&[store_name], TransactionMode::ReadWrite)
-            .expect("failed to create transaction")
-    }) else {
-        no_db("write", store_name);
+    let ser = serde_wasm_bindgen::Serializer::json_compatible();
+    let Ok(js_val) = value.serialize(&ser) else {
+        db_failed("write", store_name, "строка не сериализуется");
         return;
     };
-    let store = tx.store(store_name).expect("store not found");
-    let ser = serde_wasm_bindgen::Serializer::json_compatible();
-    let js_val = value.serialize(&ser).expect("serialize failed");
-    store.put(&js_val, None).await.expect("put failed");
-    tx.done().await.expect("transaction failed");
-    bump(store_name);
+    write_value(store_name, js_val, "write").await;
+}
+
+/// ОДНА запись в стор, с переоткрытием соединения при первой неудаче.
+///
+/// Раньше каждая писавшая функция несла свою цепочку `.expect`, и любая из них
+/// роняла приложение целиком. Теперь путь один и он не паникует: не записалось —
+/// громко в лог и в телеметрию.
+async fn write_value(store_name: &str, js_val: JsValue, op: &str) {
+    for attempt in 0..2 {
+        let Some(tx) = with_db_opt(|db| db.transaction(&[store_name], TransactionMode::ReadWrite))
+        else {
+            no_db(op, store_name);
+            return;
+        };
+        let tx = match tx {
+            Ok(tx) => tx,
+            Err(e) => {
+                let err = format!("{e}");
+                if attempt == 0 && is_dead_connection(&err) {
+                    reopen().await;
+                    continue;
+                }
+                db_failed(op, store_name, &err);
+                return;
+            }
+        };
+        let store = match tx.store(store_name) {
+            Ok(s) => s,
+            Err(e) => {
+                db_failed(op, store_name, &format!("{e}"));
+                return;
+            }
+        };
+        let done = match store.put(&js_val, None).await {
+            Ok(_) => tx.done().await.map_err(|e| format!("{e}")),
+            Err(e) => Err(format!("{e}")),
+        };
+        match done {
+            Ok(_) => {
+                bump(store_name);
+                return;
+            }
+            Err(err) => {
+                if attempt == 0 && is_dead_connection(&err) {
+                    reopen().await;
+                    continue;
+                }
+                db_failed(op, store_name, &err);
+                return;
+            }
+        }
+    }
 }
 
 pub async fn get<T: DeserializeOwned>(store_name: &str, id: &str) -> Option<T> {
-    let Some(tx) = with_db_opt(|db| {
-        db.transaction(&[store_name], TransactionMode::ReadOnly)
-            .expect("failed to create transaction")
-    }) else {
-        no_db("read", store_name);
-        return None;
-    };
-    let store = tx.store(store_name).expect("store not found");
-    let key = JsValue::from_str(id);
-    let result = store.get(key).await.expect("get failed");
-    result.and_then(|js_val| decode_row(store_name, js_val))
+    // Две попытки: между ними соединение переоткрывается. Мёртвое соединение —
+    // обычное дело на iOS (см. [`is_dead_connection`]), и терять из-за него чтение
+    // незачем.
+    for attempt in 0..2 {
+        let Some(tx) = with_db_opt(|db| db.transaction(&[store_name], TransactionMode::ReadOnly))
+        else {
+            no_db("read", store_name);
+            return None;
+        };
+        let tx = match tx {
+            Ok(tx) => tx,
+            Err(e) => {
+                let err = format!("{e}");
+                if attempt == 0 && is_dead_connection(&err) {
+                    reopen().await;
+                    continue;
+                }
+                db_failed("get", store_name, &err);
+                return None;
+            }
+        };
+        let store = match tx.store(store_name) {
+            Ok(s) => s,
+            Err(e) => {
+                db_failed("get", store_name, &format!("{e}"));
+                return None;
+            }
+        };
+        match store.get(JsValue::from_str(id)).await {
+            Ok(result) => return result.and_then(|js_val| decode_row(store_name, js_val)),
+            Err(e) => {
+                let err = format!("{e}");
+                if attempt == 0 && is_dead_connection(&err) {
+                    reopen().await;
+                    continue;
+                }
+                db_failed("get", store_name, &err);
+                return None;
+            }
+        }
+    }
+    None
 }
 
 /// Прочитать строку и, если решение положительное, записать новую — В ОДНОЙ
@@ -580,28 +675,45 @@ where
         !is_synced_store(store_name),
         "update_atomic не журналирует изменения — синкаемым сторам не подходит"
     );
-    let Some(tx) = with_db_opt(|db| {
-        db.transaction(&[store_name], TransactionMode::ReadWrite)
-            .expect("failed to create transaction")
-    }) else {
+    let Some(Ok(tx)) = with_db_opt(|db| db.transaction(&[store_name], TransactionMode::ReadWrite))
+    else {
         no_db("update", store_name);
         return false;
     };
-    let store = tx.store(store_name).expect("store not found");
-    let current = store
-        .get(JsValue::from_str(id))
-        .await
-        .expect("get failed")
-        .and_then(|js_val| decode_row::<T>(store_name, js_val));
+    let Ok(store) = tx.store(store_name) else {
+        db_failed("update", store_name, "стор не найден");
+        return false;
+    };
+    let current = match store.get(JsValue::from_str(id)).await {
+        Ok(v) => v.and_then(|js_val| decode_row::<T>(store_name, js_val)),
+        Err(e) => {
+            // Повтора здесь нет НАМЕРЕННО: аренда — не та работа, ради которой
+            // стоит бороться. Не получилось занять — продукт возьмут в следующий
+            // проход, а тихо продолжить с непрочитанной строкой нельзя.
+            db_failed("update", store_name, &format!("{e}"));
+            return false;
+        }
+    };
     let Some(next) = decide(current) else {
         // Решение отрицательное: строку не трогаем, транзакцию закрываем.
-        tx.done().await.expect("transaction failed");
+        if let Err(e) = tx.done().await {
+            db_failed("update", store_name, &format!("{e}"));
+        }
         return false;
     };
     let ser = serde_wasm_bindgen::Serializer::json_compatible();
-    let js_val = next.serialize(&ser).expect("serialize failed");
-    store.put(&js_val, None).await.expect("put failed");
-    tx.done().await.expect("transaction failed");
+    let Ok(js_val) = next.serialize(&ser) else {
+        db_failed("update", store_name, "строка не сериализуется");
+        return false;
+    };
+    if let Err(e) = store.put(&js_val, None).await {
+        db_failed("update", store_name, &format!("{e}"));
+        return false;
+    }
+    if let Err(e) = tx.done().await {
+        db_failed("update", store_name, &format!("{e}"));
+        return false;
+    }
     bump(store_name);
     true
 }
@@ -616,18 +728,50 @@ pub async fn delete(store_name: &str, id: &str) {
 
 /// Untracked delete — ONLY for sync-apply paths.
 pub async fn delete_untracked(store_name: &str, id: &str) {
-    let Some(tx) = with_db_opt(|db| {
-        db.transaction(&[store_name], TransactionMode::ReadWrite)
-            .expect("failed to create transaction")
-    }) else {
-        no_db("delete", store_name);
-        return;
-    };
-    let store = tx.store(store_name).expect("store not found");
-    let key = JsValue::from_str(id);
-    store.delete(key).await.expect("delete failed");
-    tx.done().await.expect("transaction failed");
-    bump(store_name);
+    for attempt in 0..2 {
+        let Some(tx) = with_db_opt(|db| db.transaction(&[store_name], TransactionMode::ReadWrite))
+        else {
+            no_db("delete", store_name);
+            return;
+        };
+        let tx = match tx {
+            Ok(tx) => tx,
+            Err(e) => {
+                let err = format!("{e}");
+                if attempt == 0 && is_dead_connection(&err) {
+                    reopen().await;
+                    continue;
+                }
+                db_failed("delete", store_name, &err);
+                return;
+            }
+        };
+        let store = match tx.store(store_name) {
+            Ok(s) => s,
+            Err(e) => {
+                db_failed("delete", store_name, &format!("{e}"));
+                return;
+            }
+        };
+        let done = match store.delete(JsValue::from_str(id)).await {
+            Ok(()) => tx.done().await.map_err(|e| format!("{e}")),
+            Err(e) => Err(format!("{e}")),
+        };
+        match done {
+            Ok(_) => {
+                bump(store_name);
+                return;
+            }
+            Err(err) => {
+                if attempt == 0 && is_dead_connection(&err) {
+                    reopen().await;
+                    continue;
+                }
+                db_failed("delete", store_name, &err);
+                return;
+            }
+        }
+    }
 }
 
 /// Разобрать одну строку стора. Строка, которую текущая схема взять не может,
@@ -660,15 +804,25 @@ fn decode_row<T: DeserializeOwned>(store_name: &str, val: JsValue) -> Option<T> 
 }
 
 pub async fn list_all<T: DeserializeOwned>(store_name: &str) -> Vec<T> {
-    let Some(tx) = with_db_opt(|db| {
-        db.transaction(&[store_name], TransactionMode::ReadOnly)
-            .expect("failed to create transaction")
-    }) else {
+    let Some(Ok(tx)) = with_db_opt(|db| db.transaction(&[store_name], TransactionMode::ReadOnly))
+    else {
         no_db("read", store_name);
         return Vec::new();
     };
-    let store = tx.store(store_name).expect("store not found");
-    let entries = store.get_all(None, None).await.expect("get_all failed");
+    let store = match tx.store(store_name) {
+        Ok(s) => s,
+        Err(e) => {
+            db_failed("list_all", store_name, &format!("{e}"));
+            return Vec::new();
+        }
+    };
+    let entries = match store.get_all(None, None).await {
+        Ok(v) => v,
+        Err(e) => {
+            db_failed("list_all", store_name, &format!("{e}"));
+            return Vec::new();
+        }
+    };
     entries
         .into_iter()
         .filter_map(|val| decode_row(store_name, val))
@@ -680,21 +834,37 @@ pub async fn list_by_index<T: DeserializeOwned>(
     index_name: &str,
     value: &str,
 ) -> Vec<T> {
-    let Some(tx) = with_db_opt(|db| {
-        db.transaction(&[store_name], TransactionMode::ReadOnly)
-            .expect("failed to create transaction")
-    }) else {
+    let Some(Ok(tx)) = with_db_opt(|db| db.transaction(&[store_name], TransactionMode::ReadOnly))
+    else {
         no_db("read", store_name);
         return Vec::new();
     };
-    let store = tx.store(store_name).expect("store not found");
-    let index = store.index(index_name).expect("index not found");
+    let store = match tx.store(store_name) {
+        Ok(s) => s,
+        Err(e) => {
+            db_failed("list_by_index", store_name, &format!("{e}"));
+            return Vec::new();
+        }
+    };
+    let index = match store.index(index_name) {
+        Ok(i) => i,
+        Err(e) => {
+            db_failed("list_by_index", store_name, &format!("{e}"));
+            return Vec::new();
+        }
+    };
     let key = JsValue::from_str(value);
-    let key_range = rexie::KeyRange::only(&key).expect("key range failed");
+    let Ok(key_range) = rexie::KeyRange::only(&key) else {
+        db_failed("list_by_index", store_name, "не построить диапазон ключа");
+        return Vec::new();
+    };
     let entries = index
         .get_all(Some(key_range), None)
         .await
-        .expect("index query failed");
+        .unwrap_or_else(|e| {
+            db_failed("list_by_index", store_name, &format!("{e}"));
+            Vec::new()
+        });
     entries
         .into_iter()
         .filter_map(|val| decode_row(store_name, val))
@@ -702,15 +872,19 @@ pub async fn list_by_index<T: DeserializeOwned>(
 }
 
 pub async fn count(store_name: &str) -> u32 {
-    let Some(tx) = with_db_opt(|db| {
-        db.transaction(&[store_name], TransactionMode::ReadOnly)
-            .expect("failed to create transaction")
-    }) else {
+    let Some(Ok(tx)) = with_db_opt(|db| db.transaction(&[store_name], TransactionMode::ReadOnly))
+    else {
         no_db("read", store_name);
         return 0;
     };
-    let store = tx.store(store_name).expect("store not found");
-    store.count(None).await.expect("count failed")
+    let Ok(store) = tx.store(store_name) else {
+        db_failed("count", store_name, "стор не найден");
+        return 0;
+    };
+    store.count(None).await.unwrap_or_else(|e| {
+        db_failed("count", store_name, &format!("{e}"));
+        0
+    })
 }
 
 pub async fn wipe_all() {
@@ -721,15 +895,22 @@ pub async fn wipe_all() {
 }
 
 pub async fn clear(store_name: &str) {
-    let Some(tx) = with_db_opt(|db| {
-        db.transaction(&[store_name], TransactionMode::ReadWrite)
-            .expect("failed to create transaction")
-    }) else {
+    let Some(Ok(tx)) = with_db_opt(|db| db.transaction(&[store_name], TransactionMode::ReadWrite))
+    else {
         no_db("clear", store_name);
         return;
     };
-    let store = tx.store(store_name).expect("store not found");
-    store.clear().await.expect("clear failed");
-    tx.done().await.expect("transaction failed");
+    let Ok(store) = tx.store(store_name) else {
+        db_failed("clear", store_name, "стор не найден");
+        return;
+    };
+    if let Err(e) = store.clear().await {
+        db_failed("clear", store_name, &format!("{e}"));
+        return;
+    }
+    if let Err(e) = tx.done().await {
+        db_failed("clear", store_name, &format!("{e}"));
+        return;
+    }
     bump(store_name);
 }

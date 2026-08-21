@@ -39,6 +39,13 @@ binding = "THIRDPARTY_PROVIDERS"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "thirdparty-providers"
 
+# Ключ Alibaba Cloud Model Studio, регион Singapore. Имя биндинга = имя, которым
+# на него ссылается поле `key` в реестре.
+[[secrets_store_secrets]]
+binding = "QWEN_STUDIO_API_KEY_SINGAPOUR"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "QWEN_STUDIO_API_KEY_SINGAPOUR"
+
 # ── Production (separate worker on ai.renorma.app) ──
 # Deploy: wrangler deploy --env production
 # Secrets: wrangler secret put JWT_SECRET --env production
@@ -78,3 +85,8 @@ secret_name = "internal-push-key"
 binding = "THIRDPARTY_PROVIDERS"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
 secret_name = "thirdparty-providers"
+
+[[env.production.secrets_store_secrets]]
+binding = "QWEN_STUDIO_API_KEY_SINGAPOUR"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "QWEN_STUDIO_API_KEY_SINGAPOUR"

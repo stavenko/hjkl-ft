@@ -66,7 +66,13 @@ pub async fn reopen() {
     // dropping it — a resume must never wedge the app.
     match open(&name).await {
         Ok(fresh) => {
-            DB.with(|cell| cell.replace(Some(fresh)));
+            // Старое соединение закрываем ЯВНО. Без этого оно живёт до сборки
+            // мусора и продолжает держать базу: апгрейд версии и удаление такой
+            // базы получают `blocked` и висят, пока браузер не соберётся её
+            // освободить.
+            if let Some(old) = DB.with(|cell| cell.replace(Some(fresh))) {
+                old.close();
+            }
             bump_all();
         }
         Err(e) => {
@@ -315,7 +321,10 @@ pub fn init_signals() {
 pub async fn activate_for_user(user_id: &str) -> Result<(), String> {
     let target = open(&user_db_name(user_id)).await?;
 
-    DB.with(|cell| cell.replace(Some(target)));
+    // Прежняя база другого пользователя закрывается явно — см. [`reopen`].
+    if let Some(old) = DB.with(|cell| cell.replace(Some(target))) {
+        old.close();
+    }
     DB_NAME.with(|c| c.replace(Some(user_db_name(user_id))));
 
     // Гидратация кэша профиля, чтобы синхронные геттеры читали профиль АКТИВНОГО

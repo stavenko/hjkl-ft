@@ -1,4 +1,9 @@
-var CACHE_NAME = 'ft-v39';
+// БАМП ИМЕНИ = СНОС КЭША. `activate` удаляет все кэши с другими именами, и это
+// единственный способ выбросить закэшированное под ПОСТОЯННЫМ адресом: у js/wasm
+// хеш в имени, а /story-img/*.gif, шрифты и иконки живут по одному и тому же URL.
+// Картинки историй пересняли — а на устройствах остались прежние, потому что имя
+// кэша не менялось с ft-v39.
+var CACHE_NAME = 'ft-v40';
 // Separate, long-lived cache holding the notification-receipt marker (the ntf code
 // of a received push). Kept across SW activations (excluded from the cleanup below)
 // so an app launched AFTER the push still consumes it. NOT usable as a live channel:
@@ -121,6 +126,33 @@ self.addEventListener('fetch', function(event) {
             Promise.race([network, timeout])
                 .then(function(r) { return r === '__timeout__' ? fallback() : r; })
                 .catch(fallback)
+        );
+        return;
+    }
+
+    // КАРТИНКИ ИСТОРИЙ — отдаём из кэша, но следом тихо перекачиваем.
+    //
+    // Адрес у них постоянный, а содержимое меняется: виджет переделали — и все
+    // снимки в историях пересняты под тем же именем. Чистый cache-first оставлял бы
+    // на устройстве прошлогодний кадр до самой смены `CACHE_NAME`, то есть до
+    // случайного повода. Здесь же человек видит кадр мгновенно (в том числе
+    // офлайн), а к следующему открытию истории он уже свежий.
+    if (url.pathname.startsWith('/story-img/')) {
+        event.respondWith(
+            caches.match(event.request).then(function(cached) {
+                var network = fetch(event.request).then(function(response) {
+                    if (response.ok) {
+                        var clone = response.clone();
+                        caches.open(CACHE_NAME).then(function(cache) { cache.put(event.request, clone); });
+                    }
+                    return response;
+                });
+                // Без кэша ждём сеть; с кэшем сеть не ждём вовсе — иначе на iOS
+                // зависший fetch задержал бы кадр (см. гонку с таймаутом ниже).
+                if (!cached) return network;
+                network.catch(function() {});
+                return cached;
+            })
         );
         return;
     }

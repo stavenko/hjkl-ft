@@ -22,7 +22,28 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const out = (name) => path.join(ROOT, "frontend/story-img", name);
 
 /// Кадр: тема, герой, что обводим и куда пишем.
+///
+/// Кадры второй недели (`planka_*`, `indicators`) героя не имеют: там ещё нечего
+/// выделять состоянием — виджет только что появился, и обводка показывает, ГДЕ он.
+/// Индикаторы у них выданы три дня назад при двенадцати днях дневника: гейт недели
+/// шагов ещё идёт («осталось N дней»), а ряд значков уже зелёный — овощи судят и те
+/// дни, что были до выдачи индикаторов, и без еды под ними значок оранжевел бы.
 const SHOTS = {
+  planka_cal: {
+    week: "base", target: null, days: 12, openedDaysAgo: 3,
+    sparks: ['[data-gauge="Калории"]'],
+    file: "dashboard-planka-cal.gif",
+  },
+  planka_macros: {
+    week: "base", target: null, days: 12, openedDaysAgo: 3,
+    sparks: ['[data-gauge="Белок"]', '[data-gauge="Фр/овощи"]'],
+    file: "dashboard-planka-macros.gif",
+  },
+  indicators: {
+    week: "base", target: null, days: 12, openedDaysAgo: 3,
+    sparks: ['[data-ind="Калории"] > div', '[data-ind="Белок"] > div', '[data-ind="Фр/овощи"] > div'],
+    file: "dashboard-indicators.gif",
+  },
   calcium: {
     week: "calcium", target: "calcium",
     sparks: ['[data-ind="Кальций"] > div', '[data-gauge="Кальций"]'],
@@ -77,7 +98,11 @@ for (const name of names) {
     baseUrl: BASE,
     context: { serviceWorkers: "block", deviceScaleFactor: 2 },
     uid: `story-widget-${name}-${Math.floor(Math.random() * 1e6)}`,
-    seed: sceneSeed({ week: shot.week, target: shot.target }),
+    seed: sceneSeed({
+      week: shot.week, target: shot.target,
+      ...(shot.days ? { days: shot.days } : {}),
+      ...(shot.openedDaysAgo !== undefined ? { openedDaysAgo: shot.openedDaysAgo } : {}),
+    }),
   });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForTimeout(5000);
@@ -89,6 +114,8 @@ for (const name of names) {
   // С повторами: виджет считает недельные величины асинхронно, и на первых
   // секундах ряд успевает постоять весь зелёным. Снимать в этот момент значит
   // получить кадр, где героя не видно вовсе.
+  // Кадру без героя (вторая неделя) полагается ноль оранжевых: выделять там нечего.
+  const wantOrange = shot.target ? 1 : 0;
   let row = [], orange = [], red = [];
   for (let attempt = 0; attempt < 6; attempt++) {
     row = await page.evaluate(() =>
@@ -98,12 +125,12 @@ for (const name of names) {
       ]));
     orange = row.filter(([, c]) => /232, *133/.test(c)).map(([n]) => n);
     red = row.filter(([, c]) => /224, *48/.test(c)).map(([n]) => n);
-    if (orange.length === 1 && !red.length) break;
+    if (orange.length === wantOrange && !red.length && row.length) break;
     await page.waitForTimeout(3000);
   }
   console.log(`${name}: оранжевых [${orange}] красных [${red}] всего ${row.length}`);
   if (red.length) throw new Error(`${name}: в ряду красный индикатор — сцена не та`);
-  if (orange.length !== 1) throw new Error(`${name}: оранжевых должно быть ровно один`);
+  if (orange.length !== wantOrange) throw new Error(`${name}: оранжевых должно быть ${wantOrange}`);
 
   await makeWidgetGif(page, shot.sparks, out(shot.file), {});
   console.log(`  собран ${shot.file}`);

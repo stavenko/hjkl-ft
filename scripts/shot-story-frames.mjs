@@ -30,6 +30,9 @@ const STORIES = {
   // Appears-флага имя предыдущей недели (week3 = `AfterActivityWeek`), а сама
   // история АНОНСИРУЕТ следующую. Отсчёт: week3 — активность, week4 — кальций,
   // week5 — железо, week6 — жиры, week7 — красное мясо, week8 — яйца.
+  // Вторая неделя — единственная, где кадры показывают виджет БЕЗ героя: сцена
+  // новичка (см. `days`/`openedDaysAgo` в widget-scene).
+  week2: { storyId: "week2", week: "base", target: null, days: 12, openedDaysAgo: 3 },
   calcium: { storyId: "week4", week: "calcium", target: "calcium" },
   iron: { storyId: "week5", week: "iron", target: "iron" },
   fats: { storyId: "week6", week: "fats", target: "epa_dha" },
@@ -71,7 +74,11 @@ for (const name of names) {
     baseUrl: BASE,
     context: { serviceWorkers: "block", viewport: { width: 430, height: 932 }, deviceScaleFactor: 2 },
     uid: `story-frames-${name}-${Math.floor(Math.random() * 1e6)}`,
-    seed: sceneSeed({ week: st.week, target: st.target }),
+    seed: sceneSeed({
+      week: st.week, target: st.target,
+      ...(st.days ? { days: st.days } : {}),
+      ...(st.openedDaysAgo !== undefined ? { openedDaysAgo: st.openedDaysAgo } : {}),
+    }),
   });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForTimeout(6000);
@@ -120,7 +127,7 @@ for (const name of names) {
     // Кадр с подсветкой снимаем ещё и петлёй: мигание обводки — то, ради чего
     // такой кадр вообще стоит в истории, и по неподвижному снимку не судится.
     const animated = await page.evaluate((sel) =>
-      [...document.querySelectorAll(`${sel} img`)].some((im) => /-highlight\.gif$/.test(im.src)), viewer);
+      [...document.querySelectorAll(`${sel} img`)].some((im) => /\.gif$/.test(im.src)), viewer);
     if (animated) await captureLoop(page, path.join(OUTDIR, `${stem}.gif`));
     const text = await page.evaluate((sel) =>
       (document.querySelector(sel)?.innerText || "").replace(/\s+/g, " ").slice(0, 70), viewer);

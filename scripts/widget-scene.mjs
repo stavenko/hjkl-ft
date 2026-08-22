@@ -48,12 +48,22 @@ const DAYS = 9 * 7;
  *   `null` — всё зелёное.
  * @param {number} [opts.dayOfWeek] какой сегодня день недели темы (1…7), для шкал
  *   с темпом. По умолчанию 4 — середина, шкала наполовину.
+ * @param {number} [opts.days] сколько дней истории сеять, считая сегодняшний.
+ * @param {number} [opts.openedDaysAgo] сколько дней назад ВЫДАНЫ индикаторы. По
+ *   умолчанию вся история. Меньше — это НОВИЧОК: гейт следующей темы ещё идёт, и
+ *   виджет пишет «осталось N дней»; на давно выданных индикаторах серия набрана и
+ *   подпись гейта пропадает, а с ней и кадр второй недели.
+ *
+ *   Дневник при этом сеется ГЛУБЖЕ, чем выданы индикаторы, и это не украшательство:
+ *   овощам цель известна всегда, поэтому день без дневника для них не «нет данных»,
+ *   а 0/800 — промах. Семь дней еды под тремя днями индикаторов дают зелёный ряд
+ *   при незакрытом гейте.
  */
-export function sceneSeed({ week, target = null, dayOfWeek = 4 }) {
+export function sceneSeed({ week, target = null, dayOfWeek = 4, days = DAYS, openedDaysAgo = null }) {
   if (!WEEKS.includes(week)) throw new Error(`неизвестная тема: ${week}`);
   return async (page, uid) => {
     await page.evaluate(
-      async ({ uid, week, target, dayOfWeek, RULES, DAYS, WEEKS }) => {
+      async ({ uid, week, target, dayOfWeek, RULES, DAYS, OPENED, WEEKS }) => {
         const db = await new Promise((res, rej) => {
           const r = indexedDB.open(`hjkl-ft-${uid}`);
           r.onsuccess = () => res(r.result);
@@ -96,7 +106,7 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4 }) {
           { key: "welcome_shown", value: "true" },
           { key: "push_onboarding_dismissed", value: "true" },
           { key: "paywall_skipped_date", value: ymd(0) },
-          { key: "ind_opened_at", value: ymd(DAYS - 1) },
+          { key: "ind_opened_at", value: ymd(OPENED) },
           { key: "ft_subscription", value: JSON.stringify({
               plan: "monthly", end: Date.now() + 30 * 864e5, active: true,
               start: Date.now(), status: "paid", no_renew: false, provider: "lava" }) },
@@ -313,7 +323,8 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4 }) {
         }
         db.close();
       },
-      { uid, week, target, dayOfWeek, RULES, DAYS, WEEKS },
+      { uid, week, target, dayOfWeek, RULES, DAYS: days,
+        OPENED: openedDaysAgo ?? days - 1, WEEKS },
     );
   };
 }

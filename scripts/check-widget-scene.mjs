@@ -2,6 +2,7 @@
 //
 //   node scripts/check-widget-scene.mjs [неделя] [герой]
 //   node scripts/check-widget-scene.mjs fats epa_dha
+//   DAYS=5 node scripts/check-widget-scene.mjs base   # короткая история новичка
 import { chromium } from "playwright";
 import { openSeeded, DEFAULT_URL } from "./harness.mjs";
 import { sceneSeed } from "./widget-scene.mjs";
@@ -16,7 +17,7 @@ const { context, page } = await openSeeded(browser, {
   baseUrl: BASE,
   context: { serviceWorkers: "block", deviceScaleFactor: 2 },
   uid: `scene-${Math.floor(Math.random() * 1e6)}`,
-  seed: sceneSeed({ week, target }),
+  seed: sceneSeed({ week, target, ...(process.env.DAYS ? { days: Number(process.env.DAYS) } : {}) }),
 });
 await page.reload({ waitUntil: "domcontentloaded" });
 await page.waitForTimeout(6000);

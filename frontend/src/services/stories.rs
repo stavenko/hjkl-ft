@@ -1426,7 +1426,7 @@ const S8: &[Frame] = &[
     // разметкой: снимок под ними размыт сильнее исходного, чтобы буквы читались.
     Frame {
         bg: Bg::Dark,
-        media: Media::Cover("eggs-hands.jpg"),
+        media: Media::CoverWhole("eggs-hands.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Eggs: micronutrients", ru: "Яйца: микронутриенты" },
         title: Loc { en: "", ru: "" },

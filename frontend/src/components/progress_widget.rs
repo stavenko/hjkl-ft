@@ -478,6 +478,44 @@ struct TaskInput {
     egg_gate: bool,
 }
 
+/// Состояние полосы калорий: недобор, попадание в коридор, перебор.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CalorieBar {
+    /// Недобрал больше коридора — день ещё не закрыт, судить нечего.
+    Under,
+    /// В пределах ±[`CALORIE_BAND_KCAL`] от планки — выполнено.
+    Hit,
+    /// Перебрал больше коридора.
+    Over,
+}
+
+impl CalorieBar {
+    fn color(self) -> &'static str {
+        match self {
+            CalorieBar::Under => "#9aa0a6",
+            CalorieBar::Hit => "#1fa463",
+            CalorieBar::Over => "#e0304f",
+        }
+    }
+}
+
+/// Цвет полосы калорий — ПО ТОМУ ЖЕ КОРИДОРУ, по которому индикатор калорий судит
+/// день (`indicators::CALORIE_BAND_KCAL`, ±50 ккал).
+///
+/// Прежде полоса краснела от любого превышения, и перебор в семь ккал выглядел
+/// провалом, хотя индикатор тот же день считал зелёным. Полоса и значок обязаны
+/// говорить одно и то же, поэтому границы здесь ровно те же: ровно ±50 — уже мимо.
+pub(crate) fn calorie_bar_state(eaten: f64, planka: f64) -> CalorieBar {
+    let band = crate::services::indicators::CALORIE_BAND_KCAL;
+    if eaten - planka >= band {
+        CalorieBar::Over
+    } else if planka - eaten > band {
+        CalorieBar::Under
+    } else {
+        CalorieBar::Hit
+    }
+}
+
 /// ЗАДАНИЕ ТЕКУЩЕЙ НЕДЕЛИ: что держать, ради чего и сколько осталось.
 ///
 /// Стоит в шапке карточки — там, где раньше была надпись «Ваша дневная планка».
@@ -842,13 +880,24 @@ pub fn ProgressWidget() -> impl IntoView {
             view! {
                 <div attr:data-testid="progress-widget" style=CARD>
                     {match planka_v {
-                        // Planka computed → a calorie GAUGE (eaten today / target),
-                        // in place of the old plain number. Green while under the
-                        // target, red once over (it's an «at most» goal).
+                        // Planka computed → a calorie GAUGE (eaten today / target).
+                        //
+                        // ЦВЕТ — ПО КОРИДОРУ ±50 ККАЛ, тому же, по которому индикатор
+                        // калорий судит день (`indicators::CALORIE_BAND_KCAL`):
+                        //
+                        //   недобрал больше 50   → серый: день ещё не закрыт;
+                        //   в пределах ±50       → зелёный: планка выполнена;
+                        //   перебрал больше 50   → красный.
+                        //
+                        // Прежде полоса краснела от любого превышения, и перебор в семь
+                        // ккал выглядел провалом, хотя индикатор тот же день считал
+                        // зелёным. Полоса и значок обязаны говорить одно и то же.
                         Some(n) => {
                             let calorie = {
                                 let eaten = today_kcal.get().unwrap_or(0.0);
-                                let color = if eaten > n { "#e0304f" } else { "#1fa463" }.to_string();
+                                let state = calorie_bar_state(eaten, n);
+                                let over = state == CalorieBar::Over;
+                                let color = state.color().to_string();
                                 view! {
                                     <div style="display: flex; flex-direction: column; gap: 10px;">
                                         // ЗАДАНИЕ НЕДЕЛИ вместо надписи «Ваша дневная
@@ -871,7 +920,7 @@ pub fn ProgressWidget() -> impl IntoView {
                                             label=t("dashboard.calories_title").to_string()
                                             unit=t("common.unit.kcal").to_string()
                                             color=color height=12.0
-                                            value_color={(eaten > n).then(|| "#e0304f".to_string())}/>
+                                            value_color={over.then(|| "#e0304f".to_string())}/>
                                     </div>
                                 }.into_view()
                             };
@@ -979,5 +1028,32 @@ pub fn ProgressWidget() -> impl IntoView {
                 </div>
             }.into_view()
         }}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Тот самый случай со снимка: 2957 при планке 2950. Семь ккал сверху — это
+    /// попадание, а не провал.
+    #[test]
+    fn perebor_v_sem_kkal_ostayotsya_zelyonym() {
+        assert_eq!(calorie_bar_state(2957.0, 2950.0), CalorieBar::Hit);
+    }
+
+    #[test]
+    fn granitsy_koridora_te_zhe_chto_u_indikatora() {
+        // Ровно ±50 — уже мимо: индикатор судит день по строгому «меньше 50».
+        assert_eq!(calorie_bar_state(3000.0, 2950.0), CalorieBar::Over);
+        assert_eq!(calorie_bar_state(2900.0, 2950.0), CalorieBar::Hit);
+        assert_eq!(calorie_bar_state(2899.0, 2950.0), CalorieBar::Under);
+        assert_eq!(calorie_bar_state(2999.0, 2950.0), CalorieBar::Hit);
+    }
+
+    /// Пустой день — серый: человек ещё не ел, а не провалил планку.
+    #[test]
+    fn pustoy_den_seryi() {
+        assert_eq!(calorie_bar_state(0.0, 2950.0), CalorieBar::Under);
     }
 }

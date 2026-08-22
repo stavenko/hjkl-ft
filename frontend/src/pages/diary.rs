@@ -391,15 +391,35 @@ pub fn DiaryPage() -> impl IntoView {
                             // Day goal: single gauge bar
                             let current = nutrient_sum(&goal.nutrient, &es, &fs);
                             let pct = if target > 0.0 { ((current / target) * 100.0).min(100.0) } else { 0.0 };
-                            let bar_color = if is_at_least {
-                                if current >= target { "var(--bulma-success)" } else { "var(--bulma-text-weak)" }
-                            } else {
-                                if current > target { "var(--bulma-danger)" } else { "var(--bulma-success)" }
+                            // КАЛОРИИ судятся КОРИДОРОМ ±50 ккал — тем же, по которому
+                            // их судит индикатор и полоса на дашборде: недобрал больше
+                            // — серый (день не закрыт), попал — зелёный, перебрал
+                            // больше — красный. Прежде здесь краснело любое превышение,
+                            // и 2957 при планке 2950 выглядели провалом в дневнике,
+                            // будучи попаданием на главной.
+                            let calorie_state = (goal.nutrient == "Calories")
+                                .then(|| crate::components::progress_widget::calorie_bar_state(current, target));
+                            let bar_color = match calorie_state {
+                                Some(crate::components::progress_widget::CalorieBar::Over) => "var(--bulma-danger)",
+                                Some(crate::components::progress_widget::CalorieBar::Hit) => "var(--bulma-success)",
+                                Some(crate::components::progress_widget::CalorieBar::Under) => "var(--bulma-text-weak)",
+                                None if is_at_least => {
+                                    if current >= target { "var(--bulma-success)" } else { "var(--bulma-text-weak)" }
+                                }
+                                None => {
+                                    if current > target { "var(--bulma-danger)" } else { "var(--bulma-success)" }
+                                }
                             };
-                            let text_color = if is_at_least {
-                                if current >= target { "has-text-success" } else { "" }
-                            } else {
-                                if current > target { "has-text-danger" } else { "" }
+                            let text_color = match calorie_state {
+                                Some(crate::components::progress_widget::CalorieBar::Over) => "has-text-danger",
+                                Some(crate::components::progress_widget::CalorieBar::Hit) => "has-text-success",
+                                Some(crate::components::progress_widget::CalorieBar::Under) => "",
+                                None if is_at_least => {
+                                    if current >= target { "has-text-success" } else { "" }
+                                }
+                                None => {
+                                    if current > target { "has-text-danger" } else { "" }
+                                }
                             };
                             view! {
                                 <div style="margin-bottom: 0.5rem;">

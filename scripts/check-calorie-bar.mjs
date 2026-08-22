@@ -1,9 +1,12 @@
-// ЦВЕТ ПОЛОСЫ КАЛОРИЙ — на живом дашборде.
+// ЦВЕТ ПОЛОСЫ КАЛОРИЙ — на живом дашборде И В ДНЕВНИКЕ.
 //
 // Правило: коридор ±50 ккал от планки. Недобрал больше — серый (день не закрыт),
 // попал — зелёный, перебрал больше — красный. Полоса обязана говорить то же, что и
 // индикатор калорий: он судит день по тому же коридору, и расхождение уже случалось
 // — перебор в семь ккал красил полосу красным, пока значок оставался зелёным.
+//
+// Полос две: на дашборде и в шапке дневника. Рисуются они разным кодом, и правило у
+// них обязано быть одно — потому проверяются обе.
 //
 //   node scripts/check-calorie-bar.mjs
 import { chromium } from "playwright";
@@ -81,10 +84,12 @@ const seedFor = (eaten) => async (page, uid) => {
   );
 };
 
+/// Палитры у двух экранов РАЗНЫЕ: дашборд рисует своими цветами, дневник — темой
+/// Bulma. Проверяется не оттенок, а смысл, поэтому распознаются оба набора.
 const NAME = (rgb) =>
-  /224, *48/.test(rgb) ? "красный"
-    : /31, *164/.test(rgb) ? "зелёный"
-    : /154, *160/.test(rgb) ? "серый"
+  /(224, *48)|(255, *102)/.test(rgb) ? "красный"
+    : /(31, *164)|(72, *199)/.test(rgb) ? "зелёный"
+    : /(154, *160)|(105, *116)/.test(rgb) ? "серый"
     : rgb;
 
 let failed = 0;
@@ -98,7 +103,7 @@ for (const c of CASES) {
   });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForTimeout(7000);
-  const got = await page.evaluate(() => {
+  const dash = await page.evaluate(() => {
     const g = document.querySelector('[data-gauge="Калории"]');
     if (!g) return "шкалы нет";
     // Заливка — самый вложенный div с непрозрачным фоном.
@@ -107,10 +112,29 @@ for (const c of CASES) {
       .filter((bg) => bg && bg !== "rgba(0, 0, 0, 0)");
     return fills[fills.length - 1] || "заливки нет";
   });
-  const name = NAME(got);
-  const ok = name === c.want;
-  if (!ok) failed++;
-  console.log(`${ok ? "✅" : "❌"} ${c.eaten} при планке ${PLANKA} → ${name} (ждали ${c.want}: ${c.why})`);
+
+  // ДНЕВНИК: та же планка нарисована в шапке — своей вёрсткой, без data-gauge.
+  await page.goto(`${BASE}/diary`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(5000);
+  const diary = await page.evaluate(() => {
+    const label = [...document.querySelectorAll("span")]
+      .find((el) => el.textContent.trim() === "Калории");
+    if (!label) return "строки нет";
+    // Заголовок и полоса лежат в одном блоке: поднимаемся к нему и берём заливку.
+    const box = label.closest("div")?.parentElement;
+    const fills = [...(box?.querySelectorAll("div") ?? [])]
+      .map((el) => getComputedStyle(el).backgroundColor)
+      .filter((bg) => bg && bg !== "rgba(0, 0, 0, 0)");
+    return fills[fills.length - 1] || "заливки нет";
+  });
+
+  for (const [where, rgb] of [["дашборд", dash], ["дневник", diary]]) {
+    const name = NAME(rgb);
+    const ok = name === c.want;
+    if (!ok) failed++;
+    console.log(`${ok ? "✅" : "❌"} ${where}: ${c.eaten} при планке ${PLANKA} → ${name} ` +
+      `(ждали ${c.want}: ${c.why})`);
+  }
   await context.close();
 }
 await browser.close();

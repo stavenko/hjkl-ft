@@ -2036,7 +2036,10 @@ fn usage_by_model(rows: &[api::ModelUsage]) -> leptos::View {
                 } else {
                     r.model.clone()
                 };
-                let tokens = format!("{} ↓ · {} ↑", fmt_tokens(r.in_tokens), fmt_tokens(r.out_tokens));
+                let mut tokens = format!("{} ↓ · {} ↑", fmt_tokens(r.in_tokens), fmt_tokens(r.out_tokens));
+                if r.neurons > 0.0 {
+                    tokens.push_str(&format!(" · {:.0} нейронов", r.neurons));
+                }
                 let cost = match r.usd {
                     Some(u) => fmt_usd(u),
                     None => "тариф не задан".to_string(),

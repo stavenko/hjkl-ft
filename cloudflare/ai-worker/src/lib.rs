@@ -213,8 +213,11 @@ async fn handle(req: Request, env: &Env, ctx: &Context) -> Result<Response> {
 fn neuron_rates(model: &str) -> (i64, i64) {
     match model {
         "@cf/qwen/qwen3-30b-a3b-fp8" => (4_625, 30_475),
-        // Only qwen3-30b is used for text today; price unknown models at its rates
-        // as a best-effort estimate (the caller logs the unknown model).
+        // 27B — ПЛОТНАЯ модель, и токен у неё почти в девять раз дороже, чем у
+        // 30B-A3B (там из тридцати миллиардов работают три). Пока ставки не было,
+        // её расход считался по дешёвому тарифу соседа и занижался во столько же.
+        "@cf/qwen/qwen3.8-27b" => (40_909, 290_909),
+        // Неизвестной модели ставим тариф 30b — оценка снизу, и вызывающий её логирует.
         _ => (4_625, 30_475),
     }
 }
@@ -1063,6 +1066,17 @@ mod tests {
     #[test]
     fn modeli_workers_ai_ne_uhodyat_naruzhu() {
         assert!(is_workers_ai("@cf/qwen/qwen3-30b-a3b-fp8"));
+        assert!(is_workers_ai("@cf/qwen/qwen3.8-27b"));
         assert!(!is_workers_ai("alpha-vision"));
+    }
+
+    /// У 27b СВОЙ тариф, и он много дороже: пока его не было, её расход считался
+    /// по ставке 30b и занижался почти в девять раз.
+    #[test]
+    fn u_27b_svoi_tarif_neironov() {
+        let (small_in, small_out) = neuron_rates("@cf/qwen/qwen3-30b-a3b-fp8");
+        let (big_in, big_out) = neuron_rates("@cf/qwen/qwen3.8-27b");
+        assert_eq!((big_in, big_out), (40_909, 290_909));
+        assert!(big_in > small_in * 8 && big_out > small_out * 8);
     }
 }

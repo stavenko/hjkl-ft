@@ -63,7 +63,10 @@ for (let i = 0; i < 10 && !row; i++) {
 }
 check(`токены записаны на модель ${MODEL}`, !!row,
   row ? `${row.inTokens} ↓ / ${row.outTokens} ↑ · source ${row.source}` : "строки нет");
-check("источник отделён от Workers AI", row?.source === "thirdparty", row?.source ?? "—");
+// Источник зависит от того, ЧЕЙ это счёт: у Workers AI — «text» (платим
+// нейронами), у стороннего провайдера — «thirdparty» (платим токенами).
+const want = MODEL.startsWith("@cf/") ? "text" : "thirdparty";
+check(`источник ${want}`, row?.source === want, row?.source ?? "—");
 
 // 3. Экран админки: строка модели видна человеку, а не только в JSON.
 const b = await chromium.launch({ headless: true });

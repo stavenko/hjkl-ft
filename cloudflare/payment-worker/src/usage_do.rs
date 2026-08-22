@@ -286,11 +286,15 @@ impl UsageDO {
         let by_model_rows: Vec<serde_json::Value> = sql
             .exec(
                 "SELECT source, model,
-                        SUM(in_tokens)  AS inTokens,
-                        SUM(out_tokens) AS outTokens
-                   FROM (SELECT source, model, in_tokens, out_tokens FROM usage_detail
+                        SUM(in_tokens)   AS inTokens,
+                        SUM(out_tokens)  AS outTokens,
+                        SUM(in_neurons)  AS inNeurons,
+                        SUM(out_neurons) AS outNeurons
+                   FROM (SELECT source, model, in_tokens, out_tokens, in_neurons, out_neurons
+                           FROM usage_detail
                          UNION ALL
-                         SELECT source, model, in_tokens, out_tokens FROM usage_weekly)
+                         SELECT source, model, in_tokens, out_tokens, in_neurons, out_neurons
+                           FROM usage_weekly)
                   GROUP BY source, model
                   ORDER BY (SUM(in_tokens) + SUM(out_tokens)) DESC",
                 None,
@@ -302,16 +306,24 @@ impl UsageDO {
                 let model = r.get("model").and_then(|v| v.as_str()).unwrap_or("");
                 let get = |k: &str| r.get(k).and_then(|v| v.as_i64()).unwrap_or(0);
                 let (ti, to) = (get("inTokens"), get("outTokens"));
-                // Тариф известен → деньги; неизвестен → null, а не ноль: нулём мы бы
-                // утверждали, что модель бесплатна.
-                let usd = prices.get(model).map(|(pin, pout)| {
-                    (ti as f64 * pin + to as f64 * pout) / 1_000_000.0
-                });
+                // Нейроны хранятся микро-долями (×1e6) — как их пишет ai-worker.
+                let neurons = (get("inNeurons") + get("outNeurons")) as f64 / 1e6;
+                // Деньги: у модели Cloudflare они считаются по НЕЙРОНАМ (тариф один и
+                // известен всегда), у сторонней — по токенам её тарифа. Тарифа нет →
+                // null, а не ноль: нулём мы бы утверждали, что модель бесплатна.
+                let usd = if neurons > 0.0 {
+                    Some(neurons * PRICE_USD_PER_1K_NEURONS / 1000.0)
+                } else {
+                    prices
+                        .get(model)
+                        .map(|(pin, pout)| (ti as f64 * pin + to as f64 * pout) / 1_000_000.0)
+                };
                 serde_json::json!({
                     "source": r.get("source").and_then(|v| v.as_str()).unwrap_or(""),
                     "model": model,
                     "inTokens": ti,
                     "outTokens": to,
+                    "neurons": neurons,
                     "usd": usd,
                 })
             })

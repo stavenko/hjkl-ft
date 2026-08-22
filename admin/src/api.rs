@@ -817,6 +817,9 @@ pub struct ModelUsage {
     pub in_tokens: i64,
     #[serde(rename = "outTokens", default)]
     pub out_tokens: i64,
+    /// Нейроны Cloudflare — у сторонней модели их нет (там платят токенами).
+    #[serde(default)]
+    pub neurons: f64,
     #[serde(default)]
     pub usd: Option<f64>,
 }

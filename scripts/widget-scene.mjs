@@ -75,6 +75,22 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4 }) {
         // чтобы её сетка совпадала с недельной сеткой остальных: день открытия —
         // ровно `dayOfWeek - 1` дней назад плюс целые недели.
         const anchor = dayOfWeek - 1;
+        // Якорь ПОСЛЕДНЕЙ открытой темы отдельный: гейт следующей темы смотрит,
+        // была ли с её открытия хоть одна ЗАКРЫТАЯ неделя, и если была —
+        // приложение откроет следующую неделю прямо во время съёмки. Так на кадре
+        // про красное мясо всплывала шкала яиц.
+        //
+        // Поэтому у последней темы завершённых недель ровно столько, сколько нужно
+        // её герою: недельному — одна, та самая испорченная (гейт видит провал и
+        // молчит); дневному — ни одной (гейту нечего смотреть). Сами индикаторы от
+        // этого не страдают: недели ДО открытия темы они судят наравне.
+        const weeklyHero = {
+          activity: [], calcium: [], iron: ["iron", "heme"],
+          fats: ["epa_dha", "fat_ratio"], red_meat: ["red_meat"], egg: ["egg"],
+        };
+        const lastAnchor = (weeklyHero[week] || []).includes(target) ? anchor + 7 : anchor;
+        /// Сколько дней назад открыта тема: у последней открытой — по правилу выше.
+        const openedAt = (name, backDays) => ymd(name === week ? lastAnchor : backDays + anchor);
         const app_flags = [
           { key: "db_schema_version", value: "999" },
           { key: "welcome_shown", value: "true" },
@@ -87,27 +103,27 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4 }) {
         ];
         if (upTo("activity")) {
           app_flags.push({ key: "activity_week_unlocked", value: "true" });
-          app_flags.push({ key: "steps_gate_opened_at", value: ymd(56 + anchor) });
+          app_flags.push({ key: "steps_gate_opened_at", value: openedAt("activity", 56) });
         }
         if (upTo("calcium")) {
           app_flags.push({ key: "calcium_week_unlocked", value: "true" });
-          app_flags.push({ key: "calcium_gate_opened_at", value: ymd(49 + anchor) });
+          app_flags.push({ key: "calcium_gate_opened_at", value: openedAt("calcium", 49) });
         }
         if (upTo("iron")) {
           app_flags.push({ key: "iron_week_unlocked", value: "true" });
-          app_flags.push({ key: "iron_week_opened_at", value: ymd(42 + anchor) });
+          app_flags.push({ key: "iron_week_opened_at", value: openedAt("iron", 42) });
         }
         if (upTo("fats")) {
           app_flags.push({ key: "fat_week_unlocked", value: "true" });
-          app_flags.push({ key: "fat_week_opened_at", value: ymd(35 + anchor) });
+          app_flags.push({ key: "fat_week_opened_at", value: openedAt("fats", 35) });
         }
         if (upTo("red_meat")) {
           app_flags.push({ key: "red_meat_week_unlocked", value: "true" });
-          app_flags.push({ key: "red_meat_week_opened_at", value: ymd(28 + anchor) });
+          app_flags.push({ key: "red_meat_week_opened_at", value: openedAt("red_meat", 28) });
         }
         if (upTo("egg")) {
           app_flags.push({ key: "egg_week_unlocked", value: "true" });
-          app_flags.push({ key: "egg_week_opened_at", value: ymd(21 + anchor) });
+          app_flags.push({ key: "egg_week_opened_at", value: openedAt("egg", 21) });
         }
 
         const profile = [{

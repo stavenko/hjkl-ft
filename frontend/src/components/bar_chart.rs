@@ -173,7 +173,6 @@ pub fn BarChart(
                     // СТУПЕНЧАТАЯ линия планки: горизонтальный отрезок на ширину дня,
                     // вертикальный — в день смены. Так видно и величину, и когда она
                     // менялась; прямая через весь график врала бы про прошлое.
-                    let planka_unit = unit.clone();
                     let planka_line = has_planka.then(|| {
                         let mut d = String::new();
                         let mut prev: Option<f64> = None;
@@ -194,7 +193,11 @@ pub fn BarChart(
                         // Подписана КАЖДАЯ ступень, а не только последняя: график
                         // показывает, как планка росла, и без чисел у прежних ступеней
                         // видна лишь форма. Подпись ставится на уровне своей ступени, в
-                        // её начале; у последней — полная, с единицей.
+                        // её начале.
+                        //
+                        // ТОЛЬКО ЧИСЛА. У последней ступени стояло «планка 13800 шагов»,
+                        // и на плотном графике эта строка налезала на соседнюю подпись;
+                        // что это за линия, и так видно — пунктир один на весь график.
                         let mut steps: Vec<(usize, f64)> = Vec::new();
                         let mut seen: Option<f64> = None;
                         for (i, p) in planka_by_day.iter().enumerate() {
@@ -227,7 +230,7 @@ pub fn BarChart(
                                 {last_val.map(|lv| view! {
                                     <text x=PR y=mapy(lv) - 3.0 text-anchor="end"
                                         fill=PLANKA_LINE font-size="10.5" font-weight="600">
-                                        {format!("{} {:.0} {}", t("chart.planka"), lv, planka_unit)}
+                                        {format!("{lv:.0}")}
                                     </text>
                                 })}
                             </g>

@@ -462,6 +462,12 @@ fn FrameView(frame: Frame) -> impl IntoView {
                 style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 0; \
                        width: 145%; max-width: none; height: auto;" />
         }.into_view(),
+        // Снимок целиком: ширина ровно по экрану, ничего не срезано.
+        Media::CoverWhole(p) => view! {
+            <img src=format!("/story-img/{p}")
+                style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 0; \
+                       width: 100%; max-width: none; height: auto;" />
+        }.into_view(),
         Media::Emoji(e) => view! {
             <div style="position: absolute; top: 15%; left: 0; right: 0; z-index: 1; \
                         display: flex; justify-content: center; font-size: 120px; line-height: 1;">
@@ -497,7 +503,7 @@ fn FrameView(frame: Frame) -> impl IntoView {
     // Цвет затемнения — НИЗ ФОНА этого кадра, а не всегда синий: шторка обязана
     // сойтись с фоном, иначе под фотографией видна граница чужого цвета.
     let (r, g, bl, solid) = (7, 13, 20, "#070d14");
-    let scrim = if matches!(frame.media, Media::Cover(_)) {
+    let scrim = if matches!(frame.media, Media::Cover(_) | Media::CoverWhole(_)) {
         format!(
             "position: absolute; left: 0; right: 0; bottom: 0; height: 66%; z-index: 1; \
              pointer-events: none; background: linear-gradient(180deg, \

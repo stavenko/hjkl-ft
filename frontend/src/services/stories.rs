@@ -65,6 +65,16 @@ pub enum Media {
     /// gradient whose translucency begins at the kicker line. Used for editorial
     /// "topic photo" frames (e.g. dairy sources).
     Cover(&'static str),
+    /// Фотография ЦЕЛИКОМ по ширине экрана, без вылета за края.
+    ///
+    /// [`Cover`] растягивает снимок на 145 % ширины: так фотография заполняет верх
+    /// кадра, а её края уходят за экран — для пейзажа и фактуры это правильно. Но
+    /// когда на снимке ОДИН ПРЕДМЕТ (сердце в венке), обрезка съедает его контур:
+    /// венок упирается в края и выглядит случайно кадрированным. Здесь картинка
+    /// стоит целиком и по центру.
+    ///
+    /// [`Cover`]: Media::Cover
+    CoverWhole(&'static str),
     /// The bundled weight-trend SVG chart.
     Chart,
     /// A large centred emoji (e.g. a celebration).
@@ -107,6 +117,10 @@ impl Frame {
         s.push('|');
         match self.media {
             Media::None => s.push_str("none"),
+            Media::CoverWhole(p) => {
+                s.push_str("coverwhole:");
+                s.push_str(p);
+            }
             Media::Shot(p) => {
                 s.push_str("shot:");
                 s.push_str(p);
@@ -326,7 +340,8 @@ fn all_image_paths() -> Vec<String> {
     for story in STORIES {
         for f in story.frames {
             match f.media {
-                Media::Shot(p) | Media::ShotUp(p, _) | Media::ShotTop(p) | Media::ShotBand(p) | Media::Cover(p) => {
+                Media::Shot(p) | Media::ShotUp(p, _) | Media::ShotTop(p) | Media::ShotBand(p)
+                | Media::Cover(p) | Media::CoverWhole(p) => {
                     set.insert(format!("/story-img/{p}"));
                 }
                 Media::Chart => {
@@ -1443,7 +1458,7 @@ const S8: &[Frame] = &[
     // 6 — холестерин: где он на самом деле.
     Frame {
         bg: Bg::Dark,
-        media: Media::Cover("eggs-heart.jpg"),
+        media: Media::CoverWhole("eggs-heart.jpg"),
         accent: AMBER,
         kicker: Loc { en: "Cholesterol: where it really is", ru: "Холестерин: где он на самом деле" },
         title: Loc { en: "", ru: "" },
@@ -1469,11 +1484,12 @@ const S8: &[Frame] = &[
         body: Loc {
             en: "Your body itself produces 700–1000 mg of cholesterol a day — two to three \
                  times more than comes with food. When there is less of it in the diet, the \
-                 body simply synthesizes more. That is why the link between what is eaten and \
-                 the blood test is weaker than it seems.",
+                 body simply synthesizes more. That is why the link between what you eat and \
+                 the amount of cholesterol in your blood is very weak.",
             ru: "Ваше тело само производит 700–1000 мг холестерина в сутки — в 2–3 раза больше, \
                  чем приходит с едой. Когда с пищей его меньше, организм просто синтезирует \
-                 больше. Поэтому связь между съеденным и анализом крови слабее, чем кажется.",
+                 больше. Связь между съеденным и количеством холестерина в вашей крови очень \
+                 слабая.",
         },
     },
     // 8 — что влияет по-настоящему.
@@ -1485,12 +1501,12 @@ const S8: &[Frame] = &[
         title: Loc { en: "", ru: "" },
         body: Loc {
             en: "Blood cholesterol is moved by saturated fats, trans fats and fibre — and we \
-                 already manage all three. You have been holding the fat balance since the \
-                 first week, and fibre through vegetables, fruit and wholegrains. These are the \
-                 levers that work.",
+                 already manage all three. The fat balance you have been holding since the fat \
+                 week, and fibre comes with vegetables and fruit. These are the levers that \
+                 work.",
             ru: "На холестерин в крови работают насыщенные жиры, трансжиры и клетчатка — и мы \
-                 уже управляем всеми тремя. Баланс жиров вы держите с первой недели, клетчатку \
-                 — через овощи, фрукты и цельные крупы. Это и есть рабочие рычаги.",
+                 уже управляем всеми тремя. Баланс жиров вы держите с недели жиров, клетчатку \
+                 — через овощи и фрукты. Это и есть рабочие рычаги.",
         },
     },
     // 9 — что изменилось в рекомендациях.

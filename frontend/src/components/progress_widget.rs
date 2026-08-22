@@ -299,9 +299,9 @@ fn daily_gauges_grid(
 /// которая знает и про темп: одно яйцо к пятнице значит отставание, а к вторнику
 /// нет.
 ///
-/// Штуки, а не граммы: человек ест яйца штуками, а мы восстанавливаем их число по
-/// белку (`egg::eggs_from_protein`). Дробная десятая честна — половина омлета это
-/// полтора яйца, и округлять её до целого значило бы приписывать съеденное.
+/// ГРАММЫ: счёт идёт в них, по 50 г на яйцо (`egg::GRAMS_PER_EGG`), и шкала
+/// показывает то же, что считает. Штуки остаются в тексте задания — «наберите за
+/// неделю семь яиц», — но мерить дробные штуки на шкале не за чем.
 fn weekly_egg_gauge(w: crate::services::egg::WeeklyEggs) -> impl IntoView {
     use indicators::IndicatorState;
     let (bar, val) = match w.state() {
@@ -314,9 +314,9 @@ fn weekly_egg_gauge(w: crate::services::egg::WeeklyEggs) -> impl IntoView {
     };
     view! {
         <crate::components::gauge::Gauge
-            value=w.eggs target=w.target
+            value=w.grams target=w.target
             label="Яйца/нед".to_string()
-            unit="шт".to_string()
+            unit="г".to_string()
             color=bar.to_string()
             height=12.0
             decimals=1

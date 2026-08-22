@@ -5,15 +5,11 @@
 //! качественного белка и занимают всего восемь процентов недельного лимита
 //! насыщенных жиров. Одно яйцо в день — привычный ориентир, а не предел.
 //!
-//! **Считается через БЕЛОК, а не через штуки в дневнике.** Человек записывает
-//! «Яичница глазунья, 120 г» или «Омлет, 200 г» — сколько там яиц, из записи не
-//! видно, а вес блюда включает масло, молоко и всё остальное. Белок же при готовке
-//! никуда не девается: в одном яйце его 6.3 г, значит по белку яичных продуктов
-//! число яиц восстанавливается однозначно. Тот же приём, что у красного мяса с его
-//! сырым эквивалентом, и по той же причине.
+//! **Считается в ГРАММАХ, по 50 г на яйцо.** Семь яиц в неделю — это 350 г яичных
+//! продуктов; в этих граммах и идёт счёт, а штуки остаются способом их назвать.
 //!
-//! Заодно это решает вопрос с блюдами: в запеканке засчитываются яйца, а не всё
-//! блюдо, — блюда раскрываются по составу общим механизмом [`local::tag_protein_g_on`].
+//! Блюда раскрываются по составу общим механизмом [`local::food_tag_grams_on`]: в
+//! запеканке засчитываются граммы яйца, а не всё блюдо.
 //!
 //! **Что считается яйцом.** Только продукты, помеченные признаком `is_egg`: яйца в
 //! любом виде — варёные, жареные, копчёные. Майонез и салаты с яйцом сюда не идут:
@@ -33,17 +29,17 @@ pub const EGG_WEEK_OPEN_KEY: &str = "egg_week_opened_at";
 /// Недельная планка в ЯЙЦАХ. Минимум, а не потолок.
 pub const WEEKLY_MIN_EGGS: f64 = 7.0;
 
-/// Белок одного яйца, граммы. Столовое яйцо первой категории даёт 6.3 г.
-pub const PROTEIN_PER_EGG_G: f64 = 6.3;
+/// Одно яйцо, граммы. Столовое яйцо первой категории без скорлупы — около 50 г.
+pub const GRAMS_PER_EGG: f64 = 50.0;
 
-/// Недельная планка в граммах БЕЛКА — то, в чём на самом деле идёт счёт.
-pub fn weekly_min_protein_g() -> f64 {
-    WEEKLY_MIN_EGGS * PROTEIN_PER_EGG_G
+/// Недельная планка в ГРАММАХ — то, в чём идёт счёт: 50 г × 7.
+pub fn weekly_min_grams() -> f64 {
+    WEEKLY_MIN_EGGS * GRAMS_PER_EGG
 }
 
-/// Сколько яиц стоит за таким количеством яичного белка.
-pub fn eggs_from_protein(protein_g: f64) -> f64 {
-    protein_g / PROTEIN_PER_EGG_G
+/// Сколько яиц стоит за таким количеством яичных граммов.
+pub fn eggs_from_grams(grams: f64) -> f64 {
+    grams / GRAMS_PER_EGG
 }
 
 /// Идёт ли продукт в недельный счёт.
@@ -76,16 +72,21 @@ pub fn week_bounds(today: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
 
 // ── Замер ────────────────────────────────────────────────────────────────────
 
-/// Яйца за день, в штуках.
-pub async fn eggs_on(date: &str) -> f64 {
-    eggs_from_protein(local::tag_protein_g_on(date, counts).await)
+/// Яичные ГРАММЫ за день. Блюда раскрываются по составу.
+pub async fn grams_on(date: &str) -> f64 {
+    local::food_tag_grams_on(date, counts).await
 }
 
-async fn eggs_between(from: NaiveDate, to: NaiveDate) -> f64 {
+/// Яйца за день, в штуках, — те же граммы, поделённые на 50.
+pub async fn eggs_on(date: &str) -> f64 {
+    eggs_from_grams(grams_on(date).await)
+}
+
+async fn grams_between(from: NaiveDate, to: NaiveDate) -> f64 {
     let mut total = 0.0;
     let mut d = from;
     while d <= to {
-        total += eggs_on(&d.format("%Y-%m-%d").to_string()).await;
+        total += grams_on(&d.format("%Y-%m-%d").to_string()).await;
         d += Duration::days(1);
     }
     total
@@ -94,9 +95,9 @@ async fn eggs_between(from: NaiveDate, to: NaiveDate) -> f64 {
 /// Ход текущей недели — для шкалы в виджете.
 #[derive(Clone)]
 pub struct WeeklyEggs {
-    /// Съедено за неделю, штук.
-    pub eggs: f64,
-    /// Планка — семь штук.
+    /// Съедено за неделю, ГРАММЫ яичных продуктов.
+    pub grams: f64,
+    /// Планка — 350 г (семь яиц по 50 г).
     pub target: f64,
     /// 1…7 — какой сегодня день недели яиц.
     pub day_of_week: u32,
@@ -115,11 +116,11 @@ impl WeeklyEggs {
     /// незаконченное дело. Итог подводит недельный индикатор.
     pub fn state(&self) -> super::indicators::IndicatorState {
         use super::indicators::IndicatorState;
-        if self.eggs >= self.target {
+        if self.grams >= self.target {
             return IndicatorState::Green;
         }
         let pace = self.target * f64::from(self.day_of_week.clamp(1, 7)) / 7.0;
-        if self.eggs < pace {
+        if self.grams < pace {
             IndicatorState::Orange
         } else {
             IndicatorState::Green
@@ -131,8 +132,8 @@ pub async fn weekly_progress() -> Option<WeeklyEggs> {
     let today = local::today_date();
     let (start, _end) = week_bounds(today)?;
     Some(WeeklyEggs {
-        eggs: eggs_between(start, today).await,
-        target: WEEKLY_MIN_EGGS,
+        grams: grams_between(start, today).await,
+        target: weekly_min_grams(),
         day_of_week: (today - start).num_days() as u32 + 1,
     })
 }
@@ -161,7 +162,7 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
         if !logged {
             continue;
         }
-        history.push(eggs_between(s, e).await >= WEEKLY_MIN_EGGS);
+        history.push(grams_between(s, e).await >= weekly_min_grams());
     }
     history.reverse();
     super::indicators::weekly_state(&history)
@@ -183,9 +184,9 @@ pub async fn weekly_series() -> super::indicators::IndicatorSeries {
             let logged = (0..7).any(|d| {
                 diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
             });
-            let eggs = eggs_between(s, e).await;
-            let ratio = logged.then(|| eggs / WEEKLY_MIN_EGGS);
-            points.push((s.format("%Y-%m-%d").to_string(), eggs, ratio));
+            let grams = grams_between(s, e).await;
+            let ratio = logged.then(|| grams / weekly_min_grams());
+            points.push((s.format("%Y-%m-%d").to_string(), grams, ratio));
             labels.push(format!("−{back}"));
             // Закрыта — значит НАБРАЛ: доля не меньше единицы.
             met.push(ratio.map(|r| r >= 1.0));
@@ -219,7 +220,7 @@ pub async fn week_closed_since_open() -> bool {
         let logged = (0..7).any(|d| {
             diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
         });
-        if logged && eggs_between(s, e).await >= WEEKLY_MIN_EGGS {
+        if logged && grams_between(s, e).await >= weekly_min_grams() {
             return true;
         }
         s += Duration::days(7);
@@ -232,32 +233,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn planka_v_belke_eto_sem_yaic() {
-        assert!((weekly_min_protein_g() - 44.1).abs() < 1e-9);
+    fn planka_v_grammah_eto_sem_yaic_po_pyatdesyat() {
+        assert!((weekly_min_grams() - 350.0).abs() < 1e-9);
     }
 
     #[test]
-    fn belok_perevoditsya_v_shtuki() {
-        // Яичница из двух яиц — 12.6 г белка.
-        assert!((eggs_from_protein(12.6) - 2.0).abs() < 1e-9);
+    fn grammy_perevodyatsya_v_shtuki() {
+        // Яичница из двух яиц — 100 г яйца.
+        assert!((eggs_from_grams(100.0) - 2.0).abs() < 1e-9);
     }
 
     #[test]
     fn nabrannaya_planka_zelenaya_v_lyuboy_den() {
-        let w = WeeklyEggs { eggs: 7.0, target: WEEKLY_MIN_EGGS, day_of_week: 2 };
+        let w = WeeklyEggs { grams: 350.0, target: weekly_min_grams(), day_of_week: 2 };
         assert_eq!(w.state(), crate::services::indicators::IndicatorState::Green);
     }
 
     #[test]
     fn otstavanie_ot_tempa_oranzhevoe() {
-        // Четвёртый день: в темпе было бы четыре яйца, съедено одно.
-        let w = WeeklyEggs { eggs: 1.0, target: WEEKLY_MIN_EGGS, day_of_week: 4 };
+        // Четвёртый день: в темпе было бы 200 г, съедено 50.
+        let w = WeeklyEggs { grams: 50.0, target: weekly_min_grams(), day_of_week: 4 };
         assert_eq!(w.state(), crate::services::indicators::IndicatorState::Orange);
     }
 
     #[test]
     fn v_tempe_zelenoe() {
-        let w = WeeklyEggs { eggs: 4.0, target: WEEKLY_MIN_EGGS, day_of_week: 4 };
+        let w = WeeklyEggs { grams: 200.0, target: weekly_min_grams(), day_of_week: 4 };
         assert_eq!(w.state(), crate::services::indicators::IndicatorState::Green);
     }
 }

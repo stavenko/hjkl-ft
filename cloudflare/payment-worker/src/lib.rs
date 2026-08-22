@@ -1925,8 +1925,12 @@ async fn internal_usage(mut req: Request, env: &Env) -> Result<Response> {
     let out_neurons = i64f("outNeurons");
     let source = match body.get("source").and_then(|v| v.as_str()) {
         Some("vision") => "vision",
+        Some("thirdparty") => "thirdparty",
         _ => "text",
     };
+    // Модель нужна там, где счёт идёт по токенам конкретной модели (сторонний
+    // провайдер). У Workers AI её место занимают нейроны, и поле может быть пустым.
+    let model = body.get("model").and_then(|v| v.as_str()).unwrap_or("").trim();
     // No-op (still 200) on nothing to record — a well-formed but empty report.
     if user_id.is_empty() || in_tokens + out_tokens <= 0 {
         return Response::from_json(&serde_json::json!({ "ok": true }));
@@ -1937,7 +1941,7 @@ async fn internal_usage(mut req: Request, env: &Env) -> Result<Response> {
         &stub,
         "/add",
         &serde_json::json!({
-            "userId": user_id, "source": source,
+            "userId": user_id, "source": source, "model": model,
             "inTokens": in_tokens, "outTokens": out_tokens,
             "inNeurons": in_neurons, "outNeurons": out_neurons,
         }),

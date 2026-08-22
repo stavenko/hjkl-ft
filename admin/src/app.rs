@@ -2007,6 +2007,65 @@ fn usage_weekly(weekly: &[api::WeeklyUsage], price_per_1k: f64) -> leptos::View 
     .into_view()
 }
 
+/// РАСХОД ПО МОДЕЛЯМ — токены и деньги за всё, что хранится.
+///
+/// Здесь и живёт ответ на вопрос «сколько мы тратим у провайдера»: у стороннего
+/// счёт идёт по токенам конкретной модели, и нейроны Cloudflare к нему отношения не
+/// имеют. Модель без тарифа честно помечается «тариф не задан» — ноль в этом месте
+/// читался бы как «бесплатно».
+fn usage_by_model(rows: &[api::ModelUsage]) -> leptos::View {
+    if rows.is_empty() {
+        return view! { <div class="row__meta">"Расход по моделям появится после первых запросов"</div> }
+            .into_view();
+    }
+    let fmt_tokens = |n: i64| {
+        if n >= 1_000_000 {
+            format!("{:.2}M", n as f64 / 1e6)
+        } else if n >= 1_000 {
+            format!("{:.1}k", n as f64 / 1e3)
+        } else {
+            n.to_string()
+        }
+    };
+    view! {
+        <div style="display:flex; flex-direction:column; gap:6px;">
+            {rows.iter().map(|r| {
+                // Пустое имя — строки, накопленные до того, как модель стали писать.
+                let name = if r.model.is_empty() {
+                    format!("{} (без модели)", r.source)
+                } else {
+                    r.model.clone()
+                };
+                let tokens = format!("{} ↓ · {} ↑", fmt_tokens(r.in_tokens), fmt_tokens(r.out_tokens));
+                let cost = match r.usd {
+                    Some(u) => fmt_usd(u),
+                    None => "тариф не задан".to_string(),
+                };
+                let cost_color = if r.usd.is_some() { "var(--text)" } else { "var(--muted)" };
+                // Две строки, а не три колонки: на 430 px имя модели, токены и цена
+                // в один ряд не влезают — цена уезжала за край экрана.
+                view! {
+                    <div style="display:flex; flex-direction:column; gap:2px; padding:6px 0; \
+                                border-bottom:1px solid var(--line);">
+                        <div style="display:flex; align-items:baseline; gap:8px;">
+                            <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; \
+                                         white-space:nowrap;">
+                                {name}
+                            </span>
+                            <span class="mono" style=format!("flex:none; font-weight:600; \
+                                                              color:{cost_color}; font-size:.82rem;")>
+                                {cost}
+                            </span>
+                        </div>
+                        <span class="mono" style="color:var(--muted); font-size:.78rem;">{tokens}</span>
+                    </div>
+                }
+            }).collect_view()}
+        </div>
+    }
+    .into_view()
+}
+
 /// Token-usage view: fetches /admin/usage on mount (+ refresh button) and renders
 /// a headline (total / users / average), a per-user bar histogram, and per-day totals.
 #[component]
@@ -2057,7 +2116,7 @@ fn Usage(view: RwSignal<View>) -> impl IntoView {
                     return ().into_view();
                 };
 
-                if r.week.is_empty() && r.weekly.is_empty() {
+                if r.week.is_empty() && r.weekly.is_empty() && r.by_model.is_empty() {
                     return view! {
                         <div class="empty"><div class="empty__ring"></div><p>"Пока нет данных"</p></div>
                     }.into_view();
@@ -2070,6 +2129,10 @@ fn Usage(view: RwSignal<View>) -> impl IntoView {
                 let avg_usd = if user_count > 0 { total_usd / user_count as f64 } else { 0.0 };
                 let hist = usage_histogram(&r.week, price);
                 let weekly = usage_weekly(&r.weekly, price);
+                let by_model = usage_by_model(&r.by_model);
+                // Деньги СТОРОННЕГО провайдера — отдельной строкой: нейроны Workers AI
+                // с ними не складываются, это разные счета.
+                let thirdparty_usd: f64 = r.by_model.iter().filter_map(|m| m.usd).sum();
                 let has_week = !r.week.is_empty();
                 let week_start = r.week_start.clone();
 
@@ -2114,6 +2177,15 @@ fn Usage(view: RwSignal<View>) -> impl IntoView {
                         // Long-term weekly rollup ("average week").
                         <div style="font-weight:650; margin:18px 0 8px;">"По неделям"</div>
                         {weekly}
+
+                        // Сторонние модели: токены и их собственные деньги.
+                        <div style="font-weight:650; margin:18px 0 8px;">"По моделям (всё время)"</div>
+                        <div class="row__meta" style="margin-bottom:8px;">
+                            "У стороннего провайдера: "
+                            <b style="color:var(--text);">{fmt_usd(thirdparty_usd)}</b>
+                            " — счёт отдельный от нейронов Cloudflare"
+                        </div>
+                        {by_model}
                     </div>
                 }.into_view()
             }}

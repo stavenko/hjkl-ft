@@ -256,7 +256,8 @@ async fn report_usage(env: &Env, user_id: &str, model: &str, prompt: i64, comple
         }
     };
     if let Err(e) =
-        report_usage_inner(env, &key, user_id, "text", prompt, completion, in_neurons, out_neurons).await
+        report_usage_inner(env, &key, user_id, "text", model, prompt, completion, in_neurons, out_neurons)
+            .await
     {
         console_error!("usage-report failed (best-effort, swallowed): {e:?}");
     }
@@ -268,6 +269,7 @@ async fn report_usage_inner(
     key: &str,
     user_id: &str,
     source: &str,
+    model: &str,
     in_tokens: i64,
     out_tokens: i64,
     in_neurons: i64,
@@ -277,7 +279,7 @@ async fn report_usage_inner(
     headers.set("X-Internal-Key", key)?;
     headers.set("Content-Type", "application/json")?;
     let body = serde_json::json!({
-        "userId": user_id, "source": source,
+        "userId": user_id, "source": source, "model": model,
         "inTokens": in_tokens, "outTokens": out_tokens,
         "inNeurons": in_neurons, "outNeurons": out_neurons,
     });
@@ -448,9 +450,21 @@ fn append_system_instruction(messages: &mut Vec<serde_json::Value>, text: &str) 
 }
 
 /// Расход у стороннего провайдера считается В ТОКЕНАХ: нейронов там нет, это не
-/// Cloudflare. Пишем их отдельным источником (`vision`), чтобы не подмешивать в
-/// нейроны Workers AI. Best-effort, как и текстовый учёт.
-async fn report_thirdparty_usage(env: &Env, user_id: &str, prompt: i64, completion: i64) {
+/// Cloudflare. Пишем их отдельным источником (`thirdparty`) и ОБЯЗАТЕЛЬНО с именем
+/// модели: счёт провайдер выставляет по токенам конкретной модели, и без имени
+/// нельзя ни оценить деньги, ни увидеть, что именно съедает квоту.
+///
+/// Раньше всё это уходило источником `vision` — с тех пор, как через провайдера
+/// пошло ещё и опознание еды, такая подпись стала враньём.
+///
+/// Best-effort, как и текстовый учёт.
+async fn report_thirdparty_usage(
+    env: &Env,
+    user_id: &str,
+    model: &str,
+    prompt: i64,
+    completion: i64,
+) {
     let (prompt, completion) = (prompt.max(0), completion.max(0));
     if prompt + completion <= 0 || user_id.is_empty() {
         return;
@@ -463,7 +477,7 @@ async fn report_thirdparty_usage(env: &Env, user_id: &str, prompt: i64, completi
         }
     };
     if let Err(e) =
-        report_usage_inner(env, &key, user_id, "vision", prompt, completion, 0, 0).await
+        report_usage_inner(env, &key, user_id, "thirdparty", model, prompt, completion, 0, 0).await
     {
         console_error!("usage-report failed (best-effort, swallowed): {e:?}");
     }
@@ -577,7 +591,10 @@ async fn proxy_thirdparty(
         if let Some((p, c)) = usage_split(&val) {
             let env = env.clone();
             let user_id = user_id.to_string();
-            ctx.wait_until(async move { report_thirdparty_usage(&env, &user_id, p, c).await });
+            let model = model.to_string();
+            ctx.wait_until(async move {
+                report_thirdparty_usage(&env, &user_id, &model, p, c).await
+            });
         }
         return Response::from_json(&val);
     }
@@ -588,13 +605,14 @@ async fn proxy_thirdparty(
     {
         let env = env.clone();
         let user_id = user_id.to_string();
+        let model = model.to_string();
         ctx.wait_until(async move {
             let mut last: Option<(i64, i64)> = None;
             while let Some(u) = futures_util::StreamExt::next(&mut rx).await {
                 last = Some(u);
             }
             match last {
-                Some((p, c)) => report_thirdparty_usage(&env, &user_id, p, c).await,
+                Some((p, c)) => report_thirdparty_usage(&env, &user_id, &model, p, c).await,
                 None => console_error!("usage-report: no usage chunk in thirdparty stream"),
             }
         });

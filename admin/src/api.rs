@@ -802,9 +802,29 @@ impl WeeklyUsage {
     pub fn neurons(&self) -> f64 { (self.in_neurons + self.out_neurons) as f64 / 1e6 }
 }
 
+/// Расход ПО МОДЕЛИ за всё, что хранится (свежая неделя плюс архив недель) — то, по
+/// чему выставляет счёт сторонний провайдер.
+///
+/// `usd` пустой, когда тариф модели не задан в `AI_PRICES`: ноль здесь означал бы
+/// «бесплатно», а это другое утверждение.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelUsage {
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(rename = "inTokens", default)]
+    pub in_tokens: i64,
+    #[serde(rename = "outTokens", default)]
+    pub out_tokens: i64,
+    #[serde(default)]
+    pub usd: Option<f64>,
+}
+
 /// GET /admin/usage response: the current week per-user (`week`, DESC by neurons),
-/// the long-term weekly rows (`weekly`), and the price constant so the admin renders
-/// the cost AND can recompute it if the tariff moves.
+/// the long-term weekly rows (`weekly`), the per-model totals (`by_model`), and the
+/// price constant so the admin renders the cost AND can recompute it if the tariff
+/// moves.
 #[derive(Debug, Clone, Deserialize)]
 pub struct UsageReport {
     #[serde(rename = "weekStart", default)]
@@ -813,6 +833,8 @@ pub struct UsageReport {
     pub week: Vec<UserUsage>,
     #[serde(default)]
     pub weekly: Vec<WeeklyUsage>,
+    #[serde(rename = "byModel", default)]
+    pub by_model: Vec<ModelUsage>,
     #[serde(rename = "priceUsdPer1kNeurons", default)]
     pub price_usd_per_1k_neurons: f64,
 }

@@ -90,6 +90,11 @@ service = "lava-mock-dev"
 
 [vars]
 JWT_SECRET = "dev-secret-change-in-production"
+# ТАРИФЫ СТОРОННИХ МОДЕЛЕЙ, $ за миллион токенов: {"модель": [вход, выход]}.
+# Читает UsageDO при отчёте — цена НЕ хранится в строках, чтобы её можно было
+# пересчитать задним числом, когда провайдер меняет прайс. Модель, которой здесь
+# нет, показывается в админке как «тариф не задан»: ноль означал бы «бесплатно».
+AI_PRICES = "{}"
 # Landing → app onboarding return URL; the worker appends `#claim=<id>.<secret>`.
 LANDING_RETURN_URL = "https://renorma-fit-dev.pages.dev/onboard"
 # PRODUCTION-IMPOSSIBLE test-entitlement flag (dev/test only). Its ABSENCE from
@@ -206,6 +211,11 @@ secret_name = "internal-push-key"
 
 [env.production.vars]
 # App onboarding entry; the worker appends `#claim=<id>.<secret>` after a guest pay.
+# ТАРИФЫ СТОРОННИХ МОДЕЛЕЙ, $ за миллион токенов: {"модель": [вход, выход]}.
+# Читает UsageDO при отчёте — цена НЕ хранится в строках, чтобы её можно было
+# пересчитать задним числом, когда провайдер меняет прайс. Модель, которой здесь
+# нет, показывается в админке как «тариф не задан»: ноль означал бы «бесплатно».
+AI_PRICES = "{}"
 LANDING_RETURN_URL = "https://fit.renorma.app/onboard"
 # DO NOT add TEST_ENTITLEMENT here — its absence is the prod safety.
 # /admin/* authorizes via the SUPPORT_WORKER (support-worker-prod) binding +

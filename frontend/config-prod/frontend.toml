@@ -14,3 +14,7 @@ landing_url = "https://renorma.app"
 miniapp_pay_url = "https://t.me/renorma_payment_helper_bot/pay"
 app_origin = "https://fit.renorma.app"
 identity_model = "qwen3.8-27b"
+# Запасная модель опознания: та же 27b, но у Cloudflare. Основная живёт у стороннего
+# провайдера и может отказать не из-за продукта (кончилась квота, не прошёл платёж,
+# лежит провайдер) — повтор уходит сюда, а не к тому же поставщику.
+identity_fallback_model = "@cf/qwen/qwen3.8-27b"

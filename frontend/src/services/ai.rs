@@ -150,6 +150,26 @@ pub(crate) fn build_identity_executor() -> Result<Qwen, String> {
     if model.is_empty() {
         return build_executor_think(false);
     }
+    identity_executor_for(model)
+}
+
+/// ЗАПАСНОЙ исполнитель опознания — та же модель у другого поставщика.
+///
+/// `None`, когда запасной не задан или совпадает с основным: второй заход к тому,
+/// кто только что отказал, ничего не даёт.
+pub(crate) fn build_identity_fallback_executor() -> Option<Qwen> {
+    let cfg = config::get();
+    let (main, spare) = (cfg.identity_model.trim(), cfg.identity_fallback_model.trim());
+    if spare.is_empty() || spare == main {
+        return None;
+    }
+    identity_executor_for(spare).ok()
+}
+
+/// Общий сборщик исполнителя опознания: разница между основным и запасным — только
+/// в имени модели, всё остальное (без рассуждения, потолок ответа) обязано совпадать,
+/// иначе замеры одного не годятся для другого.
+fn identity_executor_for(model: &str) -> Result<Qwen, String> {
     let token = auth::get_token().ok_or_else(|| "not authenticated".to_string())?;
     Ok(Qwen::builder()
         .api_base(&config::get().ai_base_url)

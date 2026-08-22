@@ -58,7 +58,10 @@ use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::ai::{build_executor_think, build_identity_executor, veg_fruit_from_category};
+use super::ai::{
+    build_executor_think, build_identity_executor, build_identity_fallback_executor,
+    veg_fruit_from_category,
+};
 
 /// НИЖЕ ЭТОЙ УВЕРЕННОСТИ ОПОЗНАНИЕ СЧИТАЕТСЯ НЕСОСТОЯВШИМСЯ.
 ///
@@ -696,6 +699,15 @@ struct IdentifyNode {
     /// Без рассуждения тот же вопрос пять раз из пяти даёт честные 0.10. Незнание
     /// должно оставаться незнанием.
     executor: Qwen,
+    /// ЗАПАСНОЙ исполнитель — та же модель у другого поставщика.
+    ///
+    /// Основная модель опознания живёт у стороннего провайдера, и отказать она может
+    /// не из-за продукта: кончилась квота, не прошёл платёж, лежит сам провайдер.
+    /// Повторять вопрос тому же поставщику в этом случае — терять попытки впустую,
+    /// поэтому ПЕРВАЯ ЖЕ неудача уводит следующий заход сюда.
+    ///
+    /// `None` — запасного нет (или он уже используется), повтор идёт к основному.
+    fallback: Option<Qwen>,
     /// Исполнитель С рассуждением — он уходит дальше, в узлы признаков: там
     /// противоречия настоящие («язык это мышца, но орган»), и их надо продумать.
     flags_executor: Qwen,
@@ -724,8 +736,22 @@ impl Node for IdentifyNode {
         // работа по одному названию — это ровно прежнее поведение, и оно лучше, чем
         // не выяснить о продукте ничего.
         if ctx.identity.is_none() && ctx.tries[0] < MAX_TRIES {
+            // Запасной вступает с первого же повтора и дальше остаётся один: если
+            // не ответил и он, дело в вопросе, а не в поставщике.
+            let (executor, fallback) = match self.fallback.clone() {
+                Some(spare) => {
+                    leptos::logging::log!(
+                        "опознание «{}»: основная модель не ответила ({}), пробуем запасную",
+                        ctx.food_name,
+                        ctx.last_error.clone().unwrap_or_default()
+                    );
+                    (spare, None)
+                }
+                None => (self.executor.clone(), None),
+            };
             return Some(Box::new(NodeWrapper::new(IdentifyNode {
-                executor: self.executor.clone(),
+                executor,
+                fallback,
                 flags_executor: self.flags_executor.clone(),
             })));
         }
@@ -1405,6 +1431,7 @@ pub async fn classify_all_with_identity(
         }
         None => Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode {
             executor: build_identity_executor()?,
+            fallback: build_identity_fallback_executor(),
             flags_executor: flags_executor.clone(),
         }))),
     };
@@ -1486,6 +1513,7 @@ pub async fn identify_weighed(food_name: &str) -> Result<Option<(String, f64)>, 
     ctx.identify_only = true;
     let pipeline = Pipeline::new(Box::new(NodeWrapper::new(IdentifyNode {
         executor: build_identity_executor()?,
+        fallback: build_identity_fallback_executor(),
         flags_executor: build_executor_think(true)?,
     })));
 

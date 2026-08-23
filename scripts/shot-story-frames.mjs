@@ -29,7 +29,8 @@ const STORIES = {
   // id кружка → чему посвящена история. Номер кружка СМЕЩЁН относительно темы: у
   // Appears-флага имя предыдущей недели (week3 = `AfterActivityWeek`), а сама
   // история АНОНСИРУЕТ следующую. Отсчёт: week3 — активность, week4 — кальций,
-  // week5 — железо, week6 — жиры, week7 — красное мясо, week8 — яйца.
+  // week5 — железо, week6 — жиры, week7 — красное мясо, week8 — яйца,
+  // week9 — клетчатка.
   // Вторая неделя — единственная, где кадры показывают виджет БЕЗ героя: сцена
   // новичка (см. `days`/`openedDaysAgo` в widget-scene).
   week2: { storyId: "week2", week: "base", target: null, days: 12, openedDaysAgo: 3 },
@@ -38,6 +39,7 @@ const STORIES = {
   fats: { storyId: "week6", week: "fats", target: "epa_dha" },
   red_meat: { storyId: "week7", week: "red_meat", target: "red_meat" },
   egg: { storyId: "week8", week: "egg", target: "egg" },
+  fiber: { storyId: "week9", week: "fiber", target: "fiber" },
 };
 
 /// Снять экран петлёй и собрать GIF. Шаг съёмки — период кадра исходной гифки

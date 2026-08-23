@@ -36,7 +36,9 @@ pub fn StoryTray() -> impl IntoView {
                     let fats = crate::services::fats::unlocked();
                     let red_meat = crate::services::red_meat::unlocked();
                     let egg = crate::services::egg::unlocked();
-                    let mut list = stories::visible(planka_set, activity, calcium, iron, fats, red_meat, egg);
+                    let fiber = crate::services::fiber::unlocked();
+                    let mut list =
+                        stories::visible(planka_set, activity, calcium, iron, fats, red_meat, egg, fiber);
                     // Stories with UNREAD frames shift left to draw attention; fully-read
                     // ones follow. Stable sort → each group keeps its natural appearance
                     // order. `unviewed_count` tracks the seen-version signal, so the tray
@@ -243,6 +245,12 @@ fn text_with_icons(s: &str) -> View {
 /// so a phrase carries exactly one of them, never nested.
 fn text_rich(s: &str) -> View {
     let mut out: Vec<View> = Vec::new();
+    // НЕПАРНЫЙ маркер — это НЕ разметка, а сам символ в тексте: «≈5 г», «*» в
+    // сноске. Красить с него до конца абзаца нельзя — так однажды покраснела
+    // половина кадра про овощи. Нечётное число кусков = маркеры парные.
+    if s.split('^').count() % 2 == 0 {
+        return text_rich_red(s);
+    }
     for (i, part) in s.split('^').enumerate() {
         if i % 2 == 1 {
             out.push(
@@ -268,6 +276,12 @@ fn text_rich(s: &str) -> View {
 /// segments, then handing what's left to the warm pass.
 fn text_rich_red(s: &str) -> View {
     let mut out: Vec<View> = Vec::new();
+    // НЕПАРНЫЙ маркер — это НЕ разметка, а сам символ в тексте: «≈5 г», «*» в
+    // сноске. Красить с него до конца абзаца нельзя — так однажды покраснела
+    // половина кадра про овощи. Нечётное число кусков = маркеры парные.
+    if s.split('#').count() % 2 == 0 {
+        return text_rich_olive(s);
+    }
     for (i, part) in s.split('#').enumerate() {
         if i % 2 == 1 {
             out.push(
@@ -293,6 +307,12 @@ fn text_rich_red(s: &str) -> View {
 /// borrow iron's blood-red or the warm alarm gradient.
 fn text_rich_olive(s: &str) -> View {
     let mut out: Vec<View> = Vec::new();
+    // НЕПАРНЫЙ маркер — это НЕ разметка, а сам символ в тексте: «≈5 г», «*» в
+    // сноске. Красить с него до конца абзаца нельзя — так однажды покраснела
+    // половина кадра про овощи. Нечётное число кусков = маркеры парные.
+    if s.split('@').count() % 2 == 0 {
+        return text_rich_warm(s);
+    }
     for (i, part) in s.split('@').enumerate() {
         if i % 2 == 1 {
             out.push(
@@ -316,6 +336,12 @@ fn text_rich_olive(s: &str) -> View {
 /// The warm (`~…~`) gradient + repeat-icon pass, applied to the remaining segments.
 fn text_rich_warm(s: &str) -> View {
     let mut out: Vec<View> = Vec::new();
+    // НЕПАРНЫЙ маркер — это НЕ разметка, а сам символ в тексте: «≈5 г», «*» в
+    // сноске. Красить с него до конца абзаца нельзя — так однажды покраснела
+    // половина кадра про овощи. Нечётное число кусков = маркеры парные.
+    if s.split('~').count() % 2 == 0 {
+        return text_rich_bold(s);
+    }
     for (i, part) in s.split('~').enumerate() {
         if i % 2 == 1 {
             out.push(
@@ -342,6 +368,12 @@ fn text_rich_warm(s: &str) -> View {
 /// выделялось» значит врать цветом.
 fn text_rich_bold(s: &str) -> View {
     let mut out: Vec<View> = Vec::new();
+    // НЕПАРНЫЙ маркер — это НЕ разметка, а сам символ в тексте: «≈5 г», «*» в
+    // сноске. Красить с него до конца абзаца нельзя — так однажды покраснела
+    // половина кадра про овощи. Нечётное число кусков = маркеры парные.
+    if s.split('*').count() % 2 == 0 {
+        return text_with_icons(s);
+    }
     for (i, part) in s.split('*').enumerate() {
         if i % 2 == 1 {
             out.push(
@@ -526,5 +558,22 @@ fn FrameView(frame: Frame) -> impl IntoView {
             <div style=scrim />
             {content}
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Маркеры разметки встречаются в авторском тексте как обычные символы: тильда
+    /// значит «примерно» («~5 г»), звёздочка — сноску. Непарный маркер красил всё до
+    /// конца абзаца — в кадре про овощи так покраснела половина текста.
+    ///
+    /// Проверяется само правило чётности, а не отрисовка: рендер требует leptos
+    /// рантайма, а ошибка была именно в счёте.
+    #[test]
+    fn neparnyi_marker_ne_schitaetsya_razmetkoy() {
+        let paired = "^неделя яиц^ впереди";
+        let lone = "зелёный горошек (~5 г)";
+        assert!(paired.split('^').count() % 2 == 1, "парные маркеры — нечётное число кусков");
+        assert!(lone.split('~').count() % 2 == 0, "одиночная тильда — чётное, разметки нет");
     }
 }

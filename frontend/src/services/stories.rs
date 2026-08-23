@@ -189,6 +189,8 @@ pub enum Appears {
     /// Видна, когда открылась неделя ЯИЦ — после недели мяса, которую человек
     /// удержал в пределах планки.
     AfterEggWeek,
+    /// Видна, когда открылась неделя КЛЕТЧАТКИ — после закрытой недели яиц.
+    AfterFiberWeek,
 }
 
 pub struct Story {
@@ -314,6 +316,7 @@ pub fn visible(
     fat_unlocked: bool,
     red_meat_unlocked: bool,
     egg_unlocked: bool,
+    fiber_unlocked: bool,
 ) -> Vec<&'static Story> {
     STORIES
         .iter()
@@ -326,6 +329,7 @@ pub fn visible(
             Appears::AfterFatWeek => fat_unlocked,
             Appears::AfterRedMeatWeek => red_meat_unlocked,
             Appears::AfterEggWeek => egg_unlocked,
+            Appears::AfterFiberWeek => fiber_unlocked,
         })
         .collect()
 }
@@ -1569,6 +1573,123 @@ const S8: &[Frame] = &[
     },
 ];
 
+/// НЕДЕЛЯ КЛЕТЧАТКИ — про источники и про то, чем каждый из них неудобен.
+///
+/// Индикатор здесь необязательный, и история говорит тем же тоном: не «набирайте
+/// норму», а «вот из чего она набирается и чего это стоит».
+///
+/// Русский текст — АВТОРСКИЙ, слово в слово. Английский переведён с него.
+const S9: &[Frame] = &[
+    // 1 — виды клетчатки.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fibre", ru: "Клетчатка" },
+        title: Loc { en: "What kinds of fibre there are", ru: "Какая бывает клетчатка" },
+        body: Loc {
+            en: "Fibre splits into soluble (pectin, beta-glucans, inulin, gums) and insoluble                  (cellulose, hemicellulose, lignin). The first forms a gel: it slows glucose                  absorption and lowers LDL. The second adds bulk and speeds up transit. In real                  food they always come together — there is no need to count them separately,                  what matters is the overall set of sources.",
+            ru: "Клетчатка делится на растворимую (пектин, бета-глюканы, инулин, камеди) и                  нерастворимую (целлюлоза, гемицеллюлоза, лигнин). Первая образует гель:                  замедляет всасывание глюкозы и снижает ЛПНП. Вторая даёт объём и ускоряет                  транзит. В реальной еде они всегда идут вместе — считать их отдельно не нужно,                  важен суммарный набор источников.",
+        },
+    },
+    // 2 — овощи.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fibre", ru: "Клетчатка" },
+        title: Loc { en: "Vegetables", ru: "Овощи" },
+        body: Loc {
+            en: "Most vegetables give 2–4 g of fibre per 100 g, so the contribution is set by                  the size of the portion. The densest are the brassicas (broccoli, Brussels                  sprouts), carrots, beetroot and green peas (≈5 g). Watery vegetables (cucumber,                  tomato, lettuce) give under 1 g — they are good for you, but they will not cover                  the fibre target.",
+            ru: "Большинство овощей дают 2–4 г клетчатки на 100 г, поэтому вклад определяется                  объёмом порции. Плотнее всего — капустные (брокколи, брюссельская), морковь,                  свёкла, зелёный горошек (≈5 г). Водянистые овощи (огурец, помидор, салат) дают                  меньше 1 г — они полезны, но норму клетчатки не закрывают.",
+        },
+    },
+    // 3 — ягоды.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fibre", ru: "Клетчатка" },
+        title: Loc { en: "Berries", ru: "Ягоды" },
+        body: Loc {
+            en: "Berries have the best ratio of fibre to calories and sugar. Raspberries ≈6.5 g,                  blackberries ≈5 g, blackcurrants ≈4–6 g per 100 g — the level of legumes at a                  quarter of the calories. Frozen ones keep their fibre in full, so the season is                  not a limit.",
+            ru: "Ягоды — лучшее соотношение клетчатки к калориям и сахару. Малина ≈6,5 г,                  ежевика ≈5 г, чёрная смородина ≈4–6 г на 100 г — это уровень бобовых при                  вчетверо меньшей калорийности. Замороженные сохраняют клетчатку полностью, так                  что сезонность не ограничение.",
+        },
+    },
+    // 4 — фрукты.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fibre", ru: "Клетчатка" },
+        title: Loc { en: "Fruit", ru: "Фрукты" },
+        body: Loc {
+            en: "Pear, apple, kiwi and orange give 2–3 g per 100 g, a large part of it pectin.                  Juice holds no fibre: pressing leaves it in the pulp, and the sugar stays. Dried                  fruit concentrates both the fibre and the sugar — count it as fruit, not as a                  topping.",
+            ru: "Груша, яблоко, киви, апельсин дают 2–3 г на 100 г, значительная часть — пектин.                  Сок клетчатку не содержит: при отжиме она уходит в жмых, остаётся сахар.                  Сухофрукты концентрируют и клетчатку, и сахар — считать их стоит как фрукт, а                  не как добавку.",
+        },
+    },
+    // 5 — бобовые.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fibre", ru: "Клетчатка" },
+        title: Loc { en: "Legumes", ru: "Бобовые" },
+        body: Loc {
+            en: "The densest source: lentils, beans and chickpeas — 6–8 g per 100 g of the cooked                  product. Plus resistant starch and plant protein in the same serving. One                  serving a day covers about a quarter of the daily target.",
+            ru: "Самый плотный источник: чечевица, фасоль, нут — 6–8 г на 100 г готового                  продукта. Плюс резистентный крахмал и растительный белок в одной порции. Одна                  порция в день закрывает около четверти суточной нормы.",
+        },
+    },
+    // 6 — вздутие.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fibre", ru: "Клетчатка" },
+        title: Loc { en: "Bloating: how to avoid it", ru: "Вздутие: как избежать" },
+        body: Loc {
+            en: "The cause is oligosaccharides fermented by the microbiota; this is neither                  damage nor an intolerance, and the microbiota adapts within 2–4 weeks. Build up                  gradually, soak and pour the water away, rinse tinned ones, cook until soft,                  start with red lentils and mung beans. A small daily portion is tolerated better                  than a large one once a week.",
+            ru: "Причина — олигосахариды, которые ферментируются микробиотой; это не повреждение                  и не непереносимость, микробиота адаптируется за 2–4 недели. Наращивать                  постепенно, замачивать и сливать воду, консервированные промывать, разваривать                  до мягкости, начинать с красной чечевицы и маша. Ежедневная небольшая порция                  переносится лучше, чем большая раз в неделю.",
+        },
+    },
+    // 7 — крупы.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fibre", ru: "Клетчатка" },
+        title: Loc { en: "Grains", ru: "Крупы" },
+        body: Loc {
+            en: "The difference between a whole and a refined grain is almost entirely the fibre:                  milling removes the bran and the germ. Oats, pearl barley, buckwheat, bulgur and                  whole wheat give 3–6 g per 100 g cooked. Oats and barley have something of their                  own — beta-glucans: about 3 g a day measurably lowers LDL.",
+            ru: "Разница между цельной и рафинированной крупой — почти вся в клетчатке: при                  шлифовке удаляются отруби и зародыш. Овёс, перловка, гречка, булгур,                  цельнозерновая пшеница дают 3–6 г на 100 г готовых. Отдельно у овса и ячменя —                  бета-глюканы: около 3 г в день измеримо снижают ЛПНП.",
+        },
+    },
+    // 8 — картошка и рис.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fibre", ru: "Клетчатка" },
+        title: Loc { en: "Potatoes and rice", ru: "Картошка и рис" },
+        body: Loc {
+            en: "These are starchy sides, not sources of fibre: white rice ≈0.4 g, potatoes                  ≈1.5–2 g per 100 g. They do not replace vegetables on the plate, though they                  often take their place. Cooling after boiling forms resistant starch — it                  ferments in a similar way, but that does not make up the fibre itself.",
+            ru: "Это крахмалистые гарниры, а не источники клетчатки: белый рис ≈0,4 г, картофель                  ≈1,5–2 г на 100 г. Они не заменяют овощи в тарелке, хотя часто занимают их                  место. Охлаждение после варки образует резистентный крахмал — он ферментируется                  похожим образом, но объёмы клетчатки это не компенсирует.",
+        },
+    },
+    // 9 — кожура.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::None,
+        accent: GREEN,
+        kicker: Loc { en: "Fibre", ru: "Клетчатка" },
+        title: Loc { en: "The skin", ru: "Кожура" },
+        body: Loc {
+            en: "The insoluble fraction is concentrated in the skin: a peeled apple, pear or                  potato loses roughly a third to a half of its fibre. Scrubbing with a brush                  instead of peeling is the cheapest way to add a few grams a day. The exception                  is where the skin is inedible or bitter.",
+            ru: "В кожуре сосредоточена нерастворимая фракция: очищенное яблоко, груша или                  картофель теряют примерно треть-половину клетчатки. Мыть щёткой вместо того,                  чтобы чистить, — самый дешёвый способ добавить несколько грамм в день.                  Исключение — там, где кожура несъедобна или горчит.",
+        },
+    },
+];
+
 static STORIES: &[Story] = &[
     Story {
         id: "welcome",
@@ -1623,5 +1744,11 @@ static STORIES: &[Story] = &[
         appears: Appears::AfterEggWeek,
         badge: Loc { en: "8", ru: "8" },
         frames: S8,
+    },
+    Story {
+        id: "week9",
+        appears: Appears::AfterFiberWeek,
+        badge: Loc { en: "9", ru: "9" },
+        frames: S9,
     },
 ];

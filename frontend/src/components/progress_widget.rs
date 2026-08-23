@@ -621,6 +621,13 @@ fn task_caption(input: &TaskInput) -> Option<View> {
                 Some("dashboard.progress.iron_done_progress")
             }
             "dashboard.progress.red_meat_over_title" => None,
+            // У КЛЕТЧАТКИ обратного отсчёта нет: индикатор необязательный, мы его
+            // предлагаем. Держать надо то, на чём стоит похудение — калории, белок,
+            // шаги, фрукты и овощи; клетчатка идёт довеском, и вторая строка говорит
+            // ровно это, называя её недельную величину.
+            "dashboard.progress.fiber_gate_title" => {
+                Some("dashboard.progress.fiber_optional_progress")
+            }
             _ => Some("dashboard.progress.days_left_progress"),
         };
         let word = match crate::services::i18n::get_lang() {
@@ -646,7 +653,8 @@ fn task_caption(input: &TaskInput) -> Option<View> {
             let line = t(key)
                 .replace("{n}", &left.to_string())
                 .replace("{w}", word)
-                .replace("{week}", next_week_name(title_key));
+                .replace("{week}", next_week_name(title_key))
+                .replace("{g}", &grams_target.map(|g| format!("{g:.0}")).unwrap_or_default());
             view! { <span class="is-size-7 has-text-grey">{line}</span> }
         });
         // {g} — недельная планка клетчатки: своей шкалы у неё нет, и число живёт

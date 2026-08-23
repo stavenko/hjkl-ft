@@ -34,7 +34,8 @@ async function look(browser, opts) {
       getComputedStyle(el.querySelector("div")).backgroundColor,
     ]),
     gauges: [...document.querySelectorAll("[data-gauge]")].map((el) => el.getAttribute("data-gauge")),
-    caption: document.querySelector('[data-testid="progress-widget"]')?.innerText.split("\n")[0] ?? "",
+    caption: (document.querySelector('[data-testid="progress-widget"]')?.innerText ?? "")
+      .split("\n").slice(0, 2).join(" | "),
   }));
   await context.close();
   return seen;
@@ -67,8 +68,10 @@ const browser = await chromium.launch({ headless: true });
     fiber ? NAME(fiber[1]) : "—");
   check("своей шкалы у клетчатки нет",
     !s.gauges.some((g) => /Клетчатк/i.test(g ?? "")), s.gauges.join(" · "));
-  check("задание называет недельную планку в граммах",
-    /Наберите за неделю \d+ г клетчатки/.test(s.caption), s.caption);
+  // Клетчатка НЕОБЯЗАТЕЛЬНА: на её неделе задание напоминает про то, на чём стоит
+  // похудение, а сама клетчатка идёт второй строкой, как предложение.
+  check("задание зовёт держать обязательные планки",
+    /Держите зелёными калории, белок, шаги и фрукты\/овощи/.test(s.caption), s.caption);
 }
 
 // 3. Неделя КЛЕТЧАТКИ, планка провалена: значок оранжевый — одна незакрытая неделя.
@@ -77,6 +80,8 @@ const browser = await chromium.launch({ headless: true });
   const fiber = s.row.find(([n]) => n === "Клетчатка");
   check("непобранная планка — оранжевый", fiber && NAME(fiber[1]) === "оранжевый",
     fiber ? NAME(fiber[1]) : "значка нет");
+  check("вторая строка предлагает клетчатку в граммах",
+    /Клетчатка — по желанию: \d+ г за неделю/.test(s.caption), s.caption);
 }
 
 await browser.close();

@@ -230,7 +230,8 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.red_meat_gate_title" => "Keep red meat within the weekly limit to unlock the {week}.",
         "dashboard.progress.red_meat_over_title" => "You have eaten too much red meat this week. We will try again next week.",
         "dashboard.progress.egg_gate_title" => "Eat seven eggs this week to unlock the {week}.",
-        "dashboard.progress.fiber_gate_title" => "Eat {g} g of fibre this week.",
+        "dashboard.progress.fiber_gate_title" => "Keep calories, protein, steps and fruit/veg green.",
+        "dashboard.progress.fiber_optional_progress" => "Fibre is optional: {g} g a week if you want it.",
         "dashboard.progress.days_left_progress" => "Left: {n} {w}.",
         "dashboard.progress.week_steps" => "steps week",
         "dashboard.progress.week_calcium" => "calcium week",
@@ -1169,7 +1170,8 @@ fn ru(key: &str) -> &'static str {
         // Яйца: планка снова ПРЯМАЯ — семь штук за неделю, это минимум. Следующей
         // главы за ними пока нет, поэтому цели в задании нет.
         "dashboard.progress.egg_gate_title" => "Наберите за неделю семь яиц, чтобы открыть {week}.",
-        "dashboard.progress.fiber_gate_title" => "Наберите за неделю {g} г клетчатки.",
+        "dashboard.progress.fiber_gate_title" => "Держите зелёными калории, белок, шаги и фрукты/овощи.",
+        "dashboard.progress.fiber_optional_progress" => "Клетчатка — по желанию: {g} г за неделю.",
         // Срок задания — одной строкой на все главы. У недельных глав это дни до
         // конца недели, у гейтов — недостающие ЗЕЛЁНЫЕ дни (семь штук в скользящем
         // окне восьми суток), но человеку они называются просто днями: разбираться в

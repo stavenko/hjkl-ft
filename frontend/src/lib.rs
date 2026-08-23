@@ -277,6 +277,9 @@ async fn maintain_user_data() {
     // И яйца — когда закрыта неделя красного мяса.
     services::indicators::maybe_unlock_egg_week().await;
 
+    // Последней — клетчатка, когда закрыта неделя яиц.
+    services::indicators::maybe_unlock_fiber_week().await;
+
     // Freeze each recent completed day's calorie result (its planka) BEFORE the
     // weekly recompute below might change the planka — so past-day diary gauges keep
     // the planka that actually applied. Independent of the recompute itself.

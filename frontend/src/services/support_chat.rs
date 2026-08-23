@@ -421,6 +421,8 @@ async fn open_week(week: u32) {
         5 => indicators::open_iron_week().await,
         6 => indicators::open_fat_week().await,
         7 => indicators::open_red_meat_week().await,
+        8 => indicators::open_egg_week().await,
+        9 => indicators::open_fiber_week().await,
         _ => {}
     }
 }

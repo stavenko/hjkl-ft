@@ -249,6 +249,12 @@ pub fn displayed_indicators() -> Vec<&'static str> {
     if crate::services::egg::unlocked() {
         v.push("egg");
     }
+    // Клетчатка — недельная планка граммов и ЕДИНСТВЕННЫЙ индикатор без своей шкалы:
+    // она набирается фоном всего съеденного, и суточная полоска у неё дёргалась бы
+    // от одного яблока. Открывается после закрытой недели яиц.
+    if crate::services::fiber::unlocked() {
+        v.push("fiber");
+    }
     v
 }
 
@@ -482,6 +488,44 @@ pub async fn maybe_unlock_egg_week() -> bool {
     }
     open_egg_week().await;
     true
+}
+
+/// Открыть НЕДЕЛЮ КЛЕТЧАТКИ, когда закрыта неделя яиц.
+///
+/// Восьмая и пока последняя тема пути: кальций → железо → жиры → красное мясо →
+/// яйца → клетчатка. Условие — хотя бы одна ЗАВЕРШЁННАЯ неделя яиц, в которую
+/// планка набрана (`egg::week_closed_since_open`), то есть ровно тот гейт, счётчик
+/// которого виджет уже показывает.
+///
+/// Идемпотентно и монотонно, как остальные гейты. Возвращает `true`, если открытие
+/// произошло именно сейчас.
+pub async fn maybe_unlock_fiber_week() -> bool {
+    use crate::services::{egg, fiber};
+    if fiber::unlocked() {
+        return false;
+    }
+    if !egg::unlocked() {
+        return false; // неделя яиц должна открыться первой
+    }
+    if !egg::week_closed_since_open().await {
+        return false; // ни одной закрытой недели яиц с начала темы
+    }
+    open_fiber_week().await;
+    true
+}
+
+/// САМО открытие недели клетчатки, без проверки условия (см. `open_activity_week`).
+///
+/// Ни признака, ни фонового прохода здесь не нужно: клетчатка приходит из нутриентов
+/// продукта, которые заполняет обычный разбор, — доспрашивать нечего.
+pub async fn open_fiber_week() {
+    use crate::services::fiber;
+    if fiber::unlocked() {
+        return;
+    }
+    let today = crate::services::local::today_date();
+    crate::services::app_flags::set(fiber::FIBER_WEEK_OPEN_KEY, &fmt(today));
+    crate::services::app_flags::set_bool(fiber::FIBER_UNLOCKED_KEY, true);
 }
 
 /// САМО открытие недели яиц, без проверки условия (см. `open_activity_week`).
@@ -919,6 +963,11 @@ pub async fn indicator_state(key: &str) -> IndicatorState {
     if key == "egg" {
         return crate::services::egg::indicator_state().await;
     }
+    // Клетчатка судится НЕДЕЛЕЙ: её норма привязана к калорийной планке, а сама она
+    // приходит фоном — дневное «попал/не попал» о ней ничего не говорит.
+    if key == "fiber" {
+        return crate::services::fiber::indicator_state().await;
+    }
     if key == "processed_meat" {
         return crate::services::processed_meat::indicator_state().await;
     }
@@ -1187,6 +1236,10 @@ pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
         }
         if key == "egg" {
             out.push(crate::services::egg::weekly_series().await);
+            continue;
+        }
+        if key == "fiber" {
+            out.push(crate::services::fiber::weekly_series().await);
             continue;
         }
         if key == "processed_meat" {

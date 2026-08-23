@@ -15,7 +15,7 @@
 //   await openSeeded(browser, { seed, … });
 
 /// Темы по порядку открытия. Каждая следующая включает все предыдущие.
-export const WEEKS = ["base", "activity", "calcium", "iron", "fats", "red_meat", "egg"];
+export const WEEKS = ["base", "activity", "calcium", "iron", "fats", "red_meat", "egg", "fiber"];
 
 /// Пороги — те же числа, что в коде приложения. Держать в согласии вручную:
 /// расхождение сделает сцену бессмысленной (снимок покажет не то состояние).
@@ -24,7 +24,7 @@ const RULES = {
   proteinPerDay: 157,         // белковая планка мужчины 88 кг
   vegPerDay: 800,             // мужская планка овощей и фруктов
   calciumPerDay: 1000,        // indicators::CALCIUM_PER_DAY_MG
-  fiberPerDay: 25,            // indicators::FIBER_PER_DAY_G
+  fiberPerDay: 36.4,          // fiber::daily_target_g(2600) — 14 г на 1000 ккал
   stepsPerDay: 9000,          // profile.steps_planka
   ironPerWeek: 10.1,          // iron: недельная планка усвоенного
   hemePortionsPerWeek: 3,     // heme::WEEKLY_PORTIONS
@@ -32,6 +32,7 @@ const RULES = {
   unsatToSatMin: 2.0,         // fats::UNSAT_TO_SAT_MIN
   redMeatLimitPerWeek: 700,   // red_meat::WEEKLY_LIMIT_RAW_G
   eggGramsPerWeek: 350,       // egg::weekly_min_grams()
+  fiberPerWeek: 254.8,        // fiber::weekly_target_g() при планке 2600 ккал
 };
 
 /// Сколько дней истории сеять: восемь завершённых недель окна плюс текущая.
@@ -43,8 +44,8 @@ const DAYS = 9 * 7;
  * @param {object} opts
  * @param {string} opts.week   до какой темы открыто (см. [`WEEKS`])
  * @param {string|null} opts.target ключ индикатора-героя: он будет ОРАНЖЕВЫМ.
- *   Дневные: calories | protein | veg_fruit | calcium | fiber | steps.
- *   Недельные: iron | heme | epa_dha | fat_ratio | red_meat | egg.
+ *   Дневные: calories | protein | veg_fruit | calcium | steps.
+ *   Недельные: iron | heme | epa_dha | fat_ratio | red_meat | egg | fiber.
  *   `null` — всё зелёное.
  * @param {number} [opts.dayOfWeek] какой сегодня день недели темы (1…7), для шкал
  *   с темпом. По умолчанию 4 — середина, шкала наполовину.
@@ -97,6 +98,7 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4, days = DAYS, ope
         const weeklyHero = {
           activity: [], calcium: [], iron: ["iron", "heme"],
           fats: ["epa_dha", "fat_ratio"], red_meat: ["red_meat"], egg: ["egg"],
+          fiber: ["fiber"],
         };
         const lastAnchor = (weeklyHero[week] || []).includes(target) ? anchor + 7 : anchor;
         /// Сколько дней назад открыта тема: у последней открытой — по правилу выше.
@@ -134,6 +136,10 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4, days = DAYS, ope
         if (upTo("egg")) {
           app_flags.push({ key: "egg_week_unlocked", value: "true" });
           app_flags.push({ key: "egg_week_opened_at", value: openedAt("egg", 21) });
+        }
+        if (upTo("fiber")) {
+          app_flags.push({ key: "fiber_week_unlocked", value: "true" });
+          app_flags.push({ key: "fiber_week_opened_at", value: openedAt("fiber", 14) });
         }
 
         const profile = [{
@@ -263,7 +269,8 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4, days = DAYS, ope
           if (target === "iron" && inSpoiledWeek(back)) baseId = "base_low_iron";
           else if (target === "calcium" && spoiledDay(back)) baseId = "base_low_ca";
           else if (target === "protein" && spoiledDay(back)) baseId = "base_low_protein";
-          else if (target === "fiber" && spoiledDay(back)) baseId = "base_low_fiber";
+          // Клетчатка судится НЕДЕЛЕЙ: портится вся неделя, а не отдельные дни.
+          else if (target === "fiber" && inSpoiledWeek(back)) baseId = "base_low_fiber";
           add(`b${back}`, baseId, back, 130);
 
           add(`v${back}`, "veg", back, target === "veg_fruit" && spoiledDay(back) ? 150 : 900);

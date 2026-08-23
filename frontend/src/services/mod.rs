@@ -12,6 +12,7 @@ pub mod egg;
 pub mod enrich;
 pub mod errors;
 pub mod fats;
+pub mod fiber;
 pub mod flags_pipeline;
 pub mod food_probe;
 pub mod diag;

@@ -473,9 +473,13 @@ struct TaskInput {
     fat: Option<crate::services::fats::WeeklyFats>,
     red_meat: Option<crate::services::red_meat::WeeklyRedMeat>,
     egg: Option<crate::services::egg::WeeklyEggs>,
-    /// Пройден ли гейт своей главы: у мяса и яиц счётчик после этого встаёт на ноль.
+    /// Ход недели клетчатки — только для подписи: своей шкалы у неё нет.
+    fiber: Option<crate::services::fiber::WeeklyFiber>,
+    /// Пройден ли гейт своей главы: у мяса, яиц и клетчатки счётчик после этого
+    /// встаёт на ноль.
     red_meat_gate: bool,
     egg_gate: bool,
+    fiber_gate: bool,
 }
 
 /// Состояние полосы калорий: недобор, попадание в коридор, перебор.
@@ -544,7 +548,14 @@ fn task_caption(input: &TaskInput) -> Option<View> {
             && calcium_green < indicators::GREEN_GATE_DAYS
         {
             Some(("dashboard.progress.calcium_gate_title", calcium_green))
-        } else if let Some(w) = input.egg.as_ref() {
+        } else if let Some(w) = input.fiber.as_ref() {
+            // Клетчатка — последняя открытая глава, и подпись держится всю её:
+            // следующей за ней пока нет. Планка ПРЯМАЯ, её набирают.
+            let done = if input.fiber_gate { indicators::GREEN_GATE_DAYS } else { w.day_of_week - 1 };
+            Some(("dashboard.progress.fiber_gate_title", done))
+        } else if let Some(w) =
+            input.egg.as_ref().filter(|_| !crate::services::fiber::unlocked())
+        {
             // Яйца — последняя открытая глава, и подпись держится всю её: следующей
             // за ней пока нет, ждать нечего, кроме конца своей недели.
             //
@@ -592,6 +603,7 @@ fn task_caption(input: &TaskInput) -> Option<View> {
             None
         };
 
+    let grams_target = input.fiber.as_ref().map(|w| w.target);
     active.map(|(title_key, done)| {
         // Показываем ОСТАТОК дней, а не «5/7»: дробь читается двояко — то ли
         // сделано, то ли осталось.
@@ -637,7 +649,11 @@ fn task_caption(input: &TaskInput) -> Option<View> {
                 .replace("{week}", next_week_name(title_key));
             view! { <span class="is-size-7 has-text-grey">{line}</span> }
         });
-        let title = t(title_key).replace("{week}", next_week_name(title_key));
+        // {g} — недельная планка клетчатки: своей шкалы у неё нет, и число живёт
+        // только в этой строке.
+        let title = t(title_key)
+            .replace("{week}", next_week_name(title_key))
+            .replace("{g}", &grams_target.map(|g| format!("{g:.0}")).unwrap_or_default());
         view! {
             <div style="display: flex; flex-direction: column; gap: 2px;">
                 <span class="is-size-7 has-text-weight-semibold">{title}</span>
@@ -656,6 +672,7 @@ fn next_week_name(title_key: &str) -> &'static str {
         "dashboard.progress.iron_gate_title" => t("dashboard.progress.week_fat"),
         "dashboard.progress.fat_gate_title" => t("dashboard.progress.week_red_meat"),
         "dashboard.progress.red_meat_gate_title" => t("dashboard.progress.week_egg"),
+        "dashboard.progress.egg_gate_title" => t("dashboard.progress.week_fiber"),
         "dashboard.progress.iron_done_title" => t("dashboard.progress.week_fat_nom"),
         "dashboard.progress.fat_done_title" => t("dashboard.progress.week_red_meat_nom"),
         _ => "",
@@ -763,6 +780,16 @@ pub fn ProgressWidget() -> impl IntoView {
     );
     // Гейт яиц: закрыта ли уже хотя бы одна неделя. Следующей главы за яйцами пока
     // нет, поэтому счётчик, как было у мяса, встаёт на ноль и там остаётся.
+    // Клетчатка: ход недели для подписи и «закрыта ли уже неделя» для счётчика.
+    // Шкалы у неё нет — числа нужны только тексту задания.
+    let fiber_week = create_local_resource(
+        move || (food_ver.get(), foods_ver.get()),
+        |_| async { crate::services::fiber::weekly_progress().await },
+    );
+    let fiber_gate = create_local_resource(
+        move || (food_ver.get(), foods_ver.get()),
+        |_| async { crate::services::fiber::week_closed_since_open().await },
+    );
     let egg_gate = create_local_resource(
         move || (food_ver.get(), foods_ver.get()),
         |_| async { crate::services::egg::week_closed_since_open().await },
@@ -912,8 +939,10 @@ pub fn ProgressWidget() -> impl IntoView {
                                             fat: fat_week.get().flatten(),
                                             red_meat: red_meat_week.get().flatten(),
                                             egg: egg_week.get().flatten(),
+                                            fiber: fiber_week.get().flatten(),
                                             red_meat_gate: red_meat_gate.get().unwrap_or(false),
                                             egg_gate: egg_gate.get().unwrap_or(false),
+                                            fiber_gate: fiber_gate.get().unwrap_or(false),
                                         })}
                                         <crate::components::gauge::Gauge
                                             value=eaten target=n

@@ -229,7 +229,8 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.fat_done_title" => "You have met the omega-3 target.",
         "dashboard.progress.red_meat_gate_title" => "Keep red meat within the weekly limit to unlock the {week}.",
         "dashboard.progress.red_meat_over_title" => "You have eaten too much red meat this week. We will try again next week.",
-        "dashboard.progress.egg_gate_title" => "Eat seven eggs this week.",
+        "dashboard.progress.egg_gate_title" => "Eat seven eggs this week to unlock the {week}.",
+        "dashboard.progress.fiber_gate_title" => "Eat {g} g of fibre this week.",
         "dashboard.progress.days_left_progress" => "Left: {n} {w}.",
         "dashboard.progress.week_steps" => "steps week",
         "dashboard.progress.week_calcium" => "calcium week",
@@ -237,6 +238,7 @@ fn en(key: &str) -> &'static str {
         "dashboard.progress.week_fat" => "fat week",
         "dashboard.progress.week_red_meat" => "red meat week",
         "dashboard.progress.week_egg" => "egg week",
+        "dashboard.progress.week_fiber" => "fibre week",
         "dashboard.progress.week_fat_nom" => "The fat week",
         "dashboard.progress.week_red_meat_nom" => "The red meat week",
         "dashboard.progress.kcal_day" => "kcal/day",
@@ -1166,7 +1168,8 @@ fn ru(key: &str) -> &'static str {
         "dashboard.progress.red_meat_over_title" => "Вы съели слишком много красного мяса на этой неделе. На следующей неделе попробуем ещё раз.",
         // Яйца: планка снова ПРЯМАЯ — семь штук за неделю, это минимум. Следующей
         // главы за ними пока нет, поэтому цели в задании нет.
-        "dashboard.progress.egg_gate_title" => "Наберите за неделю семь яиц.",
+        "dashboard.progress.egg_gate_title" => "Наберите за неделю семь яиц, чтобы открыть {week}.",
+        "dashboard.progress.fiber_gate_title" => "Наберите за неделю {g} г клетчатки.",
         // Срок задания — одной строкой на все главы. У недельных глав это дни до
         // конца недели, у гейтов — недостающие ЗЕЛЁНЫЕ дни (семь штук в скользящем
         // окне восьми суток), но человеку они называются просто днями: разбираться в
@@ -1179,6 +1182,7 @@ fn ru(key: &str) -> &'static str {
         "dashboard.progress.week_fat" => "неделю жиров",
         "dashboard.progress.week_red_meat" => "неделю красного мяса",
         "dashboard.progress.week_egg" => "неделю яиц",
+        "dashboard.progress.week_fiber" => "неделю клетчатки",
         // Именительные формы — только у тех двух глав, что подставляются подлежащим
         // в строку про открытие: за железом идут жиры, за жирами — красное мясо.
         "dashboard.progress.week_fat_nom" => "Неделя жиров",

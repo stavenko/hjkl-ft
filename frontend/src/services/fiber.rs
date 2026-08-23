@@ -41,9 +41,31 @@ pub fn daily_target_g(planka_kcal: Option<f64>) -> f64 {
     from_kcal.max(MIN_G_PER_DAY)
 }
 
-/// Недельная планка этого человека, г.
+/// Недельная планка этого человека ПО СЕГОДНЯШНЕЙ калорийной планке, г.
+///
+/// Годится для текущей недели; прошлые судятся своей планкой — см.
+/// [`weekly_target_on`].
 pub async fn weekly_target_g() -> f64 {
     daily_target_g(local::calorie_goal_amount().await) * 7.0
+}
+
+/// Недельная планка ТОЙ НЕДЕЛИ, что началась `week_start`, г.
+///
+/// ЗАДНИМ ЧИСЛОМ НИЧЕГО НЕ КРАСНЕЕТ. Норма клетчатки выводится из калорийной, а та
+/// пересчитывается каждую неделю: считай мы всю историю по сегодняшнему числу,
+/// поднятая планка перекрасила бы в красный недели, которые человек тогда закрыл.
+/// Поэтому берётся планка, ДЕЙСТВОВАВШАЯ в первый день той недели, — из того же
+/// журнала, по которому судит себя индикатор калорий.
+///
+/// Журнала может не быть у тех, кто получил планку до его появления: тогда падаем
+/// на сегодняшнюю — это лучше, чем судить их по минимуму ВОЗ.
+async fn weekly_target_on(week_start: NaiveDate) -> f64 {
+    let day = week_start.format("%Y-%m-%d").to_string();
+    let planka = match local::planka_on(local::PLANKA_CALORIES, &day).await {
+        Some(v) => Some(v),
+        None => local::calorie_goal_amount().await,
+    };
+    daily_target_g(planka) * 7.0
 }
 
 /// Открыта ли неделя клетчатки.
@@ -96,7 +118,6 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
     let Some((cur_start, _)) = week_bounds(today) else {
         return IndicatorState::Unknown;
     };
-    let target = weekly_target_g().await;
     let diary_days: std::collections::HashSet<String> =
         local::list_diary_dates().await.into_iter().collect();
     let mut history: Vec<bool> = Vec::new();
@@ -110,7 +131,7 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
         if !logged {
             continue;
         }
-        history.push(grams_between(s, e).await >= target);
+        history.push(grams_between(s, e).await >= weekly_target_on(s).await);
     }
     history.reverse();
     super::indicators::weekly_state(&history)
@@ -123,7 +144,6 @@ pub async fn weekly_series() -> super::indicators::IndicatorSeries {
     let mut labels: Vec<String> = Vec::new();
     let mut met: Vec<Option<bool>> = Vec::new();
     if let Some((cur_start, _)) = week_bounds(today) {
-        let target = weekly_target_g().await;
         let diary_days: std::collections::HashSet<String> =
             local::list_diary_dates().await.into_iter().collect();
         let window = super::indicators::WEEKLY_WINDOW as i64;
@@ -134,6 +154,7 @@ pub async fn weekly_series() -> super::indicators::IndicatorSeries {
                 diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
             });
             let grams = grams_between(s, e).await;
+            let target = weekly_target_on(s).await;
             let ratio = logged.then(|| grams / target);
             points.push((s.format("%Y-%m-%d").to_string(), grams, ratio));
             labels.push(format!("−{back}"));
@@ -169,7 +190,9 @@ pub async fn weekly_progress() -> Option<WeeklyFiber> {
     let (start, _end) = week_bounds(today)?;
     Some(WeeklyFiber {
         grams: grams_between(start, today).await,
-        target: weekly_target_g().await,
+        // И текущая неделя тоже — своей планкой: пересчёт калорий среди недели не
+        // должен менять задание, которое человек уже читал в понедельник.
+        target: weekly_target_on(start).await,
         day_of_week: (today - start).num_days() as u32 + 1,
     })
 }
@@ -183,7 +206,6 @@ pub async fn week_closed_since_open() -> bool {
     let (Some(open), Some((cur_start, _))) = (week_open_date(), week_bounds(today)) else {
         return false;
     };
-    let target = weekly_target_g().await;
     let diary_days: std::collections::HashSet<String> =
         local::list_diary_dates().await.into_iter().collect();
     let mut s = open;
@@ -192,7 +214,7 @@ pub async fn week_closed_since_open() -> bool {
         let logged = (0..7).any(|d| {
             diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
         });
-        if logged && grams_between(s, e).await >= target {
+        if logged && grams_between(s, e).await >= weekly_target_on(s).await {
             return true;
         }
         s += Duration::days(7);

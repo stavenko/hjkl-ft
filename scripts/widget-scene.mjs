@@ -32,6 +32,7 @@ const RULES = {
   unsatToSatMin: 2.0,         // fats::UNSAT_TO_SAT_MIN
   redMeatLimitPerWeek: 700,   // red_meat::WEEKLY_LIMIT_RAW_G
   eggGramsPerWeek: 350,       // egg::weekly_min_grams()
+  raisedPlanka: 3400,         // «планка выросла сегодня» — для проверки задним числом
   fiberPerWeek: 254.8,        // fiber::weekly_target_g() при планке 2600 ккал
 };
 
@@ -60,11 +61,13 @@ const DAYS = 9 * 7;
  *   а 0/800 — промах. Семь дней еды под тремя днями индикаторов дают зелёный ряд
  *   при незакрытом гейте.
  */
-export function sceneSeed({ week, target = null, dayOfWeek = 4, days = DAYS, openedDaysAgo = null }) {
+export function sceneSeed({
+  week, target = null, dayOfWeek = 4, days = DAYS, openedDaysAgo = null, raisePlanka = false,
+}) {
   if (!WEEKS.includes(week)) throw new Error(`неизвестная тема: ${week}`);
   return async (page, uid) => {
     await page.evaluate(
-      async ({ uid, week, target, dayOfWeek, RULES, DAYS, OPENED, WEEKS }) => {
+      async ({ uid, week, target, dayOfWeek, RULES, DAYS, OPENED, WEEKS, RAISE_PLANKA }) => {
         const db = await new Promise((res, rej) => {
           const r = indexedDB.open(`hjkl-ft-${uid}`);
           r.onsuccess = () => res(r.result);
@@ -148,19 +151,31 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4, days = DAYS, ope
           cycle_start: null, steps_planka: RULES.stepsPerDay,
           created_at: nowIso, updated_at: nowIso,
         }];
+        // Сегодняшняя планка: поднятая — только в проверке «задним числом».
+        const goalAmount = RAISE_PLANKA ? RULES.raisedPlanka : RULES.caloriePlanka;
         const goals = [
           { id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
-            amount: RULES.caloriePlanka, unit: "Kcal", period: "Day",
+            amount: goalAmount, unit: "Kcal", period: "Day",
             created_at: nowIso, updated_at: nowIso },
           { id: "g-ca", nutrient: "Кальций", key: "calcium", direction: "AtLeast",
             amount: RULES.calciumPerDay, unit: "Mg", period: "Day",
             created_at: nowIso, updated_at: nowIso },
         ];
-        // История планки: индикатор калорий судит день по планке ТОГО дня.
+        // История планки: индикатор калорий судит день по планке ТОГО дня, а норма
+        // клетчатки выводится из неё же. Форма записи — как у приложения
+        // (`api_types::PlankaEntry`): вид, дата начала действия и величина.
         const planka_history = [{
-          id: "ph-1", from_date: ymd(DAYS), kcal: RULES.caloriePlanka,
-          created_at: nowIso, updated_at: nowIso,
+          id: `calories:${ymd(DAYS)}`, kind: "calories", date: ymd(DAYS),
+          amount: RULES.caloriePlanka, created_at: nowIso, updated_at: nowIso,
         }];
+        if (RAISE_PLANKA) {
+          // ПЛАНКА ВЫРОСЛА СЕГОДНЯ. Прошлые недели обязаны остаться при своей норме:
+          // на этом проверяется, что поднятая планка не красит их задним числом.
+          planka_history.push({
+            id: `calories:${ymd(0)}`, kind: "calories", date: ymd(0),
+            amount: RULES.raisedPlanka, created_at: nowIso, updated_at: nowIso,
+          });
+        }
 
         // ── продукты сцены ─────────────────────────────────────────────────
         const food = (id, name, extra) => ({
@@ -189,6 +204,9 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4, days = DAYS, ope
           food("base_low_ca", "Рацион дня", { ...base, nutrients: { "Кальций": 150, "Клетчатка": 30 } }),
           food("base_low_protein", "Рацион дня", { ...base, protein: 40 }),
           food("base_low_fiber", "Рацион дня", { ...base, nutrients: { "Кальций": 1100, "Клетчатка": 2 } }),
+          // Клетчатки ровно столько, чтобы неделя закрывала СТАРУЮ норму и не
+          // закрывала поднятую: на этом и держится проверка «задним числом».
+          food("base_mid_fiber", "Рацион дня", { ...base, nutrients: { "Кальций": 1100, "Клетчатка": 12 } }),
           food("veg", "Овощи и фрукты", {
             kcal: 40, protein: 2, fat: 0.3, carbs: 8,
             nutrients: { "Клетчатка": 3 }, is_veg_fruit: true,
@@ -265,7 +283,7 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4, days = DAYS, ope
           // негемового железа. Порча героя подменяет её дублем с одним ослабленным
           // полем: калории при этом не съезжают, и день остаётся зелёным по всему
           // остальному.
-          let baseId = "base";
+          let baseId = RAISE_PLANKA ? "base_mid_fiber" : "base";
           if (target === "iron" && inSpoiledWeek(back)) baseId = "base_low_iron";
           else if (target === "calcium" && spoiledDay(back)) baseId = "base_low_ca";
           else if (target === "protein" && spoiledDay(back)) baseId = "base_low_protein";
@@ -331,7 +349,7 @@ export function sceneSeed({ week, target = null, dayOfWeek = 4, days = DAYS, ope
         db.close();
       },
       { uid, week, target, dayOfWeek, RULES, DAYS: days,
-        OPENED: openedDaysAgo ?? days - 1, WEEKS },
+        OPENED: openedDaysAgo ?? days - 1, WEEKS, RAISE_PLANKA: raisePlanka },
     );
   };
 }

@@ -84,5 +84,15 @@ const browser = await chromium.launch({ headless: true });
     /Клетчатка — по желанию: \d+ г за неделю/.test(s.caption), s.caption);
 }
 
+// 4. ПЛАНКА ЗАДНИМ ЧИСЛОМ. Норма клетчатки выводится из калорийной, а та растёт
+//    при недельном пересчёте. Неделя, закрытая по старой планке, обязана остаться
+//    закрытой: судим её тем, что действовало тогда, а не сегодняшним числом.
+{
+  const s = await look(browser, { week: "fiber", target: null, raisePlanka: true });
+  const fiber = s.row.find(([n]) => n === "Клетчатка");
+  check("поднятая планка не красит прошлые недели", fiber && NAME(fiber[1]) === "зелёный",
+    fiber ? NAME(fiber[1]) : "значка нет");
+}
+
 await browser.close();
 process.exit(failed ? 1 : 0);

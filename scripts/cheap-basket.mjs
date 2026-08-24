@@ -133,6 +133,17 @@ const FOODS = {
   lentils: F("Чечевица", 150,
     { kcal: 295, protein: 24, fat: 1.5, fibre: 11.5, calcium: 83, iron: 11.8,
       sfa: 15, mufa: 18, pufa: 46 }),
+  // ВКУСНЕНЬКОЕ. Жир у сырка молочный (глобула) — в баланс не идёт; у батончика и
+  // шоколада жир кондитерский, и он в балансе участвует наравне с маслом.
+  syrok: F("Сырок глазированный 26%", 600,
+    { kcal: 407, protein: 8.5, fat: 26, calcium: 135, iron: 0.3,
+      sfa: 63, mufa: 28, pufa: 4, globule: true }),
+  barni: F("Мишка Барни", 700,
+    { kcal: 463, protein: 6, fat: 21, fibre: 1.5, calcium: 60, iron: 1.2,
+      sfa: 45, mufa: 38, pufa: 13 }),
+  chocolate: F("Шоколад молочный", 900,
+    { kcal: 558, protein: 7.3, fat: 32, fibre: 3.4, calcium: 189, iron: 2.4,
+      sfa: 60, mufa: 33, pufa: 3 }),
   // Жиры.
   sunflowerOil: F("Масло подсолнечное", 130,
     { kcal: 899, protein: 0, fat: 99.9, sfa: 11, mufa: 24, pufa: 63 }),
@@ -163,9 +174,12 @@ const BASKET = {
   apple: 700,
   frozenVeg: 0,
   barley: 0,
-  buckwheat: 700,          // 100 г/день сухой
+  buckwheat: 400,          // ~57 г/день сухой
   lentils: 700,
-  sunflowerOil: 70,        // 10 г/день
+  sunflowerOil: 0,
+  syrok: 315,              // сырок 45 г в день
+  barni: 0,
+  chocolate: 0,
   sunflowerSeeds: 105,
   walnuts: 0,
 };

@@ -1687,10 +1687,11 @@ const S9: &[Frame] = &[
             ru: "Разница между цельной и рафинированной крупой — почти вся в клетчатке: при                  шлифовке удаляются отруби и зародыш. Овёс, перловка, гречка, булгур,                  цельнозерновая пшеница дают 3–6 г на 100 г готовых. Отдельно у овса и ячменя —                  бета-глюканы: около 3 г в день измеримо снижают ЛПНП.",
         },
     },
-    // 9 — картошка и рис.
+    // 9 — картошка и рис. КОЛЛАЖ из двух половин: слева картошка, справа рис — два
+    // гарнира, которые в тарелке занимают место овощей, а клетчатки не дают.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("fiber-starch.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Fibre", ru: "Клетчатка" },
         title: Loc { en: "Potatoes and rice", ru: "Картошка и рис" },
@@ -1699,16 +1700,41 @@ const S9: &[Frame] = &[
             ru: "Это крахмалистые гарниры, а не источники клетчатки: белый рис ≈0,4 г, картофель                  ≈1,5–2 г на 100 г. Они не заменяют овощи в тарелке, хотя часто занимают их                  место. Охлаждение после варки образует резистентный крахмал — он ферментируется                  похожим образом, но объёмы клетчатки это не компенсирует.",
         },
     },
-    // 10 — кожура.
+    // 10 — кожура. Печёная картошка в мундире: тот самый случай, когда кожуру не
+    // сняли, — и треть клетчатки осталась в тарелке.
     Frame {
         bg: Bg::Dark,
-        media: Media::None,
+        media: Media::Cover("fiber-skin.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Fibre", ru: "Клетчатка" },
         title: Loc { en: "The skin", ru: "Кожура" },
         body: Loc {
             en: "The insoluble fraction is concentrated in the skin: a peeled apple, pear or                  potato loses roughly a third to a half of its fibre. Scrubbing with a brush                  instead of peeling is the cheapest way to add a few grams a day. The exception                  is where the skin is inedible or bitter.",
             ru: "В кожуре сосредоточена нерастворимая фракция: очищенное яблоко, груша или                  картофель теряют примерно треть-половину клетчатки. Мыть щёткой вместо того,                  чтобы чистить, — самый дешёвый способ добавить несколько грамм в день.                  Исключение — там, где кожура несъедобна или горчит.",
+        },
+    },
+    // 11 — сам индикатор. Кадр с обводкой на значке: он последний, потому что до
+    // него объяснялось, ОТКУДА берётся клетчатка, а здесь — где её теперь видно.
+    //
+    // Текст АВТОРСКИЙ и говорит прямо: индикатор необязательный, а обязательное —
+    // калории, белок и фрукты с овощами. Это же правило стоит в подписи задания.
+    Frame {
+        bg: Bg::Dark,
+        media: Media::ShotBand("fiber-highlight.gif"),
+        accent: GREEN,
+        kicker: Loc { en: "Fibre", ru: "Клетчатка" },
+        title: Loc { en: "The new indicator", ru: "Новый индикатор" },
+        body: Loc {
+            en: "Besides the fruit-and-vegetable indicator we are adding a fibre one. It is \
+                 optional, but it will show you how much fibre your food actually gives you and \
+                 help you adjust it.\n\nWhat matters far more is to keep eating the right amount \
+                 of calories, protein and fruit and vegetables. Keep those green for a week — and \
+                 if you manage, keep the fibre indicator green too.",
+            ru: "Помимо индикатора на овощи и фрукты, мы добавляем ещё индикатор клетчатки. Этот \
+                 индикатор опционален, но он поможет вам понять, как много клетчатки вы едите из \
+                 еды и поможет вам скорректировать питание.\n\nНо гораздо важнее продолжать есть \
+                 правильное количество калорий, белка и фруктов овощей. Держите их зелёными \
+                 неделю, и если получится, держите ещё и индикатор клетчатки зелёным.",
         },
     },
 ];

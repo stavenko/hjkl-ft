@@ -80,6 +80,12 @@ const SHOTS = {
     sparks: ['[data-ind="Колбасы"] > div'],
     file: "processed-meat-highlight.gif",
   },
+  fiber: {
+    // У клетчатки своей ШКАЛЫ нет — обводится только значок.
+    week: "fiber", target: "fiber",
+    sparks: ['[data-ind="Клетчатка"] > div'],
+    file: "fiber-highlight.gif",
+  },
   egg: {
     week: "egg", target: "egg",
     sparks: ['[data-ind="Яйца"] > div', '[data-gauge="Яйца/нед"]'],

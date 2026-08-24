@@ -289,13 +289,19 @@ export function sceneSeed({
           else if (target === "protein" && spoiledDay(back)) baseId = "base_low_protein";
           // Клетчатка судится НЕДЕЛЕЙ: портится вся неделя, а не отдельные дни.
           else if (target === "fiber" && inSpoiledWeek(back)) baseId = "base_low_fiber";
-          add(`b${back}`, baseId, back, 130);
+          // Основу кладём ПОСЛЕДНЕЙ: её граммы подгоняются под калорийный коридор
+          // (см. ниже), а для этого надо знать, сколько дала остальная еда.
+          const dayStart = diary.length;
 
           add(`v${back}`, "veg", back, target === "veg_fruit" && spoiledDay(back) ? 150 : 900);
 
-          // Печень дважды в неделю — три порции гема (25 г белка = порция).
-          if (!(target === "heme" && inSpoiledWeek(back)) && (back % 7 === 2 || back % 7 === 5)) {
-            add(`h${back}`, "liver", back, 200);
+          // Мидии КАЖДЫЙ ДЕНЬ по 45 г — 3.15 порции гема за неделю (порция = 25 г
+          // белка). Раньше стояло 200 г дважды в неделю, и в эти два дня рацион
+          // перескакивал калорийный коридор ±50: индикатор калорий становился
+          // оранжевым и лез в кадр вместе с героем. Ровный ежедневный кусочек даёт
+          // те же порции гема, не трогая калории.
+          if (!(target === "heme" && inSpoiledWeek(back))) {
+            add(`h${back}`, "liver", back, 45);
           }
           // Рыбий жир — 10 г в день: 3 г ЭПК+ДГК за неделю против планки 1.75.
           //
@@ -326,12 +332,30 @@ export function sceneSeed({
 
           // Баланс жира роняется салом — насыщенных становится больше нормы.
           if (target === "fat_ratio" && inSpoiledWeek(back)) {
-            add(`l${back}`, "lard", back, 150);
+            add(`l${back}`, "lard", back, 60);
           }
           // Калории уводятся из коридора ±50 тем же салом, но в один-два дня.
           if (target === "calories" && spoiledDay(back)) {
             add(`x${back}`, "lard", back, 200);
           }
+
+          // ОСНОВА ДНЯ — носитель калорий, белка, кальция, клетчатки и негемового
+          // железа. Её граммы ПОДГОНЯЮТСЯ так, чтобы день попал в калорийный
+          // коридор ±50: порча героя добавляет или убирает еду (сало, лишнее мясо,
+          // пропущенные яйца), и с постоянной основой день выпадал бы из коридора —
+          // рядом с героем зажигался бы ещё и оранжевый значок калорий.
+          //
+          // Кроме случая, когда герой — САМИ КАЛОРИИ: там выпадение из коридора и
+          // есть то, что показывает кадр.
+          const others = diary.slice(dayStart).reduce((sum, e) => {
+            const f = foods.find((x) => x.id === e.food_id);
+            return sum + (f ? f.kcal * e.grams / 100 : 0);
+          }, 0);
+          const fixed = target === "calories" && spoiledDay(back);
+          const baseKcal = foods.find((f) => f.id === baseId).kcal;
+          const grams = fixed ? 130
+            : Math.min(200, Math.max(40, (RULES.caloriePlanka - others) / baseKcal * 100));
+          add(`b${back}`, baseId, back, Math.round(grams * 10) / 10);
         }
 
         const rows = { app_flags, profile, goals, planka_history, foods, diary,

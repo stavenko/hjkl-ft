@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light" />
 <meta name="theme-color" content="#F1F4F9" />
-<title>Рацион на 1800 ккал — сколько это стоит | re:Norma</title>
-<meta name="description" content="Готовый рацион на 1800 ккал, который закрывает белок, кальций, железо, омега-3 и клетчатку. С брендами из обычного магазина и ценой за неделю." />
+<title>Рационы на 1800, 2200 и 2500 ккал — сколько это стоит | re:Norma</title>
+<meta name="description" content="Три готовых рациона — 1800, 2200 и 2500 ккал. Закрывают белок, кальций, железо, омега-3 и клетчатку. Продукты из обычного магазина, с ценой за неделю." />
 <style>
   /* Golos Text — self-hosted (bundled woff2); no third-party font host. */
   @font-face{font-family:'Golos Text';font-style:normal;font-weight:400 900;font-display:swap;
@@ -213,6 +213,14 @@
     border-radius:var(--pill);padding:7px 13px;font-size:13.5px;font-weight:600}
   .ind i{font-style:normal;opacity:.75;font-weight:500}
 
+  /* Переключатель рационов */
+  .tabs{display:flex;gap:6px;background:var(--surface);border:1.5px solid var(--line);
+    border-radius:var(--pill);padding:4px;margin-top:18px}
+  .tabs button{flex:1;border:none;background:transparent;cursor:pointer;font-family:inherit;
+    font-weight:700;font-size:15px;color:var(--muted);padding:11px 6px;border-radius:var(--pill);line-height:1}
+  .tabs button[aria-pressed="true"]{background:var(--accent);color:#04331F}
+  .ration[hidden]{display:none}
+
   /* Числовая врезка внутри «странички» */
   .figs{display:flex;gap:10px;margin-top:4px}
   .fig{flex:1;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
@@ -233,124 +241,8 @@
     <span class="eyebrow">Пример рациона</span>
     <h1 style="margin-top:12px">Питаться правильно — <span class="hl">не дороже, чем обычно</span></h1>
     <p class="lead">Хорошее питание требует дисциплины и некоторых знаний. Но оно доступно любому человеку — не нужны ни добавки, ни «суперфуды», ни магазины здорового питания.</p>
-    <p class="lead">Вот рацион на 1800 ккал из обычного супермаркета. Он закрывает все дефициты, которые мы отслеживаем в программе: белок, кальций, железо, омега-3, клетчатку. И оставляет место сладкому.</p>
-  </section>
-
-  <!-- 2 · Рацион -->
-  <section>
-    <div class="card">
-      <h2>Корзина на неделю</h2>
-      <p class="lead" style="margin-top:8px">Бренды — пример, подойдёт любой аналог. Цены — ориентир розницы, лето 2026.</p>
-      <div class="menu">
-        <div class="mrow">
-          <div class="mname"><b>Греческий йогурт 2%</b><span>Teos, Epica, «Савушкин»</span></div>
-          <div class="mqty">150 г/день · 1 кг</div>
-          <div class="mcost">546 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Творог 5%</b><span>«Простоквашино», «Домик в деревне»</span></div>
-          <div class="mqty">100 г/день · 700 г</div>
-          <div class="mcost">280 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Куриное бедро</b><span>«Петелинка», «Троекурово»</span></div>
-          <div class="mqty">100 г/день · 700 г</div>
-          <div class="mcost">224 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Куриная грудка</b><span>«Петелинка», «Мираторг»</span></div>
-          <div class="mqty">70 г/день · 500 г</div>
-          <div class="mcost">200 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Сырок глазированный 26%</b><span>«Б.Ю. Александров», «Свитлогорье»</span></div>
-          <div class="mqty">1 шт/день · 7 шт</div>
-          <div class="mcost">189 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Кефир 2.5%</b><span>«Простоквашино», «Домик в деревне»</span></div>
-          <div class="mqty">200 г/день · 1.4 л</div>
-          <div class="mcost">168 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Чечевица</b><span>«Мистраль», «Националь»</span></div>
-          <div class="mqty">100 г/день · 700 г</div>
-          <div class="mcost">105 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Сыр полутвёрдый 45%</b><span>«Брест-Литовск», «Ламбер»</span></div>
-          <div class="mqty">15 г/день · 105 г</div>
-          <div class="mcost">95 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Капуста белокочанная</b><span>весовая</span></div>
-          <div class="mqty">300 г/день · 2.1 кг</div>
-          <div class="mcost">84 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Яблоки</b><span>весовые</span></div>
-          <div class="mqty">100 г/день · 700 г</div>
-          <div class="mcost">84 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Печень куриная</b><span>«Петелинка», «Троекурово»</span></div>
-          <div class="mqty">полпачки на неделю · 250 г</div>
-          <div class="mcost">70 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Яйцо куриное</b><span>«Роскар», «Синявинская»</span></div>
-          <div class="mqty">1 шт/день · 7 шт</div>
-          <div class="mcost">70 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Сельдь солёная</b><span>«Балтийский берег», «Меридиан»</span></div>
-          <div class="mqty">2 раза по 125 г</div>
-          <div class="mcost">65 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Гречка</b><span>«Увелка», «Мистраль»</span></div>
-          <div class="mqty">57 г/день сухой · 400 г</div>
-          <div class="mcost">44 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Морковь</b><span>весовая</span></div>
-          <div class="mqty">100 г/день · 700 г</div>
-          <div class="mcost">32 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Свёкла</b><span>весовая</span></div>
-          <div class="mqty">100 г/день · 700 г</div>
-          <div class="mcost">28 ₽</div>
-        </div>
-        <div class="mrow">
-          <div class="mname"><b>Семечки подсолнечника</b><span>«Джинн», «От Мартина»</span></div>
-          <div class="mqty">15 г/день · 105 г</div>
-          <div class="mcost">26 ₽</div>
-        </div>
-      </div>
-      <div class="mtotal">
-        <div><div class="big">2310 ₽</div><div class="sub">в неделю на одного</div></div>
-        <div style="text-align:right"><div class="big">330 ₽</div><div class="sub">в день</div></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 3 · Что закрыто -->
-  <section style="padding-top:8px">
-    <h2>Что закрывает эта корзина</h2>
-    <p class="lead">Это не «примерно похоже на здоровое питание». Каждая строка посчитана против нормы, которую программа проверяет каждый день.</p>
-    <div class="inds">
-      <span class="ind">Белок <i>143 / 135 г</i></span>
-      <span class="ind">Фрукты и овощи <i>600 / 600 г</i></span>
-      <span class="ind">Кальций <i>1181 / 1000 мг</i></span>
-      <span class="ind">Клетчатка <i>32 / 25 г</i></span>
-      <span class="ind">Железо <i>17.5 / 10.2 мг</i></span>
-      <span class="ind">Гемовое железо <i>12 / 3 порции</i></span>
-      <span class="ind">Омега-3 <i>4.4 / 1.75 г</i></span>
-      <span class="ind">Баланс жиров <i>2.9 / 2.0</i></span>
-      <span class="ind">Яйца <i>7 / 7 шт</i></span>
-      <span class="ind">Калории <i>1779 / 1800</i></span>
-    </div>
+    <p class="lead">Вот три рациона из обычного супермаркета — на 1800, 2200 и 2500 ккал. Каждый закрывает все дефициты, которые мы отслеживаем в программе: белок, кальций, железо, омега-3, клетчатку. И в каждом остаётся место сладкому.</p>
+    <a class="btn btn-ghost" href="#rations" style="margin-top:20px">Смотреть корзины →</a>
   </section>
 
   <!-- 4-6 · Полноэкранные «странички» -->
@@ -428,13 +320,359 @@
 
   </div>
 
+  <!-- 7 · Таблицы рационов -->
+  <section id="rations">
+    <h2>Три корзины</h2>
+    <p class="lead">Продукты одни и те же, разница только в количестве. Граммы — на неделю на одного человека.</p>
+    <div class="tabs" role="group" aria-label="Калорийность">
+      <button type="button" data-r="1800" aria-pressed="true">1800 ккал</button>
+      <button type="button" data-r="2200" aria-pressed="false">2200 ккал</button>
+      <button type="button" data-r="2500" aria-pressed="false">2500 ккал</button>
+    </div>
+
+    <div class="ration" data-r="1800">
+      <div class="card" style="margin-top:16px">
+        <div class="menu">
+          <div class="mrow">
+            <div class="mname"><b>Греческий йогурт 2%</b></div>
+            <div class="mqty">1050 г</div>
+            <div class="mcost">546 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Творог 5%</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">280 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Куриное бедро</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">224 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Куриная грудка</b></div>
+            <div class="mqty">500 г</div>
+            <div class="mcost">200 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Сырок глазированный</b></div>
+            <div class="mqty">315 г</div>
+            <div class="mcost">189 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Кефир 2.5%</b></div>
+            <div class="mqty">1400 г</div>
+            <div class="mcost">168 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Чечевица</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">105 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Сыр полутвёрдый 45%</b></div>
+            <div class="mqty">105 г</div>
+            <div class="mcost">95 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Капуста белокочанная</b></div>
+            <div class="mqty">2100 г</div>
+            <div class="mcost">84 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Яблоки</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">84 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Печень куриная</b></div>
+            <div class="mqty">250 г</div>
+            <div class="mcost">70 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Яйцо куриное</b></div>
+            <div class="mqty">350 г</div>
+            <div class="mcost">70 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Сельдь солёная</b></div>
+            <div class="mqty">250 г</div>
+            <div class="mcost">65 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Гречка</b></div>
+            <div class="mqty">400 г</div>
+            <div class="mcost">44 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Морковь</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">32 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Свёкла</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">28 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Семечки подсолнечника</b></div>
+            <div class="mqty">105 г</div>
+            <div class="mcost">26 ₽</div>
+          </div>
+        </div>
+        <div class="mtotal">
+          <div><div class="big">2310 ₽</div><div class="sub">в неделю</div></div>
+          <div style="text-align:right"><div class="big">330 ₽</div><div class="sub">в день</div></div>
+        </div>
+      </div>
+      <p class="lead" style="margin-top:16px">Закрыто на 1779 ккал в день — женщина 70 кг:</p>
+      <div class="inds">
+        <span class="ind">Белок <i>143 / 135 г</i></span>
+        <span class="ind">Фрукты и овощи <i>600 / 600 г</i></span>
+        <span class="ind">Кальций <i>1181 / 1000 мг</i></span>
+        <span class="ind">Клетчатка <i>32 / 25 г</i></span>
+        <span class="ind">Железо <i>17.5 / 10.2 мг</i></span>
+        <span class="ind">Гемовое железо <i>12 / 3 порции</i></span>
+        <span class="ind">Омега-3 <i>4.4 / 1.75 г</i></span>
+        <span class="ind">Баланс жиров <i>2.9 / 2.0</i></span>
+        <span class="ind">Яйца <i>7 / 7 шт</i></span>
+      </div>
+    </div>
+
+    <div class="ration" data-r="2200" hidden>
+      <div class="card" style="margin-top:16px">
+        <div class="menu">
+          <div class="mrow">
+            <div class="mname"><b>Греческий йогурт 2%</b></div>
+            <div class="mqty">1050 г</div>
+            <div class="mcost">546 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Куриное бедро</b></div>
+            <div class="mqty">1050 г</div>
+            <div class="mcost">336 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Творог 5%</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">280 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Куриная грудка</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">280 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Сырок глазированный</b></div>
+            <div class="mqty">315 г</div>
+            <div class="mcost">189 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Кефир 2.5%</b></div>
+            <div class="mqty">1400 г</div>
+            <div class="mcost">168 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Чечевица</b></div>
+            <div class="mqty">900 г</div>
+            <div class="mcost">135 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Капуста белокочанная</b></div>
+            <div class="mqty">2450 г</div>
+            <div class="mcost">98 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Сыр полутвёрдый 45%</b></div>
+            <div class="mqty">105 г</div>
+            <div class="mcost">95 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Яблоки</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">84 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Гречка</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">77 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Печень куриная</b></div>
+            <div class="mqty">250 г</div>
+            <div class="mcost">70 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Яйцо куриное</b></div>
+            <div class="mqty">350 г</div>
+            <div class="mcost">70 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Сельдь солёная</b></div>
+            <div class="mqty">300 г</div>
+            <div class="mcost">78 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Семечки подсолнечника</b></div>
+            <div class="mqty">175 г</div>
+            <div class="mcost">44 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Морковь</b></div>
+            <div class="mqty">1050 г</div>
+            <div class="mcost">47 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Свёкла</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">28 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Масло подсолнечное</b></div>
+            <div class="mqty">70 г</div>
+            <div class="mcost">9 ₽</div>
+          </div>
+        </div>
+        <div class="mtotal">
+          <div><div class="big">2926 ₽</div><div class="sub">в неделю</div></div>
+          <div style="text-align:right"><div class="big">418 ₽</div><div class="sub">в день</div></div>
+        </div>
+      </div>
+      <p class="lead" style="margin-top:16px">Закрыто на 2192 ккал в день — мужчина 88 кг:</p>
+      <div class="inds">
+        <span class="ind">Белок <i>152 / 147 г</i></span>
+        <span class="ind">Фрукты и овощи <i>843 / 800 г</i></span>
+        <span class="ind">Кальций <i>1215 / 1000 мг</i></span>
+        <span class="ind">Клетчатка <i>44 / 31 г</i></span>
+        <span class="ind">Железо <i>19.8 / 10.1 мг</i></span>
+        <span class="ind">Гемовое железо <i>14 / 3 порции</i></span>
+        <span class="ind">Омега-3 <i>5.1 / 1.75 г</i></span>
+        <span class="ind">Баланс жиров <i>3.2 / 2.0</i></span>
+        <span class="ind">Яйца <i>7 / 7 шт</i></span>
+      </div>
+    </div>
+
+    <div class="ration" data-r="2500" hidden>
+      <div class="card" style="margin-top:16px">
+        <div class="menu">
+          <div class="mrow">
+            <div class="mname"><b>Греческий йогурт 2%</b></div>
+            <div class="mqty">1400 г</div>
+            <div class="mcost">728 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Куриное бедро</b></div>
+            <div class="mqty">1400 г</div>
+            <div class="mcost">448 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Творог 5%</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">280 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Куриная грудка</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">280 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Сырок глазированный</b></div>
+            <div class="mqty">350 г</div>
+            <div class="mcost">210 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Кефир 2.5%</b></div>
+            <div class="mqty">1400 г</div>
+            <div class="mcost">168 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Чечевица</b></div>
+            <div class="mqty">1050 г</div>
+            <div class="mcost">158 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Капуста белокочанная</b></div>
+            <div class="mqty">2450 г</div>
+            <div class="mcost">98 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Сыр полутвёрдый 45%</b></div>
+            <div class="mqty">105 г</div>
+            <div class="mcost">95 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Гречка</b></div>
+            <div class="mqty">900 г</div>
+            <div class="mcost">99 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Яблоки</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">84 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Сельдь солёная</b></div>
+            <div class="mqty">300 г</div>
+            <div class="mcost">78 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Печень куриная</b></div>
+            <div class="mqty">250 г</div>
+            <div class="mcost">70 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Яйцо куриное</b></div>
+            <div class="mqty">350 г</div>
+            <div class="mcost">70 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Морковь</b></div>
+            <div class="mqty">1050 г</div>
+            <div class="mcost">47 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Семечки подсолнечника</b></div>
+            <div class="mqty">210 г</div>
+            <div class="mcost">53 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Свёкла</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">28 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Масло подсолнечное</b></div>
+            <div class="mqty">140 г</div>
+            <div class="mcost">18 ₽</div>
+          </div>
+        </div>
+        <div class="mtotal">
+          <div><div class="big">3298 ₽</div><div class="sub">в неделю</div></div>
+          <div style="text-align:right"><div class="big">471 ₽</div><div class="sub">в день</div></div>
+        </div>
+      </div>
+      <p class="lead" style="margin-top:16px">Закрыто на 2489 ккал в день — мужчина 95 кг:</p>
+      <div class="inds">
+        <span class="ind">Белок <i>171 / 165 г</i></span>
+        <span class="ind">Фрукты и овощи <i>843 / 800 г</i></span>
+        <span class="ind">Кальций <i>1355 / 1000 мг</i></span>
+        <span class="ind">Клетчатка <i>49 / 35 г</i></span>
+        <span class="ind">Железо <i>21.4 / 10.1 мг</i></span>
+        <span class="ind">Гемовое железо <i>16 / 3 порции</i></span>
+        <span class="ind">Омега-3 <i>5.1 / 1.75 г</i></span>
+        <span class="ind">Баланс жиров <i>3.3 / 2.0</i></span>
+        <span class="ind">Яйца <i>7 / 7 шт</i></span>
+      </div>
+    </div>
+
+  </section>
+
   <!-- 8 · Что это доказывает -->
   <section>
     <h2>Что из этого следует</h2>
     <ul class="list">
       <li><span class="check">✓</span><span><b>Здоровое питание — обычные продукты.</b> В корзине нет ничего, чего не было бы в ближайшем магазине.</span></li>
       <li><span class="check">✓</span><span><b>Дефициты закрываются едой.</b> Ни одной добавки, ни одной таблетки.</span></li>
-      <li><span class="check">✓</span><span><b>330 ₽ в день.</b> Это дешевле одной доставки еды и сравнимо с обычной продуктовой корзиной.</span></li>
+      <li><span class="check">✓</span><span><b>от 330 ₽ в день.</b> Это дешевле одной доставки еды и сравнимо с обычной продуктовой корзиной.</span></li>
       <li><span class="check">✓</span><span><b>Нужно только знать, что считать.</b> Этим и занимается re:Norma — она ведёт учёт за вас и показывает, где провал.</span></li>
     </ul>
   </section>
@@ -451,7 +689,7 @@
   <!-- 10 · Дисклеймер -->
   <section style="padding-top:8px">
     <div class="note plain">
-      <p><b>Обратите внимание.</b> Это пример, а не назначение. Мы не являемся медицинской организацией и не заменяем консультацию врача. Нормы рассчитаны для женщины 70 кг с планкой 1800 ккал; у вас они будут другими. Цены ориентировочные и зависят от города и магазина.</p>
+      <p><b>Обратите внимание.</b> Это пример, а не назначение. Мы не являемся медицинской организацией и не заменяем консультацию врача. Нормы рассчитаны для конкретного роста, веса и возраста — у вас они будут другими. Цены ориентировочные и зависят от города и магазина.</p>
     </div>
   </section>
 
@@ -467,5 +705,23 @@
   </footer>
 
 </div>
+
+<script>
+  // Переключатель рационов: одна активная таблица, остальные скрыты.
+  (function () {
+    var tabs = document.querySelectorAll('.tabs button');
+    var tables = document.querySelectorAll('.ration');
+    Array.prototype.forEach.call(tabs, function (t) {
+      t.addEventListener('click', function () {
+        Array.prototype.forEach.call(tabs, function (x) {
+          x.setAttribute('aria-pressed', x === t ? 'true' : 'false');
+        });
+        Array.prototype.forEach.call(tables, function (tb) {
+          tb.hidden = tb.dataset.r !== t.dataset.r;
+        });
+      });
+    });
+  })();
+</script>
 </body>
 </html>

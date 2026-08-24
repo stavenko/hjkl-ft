@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light" />
+<meta name="theme-color" content="#F1F4F9" />
+<title>Рацион на 1800 ккал — сколько это стоит | re:Norma</title>
+<meta name="description" content="Готовый рацион на 1800 ккал, который закрывает белок, кальций, железо, омега-3 и клетчатку. С брендами из обычного магазина и ценой за неделю." />
+<style>
+  /* Golos Text — self-hosted (bundled woff2); no third-party font host. */
+  @font-face{font-family:'Golos Text';font-style:normal;font-weight:400 900;font-display:swap;
+    src:url('/fonts/golos-cyrillic.woff2') format('woff2');
+    unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+  @font-face{font-family:'Golos Text';font-style:normal;font-weight:400 900;font-display:swap;
+    src:url('/fonts/golos-latin.woff2') format('woff2');
+    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+2074,U+20AC,U+2122,U+2212,U+2215,U+FEFF,U+FFFD}
+  :root{
+    --bg:#F1F4F9;--bg-2:#E8EDF5;--surface:#FFFFFF;
+    --ink:#0E1630;--ink-2:#39425F;--muted:#6B7491;--line:#E4E8F0;
+    --accent:#10B981;--accent-700:#059669;--accent-ink:#04603F;--accent-soft:#DEF7EC;
+    --radius:16px;--radius-lg:24px;--pill:999px;
+    --sans:'Golos Text',-apple-system,system-ui,sans-serif;
+    --shadow:0 16px 40px -22px rgba(14,22,48,.4);
+    --shadow-btn:0 10px 26px -10px rgba(16,185,129,.55);
+    --safe-b:env(safe-area-inset-bottom,0px);
+  }
+  html{color-scheme:light;-webkit-text-size-adjust:100%}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-2);color:var(--ink);font-family:var(--sans);
+    font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  /* Mobile-only: one phone-width column, centered on anything wider. */
+  .app{max-width:440px;margin:0 auto;background:var(--bg);min-height:100vh;
+    padding:0 20px calc(40px + var(--safe-b))}
+  p{margin:0}
+  a{color:inherit;text-decoration:none}
+  h1,h2,h3{margin:0;letter-spacing:-.01em;line-height:1.14}
+  h1{font-size:30px;font-weight:600}
+  h2{font-size:23px;font-weight:600}
+  h3{font-size:18px;font-weight:600}
+  .eyebrow{display:inline-block;font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--accent-ink);background:var(--accent-soft);padding:6px 12px;border-radius:var(--pill)}
+  section{padding:34px 0}
+  .lead{color:var(--ink-2);font-size:16px;margin-top:12px}
+
+  /* buttons */
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+    font-weight:700;font-size:16px;padding:16px 22px;border-radius:var(--pill);
+    border:1.5px solid transparent;cursor:pointer;text-align:center}
+  .btn-primary{background:var(--accent);color:#04331F;box-shadow:var(--shadow-btn)}
+  .btn-ghost{background:var(--surface);color:var(--ink);border-color:var(--line)}
+
+  /* hero */
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 0 6px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px}
+  .cur-switch{display:inline-flex;align-items:center;gap:2px;background:var(--surface);border:1.5px solid var(--line);border-radius:var(--pill);padding:3px;flex:0 0 auto}
+  .cur-switch button{border:none;background:transparent;cursor:pointer;font-family:inherit;font-weight:700;font-size:15px;color:var(--muted);min-width:32px;padding:6px 9px;border-radius:var(--pill);line-height:1}
+  .cur-switch button[aria-pressed="true"]{background:var(--accent);color:#04331F}
+  .brand .dot{width:26px;height:26px;border-radius:8px;background:var(--ink);position:relative;flex:0 0 auto}
+  .brand .dot::after{content:"";position:absolute;inset:7px;border-radius:50%;background:var(--accent)}
+  .hero{padding-top:14px}
+  .hero h1 .hl{color:var(--accent-700)}
+  .hero .btn{margin-top:22px}
+
+  /* video */
+  .video{position:relative;border-radius:var(--radius-lg);overflow:hidden;background:#0E1630;
+    aspect-ratio:9/16;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center}
+  .video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+  .video-ph{display:flex;flex-direction:column;align-items:center;gap:12px;color:#C9D2E6;padding:20px;text-align:center}
+  .video-ph .play{width:64px;height:64px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center}
+  .video-ph .play svg{margin-left:4px}
+  .video-cap{font-size:13px;color:var(--muted);text-align:center;margin-top:10px}
+
+  /* generic card + blocks */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);padding:22px;box-shadow:var(--shadow)}
+  .blocks{display:flex;flex-direction:column;gap:14px}
+  .block{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  .block h3{margin-bottom:8px}
+  .block p{color:var(--ink-2);font-size:15.5px}
+  .block .ico{font-size:26px;line-height:1;margin-bottom:12px;display:block}
+
+  /* Полноэкранные «странички»: sticky-стопка — каждая поднимается снизу,
+     фиксируется вверху и перекрывает предыдущую. После последней — обычный скролл. */
+  .stack{position:relative}
+  .panel{position:sticky;top:0;min-height:100vh;min-height:100svh;display:flex;align-items:flex-start;padding:0;
+    background:var(--bg);border-radius:28px 28px 0 0;box-shadow:0 -18px 48px -26px rgba(14,22,48,.45)}
+  .panel:nth-child(even){background:var(--surface)}
+  .panel-inner{width:100%;padding:22px 5% 48px;display:flex;flex-direction:column;gap:22px}
+  .panel-img{order:1;width:100%;aspect-ratio:4/3;border-radius:var(--radius-lg);background:var(--bg-2);
+    border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px}
+  .panel-photo{order:1;width:100%;height:auto;display:block;margin:0 auto;max-width:380px}
+  /* Скрин приложения: показываем верх, низ обрезаем, лёгкий наклон */
+  .panel-shot{order:1;width:82%;max-width:280px;margin:12px auto 0;overflow:hidden;
+    border-radius:22px;background:var(--surface);border:1px solid var(--line);
+    box-shadow:0 26px 60px -28px rgba(14,22,48,.5);transform:rotate(-3deg)}
+  .panel-shot img{width:100%;display:block}
+  /* Кластер-«веер» из скринов (файлы не изменяются; кроп низа — через object-fit) */
+  .shot-cluster{order:1;position:relative;width:100%;height:300px;margin-top:16px}
+  .shot-cluster .sc{position:absolute;width:135px;aspect-ratio:39/64;object-fit:cover;object-position:top center;
+    border-radius:16px;border:3px solid #fff;box-shadow:0 18px 42px -20px rgba(14,22,48,.5);background:#fff}
+  .shot-cluster .sc1{left:5%;top:38px;transform:rotate(-5deg);z-index:1}
+  .shot-cluster .sc2{left:50%;top:0;transform:translateX(-50%);z-index:3}
+  .shot-cluster .sc3{right:5%;top:38px;transform:rotate(5deg);z-index:2}
+  .panel h2{font-size:28px}
+  .panel p{color:var(--ink-2);font-size:17px}
+  .panel-list{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px}
+  .panel-list li{color:var(--ink-2);font-size:17px}
+  /* «Как это работает»: шаги с картинкой или плейсхолдером «нужен скриншот» */
+  .hiw{margin-top:8px}
+  .hiw-item{margin:0 0 34px}
+  .hiw-item h3{margin:0 0 8px}
+  .hiw-item p{color:var(--ink-2);font-size:16px;margin:0 0 14px}
+  .hiw-media{width:82%;max-width:260px;margin:0 auto;border-radius:20px;overflow:hidden;
+    border:1px solid var(--line);box-shadow:0 18px 44px -24px rgba(14,22,48,.4);background:var(--surface)}
+  .hiw-media img{width:100%;display:block}
+  /* Самодостаточные скруглённые кадры (карточка/меню) — без рамки и клипа контейнера */
+  .hiw-card{width:88%;max-width:300px;margin:0 auto}
+  .hiw-card img{width:100%;display:block}
+  .hiw-ph{width:82%;max-width:260px;margin:0 auto;aspect-ratio:39/60;border:2px dashed #C7D0E0;border-radius:20px;
+    display:flex;align-items:center;justify-content:center;text-align:center;padding:22px;background:#F7F9FC;color:var(--muted);font-size:14px;line-height:1.4}
+  .hiw-ph b{display:block;color:var(--ink-2);font-weight:700;margin-bottom:4px}
+  /* Длинный скрин: середина вырезана, верх и низ склеены по вертикали с волнистым срезом */
+  .fp-cut{width:84%;max-width:250px;margin:2px auto 0;display:flex;flex-direction:column;gap:10px}
+  .fp-cut img{width:100%;display:block;filter:drop-shadow(0 10px 22px rgba(14,22,48,.20))}
+  /* Две формы рядом (вес + шаги) */
+  .two-col{display:flex;gap:10px;align-items:flex-start;justify-content:center;margin-top:2px}
+  .two-col img{width:calc(50% - 5px);height:auto;display:block;border-radius:14px;
+    border:1px solid var(--line);box-shadow:0 14px 30px -18px rgba(14,22,48,.32)}
+  .panel-sub{color:var(--muted);font-size:17px}
+
+  /* steps (how it works) */
+  .step{margin-bottom:20px}
+  .step .num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;
+    background:var(--ink);color:#fff;font-weight:700;font-size:14px;margin-bottom:10px}
+  .shot{border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);background:var(--bg-2);
+    aspect-ratio:9/16;max-height:420px;display:flex;align-items:center;justify-content:center;
+    color:var(--muted);font-size:13px;text-align:center;padding:16px}
+  .shot img{width:100%;height:100%;object-fit:cover;display:block}
+
+  /* outcome / feature lists */
+  .list{list-style:none;padding:0;margin:16px 0 0;display:flex;flex-direction:column;gap:12px}
+  .list li{display:flex;gap:12px;align-items:flex-start;font-size:16px;color:var(--ink-2)}
+  .list li b{color:var(--ink);font-weight:700}
+  .check{flex:0 0 auto;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);
+    display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;margin-top:1px}
+
+  /* refund / disclaimer note */
+  .note{background:var(--accent-soft);border:1px solid #C6EBDC;border-radius:var(--radius);padding:18px 20px;color:var(--accent-ink)}
+  .note.plain{background:#F4F6FA;border-color:var(--line);color:var(--ink-2)}
+  .note h3{color:var(--ink);margin-bottom:8px}
+
+  /* CTA band */
+  .cta-band{background:var(--ink);color:#fff;border-radius:var(--radius-lg);padding:28px 22px;text-align:center}
+  .cta-band h2{color:#fff}
+  .cta-band p{color:#C9D2E6;margin-top:10px;font-size:15.5px}
+  .cta-band .btn{margin-top:18px}
+
+  /* FAQ */
+  .faq details{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:10px;overflow:hidden}
+  .faq summary{list-style:none;cursor:pointer;padding:16px 18px;font-weight:700;font-size:16px;
+    display:flex;justify-content:space-between;gap:12px;align-items:center}
+  .faq summary::-webkit-details-marker{display:none}
+  .faq summary::after{content:"⌄";color:var(--muted);font-size:20px;transition:transform .2s}
+  .faq details[open] summary::after{transform:rotate(180deg)}
+  .faq .ans{padding:0 18px 16px;color:var(--ink-2);font-size:15.5px;line-height:1.55}
+
+  /* footer */
+  footer{border-top:1px solid var(--line);margin-top:20px;padding:26px 0 10px;color:var(--muted);font-size:13.5px;text-align:center}
+  footer a{color:var(--accent-ink);font-weight:600}
+  footer .flinks{margin-top:8px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  footer .freq{font-size:12.5px;color:var(--muted);line-height:1.5}
+  footer .fcopy{margin-top:8px;font-size:12px;color:var(--muted)}
+
+  /* sticky bottom CTA */
+  .sticky{position:fixed;left:0;right:0;bottom:0;z-index:50;padding:10px 16px calc(10px + var(--safe-b));
+    background:rgba(241,244,249,.9);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+  .sticky .inner{max-width:440px;margin:0 auto}
+
+  /* buy modal — consent gate → Telegram pay bot */
+  .modal-ov{position:fixed;inset:0;z-index:100;display:flex;align-items:flex-end;justify-content:center;
+    background:rgba(14,22,48,.55);backdrop-filter:blur(6px)}
+  .modal-ov[hidden]{display:none}
+  .modal{position:relative;background:var(--surface);width:100%;max-width:440px;border-radius:22px 22px 0 0;
+    padding:26px 22px calc(26px + var(--safe-b));box-shadow:0 -20px 60px -20px rgba(14,22,48,.5);animation:sheet-in .22s ease}
+  @keyframes sheet-in{from{transform:translateY(16px);opacity:.6}to{transform:none;opacity:1}}
+  .modal h3{font-size:21px;margin:0 0 8px}
+  .modal-lead{color:var(--ink-2);font-size:15px;margin:0 0 18px}
+  .modal-x{position:absolute;top:12px;right:14px;width:34px;height:34px;border:none;background:transparent;
+    color:var(--muted);font-size:26px;line-height:1;cursor:pointer}
+  .consent{display:flex;flex-direction:column;gap:12px;margin:0 0 18px}
+  .crow{display:flex;align-items:flex-start;gap:10px;font-size:14px;line-height:1.45;color:var(--ink-2)}
+  .crow input{flex:0 0 auto;width:20px;height:20px;margin:1px 0 0;accent-color:var(--accent)}
+  .crow a{color:var(--accent-ink);font-weight:600;text-decoration:underline}
+  #buy-go.is-disabled{opacity:.5;pointer-events:none;box-shadow:none}
+
+  /* ── Рацион: строки продуктов ─────────────────────────────────────────── */
+  .menu{display:flex;flex-direction:column;gap:0;margin-top:18px}
+  .mrow{display:flex;align-items:baseline;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .mrow:last-child{border-bottom:none}
+  .mrow .mname{flex:1 1 auto;min-width:0}
+  .mrow .mname b{display:block;font-weight:600;font-size:16px;color:var(--ink)}
+  .mrow .mname span{display:block;font-size:13px;color:var(--muted);margin-top:1px}
+  .mrow .mqty{flex:0 0 auto;font-size:14px;color:var(--ink-2);text-align:right;white-space:nowrap}
+  .mrow .mcost{flex:0 0 62px;text-align:right;font-weight:700;font-size:15px;color:var(--ink)}
+  .mtotal{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+    margin-top:16px;padding-top:16px;border-top:2px solid var(--ink)}
+  .mtotal .big{font-size:26px;font-weight:700}
+  .mtotal .sub{font-size:14px;color:var(--muted)}
+
+  /* Индикаторы: что закрыто */
+  .inds{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+  .ind{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--accent-ink);
+    border-radius:var(--pill);padding:7px 13px;font-size:13.5px;font-weight:600}
+  .ind i{font-style:normal;opacity:.75;font-weight:500}
+
+  /* Числовая врезка внутри «странички» */
+  .figs{display:flex;gap:10px;margin-top:4px}
+  .fig{flex:1;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+  .panel:nth-child(even) .fig{background:var(--bg)}
+  .fig b{display:block;font-size:22px;font-weight:700;line-height:1.1}
+  .fig span{display:block;font-size:12.5px;color:var(--muted);margin-top:4px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span>re:Norma</div>
+  </div>
+
+  <!-- 1 · Заголовок -->
+  <section class="hero">
+    <span class="eyebrow">Пример рациона</span>
+    <h1 style="margin-top:12px">Питаться правильно — <span class="hl">не дороже, чем обычно</span></h1>
+    <p class="lead">Хорошее питание требует дисциплины и некоторых знаний. Но оно доступно любому человеку — не нужны ни добавки, ни «суперфуды», ни магазины здорового питания.</p>
+    <p class="lead">Вот рацион на 1800 ккал из обычного супермаркета. Он закрывает все дефициты, которые мы отслеживаем в программе: белок, кальций, железо, омега-3, клетчатку. И оставляет место сладкому.</p>
+  </section>
+
+  <!-- 2 · Рацион -->
+  <section>
+    <div class="card">
+      <h2>Корзина на неделю</h2>
+      <p class="lead" style="margin-top:8px">Бренды — пример, подойдёт любой аналог. Цены — ориентир розницы, лето 2026.</p>
+      <div class="menu">
+        <div class="mrow">
+          <div class="mname"><b>Греческий йогурт 2%</b><span>Teos, Epica, «Савушкин»</span></div>
+          <div class="mqty">150 г/день · 1 кг</div>
+          <div class="mcost">546 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Творог 5%</b><span>«Простоквашино», «Домик в деревне»</span></div>
+          <div class="mqty">100 г/день · 700 г</div>
+          <div class="mcost">280 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Куриное бедро</b><span>«Петелинка», «Троекурово»</span></div>
+          <div class="mqty">100 г/день · 700 г</div>
+          <div class="mcost">224 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Куриная грудка</b><span>«Петелинка», «Мираторг»</span></div>
+          <div class="mqty">70 г/день · 500 г</div>
+          <div class="mcost">200 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Сырок глазированный 26%</b><span>«Б.Ю. Александров», «Свитлогорье»</span></div>
+          <div class="mqty">1 шт/день · 7 шт</div>
+          <div class="mcost">189 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Кефир 2.5%</b><span>«Простоквашино», «Домик в деревне»</span></div>
+          <div class="mqty">200 г/день · 1.4 л</div>
+          <div class="mcost">168 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Чечевица</b><span>«Мистраль», «Националь»</span></div>
+          <div class="mqty">100 г/день · 700 г</div>
+          <div class="mcost">105 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Сыр полутвёрдый 45%</b><span>«Брест-Литовск», «Ламбер»</span></div>
+          <div class="mqty">15 г/день · 105 г</div>
+          <div class="mcost">95 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Капуста белокочанная</b><span>весовая</span></div>
+          <div class="mqty">300 г/день · 2.1 кг</div>
+          <div class="mcost">84 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Яблоки</b><span>весовые</span></div>
+          <div class="mqty">100 г/день · 700 г</div>
+          <div class="mcost">84 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Печень куриная</b><span>«Петелинка», «Троекурово»</span></div>
+          <div class="mqty">полпачки на неделю · 250 г</div>
+          <div class="mcost">70 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Яйцо куриное</b><span>«Роскар», «Синявинская»</span></div>
+          <div class="mqty">1 шт/день · 7 шт</div>
+          <div class="mcost">70 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Сельдь солёная</b><span>«Балтийский берег», «Меридиан»</span></div>
+          <div class="mqty">2 раза по 125 г</div>
+          <div class="mcost">65 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Гречка</b><span>«Увелка», «Мистраль»</span></div>
+          <div class="mqty">57 г/день сухой · 400 г</div>
+          <div class="mcost">44 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Морковь</b><span>весовая</span></div>
+          <div class="mqty">100 г/день · 700 г</div>
+          <div class="mcost">32 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Свёкла</b><span>весовая</span></div>
+          <div class="mqty">100 г/день · 700 г</div>
+          <div class="mcost">28 ₽</div>
+        </div>
+        <div class="mrow">
+          <div class="mname"><b>Семечки подсолнечника</b><span>«Джинн», «От Мартина»</span></div>
+          <div class="mqty">15 г/день · 105 г</div>
+          <div class="mcost">26 ₽</div>
+        </div>
+      </div>
+      <div class="mtotal">
+        <div><div class="big">2310 ₽</div><div class="sub">в неделю на одного</div></div>
+        <div style="text-align:right"><div class="big">330 ₽</div><div class="sub">в день</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · Что закрыто -->
+  <section style="padding-top:8px">
+    <h2>Что закрывает эта корзина</h2>
+    <p class="lead">Это не «примерно похоже на здоровое питание». Каждая строка посчитана против нормы, которую программа проверяет каждый день.</p>
+    <div class="inds">
+      <span class="ind">Белок <i>143 / 135 г</i></span>
+      <span class="ind">Фрукты и овощи <i>600 / 600 г</i></span>
+      <span class="ind">Кальций <i>1181 / 1000 мг</i></span>
+      <span class="ind">Клетчатка <i>32 / 25 г</i></span>
+      <span class="ind">Железо <i>17.5 / 10.2 мг</i></span>
+      <span class="ind">Гемовое железо <i>12 / 3 порции</i></span>
+      <span class="ind">Омега-3 <i>4.4 / 1.75 г</i></span>
+      <span class="ind">Баланс жиров <i>2.9 / 2.0</i></span>
+      <span class="ind">Яйца <i>7 / 7 шт</i></span>
+      <span class="ind">Калории <i>1779 / 1800</i></span>
+    </div>
+  </section>
+
+  <!-- 4-6 · Полноэкранные «странички» -->
+  <div class="stack">
+
+    <section class="panel">
+      <div class="panel-inner">
+        <img class="panel-photo" src="/img/protein.jpg" alt="Творог, йогурт и сыр" />
+        <h2>Зачем столько творога</h2>
+        <p>Белок — единственный нутриент, который нельзя ничем заменить. Он держит мышцы, пока вы худеете, и насыщает лучше жиров и углеводов: чем больше белка в тарелке, тем меньше голода вечером.</p>
+        <div class="figs">
+          <div class="fig"><b>17 г</b><span>белка в 100 г творога</span></div>
+          <div class="fig"><b>164 мг</b><span>кальция там же</span></div>
+        </div>
+        <p>Молочка работает дважды: белок и кальций в одном продукте. Мяса на норму белка не хватит — вернее, хватит, но выйдет вдвое дороже.</p>
+        <p class="panel-sub">И ещё: жир молочки заключён в целую жировую глобулу. Он не идёт в баланс жиров — обезжиренный творог покупать незачем, обычный 5 % вкуснее и сытнее.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-inner">
+        <img class="panel-photo" src="/img/omega.jpg" alt="Сельдь и скумбрия" />
+        <h2>Где брать омега-3</h2>
+        <p>Есть две разные вещи, которые называют одним словом. В грецком орехе и льняном масле — ALA. В рыбе — ЭПК и ДГК. Организм умеет превращать первое во второе, но с КПД около 5 %.</p>
+        <p>Работают именно ЭПК и ДГК: от них зависят сердце, сосуды и мозг. Значит, орехи омега-3 не закрывают — нужна жирная рыба.</p>
+        <div class="figs">
+          <div class="fig"><b>250 г</b><span>селёдки в неделю</span></div>
+          <div class="fig"><b>65 ₽</b><span>вся недельная норма</span></div>
+        </div>
+        <p>Два раза по 125 г — и норма закрыта с запасом. Сельдь, скумбрия, сардины: самая дешёвая рыба оказывается и самой полезной, потому что жир в ней и есть то, что нужно.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-inner">
+        <img class="panel-photo" src="/img/fats.jpg" alt="Масло, семечки, рыба" />
+        <h2>Баланс жиров и холестерин</h2>
+        <p>Холестерин в еде и холестерин в крови — не одно и то же. Тело само производит 700–1000 мг в сутки, в два-три раза больше, чем приходит с едой. Съели меньше — организм синтезирует больше.</p>
+        <p>На холестерин в крови работает другое: <b>соотношение жиров</b>. Насыщенные поднимают ЛПНП, ненасыщенные — снижают. Мы следим, чтобы ненасыщенных было хотя бы вдвое больше.</p>
+        <div class="figs">
+          <div class="fig"><b>2.9</b><span>вышло в этой корзине</span></div>
+          <div class="fig"><b>2.0</b><span>минимум</span></div>
+        </div>
+        <p>Отсюда семечки и растительное масло вместо сливочного, курица вместо свинины, рыба дважды в неделю. Яйца при этом можно каждый день — они в этот баланс почти не вмешиваются.</p>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- 7 · Сладкое -->
+  <section>
+    <div class="note">
+      <h3>Место сладкому остаётся</h3>
+      <p>В рационе есть глазированный сырок каждый день. Не «читмил» и не награда — просто он помещается в план. Так же поместится «Мишка Барни» или четверть плитки шоколада: мы считали, все три варианта проходят по нормам.</p>
+    </div>
+  </section>
+
+  <!-- 8 · Что это доказывает -->
+  <section>
+    <h2>Что из этого следует</h2>
+    <ul class="list">
+      <li><span class="check">✓</span><span><b>Здоровое питание — обычные продукты.</b> В корзине нет ничего, чего не было бы в ближайшем магазине.</span></li>
+      <li><span class="check">✓</span><span><b>Дефициты закрываются едой.</b> Ни одной добавки, ни одной таблетки.</span></li>
+      <li><span class="check">✓</span><span><b>330 ₽ в день.</b> Это дешевле одной доставки еды и сравнимо с обычной продуктовой корзиной.</span></li>
+      <li><span class="check">✓</span><span><b>Нужно только знать, что считать.</b> Этим и занимается re:Norma — она ведёт учёт за вас и показывает, где провал.</span></li>
+    </ul>
+  </section>
+
+  <!-- 9 · CTA -->
+  <section>
+    <div class="cta-band">
+      <h2>Считать самому — тяжело</h2>
+      <p>Мы посчитали эту корзину за минуту, потому что у нас есть система. Она же будет считать ваш обычный рацион — тот, который вы едите на самом деле, — и показывать, чего в нём не хватает.</p>
+      <a class="btn btn-primary" href="https://renorma.app/" style="margin-top:18px">Узнать про re:Norma →</a>
+    </div>
+  </section>
+
+  <!-- 10 · Дисклеймер -->
+  <section style="padding-top:8px">
+    <div class="note plain">
+      <p><b>Обратите внимание.</b> Это пример, а не назначение. Мы не являемся медицинской организацией и не заменяем консультацию врача. Нормы рассчитаны для женщины 70 кг с планкой 1800 ккал; у вас они будут другими. Цены ориентировочные и зависят от города и магазина.</p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="freq">Ставенко Василий Григорьевич · Самозанятый (НПД) · ИНН 410105361330</div>
+    <div class="flinks">
+      <a href="https://renorma.app/offer">Договор оферты</a>
+      <a href="https://renorma.app/privacy">Политика конфиденциальности</a>
+      <a href="https://t.me/vstavenko">Техподдержка</a>
+      <a href="mailto:vg.stavenko@hjkl.pro">E-Mail</a>
+    </div>
+    <div class="fcopy">© re:Norma</div>
+  </footer>
+
+</div>
+</body>
+</html>

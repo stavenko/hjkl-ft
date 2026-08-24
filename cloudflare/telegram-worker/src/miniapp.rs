@@ -788,6 +788,11 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
     transition: transform .06s, box-shadow .15s, opacity .15s; }
   button:active { transform: translateY(1px); box-shadow: 0 5px 14px var(--accent-glow); }
   button:disabled { opacity: 0.5; box-shadow: none; cursor: default; }
+  .consent { margin: 16px 0 0; display: flex; flex-direction: column; gap: 12px; }
+  .crow { display: flex; align-items: flex-start; gap: 10px; cursor: pointer;
+          font-size: 13px; line-height: 1.45; color: var(--muted); text-align: left; }
+  .crow input { flex: 0 0 auto; width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+  .crow a { color: var(--accent-700); font-weight: 600; text-decoration: underline; }
   button.secondary { background: transparent; color: var(--muted); border: 1.5px solid var(--line);
     box-shadow: none; font-weight: 600; }
   /* Отладочный вход на тестовую версию — красный, чтобы не спутать с обычным. */
@@ -857,6 +862,19 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
     <div class="step hidden" data-step="final">
       <p class="steptitle">Проверьте заказ</p>
       <div id="summary" class="summary"></div>
+      <!-- СОГЛАСИЯ. Оплата происходит ЗДЕСЬ, а не на лендинге: в бота попадают и
+           мимо сайта — из переписки, из меню Telegram, по /start. Значит и принять
+           оферту человек должен здесь, иначе он платит, не увидев её. -->
+      <div class="consent">
+        <label class="crow">
+          <input type="checkbox" id="cOffer">
+          <span>Я принимаю условия <a href="https://renorma.app/offer" data-doc>публичной оферты</a></span>
+        </label>
+        <label class="crow">
+          <input type="checkbox" id="cPrivacy">
+          <span>Я согласен с <a href="https://renorma.app/privacy" data-doc>политикой конфиденциальности</a></span>
+        </label>
+      </div>
     </div>
 
     <div id="wizStatus" class="status"></div>
@@ -877,7 +895,7 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
   <button id="devSmokeBtn" class="danger hidden" style="margin-top:10px;">Получить доступ к тестовой версии (для разработчиков)</button>
   <div id="buildTag" style="font-size:10px; opacity:0.5; text-align:center; margin-top:10px;
        padding:14px 0; touch-action:manipulation; user-select:none; -webkit-user-select:none;
-       -webkit-tap-highlight-color:transparent; cursor:pointer;">build: pay-r19</div>
+       -webkit-tap-highlight-color:transparent; cursor:pointer;">build: pay-r20</div>
 </div>
 
 <!-- Предупреждение перед уходом на тестовую версию. Кнопки намеренно
@@ -1016,13 +1034,22 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
       : ["world", "promo", "final"];
   }
 
+  // Обе включают кнопку обратно, и обе обязаны СПРОСИТЬ СОГЛАСИЕ: на последнем шаге
+  // «Оплатить» открыта только при отмеченных галочках, и ошибка или конец ожидания не
+  // должны её открывать (см. `syncConsent`).
   function busy(on, msg) {
     show(wizSpinner, on);
     nextBtn.disabled = on; backBtn.disabled = on;
+    if (!on) { syncConsent(); }
     wizStatus.classList.remove("err");
     wizStatus.textContent = msg || "";
   }
-  function err(msg) { show(wizSpinner, false); nextBtn.disabled = false; backBtn.disabled = false; wizStatus.classList.add("err"); wizStatus.textContent = msg; }
+  function err(msg) {
+    show(wizSpinner, false);
+    nextBtn.disabled = false; backBtn.disabled = false;
+    syncConsent();
+    wizStatus.classList.add("err"); wizStatus.textContent = msg;
+  }
 
   // Render a set of option buttons into a container. Picking one highlights it and calls
   // onPick(value) — no auto-advance (each step has its own «Далее»).
@@ -1099,6 +1126,25 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
     var vv = document.createElement("span"); vv.className = "v"; vv.textContent = v;
     r.appendChild(kk); r.appendChild(vv); summaryEl.appendChild(r);
   }
+  // ── Согласия на последнем шаге ──────────────────────────────────────────────────
+  // «Оплатить» закрыта, пока не отмечены ОБЕ галочки. Ничего не сохраняем: платёж и
+  // есть акцепт, а хранить факт нажатия нам негде и незачем.
+  var cOffer = document.getElementById("cOffer");
+  var cPrivacy = document.getElementById("cPrivacy");
+  function consentGiven() { return cOffer.checked && cPrivacy.checked; }
+  function syncConsent() {
+    // Только на последнем шаге: на остальных «Далее» живёт своей жизнью.
+    if (seq()[stepIdx] !== "final") { return; }
+    nextBtn.disabled = !consentGiven();
+  }
+  cOffer.addEventListener("change", syncConsent);
+  cPrivacy.addEventListener("change", syncConsent);
+  // Документы открываются СИСТЕМНЫМ браузером: внутри Telegram обычная ссылка ведёт
+  // себя непредсказуемо, а мини-приложение при этом не должно закрываться.
+  Array.prototype.forEach.call(document.querySelectorAll("a[data-doc]"), function (a) {
+    a.addEventListener("click", function (e) { e.preventDefault(); openLink(a.href); });
+  });
+
   function buildFinal() {
     var inv = invoiceCache[invoiceKey()] || {};
     var cur = apiCurrency();
@@ -1141,6 +1187,10 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
       promoInput.value = selPromo || promoInput.value;
     } else if (name === "final") {
       buildFinal();
+      // Заново на каждом заходе: вернулся на шаг назад — согласие спрашивается снова.
+      cOffer.checked = false;
+      cPrivacy.checked = false;
+      syncConsent();
       startExpiryWatch();
     }
   }
@@ -1175,6 +1225,7 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
         err((e && e.userMessage) ? e.userMessage : "Не удалось создать счёт. Попробуйте ещё раз.");
       });
     } else if (name === "final") {
+      if (!consentGiven()) { err("Примите оферту и политику конфиденциальности."); return; }
       var inv = invoiceCache[invoiceKey()];
       if (!inv || !inv.payUrl) { err("Счёт не найден — вернитесь на шаг назад."); return; }
       claimId = inv.claimId; writeClaimInfo();

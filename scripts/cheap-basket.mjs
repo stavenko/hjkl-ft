@@ -9,6 +9,11 @@
 //
 // Цены — ориентир розницы РФ, лето 2026, ₽/кг. Меняются; на выводе видно, что
 // именно дорого, и любую строку можно заменить.
+//
+// ЖИР МОЛОЧКИ В БАЛАНС НЕ ИДЁТ. У кефира и творога он заключён в целую
+// молочно-жировую глобулу, и приложение исключает такой жир из отношения
+// ненасыщенных к насыщенным (`local.rs`, ветка `is_milk_globule`). Считать иначе —
+// значит записать молочку во вредное и гнать человека на обезжиренное без причины.
 
 // ── Пороги приложения ───────────────────────────────────────────────────────
 const RULES = {
@@ -52,7 +57,7 @@ function ironWeekTarget(sex, age) {
 const F = (name, price, o) => ({
   name, price, kcal: 0, protein: 0, fat: 0, fibre: 0, calcium: 0, iron: 0,
   absorption: 0.05, sfa: 0, mufa: 0, pufa: 0, epa: 0,
-  heme: false, veg: false, egg: false, red: false, ...o,
+  heme: false, veg: false, egg: false, red: false, globule: false, ...o,
 });
 
 const FOODS = {
@@ -79,12 +84,15 @@ const FOODS = {
     { kcal: 191, protein: 18, fat: 13.2, calcium: 12, iron: 1.6, absorption: 0.15,
       sfa: 24, mufa: 40, pufa: 24, epa: 20 }),
   // Молочка — кальций. Дешевле кефира на грамм кальция ничего нет.
+  // ЖИР МОЛОЧКИ — в целой глобуле, и в баланс он НЕ идёт (local.rs: глобульный
+  // ингредиент исключается из fa_balance). Поэтому насыщенный жир кефира и творога
+  // ничего здесь не портит, а обезжиренные версии брать незачем.
   kefir: F("Кефир 2.5%", 120,
     { kcal: 53, protein: 3, fat: 2.5, calcium: 120, iron: 0.1,
-      sfa: 64, mufa: 28, pufa: 4 }),
+      sfa: 64, mufa: 28, pufa: 4, globule: true }),
   cottage: F("Творог 5%", 400,
     { kcal: 121, protein: 17, fat: 5, calcium: 164, iron: 0.4,
-      sfa: 63, mufa: 28, pufa: 4 }),
+      sfa: 63, mufa: 28, pufa: 4, globule: true }),
   egg: F("Яйцо куриное", 200,
     { kcal: 157, protein: 12.7, fat: 11.5, calcium: 55, iron: 1.75, absorption: 0.1,
       sfa: 31, mufa: 44, pufa: 15, epa: 1, egg: true }),
@@ -179,8 +187,11 @@ for (const [key, grams] of Object.entries(BASKET)) {
   if (f.red) sum.red += grams;
   if (f.heme) sum.heme += f.protein * k;
   sum.epa += fat * f.epa / 100;
-  sum.sat += fat * f.sfa / 100;
-  sum.unsat += fat * (f.mufa + f.pufa) / 100;
+  // Баланс считается БЕЗ глобульного жира — как в приложении.
+  if (!f.globule) {
+    sum.sat += fat * f.sfa / 100;
+    sum.unsat += fat * (f.mufa + f.pufa) / 100;
+  }
   const cost = f.price * grams / 1000;
   sum.price += cost;
   rows.push({ name: f.name, grams, day: Math.round(grams / 7), cost });

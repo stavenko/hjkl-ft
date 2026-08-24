@@ -148,13 +148,13 @@ const FOODS = {
 const BASKET = {
   chickenThigh: 700,
   chickenBreast: 500,      // пачка грудки
-  chickenLiver: 500,       // целая пачка
+  chickenLiver: 250,       // полпачки
   mussels: 0,
   herring: 250,
   egg: 350,
   kefir: 1400,             // 200 г/день — семь бутылочек
   cheese: 105,             // 15 г/день
-  milk: 700,               // 100 г/день
+  milk: 0,
   cottage: 700,             // 100 г/день
   teos: 1050,               // 150 г/день
   cabbage: 2100,
@@ -162,9 +162,10 @@ const BASKET = {
   beet: 700,
   apple: 700,
   frozenVeg: 0,
-  barley: 500,             // 70 г/день сухой — добираем калории самой дешёвой строкой
+  barley: 0,
+  buckwheat: 700,          // 100 г/день сухой
   lentils: 700,
-  sunflowerOil: 35,
+  sunflowerOil: 70,        // 10 г/день
   sunflowerSeeds: 105,
   walnuts: 0,
 };

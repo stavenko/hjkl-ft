@@ -242,7 +242,7 @@
     <span class="eyebrow">Пример рациона</span>
     <h1 style="margin-top:12px">Питаться правильно — <span class="hl">не дороже, чем обычно</span></h1>
     <p class="lead">Хорошее питание требует дисциплины и некоторых знаний. Но оно доступно любому человеку — не нужны ни добавки, ни «суперфуды», ни магазины здорового питания.</p>
-    <p class="lead">Вот три рациона из обычного супермаркета — на 1800, 2200 и 2500 ккал. Эти продукты именно в таком объёме, как мы предлагаем, способны закрыть все необходимые нутриенты для человека.</p>
+    <p class="lead">Вот рационы из обычного супермаркета — девушкам на 1800 и 2200 ккал, мужчинам на 2200 и 2500. Эти продукты именно в таком объёме, как мы предлагаем, способны закрыть все необходимые нутриенты для человека.</p>
     <p class="lead">В современном мире человеку необходимо отслеживать кальций, железо, омега-3 и клетчатку. В основном именно по этим нутриентам у человека большой недобор.</p>
     <a class="btn btn-ghost" href="#rations" style="margin-top:20px">Смотреть корзины →</a>
   </section>
@@ -354,12 +354,16 @@
 
   <!-- 7 · Таблицы рационов -->
   <section id="rations">
-    <h2>Три корзины</h2>
+    <h2>Корзины</h2>
     <p class="lead">Продукты одни и те же, разница только в количестве. Граммы — на неделю на одного человека.</p>
-    <div class="tabs" role="group" aria-label="Калорийность">
+    <div class="tabs" role="group" aria-label="Кому">
+      <button type="button" data-sex="f" aria-pressed="true">Девушкам</button>
+      <button type="button" data-sex="m" aria-pressed="false">Мужчинам</button>
+    </div>
+    <div class="tabs" role="group" aria-label="Калорийность" id="kcalTabs">
       <button type="button" data-r="1800" aria-pressed="true">1800 ккал</button>
       <button type="button" data-r="2200" aria-pressed="false">2200 ккал</button>
-      <button type="button" data-r="2500" aria-pressed="false">2500 ккал</button>
+      <button type="button" data-r="2500" aria-pressed="false" hidden>2500 ккал</button>
     </div>
 
     <div class="ration" data-r="1800">
@@ -446,7 +450,7 @@
             <div class="mcost">28 ₽</div>
           </div>
           <div class="mrow">
-            <div class="mname"><b>Семечки подсолнечника</b></div>
+            <div class="mname"><b>Семечки</b></div>
             <div class="mqty">105 г</div>
             <div class="mcost">26 ₽</div>
           </div>
@@ -456,7 +460,7 @@
           <div style="text-align:right"><div class="big">330 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 1779 ккал в день — женщина 70 кг:</p>
+      <p class="lead" style="margin-top:16px">Закрыто на 1779 ккал в день:</p>
       <div class="inds">
         <span class="ind">Белок <i>143 / 135 г</i></span>
         <span class="ind">Фрукты и овощи <i>600 / 600 г</i></span>
@@ -479,9 +483,9 @@
             <div class="mcost">546 ₽</div>
           </div>
           <div class="mrow">
-            <div class="mname"><b>Куриное бедро</b></div>
-            <div class="mqty">1050 г</div>
-            <div class="mcost">336 ₽</div>
+            <div class="mname"><b>Куриная грудка</b></div>
+            <div class="mqty">700 г</div>
+            <div class="mcost">280 ₽</div>
           </div>
           <div class="mrow">
             <div class="mname"><b>Творог 5%</b></div>
@@ -489,9 +493,9 @@
             <div class="mcost">280 ₽</div>
           </div>
           <div class="mrow">
-            <div class="mname"><b>Куриная грудка</b></div>
+            <div class="mname"><b>Куриное бедро</b></div>
             <div class="mqty">700 г</div>
-            <div class="mcost">280 ₽</div>
+            <div class="mcost">224 ₽</div>
           </div>
           <div class="mrow">
             <div class="mname"><b>Сырок глазированный</b></div>
@@ -509,6 +513,11 @@
             <div class="mcost">135 ₽</div>
           </div>
           <div class="mrow">
+            <div class="mname"><b>Яблоки</b></div>
+            <div class="mqty">1050 г</div>
+            <div class="mcost">126 ₽</div>
+          </div>
+          <div class="mrow">
             <div class="mname"><b>Капуста белокочанная</b></div>
             <div class="mqty">2450 г</div>
             <div class="mcost">98 ₽</div>
@@ -519,14 +528,9 @@
             <div class="mcost">95 ₽</div>
           </div>
           <div class="mrow">
-            <div class="mname"><b>Яблоки</b></div>
-            <div class="mqty">700 г</div>
-            <div class="mcost">84 ₽</div>
-          </div>
-          <div class="mrow">
-            <div class="mname"><b>Гречка</b></div>
-            <div class="mqty">700 г</div>
-            <div class="mcost">77 ₽</div>
+            <div class="mname"><b>Сельдь солёная</b></div>
+            <div class="mqty">300 г</div>
+            <div class="mcost">78 ₽</div>
           </div>
           <div class="mrow">
             <div class="mname"><b>Печень куриная</b></div>
@@ -539,19 +543,19 @@
             <div class="mcost">70 ₽</div>
           </div>
           <div class="mrow">
-            <div class="mname"><b>Сельдь солёная</b></div>
-            <div class="mqty">300 г</div>
-            <div class="mcost">78 ₽</div>
-          </div>
-          <div class="mrow">
-            <div class="mname"><b>Семечки подсолнечника</b></div>
-            <div class="mqty">175 г</div>
-            <div class="mcost">44 ₽</div>
+            <div class="mname"><b>Гречка</b></div>
+            <div class="mqty">600 г</div>
+            <div class="mcost">66 ₽</div>
           </div>
           <div class="mrow">
             <div class="mname"><b>Морковь</b></div>
-            <div class="mqty">1050 г</div>
-            <div class="mcost">47 ₽</div>
+            <div class="mqty">1400 г</div>
+            <div class="mcost">63 ₽</div>
+          </div>
+          <div class="mrow">
+            <div class="mname"><b>Семечки</b></div>
+            <div class="mqty">175 г</div>
+            <div class="mcost">44 ₽</div>
           </div>
           <div class="mrow">
             <div class="mname"><b>Свёкла</b></div>
@@ -565,20 +569,20 @@
           </div>
         </div>
         <div class="mtotal">
-          <div><div class="big">2926 ₽</div><div class="sub">в неделю</div></div>
-          <div style="text-align:right"><div class="big">418 ₽</div><div class="sub">в день</div></div>
+          <div><div class="big">2569 ₽</div><div class="sub">в неделю</div></div>
+          <div style="text-align:right"><div class="big">367 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 2192 ккал в день — мужчина 88 кг:</p>
+      <p class="lead" style="margin-top:16px">Закрыто на 2217 ккал в день:</p>
       <div class="inds">
-        <span class="ind">Белок <i>152 / 147 г</i></span>
-        <span class="ind">Фрукты и овощи <i>843 / 800 г</i></span>
-        <span class="ind">Кальций <i>1215 / 1000 мг</i></span>
+        <span class="ind">Белок <i>166 / 147 г</i></span>
+        <span class="ind">Фрукты и овощи <i>800 / 800 г</i></span>
+        <span class="ind">Кальций <i>1284 / 1000 мг</i></span>
         <span class="ind">Клетчатка <i>44 / 31 г</i></span>
-        <span class="ind">Железо <i>19.8 / 10.1 мг</i></span>
+        <span class="ind">Железо <i>20.7 / 10.1 мг</i></span>
         <span class="ind">Гемовое железо <i>14 / 3 порции</i></span>
-        <span class="ind">Омега-3 <i>5.1 / 1.75 г</i></span>
-        <span class="ind">Баланс жиров <i>3.2 / 2.0</i></span>
+        <span class="ind">Омега-3 <i>5.3 / 1.75 г</i></span>
+        <span class="ind">Баланс жиров <i>3.7 / 2.0</i></span>
         <span class="ind">Яйца <i>7 / 7 шт</i></span>
       </div>
     </div>
@@ -588,21 +592,21 @@
         <div class="menu">
           <div class="mrow">
             <div class="mname"><b>Греческий йогурт 2%</b></div>
-            <div class="mqty">1400 г</div>
-            <div class="mcost">728 ₽</div>
+            <div class="mqty">1050 г</div>
+            <div class="mcost">546 ₽</div>
           </div>
           <div class="mrow">
             <div class="mname"><b>Куриное бедро</b></div>
-            <div class="mqty">1400 г</div>
-            <div class="mcost">448 ₽</div>
+            <div class="mqty">1050 г</div>
+            <div class="mcost">336 ₽</div>
           </div>
           <div class="mrow">
-            <div class="mname"><b>Творог 5%</b></div>
+            <div class="mname"><b>Куриная грудка</b></div>
             <div class="mqty">700 г</div>
             <div class="mcost">280 ₽</div>
           </div>
           <div class="mrow">
-            <div class="mname"><b>Куриная грудка</b></div>
+            <div class="mname"><b>Творог 5%</b></div>
             <div class="mqty">700 г</div>
             <div class="mcost">280 ₽</div>
           </div>
@@ -622,6 +626,11 @@
             <div class="mcost">158 ₽</div>
           </div>
           <div class="mrow">
+            <div class="mname"><b>Яблоки</b></div>
+            <div class="mqty">1050 г</div>
+            <div class="mcost">126 ₽</div>
+          </div>
+          <div class="mrow">
             <div class="mname"><b>Капуста белокочанная</b></div>
             <div class="mqty">2450 г</div>
             <div class="mcost">98 ₽</div>
@@ -633,13 +642,8 @@
           </div>
           <div class="mrow">
             <div class="mname"><b>Гречка</b></div>
-            <div class="mqty">900 г</div>
-            <div class="mcost">99 ₽</div>
-          </div>
-          <div class="mrow">
-            <div class="mname"><b>Яблоки</b></div>
-            <div class="mqty">700 г</div>
-            <div class="mcost">84 ₽</div>
+            <div class="mqty">800 г</div>
+            <div class="mcost">88 ₽</div>
           </div>
           <div class="mrow">
             <div class="mname"><b>Сельдь солёная</b></div>
@@ -658,11 +662,11 @@
           </div>
           <div class="mrow">
             <div class="mname"><b>Морковь</b></div>
-            <div class="mqty">1050 г</div>
-            <div class="mcost">47 ₽</div>
+            <div class="mqty">1400 г</div>
+            <div class="mcost">63 ₽</div>
           </div>
           <div class="mrow">
-            <div class="mname"><b>Семечки подсолнечника</b></div>
+            <div class="mname"><b>Семечки</b></div>
             <div class="mqty">210 г</div>
             <div class="mcost">53 ₽</div>
           </div>
@@ -673,25 +677,25 @@
           </div>
           <div class="mrow">
             <div class="mname"><b>Масло подсолнечное</b></div>
-            <div class="mqty">140 г</div>
-            <div class="mcost">18 ₽</div>
+            <div class="mqty">70 г</div>
+            <div class="mcost">9 ₽</div>
           </div>
         </div>
         <div class="mtotal">
-          <div><div class="big">3298 ₽</div><div class="sub">в неделю</div></div>
-          <div style="text-align:right"><div class="big">471 ₽</div><div class="sub">в день</div></div>
+          <div><div class="big">2756 ₽</div><div class="sub">в неделю</div></div>
+          <div style="text-align:right"><div class="big">394 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 2489 ккал в день — мужчина 95 кг:</p>
+      <p class="lead" style="margin-top:16px">Закрыто на 2511 ккал в день:</p>
       <div class="inds">
-        <span class="ind">Белок <i>171 / 165 г</i></span>
-        <span class="ind">Фрукты и овощи <i>843 / 800 г</i></span>
-        <span class="ind">Кальций <i>1355 / 1000 мг</i></span>
-        <span class="ind">Клетчатка <i>49 / 35 г</i></span>
-        <span class="ind">Железо <i>21.4 / 10.1 мг</i></span>
-        <span class="ind">Гемовое железо <i>16 / 3 порции</i></span>
-        <span class="ind">Омега-3 <i>5.1 / 1.75 г</i></span>
-        <span class="ind">Баланс жиров <i>3.3 / 2.0</i></span>
+        <span class="ind">Белок <i>186 / 155 г</i></span>
+        <span class="ind">Фрукты и овощи <i>800 / 800 г</i></span>
+        <span class="ind">Кальций <i>1324 / 1000 мг</i></span>
+        <span class="ind">Клетчатка <i>50 / 35 г</i></span>
+        <span class="ind">Железо <i>23.3 / 10.1 мг</i></span>
+        <span class="ind">Гемовое железо <i>17 / 3 порции</i></span>
+        <span class="ind">Омега-3 <i>5.3 / 1.75 г</i></span>
+        <span class="ind">Баланс жиров <i>3.6 / 2.0</i></span>
         <span class="ind">Яйца <i>7 / 7 шт</i></span>
       </div>
     </div>
@@ -739,21 +743,37 @@
 </div>
 
 <script>
-  // Переключатель рационов: одна активная таблица, остальные скрыты.
+  // Переключатель: сначала кому (девушкам / мужчинам), потом калорийность.
+  // 2200 есть у обоих — при смене пола активная вкладка сохраняется, если она
+  // доступна, иначе берётся первая доступная.
   (function () {
-    var tabs = document.querySelectorAll('.tabs button');
+    var BY_SEX = { f: ["1800", "2200"], m: ["2200", "2500"] };
+    var sexBtns = document.querySelectorAll('[data-sex]');
+    var kcalBtns = document.querySelectorAll('#kcalTabs button');
     var tables = document.querySelectorAll('.ration');
-    Array.prototype.forEach.call(tabs, function (t) {
-      t.addEventListener('click', function () {
-        Array.prototype.forEach.call(tabs, function (x) {
-          x.setAttribute('aria-pressed', x === t ? 'true' : 'false');
-        });
-        Array.prototype.forEach.call(tables, function (tb) {
-          tb.hidden = tb.dataset.r !== t.dataset.r;
-        });
+    var sex = "f", cur = "1800";
+
+    function render() {
+      var allowed = BY_SEX[sex];
+      if (allowed.indexOf(cur) < 0) { cur = allowed[0]; }
+      Array.prototype.forEach.call(sexBtns, function (b) {
+        b.setAttribute('aria-pressed', b.dataset.sex === sex ? 'true' : 'false');
       });
+      Array.prototype.forEach.call(kcalBtns, function (b) {
+        b.hidden = allowed.indexOf(b.dataset.r) < 0;
+        b.setAttribute('aria-pressed', b.dataset.r === cur ? 'true' : 'false');
+      });
+      Array.prototype.forEach.call(tables, function (t) { t.hidden = t.dataset.r !== cur; });
+    }
+    Array.prototype.forEach.call(sexBtns, function (b) {
+      b.addEventListener('click', function () { sex = b.dataset.sex; render(); });
     });
+    Array.prototype.forEach.call(kcalBtns, function (b) {
+      b.addEventListener('click', function () { cur = b.dataset.r; render(); });
+    });
+    render();
   })();
 </script>
+</body>
 </body>
 </html>

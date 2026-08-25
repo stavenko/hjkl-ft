@@ -470,6 +470,22 @@ async fn user_send(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
         // что написали ему. Куратора будим пушем, лучшим усилием: сообщение уже
         // записано, и падение пуша не имеет права его отменить.
         Some((cid, slot)) => {
+            // Отчёт кладётся в слот и гасит запрос. Это НЕ второе хранилище
+            // данных человека, а снимок последнего отчёта: без него дашборд
+            // куратора перелистывал бы переписку на каждом открытии.
+            if kind == "data_share" {
+                if let Some(payload) = payload.as_deref() {
+                    if let Err(resp) = curator_do(
+                        &ctx.env,
+                        "/report-put",
+                        &serde_json::json!({ "user_id": uid, "payload": payload }),
+                    )
+                    .await
+                    {
+                        return Ok(resp);
+                    }
+                }
+            }
             if let Err(e) = nudge_curator_push(&ctx.env, cid, slot, text).await {
                 console_error!("user_send push nudge to curator {cid} failed: {e}");
             }
@@ -1023,6 +1039,106 @@ async fn curator_read(mut req: Request, ctx: RouteContext<()>) -> Result<Respons
         .await
 }
 
+/// Предел на период запроса. Куратор пишет число дней свободно, но отчёт
+/// собирается на устройстве человека, и «за всё время» — это не запрос, а
+/// выгрузка. Год покрывает любую осмысленную работу.
+const REQUEST_DAYS_MAX: i64 = 366;
+
+/// POST /curator/clients/:cid/request {days} — «пришлите данные за N дней».
+///
+/// Запрос — это СООБЩЕНИЕ в треде (kind=data_request), а не флаг на сервере:
+/// приложение худеющего и так читает тред, и из него же считает состояние
+/// виджета. Отметка в слоте нужна куратору, чтобы видеть, что он уже просил.
+async fn curator_request_data(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let Some(cid) = ctx.param("cid").map(|s| s.to_string()) else {
+        return Ok(json_status(400, "missing cid"));
+    };
+    let uid = match client_user_id(&ctx.env, &sub, &cid).await {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    let body: serde_json::Value = req.json().await?;
+    let days = body.get("days").and_then(|v| v.as_i64()).unwrap_or(1);
+    if days < 1 || days > REQUEST_DAYS_MAX {
+        return Ok(json_status(400, "days out of range"));
+    }
+    let client_id = body.get("client_id").and_then(|v| v.as_str()).unwrap_or("");
+    if client_id.is_empty() {
+        return Ok(json_status(400, "client_id required"));
+    }
+    let name = curator_name(&ctx.env, &sub).await;
+
+    // text — запасной вариант для старых сборок приложения; свежие собирают
+    // текст сами из kind+payload на языке ЧЕЛОВЕКА, а не куратора.
+    let append_req = do_request(
+        "/append",
+        &serde_json::json!({
+            "client_id": client_id,
+            "text": "Куратор запрашивает у вас данные",
+            "sender": "expert",
+            "expert_id": sub,
+            "kind": "data_request",
+            "payload": serde_json::json!({ "days": days }).to_string(),
+            "sender_name": name,
+        }),
+    )?;
+    let mut do_resp = conversation_stub(&ctx.env, &thread_key(&uid, &curator_peer(&sub)))?
+        .fetch_with_request(append_req)
+        .await?;
+    let result = read_append(&mut do_resp).await?;
+
+    if let Err(resp) = curator_do(
+        &ctx.env,
+        "/request-set",
+        &serde_json::json!({ "curator_id": sub, "id": cid, "days": days }),
+    )
+    .await
+    {
+        return Ok(resp);
+    }
+
+    // Пуш «куратор запросил данные» — один на запрос, без напоминаний. Тело
+    // по-русски: main-flow не знает языка человека, а заводить ради этого
+    // передачу локали — отдельная работа, которой здесь не место.
+    let push_text = match &name {
+        Some(n) => format!("{n} запрашивает ваши данные"),
+        None => "Куратор запрашивает ваши данные".to_string(),
+    };
+    if let Err(e) =
+        push_via_main_flow(&ctx.env, &uid, &push_text, "/?notif=1&report=1").await
+    {
+        console_error!("curator_request_data push failed for user {uid}: {e}");
+    }
+
+    Response::from_json(&serde_json::json!({ "seq": result.seq }))
+}
+
+/// GET /curator/clients/:cid/report — последний присланный отчёт и состояние
+/// открытого запроса.
+async fn curator_report(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let Some(cid) = ctx.param("cid").map(|s| s.to_string()) else {
+        return Ok(json_status(400, "missing cid"));
+    };
+    match curator_do(
+        &ctx.env,
+        "/report-get",
+        &serde_json::json!({ "curator_id": sub, "id": cid }),
+    )
+    .await
+    {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
 // ---- ADMIN authorization handlers ----
 
 /// GET /admin/me (user JWT). Returns the DO's {"approved":bool,"code":string|null}
@@ -1118,6 +1234,20 @@ async fn internal_user_wipe(mut req: Request, ctx: RouteContext<()>) -> Result<R
         return Ok(json_status(400, "userId required"));
     }
 
+    // Тред с куратора стираем ДО отвязки: после неё узнать, с кем человек
+    // переписывался, будет уже не по чему.
+    let curator_thread = match routing_of_user(&ctx.env, user_id).await {
+        Ok(r) => r.curator.map(|(cid, _)| thread_key(user_id, &curator_peer(&cid))),
+        Err(resp) => return Ok(resp),
+    };
+    if let Some(key) = curator_thread {
+        let do_req = do_request("/wipe", &serde_json::json!({}))?;
+        let resp = conversation_stub(&ctx.env, &key)?.fetch_with_request(do_req).await?;
+        if resp.status_code() != 200 {
+            return Ok(json_status(502, "curator conversation wipe failed"));
+        }
+    }
+
     let do_req = do_request("/wipe", &serde_json::json!({}))?;
     let resp = conversation_stub(&ctx.env, user_id)?.fetch_with_request(do_req).await?;
     if resp.status_code() != 200 {
@@ -1127,6 +1257,13 @@ async fn internal_user_wipe(mut req: Request, ctx: RouteContext<()>) -> Result<R
     let resp = index_stub(&ctx.env)?.fetch_with_request(do_req).await?;
     if resp.status_code() != 200 {
         return Ok(json_status(502, "conversation index forget failed"));
+    }
+    // Привязка и кэш отчёта — тоже след человека, и уходят вместе с ним. Слот
+    // остаётся у куратора: это его запись, а не данные худеющего.
+    if let Err(resp) =
+        curator_do(&ctx.env, "/forget-user", &serde_json::json!({ "user_id": user_id })).await
+    {
+        return Ok(resp);
     }
     console_log!("support: wiped conversation for {user_id}");
     Response::from_json(&serde_json::json!({ "ok": true }))
@@ -1322,6 +1459,8 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/curator/clients/:cid/messages", curator_messages)
         .post_async("/curator/clients/:cid/reply", curator_reply)
         .post_async("/curator/clients/:cid/read", curator_read)
+        .post_async("/curator/clients/:cid/request", curator_request_data)
+        .get_async("/curator/clients/:cid/report", curator_report)
         // Сторона ХУДЕЮЩЕГО: приглашение, согласие, своя отвязка
         .get_async("/curator/invite/:code", curator_invite_peek)
         .post_async("/curator/invite/:code/accept", curator_invite_accept)

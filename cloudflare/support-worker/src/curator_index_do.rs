@@ -36,6 +36,14 @@ struct OwnedClientRow {
 }
 
 #[derive(Debug, Deserialize)]
+struct ReportRow {
+    last_report: Option<String>,
+    last_report_at: Option<String>,
+    request_days: Option<i64>,
+    request_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ClientSqlRow {
     id: String,
     name: String,
@@ -448,6 +456,78 @@ impl CuratorIndexDO {
         }))
     }
 
+    /// Открытый запрос данных: на сколько дней и когда попросили. Запрос ОДИН —
+    /// новый затирает прежний, потому что и виджет у человека один.
+    fn handle_request_set(&self, curator_id: &str, id: &str, days: i64) -> Result<Response> {
+        if self.client(curator_id, id)?.is_none() {
+            return Response::error("client not found", 404);
+        }
+        let sql = self.state.storage().sql();
+        let now = now_rfc3339();
+        sql.exec(
+            "UPDATE clients SET request_days = ?, request_at = ?
+             WHERE curator_id = ? AND id = ?",
+            vec![days.into(), now.as_str().into(), curator_id.into(), id.into()],
+        )?;
+        Response::from_json(&serde_json::json!({ "ok": true, "request_at": now }))
+    }
+
+    /// Отчёт пришёл. Кладём его в слот целиком и гасим запрос: он выполнен.
+    ///
+    /// Кэш здесь — не второе хранилище данных человека, а снимок ПОСЛЕДНЕГО
+    /// присланного отчёта, чтобы дашборд куратора открывался сразу, а не
+    /// перелистывал переписку. Прежний снимок затирается: показывать устаревший
+    /// незачем, а история отчётов живёт в переписке.
+    fn handle_report_put(&self, user_id: &str, payload: &str) -> Result<Response> {
+        let Some(row) = self.bound_of_user(user_id)? else {
+            return Response::from_json(&serde_json::json!({ "stored": false }));
+        };
+        let sql = self.state.storage().sql();
+        let now = now_rfc3339();
+        sql.exec(
+            "UPDATE clients SET last_report = ?, last_report_at = ?,
+                                request_days = NULL, request_at = NULL
+             WHERE id = ?",
+            vec![payload.into(), now.as_str().into(), row.id.as_str().into()],
+        )?;
+        Response::from_json(&serde_json::json!({ "stored": true, "client_id": row.id }))
+    }
+
+    /// Последний отчёт клиента — то, из чего куратор рисует дашборд.
+    fn handle_report_get(&self, curator_id: &str, id: &str) -> Result<Response> {
+        let sql = self.state.storage().sql();
+        let rows: Vec<ReportRow> = sql
+            .exec(
+                "SELECT last_report, last_report_at, request_days, request_at
+                 FROM clients WHERE curator_id = ? AND id = ?",
+                vec![curator_id.into(), id.into()],
+            )?
+            .to_array()?;
+        let Some(row) = rows.into_iter().next() else {
+            return Response::error("client not found", 404);
+        };
+        Response::from_json(&serde_json::json!({
+            "report": row.last_report,
+            "report_at": row.last_report_at,
+            "request_days": row.request_days,
+            "request_at": row.request_at,
+        }))
+    }
+
+    /// Стирание аккаунта худеющего: слот отвязывается, кэш отчёта уходит вместе с
+    /// ним. Сам слот остаётся у куратора — это его запись, а не данные человека.
+    fn handle_forget_user(&self, user_id: &str) -> Result<Response> {
+        let Some(row) = self.bound_of_user(user_id)? else {
+            return Response::from_json(&serde_json::json!({ "forgotten": false }));
+        };
+        self.unbind_row(&row.id)?;
+        Response::from_json(&serde_json::json!({
+            "forgotten": true,
+            "curator_id": row.curator_id,
+            "client_id": row.id,
+        }))
+    }
+
     /// Кто курирует этого худеющего. Это же — маршрут его сообщений.
     fn handle_binding(&self, user_id: &str) -> Result<Response> {
         let Some(row) = self.bound_of_user(user_id)? else {
@@ -552,6 +632,21 @@ impl DurableObject for CuratorIndexDO {
                 body.get("user_id").and_then(|v| v.as_str()),
             ),
             "/binding" => self.handle_binding(str_field(&body, "user_id")?),
+            "/request-set" => self.handle_request_set(
+                str_field(&body, "curator_id")?,
+                str_field(&body, "id")?,
+                body.get("days")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| Error::RustError("missing days".into()))?,
+            ),
+            "/report-put" => self.handle_report_put(
+                str_field(&body, "user_id")?,
+                str_field(&body, "payload")?,
+            ),
+            "/report-get" => {
+                self.handle_report_get(str_field(&body, "curator_id")?, str_field(&body, "id")?)
+            }
+            "/forget-user" => self.handle_forget_user(str_field(&body, "user_id")?),
             "/client-user" => {
                 self.handle_client_user(str_field(&body, "curator_id")?, str_field(&body, "id")?)
             }

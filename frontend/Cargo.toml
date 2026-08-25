@@ -8,6 +8,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 api-types = { path = "../common/api-types" }
+pwa-prompt = { path = "../common/pwa-prompt" }
 leptos = { version = "0.6", features = ["csr"] }
 leptos_router = { version = "0.6", features = ["csr"] }
 serde = { version = "1", features = ["derive"] }

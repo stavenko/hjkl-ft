@@ -6,6 +6,7 @@ members = [
     "admin",
     "common/api-types",
     "common/datashare",
+    "common/pwa-prompt",
     "cloudflare/auth-worker",
     "cloudflare/main-flow",
 ]

@@ -25,13 +25,10 @@ use chrono::{Datelike, Duration, NaiveDate};
 use super::local;
 use super::profile::{self, Sex};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum IndicatorState {
-    Green,
-    Orange,
-    Red,
-    Unknown,
-}
+/// Цвет индикатора переехал в общий крейт вместе с подъёмом планки шагов, который
+/// по нему решается. Реэкспорт — чтобы сто с лишним мест не менялись, и, что важнее,
+/// чтобы тип остался ОДНИМ: два похожих не сложились бы друг с другом.
+pub use plankas::IndicatorState;
 
 // ── Targets (WHO / user-set; adjustable) ─────────────────────────────────────
 // Норма клетчатки здесь БОЛЬШЕ НЕ ЖИВЁТ: она считается от калорийной планки

@@ -20,11 +20,9 @@ const PROFILE_KEY: &str = "profile";
 
 /// Legacy device-global localStorage keys, migrated once into the synced row.
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Sex {
-    Male,
-    Female,
-}
+/// Пол переехал в общий крейт: от него зависят нормы, которые считает и
+/// кураторское приложение. Реэкспорт — чтобы тип остался одним.
+pub use plankas::Sex;
 
 /// The overall goal of the course. Defaults to weight loss; the user can switch
 /// to maintenance only after the relevant chapter unlocks.
@@ -216,15 +214,6 @@ pub fn set_cycle_start(date: &str) {
     write(|r| r.cycle_start = v);
 }
 
-/// Body Mass Index = weight(kg) / height(m)². `None` if height is not a positive
-/// value. Used as a coarse read on how much of the body mass is fat.
-pub fn bmi(weight_kg: f64, height_cm: f64) -> Option<f64> {
-    if height_cm <= 0.0 {
-        return None;
-    }
-    let m = height_cm / 100.0;
-    Some(weight_kg / (m * m))
-}
 
 /// Current age in whole years from the stored birth year (approximate — no
 /// birthday tracking). `None` if the birth year is unset/out of range.
@@ -233,141 +222,14 @@ pub fn get_age_years() -> Option<i32> {
     get_birth_year().map(|by| current_year - by)
 }
 
-/// Точка перегиба: до неё белок берётся постоянной долей калорий, после — растёт
-/// медленнее калорий.
-pub const PROTEIN_ANCHOR_KCAL: f64 = 1800.0;
-/// Сколько граммов белка приходится на точку перегиба. 135 г = ровно 30 % от 1800
-/// ккал: рекомендации для похудения называют 25–35 % калорий из белка, и на
-/// умеренном калораже мы берём середину. Смысл планки — не «покрыть потребность»
-/// (её закрывают куда меньшие цифры), а НАСЫТИТЬ: белок утоляет голод лучше
-/// остальных макронутриентов, и заниженная планка делает показатель бесполезным.
-pub const PROTEIN_ANCHOR_G: f64 = 135.0;
-/// Показатель степени, с которой ДОЛЯ белка убывает после точки перегиба.
-///
-/// Считается из пары якорей: `k = ln(p1/p0) / ln(E1/E0)`. Здесь — из 30 % при 1800
-/// ккал и 20 % при 3600: `ln(0.20/0.30) / ln(3600/1800) = −0.5850`.
-///
-/// Допустимый диапазон — `−1 ≤ k < 0`, и он не формальность, а условие
-/// осмысленности: при `k = 0` доля постоянна, при `k = −1` граммы перестают расти
-/// вовсе, а при `k < −1` они бы УБЫВАЛИ с ростом калоража. Проверяется тестом
-/// [`tests::pokazatel_v_dopustimom_diapazone`].
-pub const PROTEIN_CURVE_K: f64 = -0.5850;
-/// Калорийность белка.
-const KCAL_PER_G_PROTEIN: f64 = 4.0;
-/// Нижняя граница: столько граммов на кг БЕЗЖИРОВОЙ массы. Страхует случай
-/// экстремально низкой калорийной планки — доля от маленького числа не должна
-/// опускать белок ниже физиологического минимума.
-pub const PROTEIN_MIN_PER_KG_FFM: f64 = 1.6;
-/// Верхняя граница: столько граммов на кг ПОЛНОГО веса. Страхует обратный случай
-/// (высокая планка у некрупного человека) — дальше это уже не еда, а задание.
-pub const PROTEIN_MAX_PER_KG_BW: f64 = 2.2;
+/// Нормы белка и ИМТ живут в общем крейте `plankas` — их считает и кураторское
+/// приложение. Реэкспорт оставлен, чтобы вызывающие места не менялись.
+pub use plankas::{
+    bmi, fat_free_mass_kg, protein_from_kcal, protein_share_pct, protein_target_g,
+    PROTEIN_ANCHOR_G, PROTEIN_ANCHOR_KCAL, PROTEIN_CURVE_K, PROTEIN_MAX_PER_KG_BW,
+    PROTEIN_MIN_PER_KG_FFM,
+};
 
-/// Оценка БЕЗЖИРОВОЙ массы тела (кг) по уравнению Deurenberg (1991): процент жира
-/// выводится из ИМТ, возраста и пола, то есть в предположении обычного,
-/// НЕтренированного состава тела.
-///
-/// ```text
-/// BF%  = 1.2·BMI + 0.23·age − 10.8·sex − 5.4      (sex: 1 муж., 0 жен.)
-/// FFM  = weight · (1 − BF%/100)
-/// ```
-///
-/// `None`, если вес/рост неположительны (ИМТ не определён). Процент жира зажат в
-/// физиологические [3, 60] %, чтобы экстраполяция за пределы применимости не дала
-/// нелепую (или отрицательную) массу.
-pub fn fat_free_mass_kg(weight_kg: f64, height_cm: f64, age_years: i32, sex: Sex) -> Option<f64> {
-    if weight_kg <= 0.0 {
-        return None;
-    }
-    let bmi = bmi(weight_kg, height_cm)?;
-    let sex_term = match sex {
-        Sex::Male => 1.0,
-        Sex::Female => 0.0,
-    };
-    let bf_pct = (1.2 * bmi + 0.23 * age_years as f64 - 10.8 * sex_term - 5.4).clamp(3.0, 60.0);
-    Some(weight_kg * (1.0 - bf_pct / 100.0))
-}
-
-/// Сколько граммов белка полагается на калорийную планку `kcal` — БЕЗ поправок на
-/// тело.
-///
-/// ```text
-/// база = P0 · kcal / E0                     при kcal ≤ E0
-/// база = P0 · (kcal / E0)^(1 + k)           при kcal >  E0
-/// ```
-///
-/// Постоянная доля ломается на краях: на низком калораже 30 % дают завышенные
-/// граммы, а если долю просто снижать ступенями, граммы становятся НЕмонотонными —
-/// человек с бо́льшим калоражем получает меньше белка. Причина арифметическая:
-/// граммы равны `E · доля / 4`, и стоит доле убывать быстрее, чем `1/E`, как
-/// произведение начинает падать.
-///
-/// Отсюда степенная зависимость: доля убывает, а граммы всё равно растут — ровно
-/// пока `k` лежит в `[−1, 0)`. Ниже точки перегиба доля постоянна (`P0/E0 · 4` =
-/// 30 %), выше — падает до 20 % к 3600 ккал.
-///
-/// В самой точке перегиба ветви сходятся: обе дают `P0`. Излом первой производной
-/// там остаётся (плато переходит в спад) — на цифры он не влияет, сглаживание
-/// отдельной задачей, если понадобится.
-pub fn protein_from_kcal(kcal: f64) -> f64 {
-    if kcal <= PROTEIN_ANCHOR_KCAL {
-        PROTEIN_ANCHOR_G * kcal / PROTEIN_ANCHOR_KCAL
-    } else {
-        PROTEIN_ANCHOR_G * (kcal / PROTEIN_ANCHOR_KCAL).powf(1.0 + PROTEIN_CURVE_K)
-    }
-}
-
-/// Какой ДОЛЕЙ калорийной планки оказалась планка по белку, в процентах.
-///
-/// Величина производная: доля больше не задана числом, а получается из граммов.
-/// Нужна, чтобы объяснение на дашборде называло тот процент, который вышел на
-/// самом деле, а не заученные 30 %.
-pub fn protein_share_pct(kcal: f64) -> f64 {
-    if kcal <= 0.0 {
-        return 0.0;
-    }
-    KCAL_PER_G_PROTEIN * 100.0 * protein_from_kcal(kcal) / kcal
-}
-
-/// Дневная планка по белку (граммы) — от КАЛОРИЙНОЙ ПЛАНКИ по кривой
-/// [`protein_from_kcal`], зажатая между двумя границами, считающимися от тела:
-///
-/// ```text
-/// база   = protein_from_kcal(планка_ккал)
-/// пол    = 1.6 · FFM          (безжировая масса, Deurenberg)
-/// потолок = 2.2 · вес
-/// target = round(clamp(база, пол, потолок))
-/// ```
-///
-/// Пол всегда ниже потолка (1.6·FFM ≤ 1.6·вес < 2.2·вес), так что зажим корректен
-/// при любом составе тела.
-///
-/// `kcal_planka` = `None` (планки по калориям ещё нет — до конца онбординга), либо
-/// неположительна → берём пол: это ровно прежнее правило 1.6 г на кг безжировой
-/// массы, то есть до появления калорийной планки поведение не меняется.
-///
-/// `None`, если вес/рост неположительны.
-pub fn protein_target_g(
-    kcal_planka: Option<f64>,
-    weight_kg: f64,
-    height_cm: f64,
-    age_years: i32,
-    sex: Sex,
-) -> Option<u32> {
-    let ffm = fat_free_mass_kg(weight_kg, height_cm, age_years, sex)?;
-    let floor = PROTEIN_MIN_PER_KG_FFM * ffm;
-    let ceiling = PROTEIN_MAX_PER_KG_BW * weight_kg;
-    let base = match kcal_planka {
-        Some(k) if k > 0.0 => protein_from_kcal(k),
-        _ => floor,
-    };
-    Some(base.clamp(floor, ceiling).round() as u32)
-}
-
-/// Convenience over [`protein_target_g`]: pulls height/age/sex from the profile
-/// and the current calorie planka, and computes the target for `weight_kg`.
-/// Returns 0 when any profile field is unset (the setup section captures them
-/// before protein ever matters), so the task simply shows «0 г» until the profile
-/// is complete — the same fallback the weight-only formula used.
 pub async fn protein_target_from_profile(weight_kg: f64) -> u32 {
     // Кураторское число поверх нашей кривой: белок выводится из калорийной
     // планки, но куратор вправе назвать своё.

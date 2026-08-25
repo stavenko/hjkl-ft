@@ -1,0 +1,12 @@
+[package]
+name = "plankas"
+version = "0.1.0"
+edition = "2021"
+
+# Правила планок — общий код приложения худеющего и кураторского. Только чистые
+# функции: ни базы, ни сети, ни времени.
+
+[dependencies]
+api-types = { path = "../api-types" }
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }

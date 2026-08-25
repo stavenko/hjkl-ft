@@ -8,6 +8,7 @@ members = [
     "common/api-types",
     "common/datashare",
     "common/pwa-prompt",
+    "common/plankas",
     "cloudflare/auth-worker",
     "cloudflare/main-flow",
 ]

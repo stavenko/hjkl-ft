@@ -55,6 +55,15 @@ fn is_onboard_entry() -> bool {
     path == "/onboard" || path == "/onboard-tg"
 }
 
+/// Приглашение куратора. Экран сам разбирается, есть ли сессия: без неё он
+/// отправляет человека регистрироваться обычным путём. Оверлей входа здесь
+/// показал бы форму, которой пришедший по ссылке не ждал, — и увёл бы его от
+/// вопроса, на который он пришёл ответить.
+fn is_curator_invite() -> bool {
+    let Some(loc) = web_sys::window().map(|w| w.location()) else { return false };
+    loc.pathname().unwrap_or_default() == "/curator"
+}
+
 fn initial_state() -> AppState {
     // Yandex Browser comes FIRST — before the onboarding bypass. The Telegram
     // link lands on `/onboard`, which is exactly where a Yandex user gets stuck
@@ -80,7 +89,7 @@ fn initial_state() -> AppState {
     }
     // Onboarding drives its own flow; bypass all overlays so neither the Auth (login) nor the
     // PWA-install overlay covers it.
-    if is_onboard_entry() {
+    if is_onboard_entry() || is_curator_invite() {
         return AppState::Ready;
     }
     if platform::needs_pwa_prompt() {
@@ -370,6 +379,10 @@ pub fn App() -> impl IntoView {
                     <div style=SHELL_COLUMN>
                     <Routes>
                         <Route path="/" view=DashboardGate />
+                        // Согласие на куратора. Маршрут открытый: приглашение
+                        // приходит ссылкой, и экран сам решает, вести ли человека
+                        // на регистрацию или спрашивать согласие.
+                        <Route path="/curator" view=pages::curator_invite::CuratorInvitePage />
                         <Route path="/help/food" view=pages::help::HelpFoodPage />
                         <Route path="/help/:id" view=pages::help::HelpArticlePage />
                         <Route path="/onboard" view=pages::onboard::OnboardPage />

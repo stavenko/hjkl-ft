@@ -6,6 +6,7 @@ pub mod chat;
 pub mod classify;
 pub mod auth;
 pub mod config;
+pub mod curator;
 pub mod curator_plankas;
 pub mod directives;
 pub mod curator_share;

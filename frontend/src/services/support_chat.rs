@@ -152,7 +152,7 @@ const CURSOR_KEY: &str = "cursor";
 // ── Transport (FAIL LOUDLY, JWT-authed; mirrors sync.rs / bug_report.rs) ──
 
 /// POST `body` (JSON) to `{support_base_url}{path}` and parse the JSON response.
-async fn post_json<O: DeserializeOwned>(path: &str, body: &str) -> Result<O, String> {
+pub(crate) async fn post_json<O: DeserializeOwned>(path: &str, body: &str) -> Result<O, String> {
     let base = &config::get().support_base_url;
     if base.is_empty() {
         return Err("support_base_url is not configured".to_string());
@@ -189,7 +189,7 @@ async fn post_json<O: DeserializeOwned>(path: &str, body: &str) -> Result<O, Str
 }
 
 /// GET `{support_base_url}{path}` (query in the URL) and parse the JSON response.
-async fn get_json<O: DeserializeOwned>(path: &str) -> Result<O, String> {
+pub(crate) async fn get_json<O: DeserializeOwned>(path: &str) -> Result<O, String> {
     let base = &config::get().support_base_url;
     if base.is_empty() {
         return Err("support_base_url is not configured".to_string());

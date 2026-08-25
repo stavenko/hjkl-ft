@@ -9,8 +9,10 @@
 //! Здесь только ЧИСТЫЕ функции — ни базы, ни сети, ни времени. Всё, что зависит от
 //! данных человека, приходит параметрами.
 
+pub mod defaults;
 pub mod weight_trend;
 
+pub use defaults::{default_for, Kind, Snapshot, ALL};
 pub use weight_trend::{Direction, WeightTrend, CONFIDENT, DEFAULT_WINDOW_DAYS, WEAK};
 
 /// Пол. Нужен нормам, которые от него зависят (овощи-фрукты, железо, безжировая
@@ -30,6 +32,47 @@ pub enum IndicatorState {
     Orange,
     Red,
     Unknown,
+}
+
+// ── Что предложить куратору ──────────────────────────────────────────────────
+
+/// Ширина коридора, в котором день по калориям считается зелёным. Она же — порог
+/// «держался планки» при недельном пересчёте.
+pub const CALORIE_BAND_KCAL: f64 = 50.0;
+
+/// Пересчёт планок по последним данным человека — то, что куратор видит, нажав
+/// «Рассчитать».
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Suggestion {
+    pub calories: f64,
+    /// Белок следует за калориями. `None` — профиль неполон, и выдумывать норму
+    /// не из чего.
+    pub protein: Option<f64>,
+}
+
+/// Посчитать так же, как посчитал бы недельный цикл у худеющего.
+///
+/// Это НЕ отдельное правило для куратора: он видит ровно то число, к которому
+/// приложение пришло бы само, и решает, согласен ли он с ним. Второе правило
+/// означало бы, что человек и его куратор ведут разные программы.
+///
+/// `previous` — планка, от которой отталкиваемся (действующая). `avg_kcal_7d` —
+/// сколько человек ел на самом деле; без него исполнение неизвестно, и стопор не
+/// срабатывает ни в какую сторону.
+pub fn suggest(
+    s: &Snapshot,
+    previous: f64,
+    weight: &[api_types::WeightEntry],
+    avg_kcal_7d: Option<f64>,
+) -> Suggestion {
+    let trend = weight_trend::weight_trend(weight, DEFAULT_WINDOW_DAYS);
+    let weight_kg = s.weight_kg.unwrap_or(0.0);
+    let adh = adherence(avg_kcal_7d.unwrap_or(previous), previous, CALORIE_BAND_KCAL);
+    let calories = calorie_planka_weekly(previous, &trend, weight_kg, adh);
+    // Белок считается уже от НОВОЙ калорийности: куратор отправит их вместе, и
+    // показывать норму от старой планки значило бы показывать неправду.
+    let after = Snapshot { kcal_planka: Some(calories), ..*s };
+    Suggestion { calories, protein: default_for(Kind::Protein, &after) }
 }
 
 // ── Планка по калориям ───────────────────────────────────────────────────────
@@ -380,6 +423,70 @@ pub fn protein_target_g(
         _ => floor,
     };
     Some(base.clamp(floor, ceiling).round() as u32)
+}
+
+#[cfg(test)]
+mod suggest_tests {
+    use super::*;
+    use api_types::WeightEntry;
+
+    fn weigh(date: &str, kg: f64) -> WeightEntry {
+        WeightEntry {
+            id: date.to_string(),
+            date: date.to_string(),
+            weight_kg: kg,
+            no_water: false,
+            no_food: false,
+            no_wash: false,
+            used_toilet: false,
+            morning: true,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    fn person() -> Snapshot {
+        Snapshot {
+            sex: Some(Sex::Female),
+            age_years: Some(35),
+            height_cm: Some(165.0),
+            weight_kg: Some(70.0),
+            kcal_planka: Some(2000.0),
+        }
+    }
+
+    /// Предложение куратору обязано совпадать с тем, что посчитал бы недельный
+    /// цикл. Иначе человек и его куратор ведут разные программы.
+    #[test]
+    fn predlozhenie_sovpadaet_s_nedelnym_pereschetom() {
+        let w: Vec<_> = (1..=14)
+            .map(|i| weigh(&format!("2026-03-{i:02}"), 71.0 - i as f64 * 0.05))
+            .collect();
+        let trend = weight_trend::weight_trend(&w, DEFAULT_WINDOW_DAYS);
+        let adh = adherence(1900.0, 2000.0, CALORIE_BAND_KCAL);
+        let expected = calorie_planka_weekly(2000.0, &trend, 70.0, adh);
+        assert_eq!(suggest(&person(), 2000.0, &w, Some(1900.0)).calories, expected);
+    }
+
+    /// Белок считается от НОВОЙ калорийности, а не от прежней: отправляются они
+    /// вместе, и показать норму от старой планки значило бы показать неправду.
+    #[test]
+    fn belok_schitaetsya_ot_novoj_kalorijnosti() {
+        let s = person();
+        let sg = suggest(&s, 2000.0, &[], Some(2000.0));
+        let after = Snapshot { kcal_planka: Some(sg.calories), ..s };
+        assert_eq!(sg.protein, default_for(Kind::Protein, &after));
+    }
+
+    /// Без данных о съеденном стопор не срабатывает ни в какую сторону: неизвестное
+    /// исполнение — не повод ни поднимать, ни опускать.
+    #[test]
+    fn bez_sedennogo_stopor_ne_srabatyvaet() {
+        let s = person();
+        let no_data = suggest(&s, 2000.0, &[], None);
+        let on_target = suggest(&s, 2000.0, &[], Some(2000.0));
+        assert_eq!(no_data.calories, on_target.calories);
+    }
 }
 
 #[cfg(test)]

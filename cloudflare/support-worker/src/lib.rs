@@ -679,6 +679,102 @@ async fn curator_client_delete(req: Request, ctx: RouteContext<()>) -> Result<Re
     }
 }
 
+/// GET /curator/invite/:code (JWT худеющего). Что показать на экране согласия.
+///
+/// Гейт — обычный пользовательский токен: приглашение открывает ЧЕЛОВЕК, а не
+/// куратор. Код гасится согласием, а не открытием, поэтому неоткрытую ссылку
+/// можно переслать ещё раз.
+async fn curator_invite_peek(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_user(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let Some(code) = ctx.param("code").map(|s| s.to_string()) else {
+        return Ok(json_status(400, "missing code"));
+    };
+    match curator_do(
+        &ctx.env,
+        "/invite-peek",
+        &serde_json::json!({ "code": code, "user_id": sub }),
+    )
+    .await
+    {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
+/// POST /curator/invite/:code/accept (JWT худеющего) — согласие.
+///
+/// Привязка ставится на `sub` ИЗ ТОКЕНА, никогда из тела: иначе приглашением
+/// можно было бы привязать чужой аккаунт.
+async fn curator_invite_accept(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_user(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let Some(code) = ctx.param("code").map(|s| s.to_string()) else {
+        return Ok(json_status(400, "missing code"));
+    };
+    match curator_do(
+        &ctx.env,
+        "/invite-accept",
+        &serde_json::json!({ "code": code, "user_id": sub }),
+    )
+    .await
+    {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
+/// GET /curator/binding (JWT худеющего) — есть ли у меня куратор и как его зовут.
+/// Этим же ответом приложение решает, показывать ли виджет отчёта.
+async fn curator_binding(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_user(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    match curator_do(&ctx.env, "/binding", &serde_json::json!({ "user_id": sub })).await {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
+/// POST /curator/unbind (JWT худеющего) — «больше не хочу куратора».
+async fn curator_unbind_by_user(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_user(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    match curator_do(&ctx.env, "/unbind", &serde_json::json!({ "user_id": sub })).await {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
+/// POST /curator/clients/:cid/unbind (куратор) — «прекращаю работу с этим человеком».
+/// Слот остаётся в списке с новым кодом: тем же слотом человека приглашают снова.
+async fn curator_client_unbind(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let Some(cid) = ctx.param("cid").map(|s| s.to_string()) else {
+        return Ok(json_status(400, "missing cid"));
+    };
+    match curator_do(
+        &ctx.env,
+        "/unbind",
+        &serde_json::json!({ "curator_id": sub, "id": cid }),
+    )
+    .await
+    {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
 // ---- ADMIN authorization handlers ----
 
 /// GET /admin/me (user JWT). Returns the DO's {"approved":bool,"code":string|null}
@@ -974,6 +1070,12 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/curator/clients", curator_client_create)
         .post_async("/curator/clients/:cid/rename", curator_client_rename)
         .post_async("/curator/clients/:cid/delete", curator_client_delete)
+        .post_async("/curator/clients/:cid/unbind", curator_client_unbind)
+        // Сторона ХУДЕЮЩЕГО: приглашение, согласие, своя отвязка
+        .get_async("/curator/invite/:code", curator_invite_peek)
+        .post_async("/curator/invite/:code/accept", curator_invite_accept)
+        .get_async("/curator/binding", curator_binding)
+        .post_async("/curator/unbind", curator_unbind_by_user)
         // ADMIN authorization (request-code + operator secret; no redeploy to add)
         .get_async("/admin/me", admin_me)
         .post_async("/admin/request", admin_request)

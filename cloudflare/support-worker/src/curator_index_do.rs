@@ -26,6 +26,15 @@ struct CuratorRow {
     created_at: String,
 }
 
+/// Строка слота в поиске по коду/пользователю — вместе с владельцем, которого
+/// в `ClientSqlRow` нет (там выборка уже ограничена одним куратором).
+#[derive(Debug, Deserialize)]
+struct OwnedClientRow {
+    id: String,
+    curator_id: String,
+    user_id: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ClientSqlRow {
     id: String,
@@ -285,6 +294,164 @@ impl CuratorIndexDO {
         Response::from_json(&serde_json::json!({ "client": ClientRow::from(row) }))
     }
 
+    /// Слот по пригласительному коду. Код ищется по ВСЕМ кураторам — он и есть
+    /// адрес приглашения.
+    fn by_invite(&self, code: &str) -> Result<Option<OwnedClientRow>> {
+        let sql = self.state.storage().sql();
+        let rows: Vec<OwnedClientRow> = sql
+            .exec(
+                "SELECT id, curator_id, user_id FROM clients WHERE invite_code = ?",
+                vec![code.into()],
+            )?
+            .to_array()?;
+        Ok(rows.into_iter().next())
+    }
+
+    /// Привязанный слот этого худеющего, если он есть. Единственный по построению
+    /// (частичный UNIQUE по user_id).
+    fn bound_of_user(&self, user_id: &str) -> Result<Option<OwnedClientRow>> {
+        let sql = self.state.storage().sql();
+        let rows: Vec<OwnedClientRow> = sql
+            .exec(
+                "SELECT id, curator_id, user_id FROM clients WHERE user_id = ?",
+                vec![user_id.into()],
+            )?
+            .to_array()?;
+        Ok(rows.into_iter().next())
+    }
+
+    /// Что показать на экране согласия: имя куратора и не он ли это уже.
+    fn handle_invite_peek(&self, code: &str, user_id: &str) -> Result<Response> {
+        let Some(row) = self.by_invite(code)? else {
+            return Response::from_json(&serde_json::json!({ "found": false }));
+        };
+        // Код гасится согласием, а не открытием: пока слот не привязан, ссылку
+        // можно переслать ещё раз. Привязанный слот кода уже не отдаёт.
+        if row.user_id.is_some() {
+            return Response::from_json(&serde_json::json!({ "found": false, "used": true }));
+        }
+        let curator = self.curator(&row.curator_id)?;
+        let current = self.bound_of_user(user_id)?;
+        Response::from_json(&serde_json::json!({
+            "found": true,
+            "curator_name": curator.and_then(|c| c.name).unwrap_or_default(),
+            "client_id": row.id,
+            // Уже у кого-то: экран согласия обязан сказать, что старая связь
+            // оборвётся, а не молча её оборвать.
+            "current_curator_id": current.as_ref().map(|c| c.curator_id.clone()),
+        }))
+    }
+
+    /// Снять привязку со слота: user_id в NULL, отметка времени и НОВЫЙ код —
+    /// прежний погашен согласием и второй раз работать не должен. Слот остаётся
+    /// в списке куратора: тем же слотом человека приглашают снова.
+    fn unbind_row(&self, id: &str) -> Result<()> {
+        let sql = self.state.storage().sql();
+        let now = now_rfc3339();
+        let mut code = generate_invite_code()?;
+        for _ in 0..8 {
+            match sql.exec(
+                "UPDATE clients
+                 SET user_id = NULL, unbound_at = ?, invite_code = ?,
+                     request_days = NULL, request_at = NULL,
+                     last_report_at = NULL, last_report = NULL
+                 WHERE id = ?",
+                vec![now.as_str().into(), code.as_str().into(), id.into()],
+            ) {
+                Ok(_) => return Ok(()),
+                Err(_) => code = generate_invite_code()?,
+            }
+        }
+        Err(Error::RustError(
+            "could not allocate a unique invite code on unbind in 8 attempts".into(),
+        ))
+    }
+
+    /// Согласие худеющего. Если он уже у другого куратора — прежняя связь рвётся
+    /// здесь же, одной операцией: два куратора у одного человека не бывает, и
+    /// оставлять решение вызывающей стороне значит допустить окно, в котором их
+    /// двое. Прежний слот возвращается в список прежнего куратора с новым кодом.
+    fn handle_invite_accept(&self, code: &str, user_id: &str) -> Result<Response> {
+        let Some(row) = self.by_invite(code)? else {
+            return Response::error("invite not found", 404);
+        };
+        if row.user_id.is_some() {
+            return Response::error("invite already used", 409);
+        }
+        let previous = self.bound_of_user(user_id)?;
+        if let Some(prev) = &previous {
+            if prev.id == row.id {
+                return Response::error("already bound to this client", 409);
+            }
+            self.unbind_row(&prev.id)?;
+        }
+        let sql = self.state.storage().sql();
+        let now = now_rfc3339();
+        sql.exec(
+            "UPDATE clients SET user_id = ?, bound_at = ?, unbound_at = NULL WHERE id = ?",
+            vec![user_id.into(), now.as_str().into(), row.id.as_str().into()],
+        )?;
+        let curator = self.curator(&row.curator_id)?;
+        Response::from_json(&serde_json::json!({
+            "ok": true,
+            "client_id": row.id,
+            "curator_id": row.curator_id,
+            "curator_name": curator.and_then(|c| c.name).unwrap_or_default(),
+            "previous": previous.map(|p| serde_json::json!({
+                "curator_id": p.curator_id, "client_id": p.id,
+            })),
+        }))
+    }
+
+    /// Отвязка. Инициатор — либо куратор (тогда задан `curator_id`, и чужой слот
+    /// не найдётся), либо сам худеющий (тогда задан `user_id`).
+    fn handle_unbind(
+        &self,
+        curator_id: Option<&str>,
+        id: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<Response> {
+        let row = match (curator_id, id, user_id) {
+            (Some(cid), Some(id), _) => match self.client(cid, id)? {
+                Some(r) => OwnedClientRow {
+                    id: r.id,
+                    curator_id: cid.to_string(),
+                    user_id: r.user_id,
+                },
+                None => return Response::error("client not found", 404),
+            },
+            (_, _, Some(uid)) => match self.bound_of_user(uid)? {
+                Some(r) => r,
+                None => return Response::error("not bound", 404),
+            },
+            _ => return Response::error("need client or user", 400),
+        };
+        let Some(bound_user) = row.user_id.clone() else {
+            return Response::error("not bound", 404);
+        };
+        self.unbind_row(&row.id)?;
+        Response::from_json(&serde_json::json!({
+            "ok": true,
+            "client_id": row.id,
+            "curator_id": row.curator_id,
+            "user_id": bound_user,
+        }))
+    }
+
+    /// Кто курирует этого худеющего. Это же — маршрут его сообщений.
+    fn handle_binding(&self, user_id: &str) -> Result<Response> {
+        let Some(row) = self.bound_of_user(user_id)? else {
+            return Response::from_json(&serde_json::json!({ "bound": false }));
+        };
+        let curator = self.curator(&row.curator_id)?;
+        Response::from_json(&serde_json::json!({
+            "bound": true,
+            "curator_id": row.curator_id,
+            "client_id": row.id,
+            "curator_name": curator.and_then(|c| c.name).unwrap_or_default(),
+        }))
+    }
+
     /// Удаление слота. Возвращает `user_id`, если слот был привязан, — вызывающая
     /// сторона обязана довести отвязку до конца (письмо худеющему, чистка треда).
     fn handle_client_delete(&self, curator_id: &str, id: &str) -> Result<Response> {
@@ -361,6 +528,20 @@ impl DurableObject for CuratorIndexDO {
             "/client-delete" => {
                 self.handle_client_delete(str_field(&body, "curator_id")?, str_field(&body, "id")?)
             }
+            "/invite-peek" => self.handle_invite_peek(
+                str_field(&body, "code")?,
+                str_field(&body, "user_id")?,
+            ),
+            "/invite-accept" => self.handle_invite_accept(
+                str_field(&body, "code")?,
+                str_field(&body, "user_id")?,
+            ),
+            "/unbind" => self.handle_unbind(
+                body.get("curator_id").and_then(|v| v.as_str()),
+                body.get("id").and_then(|v| v.as_str()),
+                body.get("user_id").and_then(|v| v.as_str()),
+            ),
+            "/binding" => self.handle_binding(str_field(&body, "user_id")?),
             _ => Response::error(format!("unknown DO path: {path}"), 404),
         }
     }

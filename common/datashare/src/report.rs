@@ -30,6 +30,11 @@ pub struct Body {
     pub height_cm: Option<f64>,
     #[serde(default)]
     pub birth_year: Option<i32>,
+    /// Возраст, посчитанный на стороне ЧЕЛОВЕКА. У куратора своя дата, а нормы
+    /// железа идут ступеньками по возрасту — на границе год разницы даёт другую
+    /// норму. Старые отчёты его не везут: тогда считаем от года рождения.
+    #[serde(default)]
+    pub age_years: Option<i32>,
     #[serde(default)]
     pub sex: Option<String>,
 }
@@ -169,6 +174,11 @@ pub struct Report {
     pub targets: Targets,
     #[serde(default)]
     pub plankas: std::collections::BTreeMap<String, Vec<PlankaPoint>>,
+    /// Среднее съеденное за 7 завершённых дней — вход `adherence`. `None`, когда
+    /// дневник за эту неделю пуст: считать планку не от чего, и врать про это
+    /// нулём нельзя.
+    #[serde(default)]
+    pub avg_kcal_7d: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -74,6 +74,10 @@ async fn build_body() -> Value {
         "weight_kg": latest_kg,
         "height_cm": profile::get_height_cm(),
         "birth_year": profile::get_birth_year(),
+        // Возраст считается ЗДЕСЬ: у куратора свой часовой пояс и своя дата, а
+        // нормы железа ступеньками по возрасту — на границе (18/19, 50/51)
+        // расхождение в год даёт другую норму.
+        "age_years": profile::get_age_years(),
         "sex": sex,
     })
 }
@@ -374,15 +378,24 @@ fn build_targets() -> Value {
 }
 
 /// История планок за срок: какая планка действовала в какой день.
+///
+/// По ВСЕМ двенадцати видам, а не по трём подвижным. Планка любого из них теперь
+/// может смениться — её сменил куратор, — и день обязан судиться по той, что
+/// действовала тогда. У вида, которого никто не трогал, история просто пуста.
 async fn build_planka_history(from: &str) -> Value {
+    use crate::services::plankas;
     let mut out = serde_json::Map::new();
-    for kind in [local::PLANKA_CALORIES, local::PLANKA_STEPS, local::PLANKA_PROTEIN] {
+    for k in plankas::ALL {
+        let kind = k.key();
         let rows: Vec<Value> = local::planka_history(kind)
             .await
             .into_iter()
             .filter(|e| e.date.as_str() >= from)
             .map(|e| json!({ "date": e.date, "amount": e.amount }))
             .collect();
+        if rows.is_empty() {
+            continue;
+        }
         out.insert(kind.to_string(), Value::Array(rows));
     }
     Value::Object(out)
@@ -451,6 +464,11 @@ pub async fn build_report(days: u32) -> Value {
             "trend_days": trend_days,
         },
         "steps": { "series": steps_series },
+        // Среднее съеденное за 7 ЗАВЕРШЁННЫХ дней. Едет ради расчёта на стороне
+        // куратора: это вход `adherence` — без него нельзя отличить «вес стоит,
+        // потому что планка велика» от «вес стоит, потому что её не держат», а
+        // именно на этом различии недельный цикл и решает, двигать ли планку.
+        "avg_kcal_7d": local::avg_daily_kcal(7).await,
         "indicators": build_indicators(days).await,
         "targets": build_targets(),
         "plankas": build_planka_history(&from).await,

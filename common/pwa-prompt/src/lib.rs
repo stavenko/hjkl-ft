@@ -234,14 +234,14 @@ pub fn render_steps(platform: &str, lang: fn() -> Lang) -> View {
                     <span class="step-num">"1"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.ios_safari.1")}
-                        <img src="/onboard-img/ios-safari-share.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/ios-safari-share.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.ios_safari.2")}
-                        <img src="/onboard-img/ios-safari-home.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/ios-safari-home.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
@@ -251,7 +251,7 @@ pub fn render_steps(platform: &str, lang: fn() -> Lang) -> View {
                         // Последний диалог — СИСТЕМНЫЙ, один на весь iOS независимо
                         // от браузера, поэтому берётся уже снятый в яндексовском
                         // прогоне кадр, а не заводится копия того же самого.
-                        <img src="/onboard-img/ios-ya-add.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/ios-ya-add.gif" alt="" class="step-shot" />
                     </div>
                 </div>
             </div>
@@ -267,28 +267,28 @@ pub fn render_steps(platform: &str, lang: fn() -> Lang) -> View {
                     <span class="step-num">"1"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.ios_yandex.1")}
-                        <img src="/onboard-img/ios-ya-menu.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/ios-ya-menu.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.ios_yandex.2")}
-                        <img src="/onboard-img/ios-ya-shortcut.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/ios-ya-shortcut.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"3"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.ios_yandex.3")}
-                        <img src="/onboard-img/ios-ya-home.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/ios-ya-home.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"4"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.ios_yandex.4")}
-                        <img src="/onboard-img/ios-ya-add.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/ios-ya-add.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
@@ -309,14 +309,14 @@ pub fn render_steps(platform: &str, lang: fn() -> Lang) -> View {
                     <span class="step-num">"1"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.ios_chrome.1")}
-                        <img src="/onboard-img/ios-chrome-share.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/ios-chrome-share.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.ios_chrome.2")}
-                        <img src="/onboard-img/ios-chrome-add.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/ios-chrome-add.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
@@ -324,7 +324,7 @@ pub fn render_steps(platform: &str, lang: fn() -> Lang) -> View {
                     <div class="step-body">
                         {move || t("pwa.inst.ios_chrome.3")}
                         // Тот же системный диалог iOS, что и в Safari.
-                        <img src="/onboard-img/ios-ya-add.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/ios-ya-add.gif" alt="" class="step-shot" />
                     </div>
                 </div>
             </div>
@@ -353,24 +353,24 @@ pub fn render_steps(platform: &str, lang: fn() -> Lang) -> View {
                         " "
                         // Значок обновления — прямо в строке, размером со строку,
                         // чтобы не раздвигать межстрочный интервал.
-                        <img src="/onboard-img/update-icon.png" alt="значок обновления"
+                        <img src="/pwa-img/update-icon.png" alt="значок обновления"
                              style="height: 1.05em; width: auto; vertical-align: -0.18em;" />
                         "."
-                        <img src="/onboard-img/pwa-menu.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/pwa-menu.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"2"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.android_chrome.2")}
-                        <img src="/onboard-img/pwa-addscreen.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/pwa-addscreen.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">
                     <span class="step-num">"3"</span>
                     <div class="step-body">
                         {move || t("pwa.inst.android_chrome.3")}
-                        <img src="/onboard-img/pwa-install.gif" alt="" class="step-shot" />
+                        <img src="/pwa-img/pwa-install.gif" alt="" class="step-shot" />
                     </div>
                 </div>
                 <div class="step">

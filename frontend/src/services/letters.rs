@@ -69,6 +69,17 @@ pub fn refresh() {
     bump();
 }
 
+/// Сдвинуть ОБА недельных якоря на сегодня.
+///
+/// Нужно при отвязке от куратора: пока стоял его запрет, пересчёт выходил рано и
+/// якорь не двигался. Через полгода кураторства «прошло 180 дней ≥ 7» сработало
+/// бы на ближайшем запуске — то есть немедленно, вместо обещанной недели.
+pub fn reset_weekly_anchors() {
+    let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
+    app_flags::set(PLANKA_ANCHOR_KEY, &today);
+    app_flags::set(STEPS_ANCHOR_KEY, &today);
+}
+
 /// Record that the calorie planka was (re)computed today — restarts the weekly
 /// clock. Called from [`crate::services::local::set_calorie_goal`], so EVERY planka
 /// change resets the anchor: the manual «Пересчитать» button (e.g. after a course-

@@ -358,8 +358,10 @@ async fn poll_inner(first_wait: u32) -> Result<(), String> {
         let r: PollResp =
             get_json(&format!("/messages?after_seq={after}&limit=100&wait={wait}")).await?;
         // Смена куратора между опросами меняет адресата: дальше идём по нему.
+        let was = peer.clone();
         peer = r.peer.clone();
         set_current_peer(&peer);
+        peer_changed(&was, &peer).await;
         for m in &r.messages {
             let m = LiveMessage {
                 id: msg_id(&peer, m.seq),
@@ -779,6 +781,19 @@ fn set_current_peer(peer: &str) {
     if current_peer() != peer {
         crate::services::app_flags::set(CURRENT_PEER_FLAG, peer);
     }
+}
+
+/// Смена адресата — единственный признак отвязки, который виден приложению.
+///
+/// Он один и тот же, кто бы её ни начал: куратор нажал «прекратить работу»,
+/// человек отвязался сам, или он принял другого куратора. Во всех трёх случаях
+/// прежние кураторские настройки надо убрать, и делать это одним путём надёжнее,
+/// чем тремя.
+async fn peer_changed(from: &str, to: &str) {
+    if from == to || !from.starts_with("curator:") {
+        return;
+    }
+    crate::services::curator::unbind_locally().await;
 }
 
 /// Есть ли у человека куратор — по тому же признаку, по которому идут сообщения.

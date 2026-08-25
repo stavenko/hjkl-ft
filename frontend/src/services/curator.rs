@@ -55,9 +55,55 @@ pub async fn unbind() -> Result<serde_json::Value, String> {
 
 /// Забыть куратора на этом устройстве после успешной отвязки на сервере.
 ///
-/// Пока — только состояние опроса: адресат чата снова админ. Разбор кураторских
-/// планок (перенос, снятие замков, сдвиг якорей) делает `unbind_locally` в
-/// следующем шаге.
+/// Сама уборка живёт в [`unbind_locally`] и запускается по СМЕНЕ адресата в
+/// опросе — одним путём и для «куратор прекратил работу», и для «человек
+/// отвязался сам». Здесь достаточно опросить сервер: он и сообщит, что адресат
+/// сменился.
 pub async fn forget_locally() {
-    let _ = crate::services::support_chat::poll().await;
+    if let Err(e) = crate::services::support_chat::poll().await {
+        leptos::logging::error!("отвязка: опрос не удался: {e}");
+    }
+}
+
+/// Уборка после отвязки от куратора — на стороне приложения.
+///
+/// Три вещи, и порядок между ними существенный:
+///
+/// 1. Кураторские значения калорий и шагов ПЕРЕНОСЯТСЯ в наши места. Обещано,
+///    что планки держатся до ближайшего пересчёта: просто стереть запись значило
+///    бы уронить человека на число полугодовой давности.
+/// 2. Всё остальное кураторское стирается — возвращаются наши правила.
+/// 3. Оба недельных якоря сдвигаются на сегодня: неделя считается от отвязки, а
+///    не от того дня, когда пересчёт последний раз проходил.
+///
+/// Перенос идёт ПОСЛЕ стирания, иначе норма белка пересчиталась бы от ещё
+/// живого кураторского числа, а не от того, что осталось.
+pub async fn unbind_locally() {
+    use crate::services::{curator_plankas, letters, local, profile, sync};
+
+    let calories = curator_plankas::get("calories");
+    let steps = curator_plankas::get("steps");
+
+    curator_plankas::clear_all().await;
+
+    if let Some(kcal) = calories {
+        local::set_calorie_goal(kcal).await;
+    }
+    if let Some(st) = steps {
+        profile::set_steps_planka(st);
+    }
+    letters::reset_weekly_anchors();
+
+    // Письмо — и с предложением не ждать неделю. Идентификатор по дню: две
+    // отвязки в один день письма не удвоят.
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    letters::add(letters::Letter {
+        id: format!("curator-unbound-{today}"),
+        created_at: chrono::Local::now().to_rfc3339(),
+        body: crate::services::i18n::t("curator.letter.unbound").to_string(),
+        read: false,
+        action: Some(letters::LetterAction::RecomputePlankas),
+        action_done: false,
+    });
+    sync::push_background();
 }

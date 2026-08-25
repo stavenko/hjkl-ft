@@ -120,7 +120,17 @@ async function main() {
   assert(req, 'запрос не дошёл до худеющего');
   assert(JSON.parse(req.payload).days === 21, 'срок запроса потерялся');
 
-  const report = JSON.stringify({ report: { period: { from: 'a', to: 'b', days: 21 } } });
+  // Отчёт настоящей формы: по нему куратор считает планку, и потерять по дороге
+  // что-нибудь из этого — значит остаться без расчёта.
+  const report = JSON.stringify({
+    report: {
+      period: { from: 'a', to: 'b', days: 21 },
+      body: { weight_kg: 78, height_cm: 170, age_years: 35, sex: 'female' },
+      targets: { calories: 2000, fiber: 28 },
+      avg_kcal_7d: 1980,
+      weight: { series: [{ date: '2026-01-01', kg: 80 }, { date: '2026-01-15', kg: 78 }] },
+    },
+  });
   r = await call(user, 'POST', '/message',
     { client_id: randomUUID(), text: 'Отчёт отправлен', kind: 'data_share', payload: report });
   assert(r.status === 200, `отчёт: ${r.status} ${r.text}`);
@@ -128,6 +138,10 @@ async function main() {
   r = await call(curator, 'GET', `/curator/clients/${cid}/report`);
   assert(r.json.report, 'отчёт не лёг в слот');
   assert(!r.json.request_days, 'выполненный запрос пережил свой ответ');
+  const got = JSON.parse(r.json.report).report;
+  assert(got.targets?.calories === 2000, 'действующие планки не доехали до куратора');
+  assert(got.avg_kcal_7d === 1980, 'среднее съеденное потерялось — считать будет не от чего');
+  assert(got.body?.age_years === 35, 'возраст потерялся — нормы железа поедут');
 
   // ── 6. Правка планки ──
   r = await call(curator, 'POST', `/curator/clients/${cid}/reply`, {
@@ -143,6 +157,7 @@ async function main() {
   assert(directive, 'директива не дошла');
   const d = JSON.parse(directive.payload);
   assert(d.key === 'fiber' && d.amount === 32, 'директива приехала искажённой');
+  assert(!('locked' in d), 'замок вернулся в директиву — планки ведёт кто-то один');
   assert(directive.sender_name === `Куратор ${run}`, 'подпись куратора не доехала');
 
   // ── 7. Перехват другим куратором ──

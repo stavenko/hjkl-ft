@@ -10,8 +10,17 @@ use crate::services::platform;
 pub use pwa_prompt::{detect_platform, title_key};
 use pwa_prompt::render_steps as shared_steps;
 
+/// Язык для общих шагов. Слова у них свои, крейтовые, — приложению остаётся
+/// сообщить, на каком языке их показать.
+fn pwa_lang() -> pwa_prompt::Lang {
+    match crate::services::i18n::get_lang() {
+        crate::services::i18n::Lang::En => pwa_prompt::Lang::En,
+        crate::services::i18n::Lang::Ru => pwa_prompt::Lang::Ru,
+    }
+}
+
 fn render_steps(platform: &str) -> View {
-    shared_steps(platform, t)
+    shared_steps(platform, pwa_lang)
 }
 
 

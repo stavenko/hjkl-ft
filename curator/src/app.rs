@@ -65,6 +65,14 @@ pub fn App() -> impl IntoView {
 /// Экран установки: те же инструкции, что у приложения худеющего, из общего
 /// крейта. Кураторское приложение ставится теми же способами, и держать для него
 /// вторую копию этих экранов нельзя — они выстраданы на живых устройствах.
+/// Язык для общих шагов: слова у них свои, крейтовые.
+fn pwa_lang() -> pwa_prompt::Lang {
+    match i18n::get() {
+        i18n::Lang::En => pwa_prompt::Lang::En,
+        i18n::Lang::Ru => pwa_prompt::Lang::Ru,
+    }
+}
+
 #[component]
 fn Install() -> impl IntoView {
     let platform = pwa_prompt::detect_platform();
@@ -74,7 +82,7 @@ fn Install() -> impl IntoView {
                 <div class="brandmark"></div>
                 <p class="h1">{move || t("install.title")}</p>
                 <p class="sub">{move || t("install.body")}</p>
-                {pwa_prompt::render_steps(platform, t)}
+                {pwa_prompt::render_steps(platform, pwa_lang)}
             </div>
         </div>
     }

@@ -12,6 +12,118 @@ use leptos::*;
 pub mod icons;
 use icons::*;
 
+/// Язык инструкций.
+///
+/// Свой, а не заимствованный у приложения: крейт не должен знать, как каждое из
+/// них хранит настройку языка, — только какой язык выбран сейчас.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lang {
+    Ru,
+    En,
+}
+
+/// Текст шага на выбранном языке.
+///
+/// Слова живут ЗДЕСЬ, рядом с разметкой, которая их показывает. Раньше их давало
+/// приложение-хозяин через свой переводчик — и кураторское приложение, заведённое
+/// позже, их просто не завело: экран установки показывал «???» вместо инструкций.
+/// Договор, который надо помнить, рано или поздно забывают; договора больше нет.
+///
+/// Приложению остаются его собственные слова — заголовок экрана, объяснение,
+/// зачем ставить. Они у каждого свои. А «нажмите значок „Поделиться“ посередине
+/// нижней панели» описывает Safari, и второй копии у этой фразы быть не должно.
+fn step(lang: Lang, key: &str) -> &'static str {
+    match lang {
+        Lang::Ru => ru(key),
+        Lang::En => en(key),
+    }
+}
+
+fn ru(key: &str) -> &'static str {
+    match key {
+        "pwa.inst.ios_safari.1" => "Нажмите значок «Поделиться» посередине нижней панели.",
+        "pwa.inst.ios_safari.2" => "Прокрутите список и выберите «На экран „Домой“».",
+        "pwa.inst.ios_safari.3" => "Нажмите «Добавить» в правом верхнем углу. Значок появится на домашнем экране — открывайте приложение с него.",
+        "pwa.inst.ios_yandex.1" => "Нажмите на три точки в адресной строке.",
+        "pwa.inst.ios_yandex.2" => "Выберите «Добавить ярлык на телефон».",
+        "pwa.inst.ios_yandex.3" => "Затем — «На экран „Домой“».",
+        "pwa.inst.ios_yandex.4" => "Нажмите «Добавить» в правом верхнем углу.",
+        "pwa.inst.ios_yandex.5" => "Значок появится на домашнем экране. Открывайте приложение с него — оно запустится отдельным окном.",
+        "pwa.inst.ios_chrome.1" => "Нажмите значок «Поделиться» в правом краю адресной строки.",
+        "pwa.inst.ios_chrome.2" => "В меню выберите «На экран „Домой“».",
+        "pwa.inst.ios_chrome.3" => "Нажмите «Добавить» в правом верхнем углу. Значок появится на домашнем экране — открывайте приложение с него.",
+        "pwa.inst.ios_other.1" => "Установка PWA на iOS работает только в Safari",
+        "pwa.inst.ios_other.2" => "Откройте эту страницу в Safari и следуйте инструкции",
+        "pwa.inst.android_chrome.1" => "Нажмите на кебаб — вместо него может быть значок обновления",
+        "pwa.inst.android_chrome.2" => "Затем — строчка меню «Установить и создать ярлык».",
+        "pwa.inst.android_chrome.3" => "Затем нажмите «Установить».",
+        "pwa.inst.android_chrome.4" => "И подождите немного. Значок приложения будет показан на главном экране.",
+        "pwa.inst.android_samsung.1" => "Нажмите меню \u{2261} в правом нижнем углу",
+        "pwa.inst.android_samsung.2" => "Нажмите «Добавить страницу на» \u{2192} «Главный экран»",
+        "pwa.inst.android_firefox.1" => "Нажмите меню \u{22ee} (три точки)",
+        "pwa.inst.android_firefox.2" => "Нажмите «Установить»",
+        "pwa.inst.android_firefox.3" => "Подтвердите установку",
+        "pwa.inst.android_yandex.1" => "Нажмите меню \u{22ee} (три точки) в правом нижнем углу",
+        "pwa.inst.android_yandex.2" => "Выберите «Добавить ярлык», затем «Добавить автоматически»",
+        "pwa.inst.macos_safari.1" => "В меню: Файл \u{2192} Добавить в Dock",
+        "pwa.inst.macos_safari.2" => "Приложение появится в вашем Dock",
+        "pwa.inst.chrome.1" => "Нажмите значок установки в адресной строке",
+        "pwa.inst.chrome.2" => "Нажмите «Установить» во всплывающем окне",
+        "pwa.inst.edge.1" => "Меню \u{2026} \u{2192} Приложения \u{2192} Установить этот сайт как приложение",
+        "pwa.inst.edge.2" => "Нажмите «Установить» для подтверждения",
+        "pwa.inst.firefox.1" => "Firefox на компьютере не поддерживает установку PWA. Используйте Chrome, Edge или Safari.",
+        _ => "???",
+    }
+}
+
+fn en(key: &str) -> &'static str {
+    match key {
+        // iOS Safari
+        "pwa.inst.ios_safari.1" => "Tap the Share icon in the middle of the bottom bar.",
+        "pwa.inst.ios_safari.2" => "Scroll the list and pick \"Add to Home Screen\".",
+        "pwa.inst.ios_safari.3" => "Tap \"Add\" in the top right corner. The icon appears on your home screen — open the app from there.",
+        "pwa.inst.ios_yandex.1" => "Tap the three dots in the address bar.",
+        "pwa.inst.ios_yandex.2" => "Choose \"Add shortcut to phone\".",
+        "pwa.inst.ios_yandex.3" => "Then \"Add to Home Screen\".",
+        "pwa.inst.ios_yandex.4" => "Tap \"Add\" in the top right corner.",
+        "pwa.inst.ios_yandex.5" => "The icon appears on your home screen. Open the app from there — it will run in its own window.",
+        // iOS Chrome/Firefox
+        "pwa.inst.ios_chrome.1" => "Tap the Share icon at the right end of the address bar.",
+        "pwa.inst.ios_chrome.2" => "In the menu, pick \"Add to Home Screen\".",
+        "pwa.inst.ios_chrome.3" => "Tap \"Add\" in the top right corner. The icon appears on your home screen — open the app from there.",
+        "pwa.inst.ios_other.1" => "PWA install is only supported in Safari on iOS",
+        "pwa.inst.ios_other.2" => "Open this page in Safari and follow the instructions",
+        // Android Chrome
+        "pwa.inst.android_chrome.1" => "Tap the kebab menu — an update icon may be shown in its place",
+        "pwa.inst.android_chrome.2" => "Then the menu row \"Install and create a shortcut\".",
+        "pwa.inst.android_chrome.3" => "Then tap \"Install\".",
+        "pwa.inst.android_chrome.4" => "And wait a little. The app icon will appear on the home screen.",
+        // Android Samsung
+        "pwa.inst.android_samsung.1" => "Tap the menu \u{2261} at the bottom right",
+        "pwa.inst.android_samsung.2" => "Tap \"Add page to\" \u{2192} \"Home screen\"",
+        // Android Firefox
+        "pwa.inst.android_firefox.1" => "Tap the menu \u{22ee} (three dots)",
+        "pwa.inst.android_firefox.2" => "Tap \"Install\"",
+        "pwa.inst.android_firefox.3" => "Confirm the installation",
+        // Android Yandex
+        "pwa.inst.android_yandex.1" => "Tap the menu \u{22ee} (three dots) at the bottom right",
+        "pwa.inst.android_yandex.2" => "Tap \"Add shortcut\", then \"Add automatically\"",
+        // System-browser hop screen (Android browsers that can't install a PWA).
+        // macOS Safari
+        "pwa.inst.macos_safari.1" => "In the menu bar: File \u{2192} Add to Dock",
+        "pwa.inst.macos_safari.2" => "The app will appear in your Dock",
+        // Chrome (desktop & macOS)
+        "pwa.inst.chrome.1" => "Click the install icon in the address bar",
+        "pwa.inst.chrome.2" => "Click \"Install\" in the popup",
+        // Edge
+        "pwa.inst.edge.1" => "Click the \u{2026} menu \u{2192} Apps \u{2192} Install this site as an app",
+        "pwa.inst.edge.2" => "Click \"Install\" to confirm",
+        // Firefox desktop
+        "pwa.inst.firefox.1" => "Firefox desktop does not support PWA install. Use Chrome, Edge, or Safari.",
+        _ => "???",
+    }
+}
+
 pub fn detect_platform() -> &'static str {
     let ua = web_sys::window()
         .and_then(|w| w.navigator().user_agent().ok())
@@ -104,10 +216,13 @@ pub fn title_key(platform: &str) -> &'static str {
 
 /// Пошаговая инструкция для платформы.
 ///
-/// `t` — переводчик ВЫЗЫВАЮЩЕГО: у приложения худеющего и у кураторского свои
-/// таблицы строк, а ключи одни и те же. Так экраны остаются общими, а язык —
-/// делом каждого приложения.
-pub fn render_steps(platform: &str, t: fn(&str) -> &'static str) -> View {
+/// `lang` — ФУНКЦИЯ, а не значение: замыкания ниже перечитывают её на каждой
+/// перерисовке, поэтому смена языка в настройках меняет и шаги. Значение
+/// заморозило бы их до перезагрузки страницы.
+pub fn render_steps(platform: &str, lang: fn() -> Lang) -> View {
+    // Локальный переводчик: дальше по тексту `t("…")` читается ровно так же, как
+    // читалось, когда его давало приложение.
+    let t = move |key: &'static str| step(lang(), key);
     match platform {
         // Safari на iPhone. Раньше шаги были на словах и с нарисованными значками;
         // теперь — снимки живого интерфейса с мигающей подсказкой, куда нажимать

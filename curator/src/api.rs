@@ -132,8 +132,9 @@ struct ClientResp {
 struct CuratorResp {
     #[serde(default)]
     found: bool,
-    #[serde(default)]
-    created: bool,
+    // `created` в ответе сервера есть (идемпотентность регистрации проверяется им
+    // в scripts/curator-e2e.mjs), но приложению он ни к чему: и первый вызов, и
+    // повторный дают один и тот же профиль.
     curator: Option<Curator>,
 }
 

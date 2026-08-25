@@ -2201,3 +2201,117 @@ fn ru(key: &str) -> &'static str {
         _ => "???",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{en, ru};
+
+    /// Строки кураторского пути обязаны быть в ОБЕИХ таблицах.
+    ///
+    /// Их около сорока, вписаны они руками в два далеко разнесённых `match`, и
+    /// пропажа в одной таблице означала бы «???» ровно у половины людей — причём
+    /// в текстах, которые человек видит в момент, когда решает, пускать ли к себе
+    /// куратора.
+    #[test]
+    fn kuratorskie_stroki_est_v_oboih_tablicah() {
+        for key in [
+            // Согласие на куратора
+            "curator.invite.ask",
+            "curator.invite.explain",
+            "curator.invite.replaces",
+            "curator.invite.accept",
+            "curator.invite.decline",
+            "curator.invite.done",
+            "curator.invite.done_body",
+            "curator.invite.dead_title",
+            "curator.invite.dead_body",
+            "curator.invite.need_app_title",
+            "curator.invite.need_app_body",
+            "curator.invite.need_app_cta",
+            "curator.invite.to_app",
+            "curator.invite.failed",
+            // Виджет отчёта
+            "curator.report.title",
+            "curator.report.your_curator",
+            "curator.report.requested",
+            "curator.report.send_requested",
+            "curator.report.last_sent",
+            "curator.report.never_sent",
+            "curator.report.days_hint",
+            "curator.report.send",
+            "curator.report.bad_period",
+            "curator.report.unbind_hint",
+            "curator.report.unbind",
+            "curator.report_sent",
+            // Директивы: названия планок, единицы, плашки и письма
+            "planka.name.calories",
+            "planka.name.protein",
+            "planka.name.steps",
+            "planka.name.veg_fruit",
+            "planka.name.calcium",
+            "planka.name.fiber",
+            "planka.name.iron",
+            "planka.name.heme",
+            "planka.name.epa_dha",
+            "planka.name.fat_ratio",
+            "planka.name.red_meat",
+            "planka.name.egg",
+            "planka.unit.kcal",
+            "planka.unit.g",
+            "planka.unit.mg",
+            "planka.unit.steps",
+            "planka.unit.portions",
+            "planka.unit.pieces",
+            "curator.note.planka_set",
+            "curator.note.planka_changed",
+            "curator.note.lock_on",
+            "curator.note.lock_off",
+            "curator.note.week_open",
+            "curator.note.week_open_plain",
+            "curator.letter.planka_set",
+            "curator.letter.lock_on",
+            "curator.letter.lock_off",
+            "curator.letter.unbound",
+            "curator.letter.week_open",
+            "curator.week.activity",
+            "curator.week.calcium",
+            "curator.week.iron",
+            "curator.week.fats",
+            "curator.week.red_meat",
+            // Чат и почта
+            "chat.peer_support",
+            "chat.peer_curator",
+            "letters.recompute_now",
+        ] {
+            assert_ne!(ru(key), "???", "нет русской строки для {key}");
+            assert_ne!(en(key), "???", "нет английской строки для {key}");
+        }
+    }
+
+    /// Подстановки в шаблонах обязаны совпадать: русский текст без `{value}`
+    /// молча потерял бы число, ради которого письмо и писалось.
+    #[test]
+    fn podstanovki_sovpadayut_v_oboih_yazykah() {
+        for (key, marks) in [
+            ("curator.invite.ask", &["{name}"][..]),
+            ("curator.invite.done", &["{name}"][..]),
+            ("curator.note.planka_set", &["{what}", "{value}"][..]),
+            ("curator.note.planka_changed", &["{what}"][..]),
+            ("curator.note.lock_on", &["{what}"][..]),
+            ("curator.note.lock_off", &["{what}"][..]),
+            ("curator.note.week_open", &["{what}"][..]),
+            ("curator.letter.planka_set", &["{what}", "{value}"][..]),
+            ("curator.letter.lock_on", &["{what}"][..]),
+            ("curator.letter.lock_off", &["{what}"][..]),
+            ("curator.letter.week_open", &["{what}"][..]),
+            ("curator.report.requested", &["{days}"][..]),
+            ("curator.report.send_requested", &["{days}"][..]),
+            ("curator.report.last_sent", &["{date}"][..]),
+        ] {
+            for m in marks {
+                assert!(ru(key).contains(m), "в русском {key} нет подстановки {m}");
+                assert!(en(key).contains(m), "в английском {key} нет подстановки {m}");
+            }
+        }
+    }
+}

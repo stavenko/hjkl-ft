@@ -1,7 +1,6 @@
 use leptos::*;
 use wasm_bindgen::JsValue;
 
-use crate::components::pwa_icons::*;
 use crate::services::i18n::t;
 use crate::services::platform;
 /// Опознание браузера, заголовок и шаги переехали в общий крейт: кураторское

@@ -45,10 +45,9 @@ pub fn LiveBubble(
             .as_deref()
             .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
             .and_then(|v| v.get("amount").and_then(|a| a.as_f64()));
-        let text = match amount {
-            Some(a) => format!("Куратор установил вашу планку по калориям: {a:.0} ккал"),
-            None => "Куратор обновил вашу планку по калориям".to_string(),
-        };
+        // Текст собирается ЗДЕСЬ, на языке приложения: директива несёт только
+        // число, и язык плашки не должен зависеть от настроек куратора.
+        let text = crate::services::directives::set_planka_note("calories", amount);
         // Colours in a `let` (matches the bubble styles below) — soft info card.
         let note_style = "background: #EEF6FF; color: #1E4E79; border: 1px solid #CFE2F7; \
                           border-radius: 10px; padding: 8px 14px; max-width: 88%; text-align: center;";
@@ -71,15 +70,7 @@ pub fn LiveBubble(
             .as_deref()
             .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
             .and_then(|v| v.get("week").and_then(|w| w.as_u64()));
-        let what = match week {
-            Some(3) => "активность и шаги",
-            Some(4) => "кальций",
-            Some(5) => "железо",
-            Some(6) => "жиры",
-            Some(7) => "красное мясо",
-            _ => "следующая тема",
-        };
-        let text = format!("Куратор открыл вам новую тему — {what}");
+        let text = crate::services::directives::open_week_note(week.map(|w| w as u32));
         let note_style = "background: #EEF6FF; color: #1E4E79; border: 1px solid #CFE2F7; \
                           border-radius: 10px; padding: 8px 14px; max-width: 88%; text-align: center;";
         return view! {

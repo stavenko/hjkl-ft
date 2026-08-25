@@ -371,10 +371,7 @@ async fn apply_planka_directives(msgs: &[LiveMessage]) {
         crate::services::letters::add(crate::services::letters::Letter {
             id: format!("planka-curator-{seq}"),
             created_at: chrono::Local::now().to_rfc3339(),
-            body: format!(
-                "Ваш куратор установил вам новую планку по калориям: {amount:.0} ккал.\n\n\
-                 Она уже применена. Дальнейшие еженедельные пересчёты будут отталкиваться от неё.",
-            ),
+            body: crate::services::directives::set_planka_letter("calories", amount),
             read: false,
             action: None,
             action_done: false,
@@ -398,18 +395,6 @@ async fn apply_planka_directives(msgs: &[LiveMessage]) {
 /// App-flag: наибольший `seq` уже применённой директивы открытия — чтобы одна и та
 /// же не применялась дважды между опросами и перезапусками.
 const WEEK_DIRECTIVE_SEQ_KEY: &str = "week_directive_seq";
-
-/// Номер темы, как её видит человек в ленте историй, и что он получит.
-fn week_title(week: u32) -> Option<&'static str> {
-    match week {
-        3 => Some("активность и шаги"),
-        4 => Some("кальций"),
-        5 => Some("железо"),
-        6 => Some("жиры"),
-        7 => Some("красное мясо"),
-        _ => None,
-    }
-}
 
 /// Открыть тему по номеру. Номера — те же, что у историй в ленте.
 ///
@@ -447,7 +432,7 @@ async fn apply_week_directives(msgs: &[LiveMessage]) {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) else { continue };
         let Some(week) = v.get("week").and_then(|w| w.as_u64()) else { continue };
         let week = week as u32;
-        if week_title(week).is_none() {
+        if crate::services::directives::week_key(week).is_none() {
             leptos::logging::warn!("директива open_week: нет темы с номером {week}");
             continue;
         }
@@ -457,15 +442,11 @@ async fn apply_week_directives(msgs: &[LiveMessage]) {
     for (seq, week) in ordered {
         open_week(week).await;
         applied = applied.max(seq);
-        let title = week_title(week).unwrap_or_default();
+
         crate::services::letters::add(crate::services::letters::Letter {
             id: format!("week-open-{seq}"),
             created_at: chrono::Local::now().to_rfc3339(),
-            body: format!(
-                "Ваш куратор открыл вам следующую тему — {title}.\n\n\
-                 Новые шкалы и значки уже на главном экране, а история про эту тему \
-                 ждёт вас в ленте наверху."
-            ),
+            body: crate::services::directives::open_week_letter(week),
             read: false,
             action: None,
             action_done: false,

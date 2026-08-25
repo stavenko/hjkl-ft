@@ -11,6 +11,8 @@
 use leptos::*;
 use serde::Deserialize;
 
+pub mod report;
+
 // ── Payload shapes (must match the protocol; every new field is #[serde(default)]
 //    so older shares still parse) ──
 
@@ -313,7 +315,7 @@ fn weight_view(w: &WeightShare) -> impl IntoView {
 }
 
 /// Inline SVG line chart over the FULL weight series (no external libs).
-fn weight_svg(series: &[WeightPoint]) -> View {
+pub fn weight_svg(series: &[WeightPoint]) -> View {
     if series.len() < 2 {
         return view! {
             <div class="row__meta">"Недостаточно точек для графика"</div>
@@ -395,7 +397,7 @@ fn steps_view(s: &StepsShare) -> impl IntoView {
 }
 
 /// (soft background, ink) CSS-var pair for an indicator colour state.
-fn state_colors(state: &str) -> (&'static str, &'static str) {
+pub fn state_colors(state: &str) -> (&'static str, &'static str) {
     match state {
         "green" => ("var(--accent-soft)", "var(--accent)"),
         "orange" => ("var(--warn-soft)", "var(--warn-ink)"),

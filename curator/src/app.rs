@@ -366,6 +366,10 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
     let copied = create_rw_signal(false);
     let days = create_rw_signal(String::from("1"));
     let requested = create_rw_signal(false);
+    // Разобранный отчёт и открытый редактор планки.
+    let parsed = create_rw_signal(None::<datashare::report::Report>);
+    let parse_error = create_rw_signal(None::<String>);
+    let editing = create_rw_signal(None::<String>);
 
     let reload = move || {
         spawn_local(async move {
@@ -382,7 +386,24 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
                 }
             }
             match api::report(&id).await {
-                Ok(r) => report.set(r),
+                Ok(r) => {
+                    // Непонятый отчёт — громкая ошибка на экране, а не пустое
+                    // место: молча проглотить его значит спрятать поломку
+                    // протокола до следующего разбирательства.
+                    match r.report.as_deref().map(datashare::report::parse) {
+                        Some(Ok(rep)) => {
+                            parsed.set(Some(rep));
+                            parse_error.set(None);
+                        }
+                        Some(Err(e)) => {
+                            leptos::logging::error!("отчёт клиента: {e}");
+                            parsed.set(None);
+                            parse_error.set(Some(e));
+                        }
+                        None => parsed.set(None),
+                    }
+                    report.set(r);
+                }
                 // Отчёта может не быть вовсе — это не ошибка, а состояние.
                 Err(e) if !e.is_auth() => leptos::logging::warn!("отчёт: {e}"),
                 Err(_) => {}
@@ -527,7 +548,21 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
                             {move || t("client.chat")}
                         </button>
 
-                        // Дашборд по присланному отчёту — следующим шагом.
+                        {move || parse_error.get().map(|e| view! { <div class="banner">{e}</div> })}
+                        {move || parsed.get().map(|rep| datashare::report::render(
+                            &rep,
+                            Callback::new(move |key: String| editing.set(Some(key))),
+                        ))}
+                        {move || editing.get().map(|key| view! {
+                            <PlankaEditor
+                                client_id=cid.get_value()
+                                key=key
+                                targets=parsed.get().map(|r| r.targets).unwrap_or_default()
+                                on_close=Callback::new(move |changed: bool| {
+                                    editing.set(None);
+                                    if changed { reload(); }
+                                })/>
+                        })}
 
                         <button class="btn btn--danger btn--block" style="margin-top: 16px;"
                             attr:data-testid="client-unbind"
@@ -541,6 +576,135 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
                     }.into_view()
                 }
             }}
+        </div>
+    }
+}
+
+/// Индикаторы, у которых автопересчёт вообще есть, — только им нужен замок.
+/// У констант пересчитывать нечего, и переключатель там был бы враньём.
+const RECOMPUTED: &[&str] = &["calories", "steps", "protein", "veg_fruit", "iron", "fiber"];
+
+/// Правка одной планки: значение и запрет автопересчёта.
+///
+/// Директива несёт ЧИСЛО. Текст, который человек увидит в чате и в письме,
+/// собирается у него и на его языке — здесь его не составляют.
+#[component]
+fn PlankaEditor(
+    client_id: String,
+    key: String,
+    targets: datashare::report::Targets,
+    on_close: Callback<bool>,
+) -> impl IntoView {
+    let cid = store_value(client_id);
+    let k = store_value(key.clone());
+    let current = targets.value(&key);
+    let curated = targets.by_curator(&key).cloned();
+    let recomputed = RECOMPUTED.contains(&key.as_str());
+
+    let value = create_rw_signal(
+        curated
+            .as_ref()
+            .and_then(|c| c.amount)
+            .or(current)
+            .map(|v| format!("{v}"))
+            .unwrap_or_default(),
+    );
+    let locked = create_rw_signal(curated.as_ref().map(|c| c.locked).unwrap_or(false));
+    let busy = create_rw_signal(false);
+    let error = create_rw_signal(None::<String>);
+
+    let apply = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        let raw = value.get_untracked();
+        let amount = raw.trim().replace(',', ".").parse::<f64>().ok();
+        if !raw.trim().is_empty() && amount.is_none() {
+            error.set(Some("Не число".to_string()));
+            return;
+        }
+        busy.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match api::set_planka(&cid.get_value(), &k.get_value(), amount, locked.get_untracked())
+                .await
+            {
+                Ok(_) => on_close.call(true),
+                Err(e) => {
+                    error.set(Some(e.message().to_string()));
+                    busy.set(false);
+                }
+            }
+        });
+    };
+
+    // «Вернуть расчётную» — это директива БЕЗ значения и без замка: запись
+    // куратора перестаёт перекрывать наше правило.
+    let reset = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        spawn_local(async move {
+            match api::set_planka(&cid.get_value(), &k.get_value(), None, false).await {
+                Ok(_) => on_close.call(true),
+                Err(e) => {
+                    error.set(Some(e.message().to_string()));
+                    busy.set(false);
+                }
+            }
+        });
+    };
+
+    view! {
+        <div style="position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.55); \
+                    display: flex; align-items: flex-end;"
+            attr:data-testid="planka-editor"
+            on:click=move |_| on_close.call(false)>
+            <div class="card" style="width: 100%; border-radius: 18px 18px 0 0; padding: 20px;"
+                on:click=|ev| ev.stop_propagation()>
+                <p style="font-weight: 640; font-size: 1.05rem;">{move || t("planka.edit")}</p>
+
+                <p class="sub" style="margin: 14px 0 6px; font-size: .82rem;">
+                    {move || t("planka.value")}
+                </p>
+                <input class="field" attr:data-testid="planka-value"
+                    prop:value=move || value.get()
+                    on:input=move |ev| value.set(event_target_value(&ev)) />
+
+                {recomputed.then(|| view! {
+                    <label style="display: flex; gap: 10px; align-items: flex-start; margin-top: 16px;">
+                        <input type="checkbox" attr:data-testid="planka-lock"
+                            prop:checked=move || locked.get()
+                            on:change=move |ev| locked.set(event_target_checked(&ev)) />
+                        <span>
+                            <span style="font-weight: 600;">{move || t("planka.lock")}</span>
+                            <span class="sub" style="display: block; font-size: .8rem;">
+                                {move || t("planka.lock_hint")}
+                            </span>
+                        </span>
+                    </label>
+                })}
+
+                {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+
+                <button class="btn btn--primary btn--block" style="margin-top: 18px;"
+                    attr:data-testid="planka-save"
+                    prop:disabled=move || busy.get() on:click=apply>
+                    {move || t("planka.save")}
+                </button>
+                {curated.is_some().then(|| view! {
+                    <button class="btn btn--ghost btn--block" style="margin-top: 8px;"
+                        attr:data-testid="planka-reset"
+                        prop:disabled=move || busy.get() on:click=reset>
+                        {move || t("planka.reset")}
+                    </button>
+                })}
+                <button class="btn btn--ghost btn--block" style="margin-top: 8px;"
+                    on:click=move |_| on_close.call(false)>
+                    {move || t("clients.cancel")}
+                </button>
+            </div>
         </div>
     }
 }

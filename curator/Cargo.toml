@@ -42,6 +42,7 @@ web-sys = { version = "0.3", features = [
     "HtmlDocument",
     "CssStyleDeclaration",
     "Clipboard",
+    "HtmlInputElement",
 ] }
 base64 = "0.22"
 sha2 = "0.10"

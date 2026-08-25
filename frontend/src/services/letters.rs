@@ -192,14 +192,6 @@ async fn recompute_calorie_planka(force: bool) {
     use crate::services::local;
     use crate::services::weight_trend::{self, DEFAULT_WINDOW_DAYS};
 
-    // Куратор запретил автопересчёт — выходим ДО всего остального и НЕ двигаем
-    // якорь. Двинуть его значило бы, что после снятия запрета неделя пойдёт
-    // заново; человек и так ждал ровно столько, сколько ждал.
-    if crate::services::curator_plankas::locked("calories") {
-        leptos::logging::log!("планка калорий: пересчёта нет — куратор запретил");
-        return;
-    }
-
     // No planka yet → nothing to recompute (the week-2 gate hasn't fired).
     let goals = local::list_goals().await;
     let Some(goal) = goals.iter().find(|g| {
@@ -255,9 +247,9 @@ async fn recompute_calorie_planka(force: bool) {
     // anxiety undereating) from ratcheting the target downward: eating under the
     // planka no longer drags the base down, only a confirmed weight trend moves it.
     // Average intake seeds only the FIRST planka (`calorie_planka_suggestion`).
-    // Отталкиваемся от ДЕЙСТВУЮЩЕЙ планки, а не от нашей записи в goals: если
-    // куратор назвал своё число и пересчёт не запретил, следующий шаг обязан идти
-    // от его числа — иначе неделя молча отбросила бы человека к нашему прежнему.
+    // Отталкиваемся от ДЕЙСТВУЮЩЕЙ планки, а не от записи в goals: планка живёт в
+    // истории, и следующий шаг обязан идти от того числа, что действует сейчас, —
+    // хоть от нашего прошлого, хоть от кураторского, оставшегося после отвязки.
     let previous = local::calorie_goal_amount().await.unwrap_or(goal.amount);
     let entries = local::list_weight_entries().await;
     let weight_kg = entries
@@ -282,13 +274,6 @@ async fn recompute_calorie_planka(force: bool) {
         avg.unwrap_or(0.0),
         previous
     );
-
-    // Кураторское число, поставленное БЕЗ запрета пересчёта, — это «начни отсюда
-    // и веди дальше сам». Первый же пересчёт и есть это «дальше»: запись куратора
-    // снимается, приложение забирает планку обратно. Снимаем ДО записи, иначе
-    // приоритет вернул бы старое кураторское число, и пересчёт остался бы
-    // невидимым — а заодно белок посчитался бы от него же.
-    crate::services::curator_plankas::clear("calories").await;
 
     // Apply the new planka (syncs like any goal edit). `set_calorie_goal` also
     // advances the weekly anchor to today via `mark_planka_recomputed`, so the next
@@ -330,16 +315,9 @@ async fn recompute_steps_planka(force: bool) {
     use crate::services::indicators::{self, IndicatorState};
     use crate::services::{local, profile};
 
-    // Куратор запретил автопересчёт — выходим ДО всего остального и НЕ двигаем
-    // якорь (см. пересчёт калорий выше).
-    if crate::services::curator_plankas::locked("steps") {
-        leptos::logging::log!("планка шагов: пересчёта нет — куратор запретил");
-        return;
-    }
-
     // No planka yet → the activity week hasn't opened; nothing to raise.
-    // get_steps_planka уже возвращает ДЕЙСТВУЮЩУЮ планку: если куратор назвал
-    // своё число и пересчёт не запретил, ступенька идёт от его числа.
+    // get_steps_planka возвращает ДЕЙСТВУЮЩУЮ планку из истории — ступенька идёт
+    // от неё.
     let Some(current) = profile::get_steps_planka() else {
         leptos::logging::log!("планка шагов: пересчёта нет — планка ещё не поставлена");
         return;
@@ -387,9 +365,6 @@ async fn recompute_steps_planka(force: bool) {
         return;
     }
 
-    // Как и с калориями: кураторское число без запрета означает «дальше веди сам»,
-    // и первый пересчёт снимает запись куратора.
-    crate::services::curator_plankas::clear("steps").await;
     profile::set_steps_planka(next as f64);
     crate::services::sync::push_background();
 

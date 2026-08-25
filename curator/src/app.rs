@@ -599,13 +599,14 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
     }
 }
 
-/// Индикаторы, у которых автопересчёт вообще есть, — только им нужен замок.
-/// У констант пересчитывать нечего, и переключатель там был бы враньём.
-const RECOMPUTED: &[&str] = &["calories", "steps", "protein", "veg_fruit", "iron", "fiber"];
-
-/// Правка одной планки: значение и запрет автопересчёта.
+/// Правка одной планки — одно число.
 ///
-/// Директива несёт ЧИСЛО. Текст, который человек увидит в чате и в письме,
+/// Замка нет: сама привязка к куратору выключает автопересчёт, и пока он ведёт
+/// человека, планки не двигаются без него. «Вернуть расчётную» тоже нет —
+/// пересчитать планку по последним данным куратор может сам, а отправит он всё
+/// равно ЧИСЛО.
+///
+/// Директива несёт число и вид. Текст, который человек увидит в чате и в письме,
 /// собирается у него и на его языке — здесь его не составляют.
 #[component]
 fn PlankaEditor(
@@ -616,19 +617,9 @@ fn PlankaEditor(
 ) -> impl IntoView {
     let cid = store_value(client_id);
     let k = store_value(key.clone());
-    let current = targets.value(&key);
-    let curated = targets.by_curator(&key).cloned();
-    let recomputed = RECOMPUTED.contains(&key.as_str());
-
     let value = create_rw_signal(
-        curated
-            .as_ref()
-            .and_then(|c| c.amount)
-            .or(current)
-            .map(|v| format!("{v}"))
-            .unwrap_or_default(),
+        targets.value(&key).map(|v| format!("{v}")).unwrap_or_default(),
     );
-    let locked = create_rw_signal(curated.as_ref().map(|c| c.locked).unwrap_or(false));
     let busy = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);
 
@@ -637,35 +628,14 @@ fn PlankaEditor(
             return;
         }
         let raw = value.get_untracked();
-        let amount = raw.trim().replace(',', ".").parse::<f64>().ok();
-        if !raw.trim().is_empty() && amount.is_none() {
+        let Ok(amount) = raw.trim().replace(',', ".").parse::<f64>() else {
             error.set(Some("Не число".to_string()));
             return;
-        }
+        };
         busy.set(true);
         error.set(None);
         spawn_local(async move {
-            match api::set_planka(&cid.get_value(), &k.get_value(), amount, locked.get_untracked())
-                .await
-            {
-                Ok(_) => on_close.call(true),
-                Err(e) => {
-                    error.set(Some(e.message().to_string()));
-                    busy.set(false);
-                }
-            }
-        });
-    };
-
-    // «Вернуть расчётную» — это директива БЕЗ значения и без замка: запись
-    // куратора перестаёт перекрывать наше правило.
-    let reset = move |_| {
-        if busy.get_untracked() {
-            return;
-        }
-        busy.set(true);
-        spawn_local(async move {
-            match api::set_planka(&cid.get_value(), &k.get_value(), None, false).await {
+            match api::set_planka(&cid.get_value(), &k.get_value(), amount).await {
                 Ok(_) => on_close.call(true),
                 Err(e) => {
                     error.set(Some(e.message().to_string()));
@@ -691,20 +661,6 @@ fn PlankaEditor(
                     prop:value=move || value.get()
                     on:input=move |ev| value.set(event_target_value(&ev)) />
 
-                {recomputed.then(|| view! {
-                    <label style="display: flex; gap: 10px; align-items: flex-start; margin-top: 16px;">
-                        <input type="checkbox" attr:data-testid="planka-lock"
-                            prop:checked=move || locked.get()
-                            on:change=move |ev| locked.set(event_target_checked(&ev)) />
-                        <span>
-                            <span style="font-weight: 600;">{move || t("planka.lock")}</span>
-                            <span class="sub" style="display: block; font-size: .8rem;">
-                                {move || t("planka.lock_hint")}
-                            </span>
-                        </span>
-                    </label>
-                })}
-
                 {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
 
                 <button class="btn btn--primary btn--block" style="margin-top: 18px;"
@@ -712,13 +668,6 @@ fn PlankaEditor(
                     prop:disabled=move || busy.get() on:click=apply>
                     {move || t("planka.save")}
                 </button>
-                {curated.is_some().then(|| view! {
-                    <button class="btn btn--ghost btn--block" style="margin-top: 8px;"
-                        attr:data-testid="planka-reset"
-                        prop:disabled=move || busy.get() on:click=reset>
-                        {move || t("planka.reset")}
-                    </button>
-                })}
                 <button class="btn btn--ghost btn--block" style="margin-top: 8px;"
                     on:click=move |_| on_close.call(false)>
                     {move || t("clients.cancel")}

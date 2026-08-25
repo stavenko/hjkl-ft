@@ -45,6 +45,7 @@ pub fn LiveBubble(
             .as_deref()
             .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
             .and_then(|v| v.get("amount").and_then(|a| a.as_f64()));
+        let Some(amount) = amount else { return ().into_view() };
         // Текст собирается ЗДЕСЬ, на языке приложения: директива несёт только
         // число, и язык плашки не должен зависеть от настроек куратора.
         let text = crate::services::directives::set_planka_note("calories", amount);
@@ -75,14 +76,10 @@ pub fn LiveBubble(
             .unwrap_or_default()
             .to_string();
         let amount = v.as_ref().and_then(|v| v.get("amount").and_then(|a| a.as_f64()));
-        let locked = v
-            .as_ref()
-            .and_then(|v| v.get("locked").and_then(|l| l.as_bool()))
-            .unwrap_or(false);
-        let text = match amount {
-            Some(a) => crate::services::directives::set_planka_note(&key, Some(a)),
-            None => crate::services::directives::lock_note(&key, locked),
-        };
+        // Директива без числа — испорченная: планка это ЧИСЛО и ничего кроме.
+        // Рисовать по ней плашку нечем.
+        let Some(amount) = amount else { return view! {}.into_view() };
+        let text = crate::services::directives::set_planka_note(&key, amount);
         let note_style = "background: #EEF6FF; color: #1E4E79; border: 1px solid #CFE2F7; \
                           border-radius: 10px; padding: 8px 14px; max-width: 88%; text-align: center;";
         return view! {

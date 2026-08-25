@@ -299,18 +299,10 @@ pub async fn report(id: &str) -> Result<ReportResp, ApiError> {
     request("GET", &format!("/curator/clients/{id}/report"), None).await
 }
 
-/// Поставить планку и/или запретить её автопересчёт. Директива несёт ЧИСЛО —
-/// текст худеющий соберёт у себя, на своём языке.
-pub async fn set_planka(
-    id: &str,
-    key: &str,
-    amount: Option<f64>,
-    locked: bool,
-) -> Result<u64, ApiError> {
-    let mut payload = serde_json::json!({ "key": key, "locked": locked });
-    if let Some(a) = amount {
-        payload["amount"] = serde_json::json!(a);
-    }
+/// Поставить планку. Директива несёт ЧИСЛО и вид — текст худеющий соберёт у
+/// себя, на своём языке.
+pub async fn set_planka(id: &str, key: &str, amount: f64) -> Result<u64, ApiError> {
+    let payload = serde_json::json!({ "key": key, "amount": amount });
     let body = serde_json::to_string(&ReplyReq {
         client_id: &uuid::Uuid::now_v7().to_string(),
         text: "",

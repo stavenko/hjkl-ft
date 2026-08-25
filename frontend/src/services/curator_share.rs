@@ -354,29 +354,23 @@ async fn build_indicators(days: u32) -> Value {
 
 /// Действующие планки — то, по чему индикаторы судятся ПРЯМО СЕЙЧАС, и то, что
 /// куратор будет править.
-async fn build_targets() -> Value {
-    use crate::services::{curator_plankas, egg, fats, fiber, heme, iron, red_meat};
-    let protein = match local::list_weight_entries().await.last() {
-        Some(e) => Some(profile::protein_target_from_profile(e.weight_kg).await as f64),
-        None => None,
-    };
-    json!({
-        "calories": local::calorie_goal_amount().await,
-        "protein": protein,
-        "steps": profile::get_steps_planka(),
-        "veg_fruit": indicators::veg_fruit_per_day_g(),
-        "calcium": indicators::calcium_per_day_mg(),
-        "fiber": fiber::daily_target_effective_g(),
-        "iron": iron::weekly_target_mg(),
-        "heme": heme::weekly_portions(),
-        "epa_dha": fats::Fat::EpaDha.target(),
-        "fat_ratio": fats::Fat::Ratio.target(),
-        "red_meat": red_meat::weekly_limit_g(),
-        "egg": egg::weekly_min_eggs(),
-        // Что из этого поставил куратор и где он запретил пересчёт — чтобы его
-        // приложение показывало собственные пометки, а не гадало.
-        "curator": curator_plankas::all(),
-    })
+///
+/// Один проход по всем двенадцати видам: планка теперь живёт в одном месте, и
+/// перечислять её по-разному для каждого индикатора больше незачем. Пометки «это
+/// поставил куратор» тоже нет — различать авторство перестало иметь смысл.
+fn build_targets() -> Value {
+    use crate::services::plankas;
+    let mut out = serde_json::Map::new();
+    for kind in plankas::ALL {
+        out.insert(
+            kind.key().to_string(),
+            match plankas::current(*kind) {
+                Some(v) => json!(v),
+                None => Value::Null,
+            },
+        );
+    }
+    Value::Object(out)
 }
 
 /// История планок за срок: какая планка действовала в какой день.
@@ -458,7 +452,7 @@ pub async fn build_report(days: u32) -> Value {
         },
         "steps": { "series": steps_series },
         "indicators": build_indicators(days).await,
-        "targets": build_targets().await,
+        "targets": build_targets(),
         "plankas": build_planka_history(&from).await,
     }})
 }

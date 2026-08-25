@@ -134,7 +134,7 @@ async function main() {
     client_id: randomUUID(),
     text: '',
     kind: 'set_planka_v2',
-    payload: JSON.stringify({ key: 'fiber', amount: 32, locked: true }),
+    payload: JSON.stringify({ key: 'fiber', amount: 32 }),
   });
   assert(r.status === 200, `правка планки: ${r.status} ${r.text}`);
 
@@ -142,7 +142,7 @@ async function main() {
   const directive = r.json.messages.find((m) => m.kind === 'set_planka_v2');
   assert(directive, 'директива не дошла');
   const d = JSON.parse(directive.payload);
-  assert(d.key === 'fiber' && d.amount === 32 && d.locked === true, 'директива приехала искажённой');
+  assert(d.key === 'fiber' && d.amount === 32, 'директива приехала искажённой');
   assert(directive.sender_name === `Куратор ${run}`, 'подпись куратора не доехала');
 
   // ── 7. Перехват другим куратором ──

@@ -99,7 +99,7 @@ fn local_target(store: &str, id: &str) -> Option<(String, String)> {
     match store {
         "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "profile"
         | "weight_entries" | "step_entries" | "deletions" | "app_flags"
-        | "planka_history" | "curator_plankas" | "support_msgs" => {
+        | "planka_history" | "support_msgs" => {
             Some((store.to_string(), id.to_string()))
         }
         "ind_days" => {
@@ -216,7 +216,6 @@ fn local_wins(store: &str, local_ts: u64, remote_ts: u64) -> bool {
 struct ApplyCtx {
     flags_touched: bool,
     profile_touched: bool,
-    curator_plankas_touched: bool,
     /// Приехала запись в историю планок или новый вес — действующие планки могли
     /// поменяться, синхронный кэш надо перечитать.
     plankas_touched: bool,
@@ -280,16 +279,6 @@ async fn apply_upsert(store: &str, row: &serde_json::Value, ctx: &mut ApplyCtx) 
                 ctx.profile_touched = true;
             }
         }
-        // Планки куратора ключуются индикатором в поле `key`, а не `id`.
-        "curator_plankas" => {
-            let Some(k) = row.get("key").and_then(|v| v.as_str()) else {
-                leptos::logging::error!("sync v2: curator_plankas row without key: {row}");
-                return;
-            };
-            if upsert_row(store, k, row).await {
-                ctx.curator_plankas_touched = true;
-            }
-        }
         // Сообщения неизменяемы, а ключ уникален, поэтому LWW по created_at
         // безобиден: два устройства, скачавшие одно и то же, пишут одно и то же.
         "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "weight_entries"
@@ -324,7 +313,6 @@ async fn apply_delete(store: &str, id: &str, ctx: &mut ApplyCtx) {
     match store {
         "app_flags" => ctx.flags_touched = true,
         "profile" => ctx.profile_touched = true,
-        "curator_plankas" => ctx.curator_plankas_touched = true,
         "planka_history" | "weight_entries" => ctx.plankas_touched = true,
         _ => {}
     }
@@ -395,9 +383,6 @@ async fn pull_v2() -> Result<(), String> {
     // Планка, поставленная куратором с другого устройства, обязана показаться
     // сразу: шкалы читают кэш синхронно и без гидратации держали бы прежнее
     // число до следующего запуска.
-    if ctx.curator_plankas_touched {
-        super::curator_plankas::hydrate().await;
-    }
     if ctx.plankas_touched {
         super::plankas::hydrate().await;
     }
@@ -458,7 +443,7 @@ async fn migration_days() -> std::collections::BTreeMap<String, Vec<serde_json::
     };
     for store in [
         "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries",
-        "step_entries", "profile", "planka_history", "curator_plankas", "support_msgs",
+        "step_entries", "profile", "planka_history", "support_msgs",
     ] {
         for row in db::list_all::<serde_json::Value>(store).await {
             if store == "diary"
@@ -662,7 +647,7 @@ async fn migrate_inner(
 /// device-local keys must survive).
 const ADOPT_WIPE_STORES: &[&str] = &[
     "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries",
-    "step_entries", "profile", "deletions", "planka_history", "curator_plankas",
+    "step_entries", "profile", "deletions", "planka_history",
     "support_msgs", "ind_protein", "ind_veg_fruit", "ind_steps", "ind_calories",
 ];
 

@@ -104,12 +104,7 @@ fn ru(key: &str) -> &'static str {
         // Планки
         "planka.edit" => "Планка",
         "planka.value" => "Значение",
-        "planka.lock" => "Запретить автопересчёт",
-        "planka.lock_hint" => "Приложение перестанет пересчитывать эту планку само.",
         "planka.save" => "Применить",
-        "planka.reset" => "Вернуть расчётную",
-        "planka.by_curator" => "поставили вы",
-        "planka.locked" => "пересчёт запрещён",
 
         // Чат
         "chat.placeholder" => "Сообщение",
@@ -172,12 +167,7 @@ fn en(key: &str) -> &'static str {
 
         "planka.edit" => "Target",
         "planka.value" => "Value",
-        "planka.lock" => "Stop automatic recalculation",
-        "planka.lock_hint" => "The app will stop recalculating this target on its own.",
         "planka.save" => "Apply",
-        "planka.reset" => "Back to calculated",
-        "planka.by_curator" => "set by you",
-        "planka.locked" => "recalculation off",
 
         "chat.placeholder" => "Message",
         "chat.send" => "Send",
@@ -215,8 +205,7 @@ mod tests {
             "client.invite_body", "client.no_report", "client.request", "client.request_days",
             "client.requested", "client.waiting", "client.report_at", "client.chat",
             "client.unbind", "client.delete", "client.unbind_confirm", "client.delete_confirm",
-            "planka.edit", "planka.value", "planka.lock", "planka.lock_hint", "planka.save",
-            "planka.reset", "planka.by_curator", "planka.locked", "chat.placeholder",
+            "planka.edit", "planka.value", "planka.save", "chat.placeholder",
             "chat.send", "chat.empty", "settings.title", "settings.name", "settings.name_hint",
             "settings.lang", "settings.save", "settings.saved", "settings.logout",
             "common.back", "common.retry", "common.loading",

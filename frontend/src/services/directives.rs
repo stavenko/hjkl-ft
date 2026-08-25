@@ -68,19 +68,10 @@ pub fn planka_value(key: &str, amount: f64) -> String {
 }
 
 /// Системная плашка в чате: «Куратор установил планку …».
-pub fn set_planka_note(key: &str, amount: Option<f64>) -> String {
-    match amount {
-        Some(a) => t("curator.note.planka_set")
-            .replace("{what}", &planka_name(key))
-            .replace("{value}", &planka_value(key, a)),
-        None => t("curator.note.planka_changed").replace("{what}", &planka_name(key)),
-    }
-}
-
-/// Системная плашка про запрет или разрешение автопересчёта.
-pub fn lock_note(key: &str, locked: bool) -> String {
-    let k = if locked { "curator.note.lock_on" } else { "curator.note.lock_off" };
-    t(k).replace("{what}", &planka_name(key))
+pub fn set_planka_note(key: &str, amount: f64) -> String {
+    t("curator.note.planka_set")
+        .replace("{what}", &planka_name(key))
+        .replace("{value}", &planka_value(key, amount))
 }
 
 /// Письмо в почтовый ящик про новую планку.
@@ -88,12 +79,6 @@ pub fn set_planka_letter(key: &str, amount: f64) -> String {
     t("curator.letter.planka_set")
         .replace("{what}", &planka_name(key))
         .replace("{value}", &planka_value(key, amount))
-}
-
-/// Письмо про запрет/разрешение автопересчёта.
-pub fn lock_letter(key: &str, locked: bool) -> String {
-    let k = if locked { "curator.letter.lock_on" } else { "curator.letter.lock_off" };
-    t(k).replace("{what}", &planka_name(key))
 }
 
 /// Ключ строки для темы по её номеру — тому же, что человек видит в ленте

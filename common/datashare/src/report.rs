@@ -97,16 +97,6 @@ pub struct Indicator {
     pub points: Vec<Point>,
 }
 
-/// Планка, поставленная куратором, — и его же запрет пересчёта.
-#[derive(Debug, Clone, Deserialize)]
-pub struct CuratorPlanka {
-    pub key: String,
-    #[serde(default)]
-    pub amount: Option<f64>,
-    #[serde(default)]
-    pub locked: bool,
-}
-
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Targets {
     #[serde(default)]
@@ -133,8 +123,6 @@ pub struct Targets {
     pub red_meat: Option<f64>,
     #[serde(default)]
     pub egg: Option<f64>,
-    #[serde(default)]
-    pub curator: Vec<CuratorPlanka>,
 }
 
 impl Targets {
@@ -155,11 +143,6 @@ impl Targets {
             "egg" => self.egg,
             _ => None,
         }
-    }
-
-    /// Ставил ли эту планку куратор.
-    pub fn by_curator(&self, key: &str) -> Option<&CuratorPlanka> {
-        self.curator.iter().find(|c| c.key == key)
     }
 }
 
@@ -241,7 +224,6 @@ pub fn indicator_row(ind: &Indicator, targets: &Targets, on_edit: Callback<Strin
     let key = ind.key.clone();
     let key_for_click = key.clone();
     let target = targets.value(&key);
-    let curated = targets.by_curator(&key).cloned();
     let points = ind.points.clone();
     let label = if ind.label.is_empty() { key.clone() } else { ind.label.clone() };
 
@@ -262,14 +244,6 @@ pub fn indicator_row(ind: &Indicator, targets: &Targets, on_edit: Callback<Strin
                         <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
                 </button>
             </div>
-            {curated.map(|c| view! {
-                <div style="margin-top: 6px; display: flex; gap: 6px;">
-                    <span class="badge badge--plain">"поставили вы"</span>
-                    {c.locked.then(|| view! {
-                        <span class="badge badge--warn badge--plain">"пересчёт запрещён"</span>
-                    })}
-                </div>
-            })}
             {(!points.is_empty()).then(|| series_strip(&points))}
         </div>
     }
@@ -388,14 +362,17 @@ mod tests {
         assert!(parse("не json").is_err());
     }
 
+    /// Планка находится по ключу вида — и это ЕДИНСТВЕННЫЙ вопрос, который к ней
+    /// осмысленно задавать. «Кто поставил» больше не различается: планка живёт в
+    /// одном месте, и куратор правит ровно её.
     #[test]
-    fn kuratorskaya_planka_nahoditsya_po_klyuchu() {
+    fn planka_nahoditsya_po_klyuchu() {
         let raw = r#"{"report":{"period":{"from":"a","to":"b","days":7},
-            "targets":{"calories":1800,"curator":[{"key":"calories","amount":1800,"locked":true}]}}}"#;
+            "targets":{"calories":1800,"fiber":32}}}"#;
         let r = parse(raw).unwrap();
         assert_eq!(r.targets.value("calories"), Some(1800.0));
-        let c = r.targets.by_curator("calories").expect("кураторская планка");
-        assert!(c.locked);
-        assert!(r.targets.by_curator("steps").is_none());
+        assert_eq!(r.targets.value("fiber"), Some(32.0));
+        assert_eq!(r.targets.value("steps"), None);
+        assert_eq!(r.targets.value("чушь"), None);
     }
 }

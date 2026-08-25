@@ -98,7 +98,10 @@ fn bump(store_name: &str) {
     });
 }
 
-const DB_VERSION: u32 = 22;
+/// 23: снят store `curator_plankas`. Планка живёт в одном месте — в истории
+/// (`planka_history`), и отдельное кураторское хранилище стало лишним. Store не
+/// объявлен в билдере ниже, и `idb` удалит его при открытии сам.
+const DB_VERSION: u32 = 23;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -108,7 +111,7 @@ const ALL_STORES: &[&str] = &[
     "foods", "diary", "recipes", "recipe_ingredients",
     "goals", "food_drafts", "weight_entries", "step_entries",
     "progress_photos", "summaries", "chat", "profile", "deletions", "_sync_meta",
-    "app_flags", "planka_history", "curator_plankas", "food_probe",
+    "app_flags", "planka_history", "food_probe",
     "support_msgs", "support_outbox", "support_meta",
 ];
 
@@ -208,9 +211,6 @@ fn builder(name: &str) -> rexie::RexieBuilder {
         .add_object_store(ObjectStore::new("support_meta").key_path("key"))
         // История планок: одна строка на «вид × день установки». Синкается — планка
         // принадлежит человеку, а не устройству.
-        // Планки, заданные КУРАТОРОМ, — отдельно от наших. Ключ — индикатор:
-        // запись на индикатор одна, потому что действующее значение одно.
-        .add_object_store(ObjectStore::new("curator_plankas").key_path("key"))
         .add_object_store(
             ObjectStore::new("planka_history")
                 .key_path("id")
@@ -340,9 +340,8 @@ pub async fn activate_for_user(user_id: &str) -> Result<(), String> {
     crate::services::profile::hydrate().await;
     // Кураторские планки читаются синхронно из тех же мест, что профиль, — значит
     // и гидратируются здесь же, до того как кто-нибудь их спросит.
-    crate::services::curator_plankas::hydrate().await;
-    // Действующие планки читаются синхронно оттуда же — из истории. Гидратация
-    // здесь же, до первого чтения.
+    // Действующие планки читаются синхронно из истории — гидратация здесь же, до
+    // первого чтения.
     crate::services::plankas::hydrate().await;
 
     bump_all();
@@ -463,7 +462,7 @@ fn next_outbox_seq() -> String {
 /// The local key field of a store (mirrors the object-store key paths above).
 fn key_field(store: &str) -> &'static str {
     match store {
-        "profile" | "app_flags" | "_sync_meta" | "curator_plankas" => "key",
+        "profile" | "app_flags" | "_sync_meta" => "key",
         "ind_protein" | "ind_veg_fruit" | "ind_steps" | "ind_calories" => "date",
         _ => "id",
     }
@@ -476,7 +475,7 @@ fn outbox_target(store: &str, local_key: &str) -> Option<(String, String)> {
     match store {
         "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "profile"
         | "weight_entries" | "step_entries" | "deletions" | "planka_history"
-        | "curator_plankas" | "support_msgs" => Some((store.to_string(), local_key.to_string())),
+        | "support_msgs" => Some((store.to_string(), local_key.to_string())),
         "app_flags" => (!crate::services::app_flags::is_device_local(local_key))
             .then(|| ("app_flags".to_string(), local_key.to_string())),
         "ind_protein" => Some(("ind_days".into(), format!("protein:{local_key}"))),
@@ -527,7 +526,6 @@ fn is_synced_store(store: &str) -> bool {
             // устройство узнавало о них только полной выгрузкой. Заметно это
             // стало на кураторском отчёте, который историю планок как раз и шлёт.
             | "planka_history"
-            | "curator_plankas"
             // Переписка. Синкается, чтобы история — включая треды с прежними
             // кураторами — была на каждом устройстве человека, а не только на том,
             // где приложение было открыто. Очередь отправки и курсоры опроса

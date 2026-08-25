@@ -728,6 +728,18 @@ fn PlankaEditor(
     }
 }
 
+/// Пауза перед повтором. Нужна ровно в одном месте — в петле длинного опроса:
+/// без неё отказ воркера превращает её в холостую крутилку, которая долбит
+/// сервер тем чаще, чем ему хуже.
+async fn delay(ms: i32) {
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
+        }
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+}
+
 /// Подтверждение действия. Отвязка и удаление необратимы для другой стороны —
 /// спросить обязательно.
 fn confirm(message: &str) -> bool {
@@ -764,7 +776,10 @@ fn ChatScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView {
         if page.messages.is_empty() {
             return;
         }
-        let newest = page.messages.iter().map(|m| m.seq).max().unwrap_or(0);
+        // Курсор двигаем по ответу СЕРВЕРА, а не по максимальному seq на руках:
+        // иначе следующий длинный опрос ушёл бы с устаревшего места и вернулся
+        // бы мгновенно, превратив ожидание в крутилку.
+        let newest = page.next_after_seq.max(page.messages.iter().map(|m| m.seq).max().unwrap_or(0));
         messages.update(|list| {
             for m in page.messages {
                 if !list.iter().any(|x| x.seq == m.seq) {
@@ -817,10 +832,12 @@ fn ChatScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView {
                                 view.set(View::Login);
                                 return;
                             }
-                            // Сеть моргнула — не сдаёмся молча, но и не крутим
-                            // петлю вхолостую: следующая попытка придёт с новым
-                            // длинным опросом.
+                            // Сеть моргнула. Отступаем и пробуем снова: без паузы
+                            // отказ воркера превратил бы ожидание в холостую
+                            // крутилку, которая долбит сервер тем чаще, чем ему
+                            // хуже.
                             leptos::logging::warn!("опрос переписки: {e}");
+                            delay(2000).await;
                         }
                     }
                 }

@@ -572,16 +572,21 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
                             &rep,
                             Callback::new(move |key: String| editing.set(Some(key))),
                         ))}
-                        {move || editing.get().map(|key| view! {
-                            <PlankaEditor
-                                client_id=cid.get_value()
-                                key=key
-                                targets=parsed.get().map(|r| r.targets).unwrap_or_default()
-                                on_close=Callback::new(move |changed: bool| {
-                                    editing.set(None);
-                                    if changed { reload(); }
-                                })/>
-                        })}
+                        // Редактор открывается только по разобранному отчёту: из
+                        // него он берёт и текущее число, и данные для расчёта.
+                        {move || match (editing.get(), parsed.get()) {
+                            (Some(key), Some(rep)) => view! {
+                                <PlankaEditor
+                                    client_id=cid.get_value()
+                                    key=key
+                                    report=rep
+                                    on_close=Callback::new(move |changed: bool| {
+                                        editing.set(None);
+                                        if changed { reload(); }
+                                    })/>
+                            }.into_view(),
+                            _ => ().into_view(),
+                        }}
 
                         <button class="btn btn--danger btn--block" style="margin-top: 16px;"
                             attr:data-testid="client-unbind"
@@ -612,16 +617,36 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
 fn PlankaEditor(
     client_id: String,
     key: String,
-    targets: datashare::report::Targets,
+    report: datashare::report::Report,
     on_close: Callback<bool>,
 ) -> impl IntoView {
     let cid = store_value(client_id);
     let k = store_value(key.clone());
     let value = create_rw_signal(
-        targets.value(&key).map(|v| format!("{v}")).unwrap_or_default(),
+        report.targets.value(&key).map(|v| format!("{v}")).unwrap_or_default(),
     );
     let busy = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);
+
+    // «Рассчитать» есть только у двух планок — у тех, что приложение ведёт само:
+    // калории (недельный цикл) и белок (доля от них). Остальные десять — нормы, и
+    // считать в них нечего: они и так стоят на нашем правиле, пока куратор его не
+    // заменил своим числом.
+    //
+    // Число берётся из ОБЩЕГО кода: куратор видит ровно то, к чему пришло бы
+    // приложение само. Дальше он вправе поправить его и отправить своё — но
+    // отправит он в любом случае ЧИСЛО, а не «пересчитай».
+    let suggested = store_value(match key.as_str() {
+        "calories" => report.suggest().map(|s| s.calories),
+        "protein" => report.suggest().and_then(|s| s.protein),
+        _ => None,
+    });
+    let calculate = move |_| {
+        if let Some(v) = suggested.get_value() {
+            value.set(format!("{v:.0}"));
+            error.set(None);
+        }
+    };
 
     let apply = move |_| {
         if busy.get_untracked() {
@@ -660,6 +685,17 @@ fn PlankaEditor(
                 <input class="field" attr:data-testid="planka-value"
                     prop:value=move || value.get()
                     on:input=move |ev| value.set(event_target_value(&ev)) />
+
+                {suggested.get_value().map(|_| view! {
+                    <button class="btn btn--ghost btn--block" style="margin-top: 10px;"
+                        attr:data-testid="planka-calc"
+                        prop:disabled=move || busy.get() on:click=calculate>
+                        {move || t("planka.calc")}
+                    </button>
+                    <p class="sub" style="margin: 6px 0 0; font-size: .78rem;">
+                        {move || t("planka.calc_hint")}
+                    </p>
+                })}
 
                 {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
 

@@ -181,6 +181,60 @@ pub struct Report {
     pub avg_kcal_7d: Option<f64>,
 }
 
+impl Report {
+    /// Снимок человека для правил планок — ровно тот же, что приложение худеющего
+    /// собирает из профиля. Пять чисел, и правило не должно знать, откуда они.
+    pub fn snapshot(&self) -> plankas::Snapshot {
+        plankas::Snapshot {
+            sex: match self.body.sex.as_deref() {
+                Some("male") => Some(plankas::Sex::Male),
+                Some("female") => Some(plankas::Sex::Female),
+                _ => None,
+            },
+            age_years: self.body.age_years,
+            height_cm: self.body.height_cm,
+            weight_kg: self.body.weight_kg,
+            kcal_planka: self.targets.calories,
+        }
+    }
+
+    /// Ряд веса в том виде, в каком его читает тренд. Условия замера в отчёте
+    /// есть, но тренду они не нужны — он смотрит только дату и килограммы.
+    pub fn weight_entries(&self) -> Vec<api_types::WeightEntry> {
+        self.weight
+            .series
+            .iter()
+            .map(|r| api_types::WeightEntry {
+                id: String::new(),
+                date: r.date.clone(),
+                weight_kg: r.kg,
+                no_water: false,
+                no_food: false,
+                no_wash: false,
+                used_toilet: false,
+                morning: r.morning,
+                created_at: String::new(),
+                updated_at: String::new(),
+            })
+            .collect()
+    }
+
+    /// Что предложить куратору: калории и следующий за ними белок, посчитанные
+    /// ровно так же, как их посчитал бы недельный цикл у худеющего.
+    ///
+    /// `None` — планки по калориям ещё нет, отталкиваться не от чего. Это не
+    /// ошибка: до второй недели её и не бывает.
+    pub fn suggest(&self) -> Option<plankas::Suggestion> {
+        let previous = self.targets.calories?;
+        Some(plankas::suggest(
+            &self.snapshot(),
+            previous,
+            &self.weight_entries(),
+            self.avg_kcal_7d,
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct Envelope {
     report: Report,
@@ -363,6 +417,70 @@ mod tests {
         assert_eq!(r.period.days, 1);
         assert!(r.indicators.is_empty());
         assert!(r.targets.calories.is_none());
+    }
+
+    /// Расчёт идёт по ВСЕМ данным отчёта, включая среднее съеденное. Проверяется
+    /// это единственным честным способом: два отчёта, отличающиеся ТОЛЬКО им,
+    /// обязаны дать разные числа.
+    ///
+    /// Здесь вес падает быстрее комфортной полосы — правило по весу зовёт планку
+    /// вверх. Но если человек ест сильно НИЖЕ планки, дело не в её величине, а в
+    /// неисполнении: поднимать нельзя, иначе разрыв между предписанным и съеденным
+    /// растёт каждую неделю. Стопор — та самая механика, ради которой среднее
+    /// съеденное и поехало в отчёте.
+    #[test]
+    fn raschyot_uchityvaet_sedennoe_a_ne_tolko_ves() {
+        let body = r#""body":{"weight_kg":78,"height_cm":170,"age_years":35,"sex":"female"},
+            "targets":{"calories":2000},
+            "weight":{"series":[
+                {"date":"2026-01-01","kg":80.0},{"date":"2026-01-03","kg":79.7},
+                {"date":"2026-01-05","kg":79.4},{"date":"2026-01-07","kg":79.1},
+                {"date":"2026-01-09","kg":78.8},{"date":"2026-01-11","kg":78.5},
+                {"date":"2026-01-13","kg":78.2},{"date":"2026-01-15","kg":78.0}]}"#;
+        let held = parse(&format!(
+            r#"{{"report":{{"period":{{"from":"a","to":"b","days":14}},{body},"avg_kcal_7d":1400}}}}"#
+        ))
+        .unwrap()
+        .suggest()
+        .expect("планка есть — считать есть от чего");
+        let moved = parse(&format!(
+            r#"{{"report":{{"period":{{"from":"a","to":"b","days":14}},{body},"avg_kcal_7d":2000}}}}"#
+        ))
+        .unwrap()
+        .suggest()
+        .unwrap();
+
+        assert_eq!(held.calories, 2000.0, "недоедающему планку не поднимаем");
+        assert!(moved.calories > 2000.0, "{}", moved.calories);
+        // Белок следует за калориями — значит расходится вместе с ними.
+        assert!(held.protein.is_some() && moved.protein.is_some());
+        assert_ne!(held.protein, moved.protein);
+    }
+
+    /// Планки по калориям ещё нет — предлагать нечего, и выдумывать нельзя.
+    #[test]
+    fn bez_dejstvuyushchej_planki_raschyota_net() {
+        let raw = r#"{"report":{"period":{"from":"a","to":"b","days":7}}}"#;
+        assert!(parse(raw).unwrap().suggest().is_none());
+    }
+
+    /// Снимок собирается из тела отчёта — теми же пятью числами, что приложение
+    /// худеющего берёт из профиля.
+    #[test]
+    fn snimok_sobiraetsya_iz_tela_otchyota() {
+        let raw = r#"{"report":{"period":{"from":"a","to":"b","days":7},
+            "body":{"weight_kg":80,"height_cm":170,"age_years":35,"sex":"male"},
+            "targets":{"calories":2200}}}"#;
+        let s = parse(raw).unwrap().snapshot();
+        assert_eq!(s.sex, Some(plankas::Sex::Male));
+        assert_eq!(s.age_years, Some(35));
+        assert_eq!(s.weight_kg, Some(80.0));
+        assert_eq!(s.kcal_planka, Some(2200.0));
+        // По нему сразу считаются наши нормы — те же, что у худеющего.
+        assert_eq!(
+            plankas::default_for(plankas::Kind::Fiber, &s),
+            Some(2200.0 / 1000.0 * plankas::defaults::G_PER_1000_KCAL)
+        );
     }
 
     /// Мусор — громкая ошибка, а не пустой экран.

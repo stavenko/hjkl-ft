@@ -104,6 +104,8 @@ fn ru(key: &str) -> &'static str {
         // Планки
         "planka.edit" => "Планка",
         "planka.value" => "Значение",
+        "planka.calc" => "Рассчитать",
+        "planka.calc_hint" => "По последним данным клиента — то же число, к которому пришло бы его приложение само.",
         "planka.save" => "Применить",
 
         // Чат
@@ -167,6 +169,8 @@ fn en(key: &str) -> &'static str {
 
         "planka.edit" => "Target",
         "planka.value" => "Value",
+        "planka.calc" => "Calculate",
+        "planka.calc_hint" => "From the client's latest data — the same figure their app would have arrived at on its own.",
         "planka.save" => "Apply",
 
         "chat.placeholder" => "Message",
@@ -205,7 +209,8 @@ mod tests {
             "client.invite_body", "client.no_report", "client.request", "client.request_days",
             "client.requested", "client.waiting", "client.report_at", "client.chat",
             "client.unbind", "client.delete", "client.unbind_confirm", "client.delete_confirm",
-            "planka.edit", "planka.value", "planka.save", "chat.placeholder",
+            "planka.edit", "planka.value", "planka.calc", "planka.calc_hint", "planka.save",
+            "chat.placeholder",
             "chat.send", "chat.empty", "settings.title", "settings.name", "settings.name_hint",
             "settings.lang", "settings.save", "settings.saved", "settings.logout",
             "common.back", "common.retry", "common.loading",

@@ -1204,8 +1204,10 @@ dependencies = [
 name = "datashare"
 version = "0.1.0"
 dependencies = [
+ "api-types",
  "js-sys",
  "leptos",
+ "plankas",
  "serde",
  "serde_json",
 ]

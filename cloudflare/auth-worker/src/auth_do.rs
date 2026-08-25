@@ -55,13 +55,14 @@ const STORAGE_KEY_CHAPTERS_PREFIX: &str = "chapters:";
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Inputs are the FIXED env-derived configs plus the ceremony origin.
-/// Returns true => use ADMIN config, false => use APP config.
-/// Selection is pure string equality against the configured admin origin;
-/// a client-supplied origin is ONLY ever used as a selector, never copied
-/// into the returned config.
-fn select_is_admin(origin: &str, admin_rp_origin: &str) -> bool {
-    !origin.is_empty() && origin == admin_rp_origin
+/// Выбор области (app / admin / curator) по origin церемонии.
+///
+/// Inputs are the FIXED env-derived configs plus the ceremony origin. Selection is
+/// pure string equality against the configured origin of that scope; a client-supplied
+/// origin is ONLY ever used as a selector, never copied into the returned config.
+/// Пустой origin не выбирает ничего — это не повод молча свалиться в область.
+fn origin_selects(origin: &str, scope_rp_origin: &str) -> bool {
+    !origin.is_empty() && !scope_rp_origin.is_empty() && origin == scope_rp_origin
 }
 
 // ---- Recovery hash helpers (HMAC-SHA256 based) ----
@@ -307,6 +308,23 @@ impl AuthDO {
             .var("ADMIN_RP_ORIGIN")
             .map(|v| v.to_string())
             .unwrap_or_else(|_| format!("https://{admin_rp_id}"));
+        // Куратор — третья область со своим паскеем. В отличие от админской, её
+        // переменные НЕобязательны: окружение без кураторского приложения должно
+        // подниматься как раньше, а не падать на «CURATOR_RP_ID not configured».
+        // Пустой rp_id гасит ветку сам — `origin_selects` не выбирает пустое.
+        let curator_rp_id = self
+            .env
+            .var("CURATOR_RP_ID")
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        let curator_rp_origin = if curator_rp_id.is_empty() {
+            String::new()
+        } else {
+            self.env
+                .var("CURATOR_RP_ORIGIN")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|_| format!("https://{curator_rp_id}"))
+        };
 
         // Fail loudly on empty origin: do NOT silently fall back to a scope.
         if origin.is_empty() {
@@ -330,8 +348,10 @@ impl AuthDO {
             .find(|o| *o == origin)
             .map(|o| o.to_string());
 
-        let (rp_id, rp_origin) = if select_is_admin(origin, &admin_rp_origin) {
+        let (rp_id, rp_origin) = if origin_selects(origin, &admin_rp_origin) {
             (admin_rp_id, admin_rp_origin)
+        } else if origin_selects(origin, &curator_rp_origin) {
+            (curator_rp_id, curator_rp_origin)
         } else if let Some(o) = extra_match {
             (app_rp_id, o)
         } else {
@@ -1885,32 +1905,56 @@ impl DurableObject for AuthDO {
 
 #[cfg(test)]
 mod tests {
-    use super::select_is_admin;
+    use super::origin_selects;
     const ADMIN_DEV: &str = "https://renorma-admin-dev.pages.dev";
     const ADMIN_PROD: &str = "https://admin.renorma.app";
+    const CURATOR_DEV: &str = "https://renorma-curator-dev.pages.dev";
+    const CURATOR_PROD: &str = "https://curator.renorma.app";
 
     #[test]
     fn admin_origin_selects_admin_dev() {
-        assert!(select_is_admin("https://renorma-admin-dev.pages.dev", ADMIN_DEV));
+        assert!(origin_selects("https://renorma-admin-dev.pages.dev", ADMIN_DEV));
     }
     #[test]
     fn admin_origin_selects_admin_prod() {
-        assert!(select_is_admin("https://admin.renorma.app", ADMIN_PROD));
+        assert!(origin_selects("https://admin.renorma.app", ADMIN_PROD));
     }
     #[test]
     fn app_origin_selects_app_dev() {
-        assert!(!select_is_admin("https://renorma-fit-dev.pages.dev", ADMIN_DEV));
+        assert!(!origin_selects("https://renorma-fit-dev.pages.dev", ADMIN_DEV));
     }
     #[test]
     fn app_origin_selects_app_prod() {
-        assert!(!select_is_admin("https://fit.renorma.app", ADMIN_PROD));
+        assert!(!origin_selects("https://fit.renorma.app", ADMIN_PROD));
     }
     #[test]
     fn empty_origin_is_not_admin() {
-        assert!(!select_is_admin("", ADMIN_DEV));
+        assert!(!origin_selects("", ADMIN_DEV));
     }
     #[test]
     fn unknown_origin_is_not_admin() {
-        assert!(!select_is_admin("https://evil.example", ADMIN_DEV));
+        assert!(!origin_selects("https://evil.example", ADMIN_DEV));
+    }
+
+    #[test]
+    fn kuratorskij_origin_vybiraet_kuratorskuyu_oblast() {
+        assert!(origin_selects("https://renorma-curator-dev.pages.dev", CURATOR_DEV));
+        assert!(origin_selects("https://curator.renorma.app", CURATOR_PROD));
+    }
+
+    // Три области не пересекаются: ни один origin не выбирает чужую.
+    #[test]
+    fn oblasti_ne_peresekayutsya() {
+        assert!(!origin_selects(CURATOR_PROD, ADMIN_PROD));
+        assert!(!origin_selects(ADMIN_PROD, CURATOR_PROD));
+        assert!(!origin_selects("https://fit.renorma.app", CURATOR_PROD));
+    }
+
+    // Окружение без кураторского приложения: переменная не задана, ветка не
+    // выбирается НИКОГДА — иначе пустой origin совпал бы с пустой настройкой.
+    #[test]
+    fn nenastroennaya_oblast_ne_vybiraetsya() {
+        assert!(!origin_selects("https://curator.renorma.app", ""));
+        assert!(!origin_selects("", ""));
     }
 }

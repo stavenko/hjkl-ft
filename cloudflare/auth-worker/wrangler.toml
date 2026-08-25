@@ -38,6 +38,8 @@ RP_ID = "renorma-fit-dev.pages.dev"
 RP_ORIGIN = "https://renorma-fit-dev.pages.dev"
 ADMIN_RP_ID = "renorma-admin-dev.pages.dev"
 ADMIN_RP_ORIGIN = "https://renorma-admin-dev.pages.dev"
+CURATOR_RP_ID = "renorma-curator-dev.pages.dev"
+CURATOR_RP_ORIGIN = "https://renorma-curator-dev.pages.dev"
 
 
 # ── Production (separate worker on auth.renorma.app, clean DO data) ──
@@ -89,6 +91,12 @@ RP_ORIGIN = "https://fit.renorma.app"
 # suffix of "fit.renorma.app", so the scopes cannot cross.
 ADMIN_RP_ID = "admin.renorma.app"
 ADMIN_RP_ORIGIN = "https://admin.renorma.app"
+# Куратор — третья область, и по той же причине со СВОИМ registrable rp_id.
+# "curator.renorma.app" не является registrable suffix ни для fit.renorma.app,
+# ни для admin.renorma.app, поэтому кураторский паскей структурно непригоден ни
+# в приложении худеющего, ни в консоли — и наоборот.
+CURATOR_RP_ID = "curator.renorma.app"
+CURATOR_RP_ORIGIN = "https://curator.renorma.app"
 # Смоук-фронт на соседнем поддомене: rpId тот же (renorma.app — его суффикс),
 # поэтому ключ, созданный на смоуке, действует и на fit.renorma.app.
 RP_ORIGINS_EXTRA = "https://fit-smoke.renorma.app"

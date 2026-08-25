@@ -537,6 +537,8 @@ enum Overlay {
     Cycle,
     Errors,
     Mail,
+    /// Отправка отчёта куратору (виден только у привязанного человека).
+    Report,
     Progress,
     Weight,
     Steps,
@@ -591,6 +593,22 @@ pub fn DashboardPage() -> impl IntoView {
     };
 
     let overlay = create_rw_signal(Overlay::None);
+
+    // Виджет отчёта: есть ли куратор и требует ли он сейчас внимания. И то и
+    // другое считается из уже скачанного треда, поэтому пересчитывается вместе с
+    // его кэшем, а не отдельным запросом.
+    let curator_bound = create_rw_signal(false);
+    let report_attention = create_rw_signal(false);
+    create_effect(move |_| {
+        crate::services::db::version("support_msgs").get();
+        // Закрытие панели тоже повод пересчитать: открытие гасит дребезжание.
+        let _ = overlay.get();
+        spawn_local(async move {
+            curator_bound.set(crate::services::support_chat::has_curator());
+            let st = crate::services::support_chat::report_status().await;
+            report_attention.set(st.needs_attention);
+        });
+    });
     // Нажали «Главную» в меню — значит хотят главную, а не панель, раскрытую поверх
     // неё пять минут назад. Роутер на переход в то же место не отвечает, поэтому
     // слушаем сам факт нажатия.
@@ -749,6 +767,16 @@ pub fn DashboardPage() -> impl IntoView {
                             show_done=Signal::derive(|| true)
                             on_done=move || overlay.set(Overlay::None)/>
                         <ErrorsPanel/>
+                    </div>
+                }.into_view()
+            } else if overlay.get() == Overlay::Report {
+                view! {
+                    <div style=EDITOR>
+                        <EditorHead title="curator.report.title"
+                            show_done=Signal::derive(|| true)
+                            on_done=move || overlay.set(Overlay::None)/>
+                        <crate::components::report_widget::ReportPanel
+                            on_done=Callback::new(move |_| overlay.set(Overlay::None))/>
                     </div>
                 }.into_view()
             } else if overlay.get() == Overlay::Mail {
@@ -1004,6 +1032,25 @@ pub fn DashboardPage() -> impl IntoView {
                                 on:click=move |_| overlay.set(Overlay::Persona)>
                                 {icon_user()}
                             </button>
+                            // Отправка отчёта куратору — колонка 2, сразу за
+                            // персоной. Есть только у привязанного человека.
+                            // Дребезжит тем же кадром, что колокольчик, пока
+                            // панель после запроса не открыли.
+                            {move || curator_bound.get().then(|| view! {
+                                <button style=format!("{TILE} grid-column: 2 / 3; grid-row: span 1; position: relative;")
+                                    attr:data-testid="dash-report-widget"
+                                    on:click=move |_| overlay.set(Overlay::Report)>
+                                    <span class=move || if report_attention.get() { "dash-bell-jiggle" } else { "" }
+                                        style="display: inline-flex;">
+                                        {crate::components::report_widget::icon_upload()}
+                                    </span>
+                                    {move || report_attention.get().then(|| view! {
+                                        <span style="position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; \
+                                            border-radius: 50%; background: #e0304f; \
+                                            box-shadow: 0 0 0 2px var(--bulma-scheme-main);"></span>
+                                    })}
+                                </button>
+                            })}
                             // Error tile (⚠, orange) — col 6, one cell left of the mail
                             // tile. Shown only when the background queue recorded errors
                             // or there is a network problem.

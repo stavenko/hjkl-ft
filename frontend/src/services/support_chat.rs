@@ -668,6 +668,99 @@ async fn store_cursor(peer: &str, after_seq: u64) {
     db::put(META_STORE, &Cursor { key: cursor_key(peer), after_seq }).await;
 }
 
+// ── Состояние отчёта ─────────────────────────────────────────────────────────
+//
+// Виджет на дашборде считает своё состояние ЗДЕСЬ, из уже скачанного треда, а не
+// отдельным запросом: приложение и так опрашивает чат, и второй источник правды
+// разошёлся бы с первым.
+
+/// App-flag: `seq` запроса, панель после которого уже открывали. Дребезжание
+/// гасится самим ОТКРЫТИЕМ — человек увидел, и дальше это его дело. Device-local:
+/// увидеть надо на том устройстве, где смотрят.
+const REPORT_SEEN_FLAG: &str = "report_request_seen_seq";
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ReportStatus {
+    /// Открытый запрос куратора: на сколько дней. `None` — запроса нет.
+    pub request_days: Option<u32>,
+    /// Когда отчёт отправляли в последний раз.
+    pub last_report_at: Option<String>,
+    /// Запрос есть, и панель после него ещё не открывали.
+    pub needs_attention: bool,
+}
+
+/// Разобрать срок из запроса куратора. Старые запросы админки несут `dataset`, а
+/// не `days`, — они живут своей панелью в чате, и виджету до них дела нет.
+fn request_days(m: &LiveMessage) -> Option<u32> {
+    if m.kind != "data_request" {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(m.payload.as_deref()?).ok()?;
+    let d = v.get("days")?.as_u64()?;
+    (d >= 1).then_some(d as u32)
+}
+
+/// Отчёт ли это (а не старый датасетный обмен).
+fn is_report(m: &LiveMessage) -> bool {
+    m.kind == "data_share"
+        && m.sender == "user"
+        && m.payload
+            .as_deref()
+            .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+            .map(|v| v.get("report").is_some())
+            .unwrap_or(false)
+}
+
+pub async fn report_status() -> ReportStatus {
+    let peer = current_peer();
+    let msgs: Vec<LiveMessage> = list_messages()
+        .await
+        .into_iter()
+        .filter(|m| m.peer == peer)
+        .collect();
+
+    let last_request = msgs.iter().filter_map(|m| request_days(m).map(|d| (m.seq, d))).last();
+    let last_report = msgs.iter().filter(|m| is_report(m)).last();
+    // Запрос закрыт отчётом, ПРИШЕДШИМ ПОСЛЕ него: повторный запрос за тем же
+    // сроком должен снова ждать ответа, а не считаться выполненным старым.
+    let open = match (last_request, last_report) {
+        (Some((rseq, _)), Some(rep)) if rep.seq > rseq => None,
+        (Some((rseq, days)), _) => Some((rseq, days)),
+        (None, _) => None,
+    };
+    let seen = crate::services::app_flags::get(REPORT_SEEN_FLAG)
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    ReportStatus {
+        request_days: open.map(|(_, d)| d),
+        last_report_at: last_report.map(|m| m.created_at.clone()),
+        needs_attention: open.map(|(seq, _)| seq > seen).unwrap_or(false),
+    }
+}
+
+/// Отметить, что панель открывали: дребезжать больше не о чем. Запрос при этом
+/// остаётся невыполненным — открыть и не отправить человек вправе.
+pub async fn mark_report_seen() {
+    let peer = current_peer();
+    let newest = list_messages()
+        .await
+        .into_iter()
+        .filter(|m| m.peer == peer)
+        .filter_map(|m| request_days(&m).map(|_| m.seq))
+        .last()
+        .unwrap_or(0);
+    if newest > 0 {
+        crate::services::app_flags::set(REPORT_SEEN_FLAG, &newest.to_string());
+    }
+}
+
+/// Отправить отчёт за `days` дней. Тот же путь, что у любого сообщения, — с
+/// очередью отправки и повторами.
+pub async fn send_report(days: u32) -> Result<LiveMessage, String> {
+    let (text, payload) = crate::services::curator_share::report_message(days).await?;
+    send_data_share(text, payload).await
+}
+
 // ── Текущий собеседник ───────────────────────────────────────────────────────
 //
 // Кто адресат — решает сервер, приложение лишь запоминает его ответ. Флаг

@@ -52,3 +52,12 @@ pub async fn binding() -> Result<Binding, String> {
 pub async fn unbind() -> Result<serde_json::Value, String> {
     post_json("/curator/unbind", "{}").await
 }
+
+/// Забыть куратора на этом устройстве после успешной отвязки на сервере.
+///
+/// Пока — только состояние опроса: адресат чата снова админ. Разбор кураторских
+/// планок (перенос, снятие замков, сдвиг якорей) делает `unbind_locally` в
+/// следующем шаге.
+pub async fn forget_locally() {
+    let _ = crate::services::support_chat::poll().await;
+}

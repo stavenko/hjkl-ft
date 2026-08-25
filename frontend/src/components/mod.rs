@@ -34,3 +34,4 @@ pub mod live_message;
 pub mod cycle_widget;
 pub mod notify_panel;
 pub mod progress_widget;
+pub mod report_widget;

@@ -35,6 +35,13 @@ web-sys = { version = "0.3", features = [
     "PublicKeyCredential",
     "PublicKeyCredentialCreationOptions",
     "PublicKeyCredentialRequestOptions",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlTextAreaElement",
+    "HtmlDocument",
+    "CssStyleDeclaration",
+    "Clipboard",
 ] }
 base64 = "0.22"
 sha2 = "0.10"

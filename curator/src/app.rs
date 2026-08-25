@@ -168,12 +168,11 @@ fn Login(on_done: Callback<()>) -> impl IntoView {
                 </button>
                 <details style="margin-top: 18px;">
                     <summary class="sub" style="cursor: pointer;">{move || t("login.first_time")}</summary>
-                    <div class="field" style="margin-top: 12px;">
-                        <input class="input" placeholder=move || t("login.name")
-                            attr:data-testid="curator-name"
-                            prop:value=move || name.get()
-                            on:input=move |ev| name.set(event_target_value(&ev)) />
-                    </div>
+                    <input class="field" style="margin-top: 12px;"
+                        placeholder=move || t("login.name")
+                        attr:data-testid="curator-name"
+                        prop:value=move || name.get()
+                        on:input=move |ev| name.set(event_target_value(&ev)) />
                     <button class="btn" prop:disabled=move || busy.get() on:click=register
                         attr:data-testid="curator-register">
                         {move || t("login.register")}
@@ -197,17 +196,361 @@ pub fn invite_url(code: &str) -> String {
     format!("{}/curator?c={code}", config::get().app_origin.trim_end_matches('/'))
 }
 
-// Экраны списка, клиента, переписки и настроек — в следующих шагах.
-#[component]
-fn Clients(view: RwSignal<View>) -> impl IntoView {
-    let _ = view;
-    view! { <div class="screen"><div class="center"><p class="sub">{move || t("common.loading")}</p></div></div> }
+/// Скопировать текст в буфер СИНХРОННО из обработчика нажатия.
+///
+/// Два механизма разом — как в приложении худеющего и по той же причине: в
+/// standalone-PWA на iOS асинхронный Clipboard API капризен, а старый
+/// execCommand там работает. Оба вызываются внутри жеста, что iOS и проверяет.
+fn copy_to_clipboard(text: &str) {
+    use wasm_bindgen::JsCast;
+    let Some(window) = web_sys::window() else { return };
+    let _ = window.navigator().clipboard().write_text(text);
+
+    let Some(document) = window.document() else { return };
+    if let Ok(el) = document.create_element("textarea") {
+        let ta: web_sys::HtmlTextAreaElement = el.unchecked_into();
+        ta.set_value(text);
+        let _ = ta.set_attribute("readonly", "");
+        let _ = ta.style().set_property("position", "fixed");
+        let _ = ta.style().set_property("top", "0");
+        let _ = ta.style().set_property("opacity", "0");
+        if let Some(body) = document.body() {
+            let _ = body.append_child(&ta);
+            ta.select();
+            let _ = ta.set_selection_range(0, text.len() as u32);
+            if let Ok(html_doc) = document.dyn_into::<web_sys::HtmlDocument>() {
+                let _ = html_doc.exec_command("copy");
+            }
+            let _ = body.remove_child(&ta);
+        }
+    }
 }
 
+/// Список клиентов. В строке только имя: всё остальное — внутри.
+#[component]
+fn Clients(view: RwSignal<View>) -> impl IntoView {
+    let clients = create_rw_signal(Vec::<api::Client>::new());
+    let loading = create_rw_signal(true);
+    let error = create_rw_signal(None::<String>);
+    let adding = create_rw_signal(false);
+    let new_name = create_rw_signal(String::new());
+    let busy = create_rw_signal(false);
+
+    let reload = move || {
+        spawn_local(async move {
+            match api::clients().await {
+                Ok(list) => {
+                    clients.set(list);
+                    error.set(None);
+                }
+                Err(e) => {
+                    if e.is_auth() {
+                        auth::logout();
+                        view.set(View::Login);
+                        return;
+                    }
+                    error.set(Some(e.message().to_string()));
+                }
+            }
+            loading.set(false);
+        });
+    };
+    create_effect(move |_| reload());
+
+    let create = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        let name = new_name.get_untracked().trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        busy.set(true);
+        spawn_local(async move {
+            match api::add_client(&name).await {
+                Ok(_) => {
+                    new_name.set(String::new());
+                    adding.set(false);
+                    reload();
+                }
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            busy.set(false);
+        });
+    };
+
+    view! {
+        <div class="appbar">
+            <div class="ring"></div>
+            <div class="appbar__title">{move || t("clients.title")}</div>
+            <button class="btn btn--icon btn--ghost" attr:data-testid="curator-settings"
+                on:click=move |_| view.set(View::Settings)>
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6c.6-.25 1-.85 1-1.51V3a2 2 0 1 1 4 0v.09c0 .66.4 1.26 1 1.51.6.25 1.3.12 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.25.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09c-.66 0-1.26.4-1.51 1z"/></svg>
+            </button>
+        </div>
+        <div class="screen pad">
+            {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+            {move || loading.get().then(|| view! { <div class="spinner"></div> })}
+
+            {move || adding.get().then(|| view! {
+                <div class="card" style="margin-bottom: 12px;">
+                    <input class="field" placeholder=move || t("clients.add_name")
+                        attr:data-testid="client-name"
+                        prop:value=move || new_name.get()
+                        on:input=move |ev| new_name.set(event_target_value(&ev)) />
+                    <p class="sub" style="margin: 8px 0 12px; font-size: .8rem;">
+                        {move || t("clients.add_hint")}
+                    </p>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn--primary" prop:disabled=move || busy.get()
+                            attr:data-testid="client-create" on:click=create>
+                            {move || t("clients.create")}
+                        </button>
+                        <button class="btn btn--ghost" on:click=move |_| adding.set(false)>
+                            {move || t("clients.cancel")}
+                        </button>
+                    </div>
+                </div>
+            })}
+
+            {move || {
+                let list = clients.get();
+                if list.is_empty() && !loading.get() {
+                    return view! {
+                        <div class="empty">
+                            <div class="empty__ring"></div>
+                            <p class="sub">{move || t("clients.empty")}</p>
+                        </div>
+                    }.into_view();
+                }
+                list.into_iter().map(|c| {
+                    let id = c.id.clone();
+                    let name = c.name.clone();
+                    let bound = c.bound;
+                    view! {
+                        <button class="row card" style="margin-bottom: 10px;"
+                            attr:data-testid="client-row"
+                            on:click=move |_| view.set(View::Client {
+                                id: id.clone(), name: name.clone(),
+                            })>
+                            <div class="row__top">
+                                <span class="row__title">{c.name.clone()}</span>
+                                {(!bound).then(|| view! {
+                                    <span class="badge badge--warn">{move || t("clients.pending")}</span>
+                                })}
+                            </div>
+                        </button>
+                    }
+                }).collect_view()
+            }}
+
+            <button class="btn btn--primary btn--block" style="margin-top: 6px;"
+                attr:data-testid="client-add" on:click=move |_| adding.set(true)>
+                {move || t("clients.add")}
+            </button>
+        </div>
+    }
+}
+
+/// Экран клиента. Пока согласия нет — на нём только ссылка; после согласия её
+/// место занимают данные и запрос.
 #[component]
 fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView {
-    let _ = (id, name, view);
-    view! { <div class="screen"></div> }
+    let cid = store_value(id.clone());
+    let title = store_value(name.clone());
+    let client = create_rw_signal(None::<api::Client>);
+    let report = create_rw_signal(api::ReportResp::default());
+    let error = create_rw_signal(None::<String>);
+    let busy = create_rw_signal(false);
+    let copied = create_rw_signal(false);
+    let days = create_rw_signal(String::from("1"));
+    let requested = create_rw_signal(false);
+
+    let reload = move || {
+        spawn_local(async move {
+            let id = cid.get_value();
+            match api::clients().await {
+                Ok(list) => client.set(list.into_iter().find(|c| c.id == id)),
+                Err(e) => {
+                    if e.is_auth() {
+                        auth::logout();
+                        view.set(View::Login);
+                        return;
+                    }
+                    error.set(Some(e.message().to_string()));
+                }
+            }
+            match api::report(&id).await {
+                Ok(r) => report.set(r),
+                // Отчёта может не быть вовсе — это не ошибка, а состояние.
+                Err(e) if !e.is_auth() => leptos::logging::warn!("отчёт: {e}"),
+                Err(_) => {}
+            }
+        });
+    };
+    create_effect(move |_| reload());
+
+    let ask = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        let n = days.get_untracked().trim().parse::<u32>().unwrap_or(1);
+        if n == 0 || n > 366 {
+            error.set(Some("Срок — от 1 до 366 дней".to_string()));
+            return;
+        }
+        busy.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match api::request_data(&cid.get_value(), n).await {
+                Ok(_) => {
+                    requested.set(true);
+                    reload();
+                }
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            busy.set(false);
+        });
+    };
+
+    let unbind = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        if !confirm(t("client.unbind_confirm")) {
+            return;
+        }
+        busy.set(true);
+        spawn_local(async move {
+            match api::unbind_client(&cid.get_value()).await {
+                Ok(_) => reload(),
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            busy.set(false);
+        });
+    };
+
+    let remove = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        if !confirm(t("client.delete_confirm")) {
+            return;
+        }
+        busy.set(true);
+        spawn_local(async move {
+            match api::delete_client(&cid.get_value()).await {
+                Ok(_) => view.set(View::Clients),
+                Err(e) => {
+                    error.set(Some(e.message().to_string()));
+                    busy.set(false);
+                }
+            }
+        });
+    };
+
+    view! {
+        <div class="appbar">
+            <button class="btn btn--icon btn--ghost" on:click=move |_| view.set(View::Clients)>
+                <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <div class="appbar__title">{title.get_value()}</div>
+        </div>
+        <div class="screen pad">
+            {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+
+            {move || match client.get() {
+                None => view! { <div class="spinner"></div> }.into_view(),
+
+                // Не привязан — только приглашение. Данных нет и быть не может:
+                // согласия человек ещё не давал.
+                Some(c) if !c.bound => {
+                    let link = c.invite_code.as_deref().map(invite_url).unwrap_or_default();
+                    let to_copy = link.clone();
+                    view! {
+                        <div class="card">
+                            <p style="font-weight: 620;">{move || t("client.invite_title")}</p>
+                            <p class="sub" style="margin: 8px 0 14px;">{move || t("client.invite_body")}</p>
+                            <p class="code-box" style="font-size: .82rem; letter-spacing: 0; \
+                                word-break: break-all; text-align: left;"
+                                attr:data-testid="invite-link">{link}</p>
+                            <button class="btn btn--primary btn--block" style="margin-top: 12px;"
+                                attr:data-testid="invite-copy"
+                                on:click=move |_| { copy_to_clipboard(&to_copy); copied.set(true); }>
+                                {move || if copied.get() { t("clients.copied") } else { t("clients.copy_link") }}
+                            </button>
+                        </div>
+                        <button class="btn btn--danger btn--block" style="margin-top: 16px;"
+                            prop:disabled=move || busy.get() on:click=remove>
+                            {move || t("client.delete")}
+                        </button>
+                    }.into_view()
+                }
+
+                Some(_) => {
+                    let r = report.get();
+                    view! {
+                        <div class="card" style="margin-bottom: 12px;">
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <input class="field" type="number" min="1" max="366"
+                                    style="max-width: 92px;" attr:data-testid="request-days"
+                                    prop:value=move || days.get()
+                                    on:input=move |ev| days.set(event_target_value(&ev)) />
+                                <span class="sub" style="font-size: .8rem;">{move || t("client.request_days")}</span>
+                                <button class="btn btn--primary" style="margin-left: auto;"
+                                    attr:data-testid="request-data"
+                                    prop:disabled=move || busy.get() on:click=ask>
+                                    {move || t("client.request")}
+                                </button>
+                            </div>
+                            <p class="sub" style="margin-top: 10px; font-size: .82rem;">
+                                {match (&r.report_at, &r.request_at) {
+                                    (_, Some(at)) => t("client.waiting")
+                                        .replace("{date}", at.get(0..10).unwrap_or("")),
+                                    (Some(at), None) => t("client.report_at")
+                                        .replace("{date}", at.get(0..10).unwrap_or("")),
+                                    (None, None) => t("client.no_report").to_string(),
+                                }}
+                            </p>
+                            {move || requested.get().then(|| view! {
+                                <p class="sub" style="margin-top: 6px; color: var(--accent);"
+                                    attr:data-testid="request-sent">{move || t("client.requested")}</p>
+                            })}
+                        </div>
+
+                        <button class="btn btn--ghost btn--block" style="margin-bottom: 12px;"
+                            attr:data-testid="client-chat"
+                            on:click=move |_| view.set(View::Chat {
+                                id: cid.get_value(), name: title.get_value(),
+                            })>
+                            {move || t("client.chat")}
+                        </button>
+
+                        // Дашборд по присланному отчёту — следующим шагом.
+
+                        <button class="btn btn--danger btn--block" style="margin-top: 16px;"
+                            attr:data-testid="client-unbind"
+                            prop:disabled=move || busy.get() on:click=unbind>
+                            {move || t("client.unbind")}
+                        </button>
+                        <button class="btn btn--ghost btn--block" style="margin-top: 8px;"
+                            prop:disabled=move || busy.get() on:click=remove>
+                            {move || t("client.delete")}
+                        </button>
+                    }.into_view()
+                }
+            }}
+        </div>
+    }
+}
+
+/// Подтверждение действия. Отвязка и удаление необратимы для другой стороны —
+/// спросить обязательно.
+fn confirm(message: &str) -> bool {
+    web_sys::window()
+        .and_then(|w| w.confirm_with_message(message).ok())
+        .unwrap_or(false)
 }
 
 #[component]

@@ -68,12 +68,13 @@ fn ru(key: &str) -> &'static str {
         "install.title" => "Установите приложение",
         "install.body" => "Кабинет куратора работает как приложение на телефоне. Поставьте его на домашний экран — иначе не будет ни ключа для входа, ни уведомлений о сообщениях.",
         "login.title" => "Кабинет куратора",
-        "login.sub" => "Вход по ключу этого устройства",
+        "login.sub" => "Заведите ключ на этом устройстве — входить будете им, без пароля.",
         "login.enter" => "Войти",
-        "login.first_time" => "Первый вход на этом устройстве",
+        "login.have_key" => "Уже есть ключ?",
         "login.name" => "Как вас зовут",
+        "login.name_hint" => "Это имя увидят ваши клиенты",
         "login.register" => "Создать ключ",
-        "login.name_required" => "Введите имя — его увидят ваши клиенты",
+        "login.name_required" => "Введите имя",
 
         // Клиенты
         "clients.title" => "Клиенты",
@@ -136,12 +137,13 @@ fn en(key: &str) -> &'static str {
         "install.title" => "Install the app",
         "install.body" => "The curator workspace runs as an app on your phone. Add it to your home screen — otherwise there is no key to sign in with and no notifications about messages.",
         "login.title" => "Curator workspace",
-        "login.sub" => "Sign in with this device's key",
+        "login.sub" => "Create a key on this device — you will sign in with it, no password.",
         "login.enter" => "Sign in",
-        "login.first_time" => "First time on this device",
+        "login.have_key" => "Already have a key?",
         "login.name" => "Your name",
+        "login.name_hint" => "Your clients will see this name",
         "login.register" => "Create a key",
-        "login.name_required" => "Enter your name — your clients will see it",
+        "login.name_required" => "Enter your name",
 
         "clients.title" => "Clients",
         "clients.empty" => "No one yet. Add your first client and send them the link.",
@@ -203,7 +205,7 @@ mod tests {
     fn tablicy_soglasovany() {
         for key in [
             "app.title", "install.title", "install.body", "login.title", "login.sub",
-            "login.enter", "login.first_time", "login.name", "login.register",
+            "login.enter", "login.have_key", "login.name", "login.name_hint", "login.register",
             "login.name_required", "clients.title", "clients.empty", "clients.add",
             "clients.add_name", "clients.add_hint", "clients.create", "clients.cancel",
             "clients.pending", "clients.copy_link", "clients.copied", "client.invite_title",

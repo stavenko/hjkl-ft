@@ -244,6 +244,34 @@
 
         /* Auth / centered card layout */
         .center { margin: auto; width: 100%; max-width: 400px; padding: 24px; }
+
+        /* Экран без нижней панели, содержимое по центру. `margin:auto` на
+           flex-элементе — тот самый безопасный способ центрировать то, что может
+           оказаться выше экрана: `justify-content:center` обрезал бы верх и
+           прокрутить к нему было бы нельзя. */
+        .screen--center { display: flex; padding-bottom: calc(var(--safe-b) + 8px); }
+
+        /* Метка поля. В системе её не было, и подпись жила плейсхолдером — а он
+           исчезает, стоит начать печатать. Имя куратор вводит один раз и
+           навсегда, и видеть, что это именно имя, надо и во время ввода. */
+        .label { display: block; font-size: .78rem; font-weight: 600; letter-spacing: .02em;
+            color: var(--faint); margin: 0 0 7px; }
+        .hint { font-size: .82rem; color: var(--muted); margin: 8px 0 0; }
+
+        /* Второстепенное действие — ссылкой, а не второй кнопкой: две одинаковые
+           кнопки не отвечают на вопрос «а мне-то куда». */
+        .alt { display: flex; align-items: center; justify-content: center; gap: 7px;
+            margin-top: 20px; color: var(--muted); font-size: .92rem; }
+        .linkbtn { color: var(--accent); font-weight: 600; font-size: .92rem; padding: 2px; }
+        .linkbtn:disabled { opacity: .5; cursor: default; }
+
+        /* Внутри узкой колонки у сообщения об ошибке свои поля не нужны — оно
+           встаёт по её краям, как поле и кнопка. */
+        .center .banner { margin: 0 0 16px; }
+
+        /* Клавиатурный фокус обязан быть виден: сюда попадают и с внешней
+           клавиатуры, и с VoiceOver. */
+        :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .brandmark { width: 54px; height: 54px; border-radius: 50%; margin-bottom: 18px;
             background: conic-gradient(from -90deg, var(--accent) 0 60%, var(--danger) 60% 90%, var(--warn) 90% 100%);
             -webkit-mask: radial-gradient(circle, transparent 13px, #000 14px);

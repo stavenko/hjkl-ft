@@ -77,7 +77,7 @@ fn pwa_lang() -> pwa_prompt::Lang {
 fn Install() -> impl IntoView {
     let platform = pwa_prompt::detect_platform();
     view! {
-        <div class="screen">
+        <div class="screen screen--center screen--noflow">
             <div class="center">
                 <div class="brandmark"></div>
                 <p class="h1">{move || t("install.title")}</p>
@@ -92,6 +92,13 @@ fn Install() -> impl IntoView {
 /// auth-worker, а роль хранит support-worker, и второй шаг нужен всегда — аппрува
 /// у нас нет, и профиль это единственное, что отличает куратора от любого другого
 /// владельца токена.
+///
+/// Экран ведёт РЕГИСТРАЦИЮ, а не вход, и порядок на нём не случаен. Кураторов
+/// приглашают, они приходят сюда впервые, и первое, что им нужно, — назваться и
+/// завести ключ. Вход — для второго и следующих раз, и это одна строка внизу.
+/// Прежде было наоборот: кнопка «Войти», а регистрация пряталась в `<details>`
+/// с браузерным треугольником — то есть главное действие экрана было спрятано
+/// за раскрывашкой, да ещё и выглядело чужеродно.
 #[component]
 fn Login(on_done: Callback<()>) -> impl IntoView {
     let busy = create_rw_signal(false);
@@ -167,29 +174,48 @@ fn Login(on_done: Callback<()>) -> impl IntoView {
         });
     };
 
+    // Настоящая <form>: на телефоне это даёт кнопку «Go» на клавиатуре, и имя
+    // отправляется, не убирая её. `submit` — тот же путь, что и нажатие кнопки.
+    let submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        register(());
+    };
+
     view! {
-        <div class="screen">
+        <div class="screen screen--center screen--noflow">
             <div class="center">
                 <div class="brandmark"></div>
                 <p class="h1">{move || t("login.title")}</p>
                 <p class="sub">{move || t("login.sub")}</p>
-                {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
-                <button class="btn" prop:disabled=move || busy.get() on:click=sign_in
-                    attr:data-testid="curator-login">
-                    {move || t("login.enter")}
-                </button>
-                <details style="margin-top: 18px;">
-                    <summary class="sub" style="cursor: pointer;">{move || t("login.first_time")}</summary>
-                    <input class="field" style="margin-top: 12px;"
-                        placeholder=move || t("login.name")
+
+                {move || error.get().map(|e| view! {
+                    <div class="banner" attr:role="alert">{e}</div>
+                })}
+
+                <form on:submit=submit>
+                    <label class="label" attr:for="curator-name">{move || t("login.name")}</label>
+                    <input class="field" attr:id="curator-name" attr:type="text"
+                        attr:autocomplete="name" attr:autocapitalize="words"
+                        attr:enterkeyhint="go" attr:spellcheck="false"
                         attr:data-testid="curator-name"
                         prop:value=move || name.get()
                         on:input=move |ev| name.set(event_target_value(&ev)) />
-                    <button class="btn" prop:disabled=move || busy.get() on:click=register
+                    <p class="hint">{move || t("login.name_hint")}</p>
+                    <button class="btn btn--primary btn--block" style="margin-top: 20px;"
+                        attr:type="submit" prop:disabled=move || busy.get()
                         attr:data-testid="curator-register">
                         {move || t("login.register")}
                     </button>
-                </details>
+                </form>
+
+                <p class="alt">
+                    {move || t("login.have_key")}
+                    <button class="linkbtn" attr:type="button"
+                        prop:disabled=move || busy.get() on:click=sign_in
+                        attr:data-testid="curator-login">
+                        {move || t("login.enter")}
+                    </button>
+                </p>
             </div>
         </div>
     }

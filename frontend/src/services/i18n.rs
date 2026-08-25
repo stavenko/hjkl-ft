@@ -449,6 +449,7 @@ fn en(key: &str) -> &'static str {
         "curator.shared_steps" => "Data sent: steps diary",
         "curator.shared_all" => "Data sent: all your data",
         "curator.shared_system" => "Data sent: device and browser info",
+        "curator.report_sent" => "Report sent",
 
         // Diary: relative dates
         "diary.today" => "Today",
@@ -1447,6 +1448,7 @@ fn ru(key: &str) -> &'static str {
         "curator.shared_steps" => "Данные отправлены: дневник шагов",
         "curator.shared_all" => "Данные отправлены: все ваши данные",
         "curator.shared_system" => "Данные отправлены: данные об устройстве",
+        "curator.report_sent" => "Отчёт отправлен",
 
         // Дневник: относительные даты
         "diary.today" => "Сегодня",

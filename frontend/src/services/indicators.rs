@@ -46,7 +46,7 @@ const CALCIUM_PER_DAY_MG: f64 = 1000.0; // user: 1 g/day for everyone
 
 /// Vegetables/fruit target (g/day): user-set — women 600, men 800. Unknown sex →
 /// 600 (the lower, so it isn't spuriously missed before the persona is complete).
-fn veg_fruit_per_day_g() -> f64 {
+pub fn veg_fruit_per_day_g() -> f64 {
     let ours = match profile::get_sex() {
         Some(Sex::Male) => 800.0,
         _ => 600.0,
@@ -1196,9 +1196,20 @@ pub struct IndicatorSeries {
 
 /// Per-day series for every unlocked indicator (cached), for the histograms.
 pub async fn unlocked_indicator_series() -> Vec<IndicatorSeries> {
+    indicator_series_for(7).await
+}
+
+/// То же, но за произвольное число ЗАВЕРШЁННЫХ дней.
+///
+/// Виджету всегда нужна неделя, а кураторскому отчёту — тот срок, который
+/// назвал куратор. Недельные индикаторы (железо, гем, жиры, мясо, яйца,
+/// клетчатка) отдают свои восемь недель как есть: их шаг — неделя, и дробить его
+/// днями бессмысленно.
+pub async fn indicator_series_for(days: u32) -> Vec<IndicatorSeries> {
+    let days = days.max(1) as i64;
     let today = crate::services::local::today_date();
-    // Oldest → newest: today-7 … today-1.
-    let dates: Vec<NaiveDate> = (1..=7).rev().map(|i| today - Duration::days(i)).collect();
+    // Oldest → newest: today-days … today-1.
+    let dates: Vec<NaiveDate> = (1..=days).rev().map(|i| today - Duration::days(i)).collect();
     let mut out = Vec::new();
     for key in displayed_indicators() {
         // Железо судится НЕДЕЛЯМИ, поэтому и столбики у него недельные: восемь

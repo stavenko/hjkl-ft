@@ -43,6 +43,14 @@ web-sys = { version = "0.3", features = [
     "CssStyleDeclaration",
     "Clipboard",
     "HtmlInputElement",
+    "HtmlTextAreaElement",
+    "Notification",
+    "NotificationPermission",
+    "ServiceWorkerContainer",
+    "ServiceWorkerRegistration",
+    "PushManager",
+    "PushSubscription",
+    "PushSubscriptionOptionsInit",
 ] }
 base64 = "0.22"
 sha2 = "0.10"

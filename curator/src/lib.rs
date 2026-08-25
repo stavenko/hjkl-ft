@@ -10,6 +10,7 @@ pub mod app;
 pub mod auth;
 pub mod config;
 pub mod i18n;
+pub mod push;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

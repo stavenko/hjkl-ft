@@ -93,7 +93,10 @@ fn Login(on_done: Callback<()>) -> impl IntoView {
     let finish = move || {
         spawn_local(async move {
             match api::register().await {
-                Ok(_) => on_done.call(()),
+                Ok(_) => {
+                    subscribe_to_push();
+                    on_done.call(())
+                }
                 Err(e) => {
                     leptos::logging::error!("curator register: {e}");
                     error.set(Some(e.message().to_string()));
@@ -145,6 +148,7 @@ fn Login(on_done: Callback<()>) -> impl IntoView {
                     if let Err(e) = api::set_profile(&display, lang_code()).await {
                         leptos::logging::error!("curator profile: {e}");
                     }
+                    subscribe_to_push();
                     on_done.call(());
                 }
                 Err(e) => {
@@ -181,6 +185,21 @@ fn Login(on_done: Callback<()>) -> impl IntoView {
             </div>
         </div>
     }
+}
+
+/// Подписаться на уведомления о сообщениях клиентов — лучшим усилием.
+///
+/// Отказ в разрешении не должен мешать входу: работать без уведомлений можно,
+/// не войти — нельзя.
+fn subscribe_to_push() {
+    if crate::push::is_subscribed() || !crate::push::is_supported() {
+        return;
+    }
+    spawn_local(async {
+        if let Err(e) = crate::push::subscribe().await {
+            leptos::logging::warn!("подписка на уведомления: {e}");
+        }
+    });
 }
 
 pub fn lang_code() -> &'static str {
@@ -717,14 +736,288 @@ fn confirm(message: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Переписка с клиентом. Тред ЛИЧНЫЙ: это разговор куратора с этим человеком, и
+/// ни другой куратор, ни админ его не видят.
 #[component]
 fn ChatScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView {
-    let _ = (id, name, view);
-    view! { <div class="screen"></div> }
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let cid = store_value(id.clone());
+    let title = store_value(name.clone());
+    let messages = create_rw_signal(Vec::<api::Message>::new());
+    let input = create_rw_signal(String::new());
+    let sending = create_rw_signal(false);
+    let error = create_rw_signal(None::<String>);
+    let last_seq = create_rw_signal(0u64);
+
+    // Опрос живёт, пока экран открыт. Сторож на месте по той же причине, что в
+    // приложении худеющего: без него петли складываются друг на друга при
+    // быстром уходе и возврате.
+    let alive = Rc::new(Cell::new(true));
+    on_cleanup({
+        let a = alive.clone();
+        move || a.set(false)
+    });
+
+    let apply = move |page: api::MessagesPage| {
+        if page.messages.is_empty() {
+            return;
+        }
+        let newest = page.messages.iter().map(|m| m.seq).max().unwrap_or(0);
+        messages.update(|list| {
+            for m in page.messages {
+                if !list.iter().any(|x| x.seq == m.seq) {
+                    list.push(m);
+                }
+            }
+            list.sort_by_key(|m| m.seq);
+        });
+        if newest > last_seq.get_untracked() {
+            last_seq.set(newest);
+            // Отметка прочтения — по факту показа, и только вперёд.
+            spawn_local(async move {
+                if let Err(e) = api::mark_read(&cid.get_value(), newest).await {
+                    leptos::logging::warn!("отметка прочтения: {e}");
+                }
+            });
+        }
+    };
+
+    // Первая загрузка и дальше — длинный опрос: воркер держит запрос открытым до
+    // 25 секунд и отвечает, как только приходит новое.
+    create_effect({
+        let alive = alive.clone();
+        move |_| {
+            let alive = alive.clone();
+            spawn_local(async move {
+                match api::messages(&cid.get_value(), 0).await {
+                    Ok(page) => apply(page),
+                    Err(e) => {
+                        if e.is_auth() {
+                            auth::logout();
+                            view.set(View::Login);
+                            return;
+                        }
+                        error.set(Some(e.message().to_string()));
+                    }
+                }
+                while alive.get() {
+                    let after = last_seq.get_untracked();
+                    match api::messages_wait(&cid.get_value(), after, 25).await {
+                        Ok(page) => {
+                            if !alive.get() {
+                                return;
+                            }
+                            apply(page);
+                        }
+                        Err(e) => {
+                            if e.is_auth() {
+                                auth::logout();
+                                view.set(View::Login);
+                                return;
+                            }
+                            // Сеть моргнула — не сдаёмся молча, но и не крутим
+                            // петлю вхолостую: следующая попытка придёт с новым
+                            // длинным опросом.
+                            leptos::logging::warn!("опрос переписки: {e}");
+                        }
+                    }
+                }
+            });
+        }
+    });
+
+    let send = move |_| {
+        if sending.get_untracked() {
+            return;
+        }
+        let text = input.get_untracked().trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        sending.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match api::reply(&cid.get_value(), &text).await {
+                Ok(_) => {
+                    input.set(String::new());
+                    if let Ok(page) = api::messages(&cid.get_value(), last_seq.get_untracked()).await
+                    {
+                        apply(page);
+                    }
+                }
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            sending.set(false);
+        });
+    };
+
+    view! {
+        <div class="appbar">
+            <button class="btn btn--icon btn--ghost" on:click=move |_| view.set(View::Client {
+                id: cid.get_value(), name: title.get_value(),
+            })>
+                <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <div class="appbar__title">{title.get_value()}</div>
+        </div>
+        <div class="screen screen--noflow">
+            {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+            <div class="msgs" attr:data-testid="curator-chat">
+                {move || {
+                    let list = messages.get();
+                    if list.is_empty() {
+                        return view! { <p class="sub" style="padding: 20px;">{t("chat.empty")}</p> }
+                            .into_view();
+                    }
+                    list.into_iter().map(|m| {
+                        // Директивы — не разговор: их текст человек собирает у
+                        // себя, и показывать здесь пустой пузырь незачем.
+                        if m.kind != "text" {
+                            return view! {
+                                <p class="row__meta" style="align-self: center; text-align: center;">
+                                    {directive_note(&m)}
+                                </p>
+                            }.into_view();
+                        }
+                        let mine = m.sender == "expert";
+                        let class = if mine { "bubble bubble--me" } else { "bubble bubble--them" };
+                        view! { <div class=class attr:data-testid="curator-msg">{m.text}</div> }
+                            .into_view()
+                    }).collect_view()
+                }}
+            </div>
+            <div class="composer">
+                <textarea class="field" rows="1" placeholder=move || t("chat.placeholder")
+                    attr:data-testid="chat-input"
+                    prop:value=move || input.get()
+                    on:input=move |ev| input.set(event_target_value(&ev))></textarea>
+                <button class="btn btn--primary" attr:data-testid="chat-send"
+                    prop:disabled=move || sending.get() on:click=send>
+                    {move || t("chat.send")}
+                </button>
+            </div>
+        </div>
+    }
 }
 
+/// Короткая пометка о служебном сообщении. Куратору важно видеть, что директива
+/// ушла; полный текст её человек прочтёт у себя и на своём языке.
+fn directive_note(m: &api::Message) -> String {
+    match m.kind.as_str() {
+        "data_request" => "запрос данных".to_string(),
+        "data_share" => "получен отчёт".to_string(),
+        "set_planka_v2" | "set_planka" => "правка планки".to_string(),
+        "open_week" => "открыта тема".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Настройки куратора: имя и язык.
+///
+/// Имя видят клиенты — в приглашении и под каждым его сообщением. Язык здесь
+/// только про этот интерфейс: тексты, которые получает худеющий, собираются у
+/// него и на ЕГО языке.
 #[component]
 fn Settings(view: RwSignal<View>) -> impl IntoView {
-    let _ = view;
-    view! { <div class="screen"></div> }
+    let name = create_rw_signal(String::new());
+    let lang = create_rw_signal(i18n::get());
+    let busy = create_rw_signal(false);
+    let saved = create_rw_signal(false);
+    let error = create_rw_signal(None::<String>);
+
+    create_effect(move |_| {
+        spawn_local(async move {
+            match api::me().await {
+                Ok(Some(c)) => {
+                    name.set(c.name);
+                    if c.lang == "en" {
+                        lang.set(Lang::En);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    if e.is_auth() {
+                        auth::logout();
+                        view.set(View::Login);
+                        return;
+                    }
+                    error.set(Some(e.message().to_string()));
+                }
+            }
+        });
+    });
+
+    let save = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        let n = name.get_untracked().trim().to_string();
+        let l = lang.get_untracked();
+        busy.set(true);
+        error.set(None);
+        spawn_local(async move {
+            let code = if l == Lang::En { "en" } else { "ru" };
+            match api::set_profile(&n, code).await {
+                Ok(_) => {
+                    // Язык интерфейса переключается тут же — ждать перезапуска
+                    // ради собственной настройки незачем.
+                    i18n::set(l);
+                    saved.set(true);
+                }
+                Err(e) => error.set(Some(e.message().to_string())),
+            }
+            busy.set(false);
+        });
+    };
+
+    view! {
+        <div class="appbar">
+            <button class="btn btn--icon btn--ghost" on:click=move |_| view.set(View::Clients)>
+                <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <div class="appbar__title">{move || t("settings.title")}</div>
+        </div>
+        <div class="screen pad">
+            {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+            <div class="card">
+                <p class="sub" style="font-size: .82rem;">{move || t("settings.name")}</p>
+                <input class="field" style="margin-top: 6px;" attr:data-testid="settings-name"
+                    prop:value=move || name.get()
+                    on:input=move |ev| name.set(event_target_value(&ev)) />
+                <p class="sub" style="margin-top: 8px; font-size: .8rem;">
+                    {move || t("settings.name_hint")}
+                </p>
+            </div>
+
+            <div class="card" style="margin-top: 12px;">
+                <p class="sub" style="font-size: .82rem;">{move || t("settings.lang")}</p>
+                <div class="seg" style="margin-top: 8px;">
+                    <button class=move || if lang.get() == Lang::Ru { "seg__btn seg__btn--on" } else { "seg__btn" }
+                        attr:data-testid="settings-lang-ru"
+                        on:click=move |_| lang.set(Lang::Ru)>"Русский"</button>
+                    <button class=move || if lang.get() == Lang::En { "seg__btn seg__btn--on" } else { "seg__btn" }
+                        attr:data-testid="settings-lang-en"
+                        on:click=move |_| lang.set(Lang::En)>"English"</button>
+                </div>
+            </div>
+
+            <button class="btn btn--primary btn--block" style="margin-top: 16px;"
+                attr:data-testid="settings-save"
+                prop:disabled=move || busy.get() on:click=save>
+                {move || t("settings.save")}
+            </button>
+            {move || saved.get().then(|| view! {
+                <p class="sub" style="margin-top: 8px; color: var(--accent);"
+                    attr:data-testid="settings-saved">{move || t("settings.saved")}</p>
+            })}
+
+            <button class="btn btn--danger btn--block" style="margin-top: 28px;"
+                attr:data-testid="settings-logout"
+                on:click=move |_| { auth::logout(); view.set(View::Login); }>
+                {move || t("settings.logout")}
+            </button>
+        </div>
+    }
 }

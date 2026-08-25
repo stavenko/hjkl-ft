@@ -9,7 +9,7 @@
 //
 // Рационы, которые показаны на странице корзины, живут не здесь, а в самой
 // странице; пересчитывает их `price-basket-page.mjs` тем же модулем.
-import { RULES, evaluate } from "./basket-foods.mjs";
+import { RULES, evaluate, packLabel } from "./basket-foods.mjs";
 
 // ── Корзина: граммы ЗА НЕДЕЛЮ ───────────────────────────────────────────────
 const BASKET = {
@@ -53,7 +53,7 @@ rows.sort((a, b) => b.cost - a.cost);
 for (const r of rows) {
   console.log(`  ${r.name.padEnd(30)} ${String(r.grams).padStart(5)} г  (${String(r.day).padStart(4)} г/день)  ${n(r.cost).padStart(5)} ₽`);
   // Откуда цена: без этой строки «530 ₽/кг» нечем проверить.
-  console.log(`  ${" ".repeat(30)} ${r.pack || "цена по Ozon не проверялась"}`);
+  console.log(`  ${" ".repeat(30)} ${packLabel(r.pack) || "цена по Ozon не проверялась"}`);
 }
 console.log(`  ${"ИТОГО".padEnd(30)} ${" ".padStart(5)}    ${" ".padStart(4)}            ${n(sum.price).padStart(5)} ₽/нед  ·  ${n(sum.price / 7)} ₽/день`);
 

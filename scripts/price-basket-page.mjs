@@ -13,35 +13,42 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { RULES, evaluate } from "./basket-foods.mjs";
+import { RULES, evaluate, packLabel } from "./basket-foods.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const PAGE = path.join(ROOT, "landing-basket/index.html");
 
-/// Подпись в таблице → продукт. Названия на странице человеческие и не совпадают
-/// с ключами; расходятся — падаем, а не считаем молча мимо.
-const BY_LABEL = {
-  "Греческий йогурт 2%": "teos",
-  "Творог 5%": "cottage",
-  "Куриное бедро": "chickenThigh",
-  "Куриная грудка": "chickenBreast",
-  "Сырок глазированный": "syrok",
-  "Кефир 2.5%": "kefir",
-  "Чечевица": "lentils",
-  "Сыр полутвёрдый 45%": "cheese",
-  "Капуста белокочанная": "cabbage",
-  "Яблоки": "apple",
-  "Печень куриная": "chickenLiver",
-  "Яйцо куриное": "egg",
-  "Сельдь солёная": "herring",
-  "Гречка": "buckwheat",
-  "Морковь": "carrot",
-  "Свёкла": "beet",
-  "Семечки": "pumpkinSeeds",
-  "Масло подсолнечное": "sunflowerOil",
+/// Как продукт подписан в таблице. Название держится в одну строку, поэтому оно
+/// короткое: жирность и фасовка всё равно видны в окошке с ценой пачки.
+const LABEL_BY_KEY = {
+  teos: "Греческий йогурт",
+  cottage: "Творог 5%",
+  chickenThigh: "Куриное бедро",
+  chickenBreast: "Куриная грудка",
+  syrok: "Сырок глазированный",
+  kefir: "Кефир 2.5%",
+  lentils: "Чечевица",
+  cheese: "Сыр 45%",
+  cabbage: "Капуста",
+  apple: "Яблоки",
+  chickenLiver: "Печень куриная",
+  egg: "Яйцо куриное",
+  herring: "Сельдь солёная",
+  buckwheat: "Гречка",
+  carrot: "Морковь",
+  beet: "Свёкла",
+  pumpkinSeeds: "Семечки",
+  sunflowerOil: "Масло подсолнечное",
 };
-const LABEL_BY_KEY = Object.fromEntries(
-  Object.entries(BY_LABEL).map(([label, key]) => [key, label]));
+
+/// Подпись в файле → продукт. Кроме нынешних имён здесь лежат ПРЕЖНИЕ: граммы
+/// читаются из уже сохранённой страницы, и переименование не должно её ронять.
+const BY_LABEL = {
+  ...Object.fromEntries(Object.entries(LABEL_BY_KEY).map(([key, label]) => [label, key])),
+  "Греческий йогурт 2%": "teos",
+  "Капуста белокочанная": "cabbage",
+  "Сыр полутвёрдый 45%": "cheese",
+};
 
 /// Кому какой рацион. Тело — то же, на котором рационы подбирались.
 const PROFILES = {
@@ -63,9 +70,10 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
   const profile = PROFILES[id];
   if (!profile) throw new Error(`неизвестный рацион: ${id}`);
 
-  // Граммы — из самой страницы.
+  // Граммы — из самой страницы. Бренд в подписи не мешает: имя продукта лежит в
+  // <b>, и берётся именно оно.
   const basket = {};
-  const rowRe = /<div class="mname"><b>([^<]+)<\/b><\/div>\s*<div class="mqty">(\d+) г<\/div>/g;
+  const rowRe = /<div class="mname"><b>([^<]+)<\/b>[\s\S]*?<div class="mqty">(\d+) г<\/div>/g;
   for (const m of body.matchAll(rowRe)) {
     const key = BY_LABEL[m[1]];
     if (!key) throw new Error(`${id}: нет продукта под подписью «${m[1]}»`);
@@ -76,13 +84,27 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
   const { sum, rows, targets: t } = evaluate(basket, profile);
   rows.sort((a, b) => b.cost - a.cost);
 
-  const menu = rows.map((r) => [
-    '          <div class="mrow">',
-    `            <div class="mname"><b>${LABEL_BY_KEY[r.key]}</b></div>`,
-    `            <div class="mqty">${r.grams} г</div>`,
-    `            <div class="mcost">${Math.round(r.cost)} ₽</div>`,
-    "          </div>",
-  ].join("\n")).join("\n");
+  const menu = rows.map((r) => {
+    if (!r.pack) throw new Error(`${id}: у «${r.name}» нет карточки Ozon — цену нечем подтвердить`);
+    // Фото есть не у всех позиций; вместо чужой картинки — плашка с буквой.
+    const label = LABEL_BY_KEY[r.key];
+    const pic = r.photo
+      ? `            <img class="mpic" src="/img/mini/${r.photo}.jpg" alt="" loading="lazy" width="44" height="44" />`
+      : `            <span class="mpic mpic-blank" aria-hidden="true">${label[0]}</span>`;
+    // У весового товара (капуста, морковь) бренда нет — и повторять название
+    // второй строкой незачем.
+    const brand = r.pack.brand || "весовой товар";
+    const popId = `pack-${id}-${r.key}`;
+    return [
+      '          <div class="mrow">',
+      pic,
+      `            <div class="mname"><b>${label}</b><span>${brand}</span></div>`,
+      `            <div class="mqty">${r.grams} г</div>`,
+      `            <button class="mcost" type="button" aria-expanded="false" aria-controls="${popId}">${Math.round(r.cost)} ₽</button>`,
+      `            <div class="mpop" id="${popId}" role="tooltip" hidden>${packLabel(r.pack)}<i>${r.pricePerKg} ₽/кг</i></div>`,
+      "          </div>",
+    ].join("\n");
+  }).join("\n");
 
   const n = (x, d = 0) => x.toFixed(d);
   const inds = [

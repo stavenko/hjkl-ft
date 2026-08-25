@@ -331,23 +331,6 @@ pub fn PwaPrompt(on_dismiss: Callback<()>) -> impl IntoView {
     }
 
     view! {
-        <style>"
-            .steps { display: flex; flex-direction: column; gap: 0.75rem; }
-            .step { display: flex; align-items: flex-start; gap: 0.75rem; }
-            .step-num {
-                flex-shrink: 0; width: 1.75rem; height: 1.75rem;
-                border-radius: 50%; background: var(--bulma-link); color: var(--bulma-link-invert);
-                display: flex; align-items: center; justify-content: center;
-                font-size: 0.85rem; font-weight: 600;
-            }
-            .step-body { font-size: 0.95rem; line-height: 1.5; padding-top: 0.15rem; }
-            /* Скриншот живого интерфейса под текстом шага — мигающая подсказка
-               показывает, куда нажимать. */
-            .step-shot {
-                display: block; width: 100%; margin-top: 0.5rem;
-                border-radius: 10px; border: 1px solid var(--bulma-border);
-            }
-        "</style>
         <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; background: var(--bulma-scheme-main); overflow-y: auto;">
             <div style="max-width: 24rem;">
                 <img src="/icon-192.png" alt="re:Norma" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />

@@ -223,7 +223,37 @@ pub fn render_steps(platform: &str, lang: fn() -> Lang) -> View {
     // Локальный переводчик: дальше по тексту `t("…")` читается ровно так же, как
     // читалось, когда его давало приложение.
     let t = move |key: &'static str| step(lang(), key);
-    match platform {
+    // Оформление — здесь же, а не у хозяина. Раньше оно лежало в `<style>` внутри
+    // экрана приложения худеющего, и кураторское приложение, звавшее эту же
+    // функцию, получало разметку без единого правила: номер и текст вставали
+    // столбиком вместо строки. Забыть его теперь физически нельзя.
+    //
+    // Цвета берутся вложенными фолбэками: приложения живут в разных палитрах, и
+    // одна и та же разметка обязана попасть в обе. Куратор определяет `--accent`
+    // и `--line`, приложение худеющего — нет, и проваливается в свои `--bulma-*`.
+    let styles = view! {
+        <style>"
+            .steps { display: flex; flex-direction: column; gap: 0.75rem; }
+            .step { display: flex; align-items: flex-start; gap: 0.75rem; }
+            .step-num {
+                flex-shrink: 0; width: 1.75rem; height: 1.75rem;
+                border-radius: 50%;
+                background: var(--accent, var(--bulma-link, #0F9E70));
+                color: var(--accent-ink, var(--bulma-link-invert, #FFFFFF));
+                display: flex; align-items: center; justify-content: center;
+                font-size: 0.85rem; font-weight: 600;
+            }
+            .step-body { font-size: 0.95rem; line-height: 1.5; padding-top: 0.15rem; }
+            /* Скриншот живого интерфейса под текстом шага — мигающая подсказка
+               показывает, куда нажимать. */
+            .step-shot {
+                display: block; width: 100%; margin-top: 0.5rem;
+                border-radius: 10px;
+                border: 1px solid var(--line, var(--bulma-border, #DFE4EA));
+            }
+        "</style>
+    };
+    let steps = match platform {
         // Safari на iPhone. Раньше шаги были на словах и с нарисованными значками;
         // теперь — снимки живого интерфейса с мигающей подсказкой, куда нажимать
         // (scripts/shot-ios-install-gifs.mjs). Значок «Поделиться» у Safari стоит
@@ -494,7 +524,8 @@ pub fn render_steps(platform: &str, lang: fn() -> Lang) -> View {
                 </div>
             </div>
         }.into_view(),
-    }
+    };
+    view! { {styles} {steps} }.into_view()
 }
 
 #[cfg(test)]

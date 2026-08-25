@@ -21,14 +21,62 @@ and how to deploy/operate it.
 
 ---
 
+## 1a. Куратор
+
+Куратор — САМОСТОЯТЕЛЬНАЯ роль, а не разновидность эксперта.
+
+| | эксперт (админка) | куратор |
+|---|---|---|
+| домен и RP паскея | `admin.renorma.app` | `curator.renorma.app` |
+| как получают доступ | оператор одобряет код (`/admin/approve`) | регистрируются сами (`/curator/register`) |
+| кого видят | все треды, адресованные админу | только своих клиентов |
+| откуда берут данные | присланные снимки | присланные отчёты |
+
+**Маршрутизация.** `/message`, `/messages`, `/read` смотрят привязку: есть куратор —
+тред с ним, нет — тред с админом. Развилка живёт ТОЛЬКО в воркере
+(`routing_of_user`); приложение худеющего про адресата не знает и знать не обязано.
+У человека с куратором сообщения в очередь админа не попадают.
+
+**Приглашение.** Куратор заводит слот с именем (это имя видит только он — у худеющего
+имени в системе нет) и получает ссылку `{app_origin}/curator?c=<код>`. Код гаснет
+СОГЛАСИЕМ, а не открытием: человек вправе подумать и вернуться. Приглашение — для тех,
+кто уже пользуется приложением; открывшего без сессии экран отправляет на лендинг.
+
+**Данные.** Сервер данных худеющего не хранит и здесь. Куратор просит отчёт за срок
+(`kind:"data_request"`, `payload={days}`), человек отправляет его сам
+(`kind:"data_share"`), и последний отчёт кэшируется в слоте — чтобы дашборд открывался
+сразу, а не перелистывал переписку.
+
+**Директивы.** `set_planka_v2` с `{key, amount?, locked?}` — одна на любой индикатор.
+Несёт ЧИСЛО; текст плашки и письма собирает приложение худеющего на СВОЁМ языке
+(`frontend/src/services/directives.rs`). Прежние `set_planka` и `open_week` переведены
+на тот же порядок.
+
+**Отвязка.** Куратором, самим человеком или переходом к другому куратору — во всех трёх
+случаях приложение узнаёт её по одному признаку: сменился адресат в опросе. Тогда
+кураторские калории и шаги переносятся в родные места (они держатся до ближайшего
+пересчёта), остальные переопределения стираются, замки снимаются, оба недельных якоря
+сдвигаются на сегодня, и приходит письмо с кнопкой «пересчитать сейчас».
+
+**Проверка:** `node scripts/curator-e2e.mjs` — весь путь по ручкам живого dev-воркера.
+
+---
+
 ## 2. support-worker
 
 `cloudflare/support-worker/` — Rust (worker 0.8, SQLite Durable Objects).
 
 ### Durable Objects
-- **`ConversationDO`** — one per user (`id_from_name(user_id)`). SQLite `messages(seq PK,
-  client_id UNIQUE, sender, expert_id, text, created_at)` + read markers. `seq` is the
-  monotonic per-thread order AND the poll cursor.
+- **`ConversationDO`** — тред на ПАРУ, а не на человека. Пара «худеющий ↔ админ»
+  сохранила прежний ключ (`id_from_name(user_id)`), пара «худеющий ↔ куратор» —
+  `id_from_name("{user_id}|curator:{curator_id}")`. Переписка личная: новый куратор
+  не видит разговора с предыдущим. SQLite `messages(seq PK, client_id UNIQUE, sender,
+  expert_id, text, created_at, kind, payload, sender_name)` + отметки прочтения. `seq`
+  монотонен ВНУТРИ треда и он же курсор опроса — между тредами номера несравнимы.
+- **`CuratorIndexDO`** — **global** (`id_from_name("curators")`). Кураторы и их слоты
+  клиентов: `curators(curator_id PK, name, lang)` и `clients(id PK, curator_id, name,
+  invite_code UNIQUE, user_id, …, last_report, request_days)`. Частичный UNIQUE по
+  `user_id` держит правило «один худеющий — один куратор».
 - **`ConversationIndexDO`** — **global** (`id_from_name("index")`). The sortable queue
   (`conversations`, `pending_seq` monotonic counter) **plus** the admin allowlist:
   `admins(sub PK, approved_at)` and `admin_requests(code PK, sub UNIQUE, created_at)`.

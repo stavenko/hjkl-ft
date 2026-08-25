@@ -34,6 +34,23 @@ admin/scripts/deploy-prod.sh
 cd admin && trunk build --release && npx wrangler pages deploy dist --project-name=renorma-admin-dev --branch main --commit-dirty=true
 ```
 
+## Куратор (→ Cloudflare Pages)
+
+**Prod** (`renorma-curator-prod` → `curator.renorma.app`):
+```bash
+curator/scripts/deploy-prod.sh
+```
+**Dev** (`renorma-curator-dev`):
+```bash
+cd curator && trunk build --release && npx wrangler pages deploy dist --project-name=renorma-curator-dev --branch main --commit-dirty=true
+```
+
+> Домен у кураторского приложения СВОЙ не для красоты: `rp_id` паскея берётся от
+> него, и `curator.renorma.app` не является registrable suffix ни для
+> `fit.renorma.app`, ни для `admin.renorma.app`. Три области ключей не
+> пересекаются структурно, а не только по origin. Соответствующие переменные —
+> `CURATOR_RP_ID`/`CURATOR_RP_ORIGIN` в `cloudflare/auth-worker/wrangler.toml`.
+
 ## Воркеры (Rust → Cloudflare Workers)
 
 Каждый `cloudflare/<worker>/wrangler.toml`: `name = "<worker>-dev"` (по умолчанию) + `[env.production] name = "<worker>-prod"`. Билд (`worker-build --release`) запускается автоматически из `[build] command` при `wrangler deploy`.
@@ -55,4 +72,4 @@ cd cloudflare/<worker> && npx wrangler deploy --env production
 
 ## Порядок
 
-Обычный релиз: воркеры (если менялись) → фронтенд/admin. Прод — после проверки на dev.
+Обычный релиз: воркеры (если менялись) → фронтенд/admin/curator. Прод — после проверки на dev.

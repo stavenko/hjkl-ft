@@ -74,3 +74,38 @@ pub struct ConversationsPage {
     pub next_after: Option<String>,
     pub has_more: bool,
 }
+
+// ---- wire: куратор и его клиенты ----
+
+/// Профиль куратора. `name` показывается худеющему на экране согласия и в чате,
+/// `lang` — язык интерфейса самого куратора (на тексты, которые видит худеющий,
+/// он не влияет: те собираются у худеющего на его языке).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CuratorProfile {
+    pub curator_id: String,
+    pub name: String,
+    pub lang: String,
+    pub created_at: String,
+}
+
+/// Слот клиента у куратора. `invite_code` присутствует ТОЛЬКО пока слот не
+/// привязан: после согласия код погашен, и его место в интерфейсе занимают
+/// данные человека.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClientRow {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invite_code: Option<String>,
+    pub bound: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bound_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unbound_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_report_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_days: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_at: Option<String>,
+}

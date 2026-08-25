@@ -2,16 +2,22 @@ use worker::*;
 
 mod conversation_do;
 mod conversation_index_do;
+mod curator_index_do;
 mod token;
 mod types;
 
 pub use conversation_do::ConversationDO;
 pub use conversation_index_do::ConversationIndexDO;
+pub use curator_index_do::CuratorIndexDO;
 
 use token::validate_from_header;
 use types::{AppendResult, ErrorResponse};
 
 const PREVIEW_MAX: usize = 200;
+/// Пределы на имена. Имя куратора видит худеющий на экране согласия, имя клиента —
+/// только сам куратор; и то и другое — подпись, а не текст, поэтому короткие.
+const CURATOR_NAME_MAX: usize = 64;
+const CLIENT_NAME_MAX: usize = 64;
 
 // ---- Durable Object stubs ----
 
@@ -24,6 +30,12 @@ fn conversation_stub(env: &Env, user_id: &str) -> Result<worker::durable::Stub> 
 fn index_stub(env: &Env) -> Result<worker::durable::Stub> {
     env.durable_object("CONVERSATION_INDEX_DO")?
         .id_from_name("index")?
+        .get_stub()
+}
+
+fn curator_stub(env: &Env) -> Result<worker::durable::Stub> {
+    env.durable_object("CURATOR_INDEX_DO")?
+        .id_from_name("curators")?
         .get_stub()
 }
 
@@ -101,6 +113,52 @@ async fn auth_expert(req: &Request, env: &Env) -> std::result::Result<String, Re
         Ok(sub)
     } else {
         Err(json_status(403, "not an expert"))
+    }
+}
+
+/// Позвать кураторский DO и вернуть его JSON. Ошибка стуба/сети/разбора — это
+/// 500 и никогда не «нет доступа»: молчаливая деградация в отказ скрыла бы
+/// поломку хранилища.
+async fn curator_do(
+    env: &Env,
+    path: &str,
+    body: &serde_json::Value,
+) -> std::result::Result<serde_json::Value, Response> {
+    let do_req = do_request(path, body)
+        .map_err(|e| json_status(500, &format!("curator DO request {path}: {e}")))?;
+    let stub =
+        curator_stub(env).map_err(|e| json_status(500, &format!("curator DO stub: {e}")))?;
+    let mut resp = stub
+        .fetch_with_request(do_req)
+        .await
+        .map_err(|e| json_status(500, &format!("curator DO fetch {path}: {e}")))?;
+    let status = resp.status_code();
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| json_status(500, &format!("curator DO parse {path}: {e}")))?;
+    if status != 200 {
+        let msg = v.get("error").and_then(|e| e.as_str()).unwrap_or("curator DO error");
+        return Err(json_status(status, msg));
+    }
+    Ok(v)
+}
+
+/// 401 при негодном токене, 403 если `sub` не заведён куратором.
+///
+/// В отличие от `auth_expert`, здесь нет одобрения оператором: куратором
+/// становится любой, кто позвал `/curator/register`. Гейт проверяет только, что
+/// профиль существует, — то есть что человек пришёл из кураторского приложения,
+/// а не тычет кураторскими ручками из приложения худеющего.
+async fn auth_curator(req: &Request, env: &Env) -> std::result::Result<String, Response> {
+    let sub = validate_from_header(req, env)
+        .await
+        .map_err(|e| json_status(401, &e.to_string()))?;
+    let v = curator_do(env, "/curator-get", &serde_json::json!({ "curator_id": sub })).await?;
+    if v.get("found").and_then(|b| b.as_bool()).unwrap_or(false) {
+        Ok(sub)
+    } else {
+        Err(json_status(403, "not a curator"))
     }
 }
 
@@ -465,6 +523,162 @@ async fn expert_read(mut req: Request, ctx: RouteContext<()>) -> Result<Response
         .await
 }
 
+// ---- CURATOR handlers ----
+//
+// Куратор — свободная роль: регистрируется сам, никого не спрашивая. Всё, что
+// ниже, кроме /curator/register, требует уже заведённого профиля (`auth_curator`),
+// и КАЖДАЯ операция над клиентом привязана к `curator_id` вызывающего — чужой
+// `cid` не находится и отвечает 404, а не чужими данными.
+
+/// POST /curator/register (JWT). Идемпотентно: повторный вызов возвращает
+/// заведённый профиль. Паскей человек создал на кураторском домене — здесь
+/// заводится только профиль под его `sub`.
+async fn curator_register(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_user(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    match curator_do(
+        &ctx.env,
+        "/curator-register",
+        &serde_json::json!({ "curator_id": sub }),
+    )
+    .await
+    {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
+/// GET /curator/me — профиль (имя и язык).
+async fn curator_me(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    match curator_do(&ctx.env, "/curator-get", &serde_json::json!({ "curator_id": sub })).await {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
+/// POST /curator/me {name?, lang?} — правка своего профиля.
+async fn curator_me_set(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::Value::Null);
+    let mut call = serde_json::json!({ "curator_id": sub });
+    if let Some(name) = body.get("name").and_then(|v| v.as_str()) {
+        let name = name.trim();
+        if name.chars().count() > CURATOR_NAME_MAX {
+            return Ok(json_status(400, "name too long"));
+        }
+        call["name"] = serde_json::Value::String(name.to_string());
+    }
+    if let Some(lang) = body.get("lang").and_then(|v| v.as_str()) {
+        if !matches!(lang, "ru" | "en") {
+            return Ok(json_status(400, "unsupported lang"));
+        }
+        call["lang"] = serde_json::Value::String(lang.to_string());
+    }
+    match curator_do(&ctx.env, "/curator-set", &call).await {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
+/// GET /curator/clients — список слотов.
+async fn curator_clients(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    match curator_do(&ctx.env, "/client-list", &serde_json::json!({ "curator_id": sub })).await {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
+/// POST /curator/clients {name} — завести слот и получить пригласительный код.
+async fn curator_client_create(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::Value::Null);
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if name.is_empty() {
+        return Ok(json_status(400, "name required"));
+    }
+    if name.chars().count() > CLIENT_NAME_MAX {
+        return Ok(json_status(400, "name too long"));
+    }
+    match curator_do(
+        &ctx.env,
+        "/client-create",
+        &serde_json::json!({ "curator_id": sub, "name": name }),
+    )
+    .await
+    {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
+/// POST /curator/clients/:cid/rename {name}. POST, а не PATCH: CORS-преамбула
+/// воркера разрешает только GET/POST/OPTIONS, и заводить ради переименования
+/// новый метод — лишний повод для сюрприза в браузере.
+async fn curator_client_rename(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let Some(cid) = ctx.param("cid").map(|s| s.to_string()) else {
+        return Ok(json_status(400, "missing cid"));
+    };
+    let body: serde_json::Value = req.json().await.unwrap_or(serde_json::Value::Null);
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if name.is_empty() {
+        return Ok(json_status(400, "name required"));
+    }
+    if name.chars().count() > CLIENT_NAME_MAX {
+        return Ok(json_status(400, "name too long"));
+    }
+    match curator_do(
+        &ctx.env,
+        "/client-rename",
+        &serde_json::json!({ "curator_id": sub, "id": cid, "name": name }),
+    )
+    .await
+    {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
+/// POST /curator/clients/:cid/delete — убрать слот из списка совсем.
+async fn curator_client_delete(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let Some(cid) = ctx.param("cid").map(|s| s.to_string()) else {
+        return Ok(json_status(400, "missing cid"));
+    };
+    match curator_do(
+        &ctx.env,
+        "/client-delete",
+        &serde_json::json!({ "curator_id": sub, "id": cid }),
+    )
+    .await
+    {
+        Ok(v) => Response::from_json(&v),
+        Err(resp) => Ok(resp),
+    }
+}
+
 // ---- ADMIN authorization handlers ----
 
 /// GET /admin/me (user JWT). Returns the DO's {"approved":bool,"code":string|null}
@@ -657,6 +871,7 @@ fn is_allowed_origin(origin: &str) -> bool {
         || (origin.starts_with("https://") && origin.ends_with(".renorma.app"))
         || origin == "https://renorma-fit-dev.pages.dev"
         || origin == "https://renorma-admin-dev.pages.dev"
+        || origin == "https://renorma-curator-dev.pages.dev"
         || origin.starts_with("http://localhost")
         || origin.starts_with("http://127.0.0.1")
 }
@@ -751,6 +966,14 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .get_async("/conversations/:uid/messages", expert_messages)
         .post_async("/conversations/:uid/reply", expert_reply)
         .post_async("/conversations/:uid/read", expert_read)
+        // CURATOR side (свободная регистрация; каждая операция — в своих клиентах)
+        .post_async("/curator/register", curator_register)
+        .get_async("/curator/me", curator_me)
+        .post_async("/curator/me", curator_me_set)
+        .get_async("/curator/clients", curator_clients)
+        .post_async("/curator/clients", curator_client_create)
+        .post_async("/curator/clients/:cid/rename", curator_client_rename)
+        .post_async("/curator/clients/:cid/delete", curator_client_delete)
         // ADMIN authorization (request-code + operator secret; no redeploy to add)
         .get_async("/admin/me", admin_me)
         .post_async("/admin/request", admin_request)

@@ -16,9 +16,20 @@ class_name = "ConversationDO"
 name = "CONVERSATION_INDEX_DO"
 class_name = "ConversationIndexDO"
 
+# Кураторы и их клиенты. Отдельный глобальный DO, а не таблицы в
+# ConversationIndexDO: тот обслуживает очередь админа, и мешать в него роль,
+# которая живёт своей жизнью, значит связать два независимых списка.
+[[durable_objects.bindings]]
+name = "CURATOR_INDEX_DO"
+class_name = "CuratorIndexDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ConversationDO", "ConversationIndexDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["CuratorIndexDO"]
 
 # Hourly support-digest push to the approved experts (see run_support_digest).
 [triggers]
@@ -66,6 +77,10 @@ class_name = "ConversationDO"
 [[env.production.durable_objects.bindings]]
 name = "CONVERSATION_INDEX_DO"
 class_name = "ConversationIndexDO"
+
+[[env.production.durable_objects.bindings]]
+name = "CURATOR_INDEX_DO"
+class_name = "CuratorIndexDO"
 
 # All three shared secrets are mounted from the global Secrets Store in prod
 # (dev keeps the [vars] values in the default-env [vars] block above). Each

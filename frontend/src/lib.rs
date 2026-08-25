@@ -25,6 +25,9 @@ pub fn main() {
         services::config::load_or_default();
         // Profile reactivity BEFORE db::init (which hydrates the profile cache).
         services::profile::init();
+        // Кураторские планки — по той же причине и тем же порядком: их кэш
+        // гидратируется внутри активации базы, а сигнал обязан существовать раньше.
+        services::curator_plankas::init();
 
         // Сигналы версий сторов нужны раньше самой базы: на них подписаны ресурсы
         // виджетов, а те строятся до того, как выяснится, есть ли сессия.

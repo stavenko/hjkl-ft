@@ -129,6 +129,12 @@ pub fn set_sex(sex: Sex) {
 /// week — there is no manual editing UI. Lives here (not in `goals`) so no
 /// nutrient-iterating food UI can ever pick it up.
 pub fn get_steps_planka() -> Option<f64> {
+    crate::services::curator_plankas::or_ours_opt("steps", our_steps_planka())
+}
+
+/// Планка шагов, которую поставило САМО приложение, — без кураторского
+/// приоритета (см. [`crate::services::local::our_calorie_goal_amount`]).
+pub fn our_steps_planka() -> Option<f64> {
     CACHE.with(|c| c.borrow().as_ref().and_then(|r| r.steps_planka).filter(|p| *p > 0.0))
 }
 
@@ -363,6 +369,11 @@ pub fn protein_target_g(
 /// before protein ever matters), so the task simply shows «0 г» until the profile
 /// is complete — the same fallback the weight-only formula used.
 pub async fn protein_target_from_profile(weight_kg: f64) -> u32 {
+    // Кураторское число поверх нашей кривой: белок выводится из калорийной
+    // планки, но куратор вправе назвать своё.
+    if let Some(g) = crate::services::curator_plankas::get("protein") {
+        return g.max(0.0).round() as u32;
+    }
     let kcal = crate::services::local::calorie_goal_amount().await;
     match (get_height_cm(), get_age_years(), get_sex()) {
         (Some(h), Some(age), Some(sex)) => {

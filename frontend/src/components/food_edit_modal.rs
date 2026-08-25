@@ -298,8 +298,8 @@ pub fn FoodEditModal(
                                     // вниз. Числа тут намеренно нет: важна сторона.
                                     let balance = match f.unsat_to_sat {
                                         None => "—",
-                                        Some(r) if r > crate::services::fats::UNSAT_TO_SAT_MIN => "улучшает",
-                                        Some(r) if r < crate::services::fats::UNSAT_TO_SAT_MIN => "ухудшает",
+                                        Some(r) if r > crate::services::fats::Fat::Ratio.target() => "улучшает",
+                                        Some(r) if r < crate::services::fats::Fat::Ratio.target() => "ухудшает",
                                         Some(_) => "не влияет",
                                     };
                                     view! {

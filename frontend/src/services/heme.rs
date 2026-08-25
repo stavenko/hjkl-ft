@@ -28,6 +28,11 @@ pub const PORTION_PROTEIN_G: f64 = 25.0;
 /// Недельная цель в порциях.
 pub const WEEKLY_PORTIONS: f64 = 3.0;
 
+/// Действующая недельная планка порций: кураторская, если задана.
+pub fn weekly_portions() -> f64 {
+    crate::services::curator_plankas::or_ours("heme", WEEKLY_PORTIONS)
+}
+
 /// Виден ли индикатор. Открывается ровно вместе с железом — отдельного условия
 /// нет и быть не должно: это две стороны одного разговора.
 pub fn unlocked() -> bool {
@@ -73,7 +78,7 @@ pub async fn weekly_progress() -> Option<WeeklyHeme> {
     let (start, _end) = week_bounds(today)?;
     Some(WeeklyHeme {
         portions: portions_between(start, today).await,
-        target: WEEKLY_PORTIONS,
+        target: weekly_portions(),
         day_of_week: (today - start).num_days() as u32 + 1,
     })
 }
@@ -103,7 +108,7 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
         if !logged {
             continue;
         }
-        history.push(portions_between(s, e).await >= WEEKLY_PORTIONS);
+        history.push(portions_between(s, e).await >= weekly_portions());
     }
     history.reverse();
     super::indicators::weekly_state(&history)
@@ -130,7 +135,7 @@ pub async fn weekly_series() -> super::indicators::IndicatorSeries {
             // и у гема оказывается четыре недели там, где у железа восемь, хотя
             // недели у них одни и те же.
             let p = portions_between(s, e).await;
-            let ratio = logged.then(|| p / WEEKLY_PORTIONS);
+            let ratio = logged.then(|| p / weekly_portions());
             points.push((s.format("%Y-%m-%d").to_string(), p, ratio));
             labels.push(format!("−{back}"));
             met.push(ratio.map(|r| r >= 1.0));

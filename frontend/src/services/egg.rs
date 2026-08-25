@@ -29,12 +29,17 @@ pub const EGG_WEEK_OPEN_KEY: &str = "egg_week_opened_at";
 /// Недельная планка в ЯЙЦАХ. Минимум, а не потолок.
 pub const WEEKLY_MIN_EGGS: f64 = 7.0;
 
+/// Действующая недельная планка в штуках: кураторская, если задана.
+pub fn weekly_min_eggs() -> f64 {
+    crate::services::curator_plankas::or_ours("egg", WEEKLY_MIN_EGGS)
+}
+
 /// Одно яйцо, граммы. Столовое яйцо первой категории без скорлупы — около 50 г.
 pub const GRAMS_PER_EGG: f64 = 50.0;
 
 /// Недельная планка в ГРАММАХ — то, в чём идёт счёт: 50 г × 7.
 pub fn weekly_min_grams() -> f64 {
-    WEEKLY_MIN_EGGS * GRAMS_PER_EGG
+    weekly_min_eggs() * GRAMS_PER_EGG
 }
 
 /// Сколько яиц стоит за таким количеством яичных граммов.

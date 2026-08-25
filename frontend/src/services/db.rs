@@ -98,7 +98,7 @@ fn bump(store_name: &str) {
     });
 }
 
-const DB_VERSION: u32 = 20;
+const DB_VERSION: u32 = 21;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -108,7 +108,7 @@ const ALL_STORES: &[&str] = &[
     "foods", "diary", "recipes", "recipe_ingredients",
     "goals", "food_drafts", "weight_entries", "step_entries",
     "progress_photos", "summaries", "chat", "profile", "deletions", "_sync_meta",
-    "app_flags", "planka_history", "food_probe",
+    "app_flags", "planka_history", "curator_plankas", "food_probe",
     "support_messages", "support_outbox", "support_meta",
 ];
 
@@ -203,6 +203,9 @@ fn builder(name: &str) -> rexie::RexieBuilder {
         .add_object_store(ObjectStore::new("support_meta").key_path("key"))
         // История планок: одна строка на «вид × день установки». Синкается — планка
         // принадлежит человеку, а не устройству.
+        // Планки, заданные КУРАТОРОМ, — отдельно от наших. Ключ — индикатор:
+        // запись на индикатор одна, потому что действующее значение одно.
+        .add_object_store(ObjectStore::new("curator_plankas").key_path("key"))
         .add_object_store(
             ObjectStore::new("planka_history")
                 .key_path("id")
@@ -330,6 +333,9 @@ pub async fn activate_for_user(user_id: &str) -> Result<(), String> {
     // Гидратация кэша профиля, чтобы синхронные геттеры читали профиль АКТИВНОГО
     // пользователя.
     crate::services::profile::hydrate().await;
+    // Кураторские планки читаются синхронно из тех же мест, что профиль, — значит
+    // и гидратируются здесь же, до того как кто-нибудь их спросит.
+    crate::services::curator_plankas::hydrate().await;
 
     bump_all();
     // Последним: те, кто ждал базу, начинают работу — и уже по гидратированному
@@ -449,7 +455,7 @@ fn next_outbox_seq() -> String {
 /// The local key field of a store (mirrors the object-store key paths above).
 fn key_field(store: &str) -> &'static str {
     match store {
-        "profile" | "app_flags" | "_sync_meta" => "key",
+        "profile" | "app_flags" | "_sync_meta" | "curator_plankas" => "key",
         "ind_protein" | "ind_veg_fruit" | "ind_steps" | "ind_calories" => "date",
         _ => "id",
     }
@@ -461,9 +467,8 @@ fn key_field(store: &str) -> &'static str {
 fn outbox_target(store: &str, local_key: &str) -> Option<(String, String)> {
     match store {
         "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "profile"
-        | "weight_entries" | "step_entries" | "deletions" | "planka_history" => {
-            Some((store.to_string(), local_key.to_string()))
-        }
+        | "weight_entries" | "step_entries" | "deletions" | "planka_history"
+        | "curator_plankas" => Some((store.to_string(), local_key.to_string())),
         "app_flags" => (!crate::services::app_flags::is_device_local(local_key))
             .then(|| ("app_flags".to_string(), local_key.to_string())),
         "ind_protein" => Some(("ind_days".into(), format!("protein:{local_key}"))),
@@ -508,6 +513,13 @@ fn is_synced_store(store: &str) -> bool {
             | "step_entries"
             | "deletions"
             | "app_flags"
+            // planka_history НЕ БЫЛО в этом списке, хотя оно есть и в
+            // outbox_target, и во всех списках sync.rs. Из-за этого правки истории
+            // планок не попадали в очередь и инкрементально не уезжали: второе
+            // устройство узнавало о них только полной выгрузкой. Заметно это
+            // стало на кураторском отчёте, который историю планок как раз и шлёт.
+            | "planka_history"
+            | "curator_plankas"
             | "ind_protein"
             | "ind_veg_fruit"
             | "ind_steps"

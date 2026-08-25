@@ -446,7 +446,7 @@ fn weekly_fat_gauges(w: crate::services::fats::WeeklyFats) -> impl IntoView {
         // Шкала у него РАСХОДЯЩАЯСЯ: см. `BalanceGauge`.
         <crate::components::gauge::BalanceGauge
             value=w.ratio()
-            target=crate::services::fats::UNSAT_TO_SAT_MIN
+            target=crate::services::fats::Fat::Ratio.target()
             label="Баланс жира".to_string()
             height=12.0
     />

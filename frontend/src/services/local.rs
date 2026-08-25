@@ -376,6 +376,13 @@ pub async fn calorie_planka_suggestion() -> Option<f64> {
 
 /// The currently-set daily calorie planka (the `Calories`/`AtMost` goal), if any.
 pub async fn calorie_goal_amount() -> Option<f64> {
+    crate::services::curator_plankas::or_ours_opt("calories", our_calorie_goal_amount().await)
+}
+
+/// Планка по калориям, которую посчитало САМО приложение, — без кураторского
+/// приоритета. Нужна ровно там, где приоритет неуместен: недельный пересчёт
+/// отталкивается от предыдущего значения, а перенос при отвязке возвращает наше.
+pub async fn our_calorie_goal_amount() -> Option<f64> {
     list_goals()
         .await
         .into_iter()

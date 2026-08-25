@@ -44,10 +44,16 @@ const CALCIUM_PER_DAY_MG: f64 = 1000.0; // user: 1 g/day for everyone
 /// Vegetables/fruit target (g/day): user-set — women 600, men 800. Unknown sex →
 /// 600 (the lower, so it isn't spuriously missed before the persona is complete).
 fn veg_fruit_per_day_g() -> f64 {
-    match profile::get_sex() {
+    let ours = match profile::get_sex() {
         Some(Sex::Male) => 800.0,
         _ => 600.0,
-    }
+    };
+    crate::services::curator_plankas::or_ours("veg_fruit", ours)
+}
+
+/// Суточная норма кальция: наша константа, если куратор не назвал свою.
+pub fn calcium_per_day_mg() -> f64 {
+    crate::services::curator_plankas::or_ours("calcium", CALCIUM_PER_DAY_MG)
 }
 
 // Nutrient display names. `Food.nutrients` is keyed by the display name (same as
@@ -894,7 +900,8 @@ async fn target_for(key: &str) -> f64 {
         "veg_fruit" => veg_fruit_per_day_g(),
         "steps" => crate::services::profile::get_steps_planka().unwrap_or(0.0),
         "calories" => local::calorie_goal_amount().await.unwrap_or(0.0),
-        "calcium" => CALCIUM_PER_DAY_MG,
+        "calcium" => calcium_per_day_mg(),
+        "fiber" => crate::services::fiber::daily_target_effective_g().await,
         _ => 0.0,
     }
 }

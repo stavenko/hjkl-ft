@@ -41,12 +41,21 @@ pub fn daily_target_g(planka_kcal: Option<f64>) -> f64 {
     from_kcal.max(MIN_G_PER_DAY)
 }
 
+/// Действующая СУТОЧНАЯ норма: кураторская, если он её задал, иначе наша от
+/// калорийной планки.
+pub async fn daily_target_effective_g() -> f64 {
+    crate::services::curator_plankas::or_ours(
+        "fiber",
+        daily_target_g(local::calorie_goal_amount().await),
+    )
+}
+
 /// Недельная планка этого человека ПО СЕГОДНЯШНЕЙ калорийной планке, г.
 ///
 /// Годится для текущей недели; прошлые судятся своей планкой — см.
 /// [`weekly_target_on`].
 pub async fn weekly_target_g() -> f64 {
-    daily_target_g(local::calorie_goal_amount().await) * 7.0
+    daily_target_effective_g().await * 7.0
 }
 
 /// Недельная планка ТОЙ НЕДЕЛИ, что началась `week_start`, г.

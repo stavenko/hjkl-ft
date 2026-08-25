@@ -36,6 +36,11 @@ pub const RED_MEAT_WEEK_OPEN_KEY: &str = "red_meat_week_opened_at";
 /// Недельная планка в граммах СЫРОГО мяса.
 pub const WEEKLY_LIMIT_RAW_G: f64 = 700.0;
 
+/// Действующий недельный предел, г сырого: кураторский, если задан.
+pub fn weekly_limit_g() -> f64 {
+    crate::services::curator_plankas::or_ours("red_meat", WEEKLY_LIMIT_RAW_G)
+}
+
 /// Сколько белка в 100 г сырого красного мяса. Говядина, свинина и баранина дают
 /// 19–21 г — берётся круглая середина, точность здесь не важнее прозрачности.
 pub const RAW_PROTEIN_PER_100G: f64 = 20.0;
@@ -140,7 +145,7 @@ pub async fn weekly_progress() -> Option<WeeklyRedMeat> {
     let (start, _end) = week_bounds(today)?;
     Some(WeeklyRedMeat {
         grams: raw_grams_between(start, today).await,
-        limit: WEEKLY_LIMIT_RAW_G,
+        limit: weekly_limit_g(),
         day_of_week: (today - start).num_days() as u32 + 1,
     })
 }
@@ -170,7 +175,7 @@ pub async fn week_closed_since_open() -> bool {
         let logged = (0..7).any(|d| {
             diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
         });
-        if logged && raw_grams_between(s, e).await <= WEEKLY_LIMIT_RAW_G {
+        if logged && raw_grams_between(s, e).await <= weekly_limit_g() {
             return true;
         }
         s += Duration::days(7);
@@ -215,7 +220,7 @@ pub async fn indicator_state() -> super::indicators::IndicatorState {
         if !logged {
             continue;
         }
-        history.push(raw_grams_between(s, e).await <= WEEKLY_LIMIT_RAW_G);
+        history.push(raw_grams_between(s, e).await <= weekly_limit_g());
     }
     history.reverse();
     super::indicators::weekly_state(&history)
@@ -238,7 +243,7 @@ pub async fn weekly_series() -> super::indicators::IndicatorSeries {
                 diary_days.contains(&(s + Duration::days(d)).format("%Y-%m-%d").to_string())
             });
             let g = raw_grams_between(s, e).await;
-            let ratio = logged.then(|| g / WEEKLY_LIMIT_RAW_G);
+            let ratio = logged.then(|| g / weekly_limit_g());
             points.push((s.format("%Y-%m-%d").to_string(), g, ratio));
             labels.push(format!("−{back}"));
             // Закрыта — значит УЛОЖИЛСЯ: доля не больше единицы.
@@ -277,7 +282,7 @@ mod tests {
     }
 
     fn week(grams: f64, day: u32) -> WeeklyRedMeat {
-        WeeklyRedMeat { grams, limit: WEEKLY_LIMIT_RAW_G, day_of_week: day }
+        WeeklyRedMeat { grams, limit: weekly_limit_g(), day_of_week: day }
     }
 
     #[test]

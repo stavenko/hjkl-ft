@@ -150,7 +150,7 @@ pub async fn weekly_progress() -> Option<WeeklyFats> {
     Some(WeeklyFats {
         acids: fatty_acids_between(start, today).await,
         balance_acids: balance_acids_between(start, today).await,
-        epa_dha_target: EPA_DHA_PER_WEEK_G,
+        epa_dha_target: Fat::EpaDha.target(),
         day_of_week: (today - start).num_days() as u32 + 1,
     })
 }
@@ -199,10 +199,11 @@ impl Fat {
 
     /// Норма, с которой сравнивается значение.
     pub fn target(self) -> f64 {
-        match self {
+        let ours = match self {
             Fat::EpaDha => EPA_DHA_PER_WEEK_G,
             Fat::Ratio => UNSAT_TO_SAT_MIN,
-        }
+        };
+        crate::services::curator_plankas::or_ours(self.key(), ours)
     }
 
     /// Закрыта ли неделя по этому индикатору.

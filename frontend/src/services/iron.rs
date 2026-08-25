@@ -122,7 +122,10 @@ pub fn intake_basis_for_profile() -> f64 {
 
 /// This user's weekly absorbed-iron target, from their profile.
 pub fn weekly_target_mg() -> f64 {
-    weekly_absorbed_target_mg(profile::get_sex(), profile::get_age_years())
+    crate::services::curator_plankas::or_ours(
+        "iron",
+        weekly_absorbed_target_mg(profile::get_sex(), profile::get_age_years()),
+    )
 }
 
 // ── The week window ──────────────────────────────────────────────────────────

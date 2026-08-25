@@ -202,7 +202,7 @@ fn heme_hint_text() -> String {
          чем из растительной пищи.\n\n\
          Цель — {:.0} порции в неделю. Точки на полосе делят неделю на семь дней.",
         heme::PORTION_PROTEIN_G,
-        heme::WEEKLY_PORTIONS,
+        heme::weekly_portions(),
     )
 }
 
@@ -218,7 +218,7 @@ fn red_meat_hint_text() -> String {
          засчитывается само мясо, а не вся тарелка.\n\n\
          Колбасы и сосиски тратят ту же планку: как бы их ни переработали, это по-прежнему \
          красное мясо.",
-        red_meat::WEEKLY_LIMIT_RAW_G,
+        red_meat::weekly_limit_g(),
         150.0,
         150.0,
     )
@@ -235,7 +235,7 @@ fn egg_hint_text() -> String {
          Считаем в граммах, по {:.0} г на яйцо: семь яиц — это {:.0} г за неделю. В блюдах \
          засчитываются сами яйца, а не вся тарелка. Майонез и салаты с яйцом сюда не идут: \
          долю яйца в них не восстановить.",
-        egg::WEEKLY_MIN_EGGS,
+        egg::weekly_min_eggs(),
         egg::GRAMS_PER_EGG,
         egg::weekly_min_grams(),
     )
@@ -246,7 +246,8 @@ fn egg_hint_text() -> String {
 /// клетчатки» ничего не сообщает.
 fn fiber_hint_text(planka: Option<f64>) -> String {
     use crate::services::fiber;
-    let daily = fiber::daily_target_g(planka);
+    // Действующая суточная норма: кураторская, если задана, иначе наша от планки.
+    let daily = crate::services::curator_plankas::or_ours("fiber", fiber::daily_target_g(planka));
     format!(
         "Клетчатка — то, что мы сами не перевариваем, а отдаём кишечным бактериям. От неё          зависят стул, чувство сытости, уровень холестерина и сахара после еды.
 
@@ -281,7 +282,7 @@ fn epa_dha_hint_text() -> String {
          конверсией в единицы процентов — льняным маслом эту норму не закрыть.\n\n\
          Цель — {:.2} г в неделю. Это закрывается двумя рыбными трапезами: порция \
          скумбрии или сельди даёт около двух граммов.",
-        crate::services::fats::EPA_DHA_PER_WEEK_G,
+        crate::services::fats::Fat::EpaDha.target(),
     )
 }
 
@@ -295,7 +296,7 @@ fn fat_ratio_hint_text() -> String {
          шоколад и кокосовое масло опускают.\n\n\
          Считается по суммам за неделю, а не по каждому продукту: ложка оливкового \
          масла не искупает двести граммов сала.",
-        crate::services::fats::UNSAT_TO_SAT_MIN,
+        crate::services::fats::Fat::Ratio.target(),
     )
 }
 
@@ -880,7 +881,7 @@ pub fn DashboardPage() -> impl IntoView {
                                     // «сколько набрано».
                                     <crate::components::gauge::BalanceGauge
                                         value=w.ratio()
-                                        target=crate::services::fats::UNSAT_TO_SAT_MIN
+                                        target=crate::services::fats::Fat::Ratio.target()
                                         label="Баланс жира".to_string()
                                         height=12.0
                                         hint=fat_ratio_hint_text()/>

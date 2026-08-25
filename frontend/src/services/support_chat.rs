@@ -474,6 +474,7 @@ fn planka_range(key: &str) -> Option<(f64, f64)> {
 /// прежнему числу, а дневник показывал бы не ту планку.
 async fn record_effective(key: &str) {
     use crate::services::local;
+    use crate::services::letters;
     match key {
         "calories" => {
             if let Some(v) = local::calorie_goal_amount().await {
@@ -481,11 +482,17 @@ async fn record_effective(key: &str) {
             }
             // Белок выводится из калорий — его норма поехала вместе с ними.
             local::record_protein_planka().await;
+            // И недельные часы пошли заново. Без этого правка куратора попадала
+            // бы в чужой отсчёт: якорь остался бы прежним, и автопересчёт (если
+            // куратор его не запретил) мог сработать назавтра, отменив только что
+            // поставленное число.
+            letters::mark_planka_recomputed();
         }
         "steps" => {
             if let Some(v) = crate::services::profile::get_steps_planka() {
                 local::record_planka(local::PLANKA_STEPS, v).await;
             }
+            letters::mark_steps_recomputed();
         }
         "protein" => local::record_protein_planka().await,
         _ => {}

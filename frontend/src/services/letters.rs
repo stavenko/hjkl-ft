@@ -69,15 +69,21 @@ pub fn refresh() {
     bump();
 }
 
+/// Перезапустить недельные часы ШАГОВ — тем же движением, каким
+/// [`mark_planka_recomputed`] перезапускает их у калорий.
+pub fn mark_steps_recomputed() {
+    let today = chrono::Local::now().date_naive();
+    app_flags::set(STEPS_ANCHOR_KEY, &today.format("%Y-%m-%d").to_string());
+}
+
 /// Сдвинуть ОБА недельных якоря на сегодня.
 ///
 /// Нужно при отвязке от куратора: пока стоял его запрет, пересчёт выходил рано и
 /// якорь не двигался. Через полгода кураторства «прошло 180 дней ≥ 7» сработало
 /// бы на ближайшем запуске — то есть немедленно, вместо обещанной недели.
 pub fn reset_weekly_anchors() {
-    let today = chrono::Local::now().date_naive().format("%Y-%m-%d").to_string();
-    app_flags::set(PLANKA_ANCHOR_KEY, &today);
-    app_flags::set(STEPS_ANCHOR_KEY, &today);
+    mark_planka_recomputed();
+    mark_steps_recomputed();
 }
 
 /// Record that the calorie planka was (re)computed today — restarts the weekly

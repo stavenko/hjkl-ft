@@ -133,15 +133,26 @@ async fn curator_do(
         .await
         .map_err(|e| json_status(500, &format!("curator DO fetch {path}: {e}")))?;
     let status = resp.status_code();
-    let v: serde_json::Value = resp
-        .json()
+    // Тело читается ТЕКСТОМ, а не сразу `json()`. DO отвечает на доменные отказы
+    // простой строкой (`Response::error`), а не JSON-объектом, — и разбор её как
+    // JSON падал ДО проверки статуса. Наружу это выходило пятисоткой: «клиента
+    // нет» и «приглашение уже использовано» становились «сломалось хранилище».
+    // Самая дорогая подмена диагноза из возможных, и попадала она ровно в те
+    // пути, что видит человек.
+    let body = resp
+        .text()
         .await
-        .map_err(|e| json_status(500, &format!("curator DO parse {path}: {e}")))?;
+        .map_err(|e| json_status(500, &format!("curator DO read {path}: {e}")))?;
     if status != 200 {
-        let msg = v.get("error").and_then(|e| e.as_str()).unwrap_or("curator DO error");
-        return Err(json_status(status, msg));
+        // Сообщение берём из JSON, если DO его дал, иначе — сам текст.
+        let msg = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            .unwrap_or_else(|| body.trim().to_string());
+        let msg = if msg.is_empty() { "curator DO error".to_string() } else { msg };
+        return Err(json_status(status, &msg));
     }
-    Ok(v)
+    serde_json::from_str(&body).map_err(|e| json_status(500, &format!("curator DO parse {path}: {e}")))
 }
 
 /// 401 при негодном токене, 403 если `sub` не заведён куратором.
@@ -414,14 +425,12 @@ async fn user_send(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
     };
 
     let body: serde_json::Value = req.json().await?;
-    let client_id = body.get("client_id").and_then(|v| v.as_str()).unwrap_or("");
-    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
-    if client_id.is_empty() || text.is_empty() {
-        return Ok(json_status(400, "client_id and text are required"));
-    }
     // Typed envelope (default kind='text'). `payload` is a RAW JSON string;
     // forwarded verbatim to the DO. See the data-request/data-share protocol.
-    let (kind, payload) = typed_envelope(&body);
+    let (client_id, text, kind, payload) = match parse_envelope(&body) {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
 
     // Кому адресовано: есть куратор — ему, нет — админу. Развилка здесь и только
     // здесь, поэтому приложение худеющего про адресата ничего знать не обязано.
@@ -609,14 +618,12 @@ async fn expert_reply(mut req: Request, ctx: RouteContext<()>) -> Result<Respons
         .clone();
 
     let body: serde_json::Value = req.json().await?;
-    let client_id = body.get("client_id").and_then(|v| v.as_str()).unwrap_or("");
-    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
-    if client_id.is_empty() || text.is_empty() {
-        return Ok(json_status(400, "client_id and text are required"));
-    }
     // Typed envelope (default kind='text'). A curator data-request rides here as
     // kind='data_request' with the {dataset} payload; forwarded verbatim.
-    let (kind, payload) = typed_envelope(&body);
+    let (client_id, text, kind, payload) = match parse_envelope(&body) {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
 
     let append_req = do_request(
         "/append",
@@ -988,12 +995,10 @@ async fn curator_reply(mut req: Request, ctx: RouteContext<()>) -> Result<Respon
         Err(resp) => return Ok(resp),
     };
     let body: serde_json::Value = req.json().await?;
-    let client_id = body.get("client_id").and_then(|v| v.as_str()).unwrap_or("");
-    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
-    if client_id.is_empty() || text.is_empty() {
-        return Ok(json_status(400, "client_id and text are required"));
-    }
-    let (kind, payload) = typed_envelope(&body);
+    let (client_id, text, kind, payload) = match parse_envelope(&body) {
+        Ok(v) => v,
+        Err(resp) => return Ok(resp),
+    };
     let name = curator_name(&ctx.env, &sub).await;
 
     let append_req = do_request(
@@ -1314,6 +1319,31 @@ async fn internal_is_admin(mut req: Request, ctx: RouteContext<()>) -> Result<Re
 /// storage/read contract): a JSON string passes through verbatim, a JSON object
 /// is stringified, anything else (or absent) becomes None. This is forwarded to
 /// the DO's `/append` and stored/returned unchanged.
+/// Разобрать тело сообщения и проверить его: `client_id` нужен ВСЕГДА, а `text` —
+/// только у обычного сообщения.
+///
+/// У типизированной директивы текста нет и быть не должно: она несёт ДАННЫЕ
+/// (`payload`), а фразу собирает приложение получателя на своём языке (см.
+/// `frontend/src/services/directives.rs`). Прежнее «text обязателен всегда»
+/// делало правку планки из кураторского приложения невозможной: оно шлёт
+/// `text: ""` — и получало 400 на каждую директиву.
+fn parse_envelope(
+    body: &serde_json::Value,
+) -> std::result::Result<(&str, &str, String, Option<String>), Response> {
+    let client_id = body.get("client_id").and_then(|v| v.as_str()).unwrap_or("");
+    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    let (kind, payload) = typed_envelope(body);
+    if client_id.is_empty() {
+        return Err(json_status(400, "client_id is required"));
+    }
+    // Пустой текст без полезной нагрузки — это не директива, а потерянное
+    // сообщение: записывать пустоту в тред незачем.
+    if text.is_empty() && payload.is_none() {
+        return Err(json_status(400, "text is required for a plain message"));
+    }
+    Ok((client_id, text, kind, payload))
+}
+
 fn typed_envelope(body: &serde_json::Value) -> (String, Option<String>) {
     let kind = body
         .get("kind")

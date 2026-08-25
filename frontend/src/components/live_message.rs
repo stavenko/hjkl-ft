@@ -118,6 +118,13 @@ pub fn LiveBubble(
         .into_view();
     }
 
+    // Подпись под пузырём собеседника. Экран чата один на всех, и без имени
+    // куратор неотличим от поддержки — особенно выше разделителя, когда человек
+    // листает старую переписку.
+    let sender_name = (msg.sender != "user")
+        .then(|| msg.sender_name.clone())
+        .flatten();
+
     let is_user = msg.sender == "user";
     // re:Norma palette: the user bubble is the soft-emerald brand tint (not the
     // stock nuclear-blue link); the curator bubble is a white surface. Both carry
@@ -129,9 +136,14 @@ pub fn LiveBubble(
     };
 
     let text = msg.text.clone();
+    let name_line = sender_name.map(|n| view! {
+        <span class="is-size-7 has-text-grey" attr:data-testid="live-sender-name"
+            style="margin: 0 0 3px 4px;">{n}</span>
+    });
     view! {
         <div attr:data-testid="live-message" attr:data-role=msg.sender.clone()
             style="display: flex; flex-direction: column; margin-bottom: 10px;">
+            {name_line}
             <div style=bubble_style>
                 <p class="is-size-6" style="white-space: pre-wrap; line-height: 1.45; margin: 0;">
                     {text}

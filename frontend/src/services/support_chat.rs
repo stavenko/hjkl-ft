@@ -22,9 +22,23 @@ pub enum ChatMode {
     Live,
 }
 
-/// Cached server message, keyed by `seq` (IndexedDB key + ordering).
+/// Собеседник по умолчанию, пока приложение ещё не узнало, есть ли куратор.
+pub const PEER_ADMIN: &str = "admin";
+
+/// Кэш серверного сообщения, ключ — `"{peer}:{seq}"`.
+///
+/// Тред на сервере один на ПАРУ, поэтому `seq` уникален только внутри своего
+/// собеседника: у переписки с админом и у переписки с куратором номера идут
+/// каждый со своей единицы. Ключом стал составной id, иначе первое сообщение
+/// куратора затёрло бы первое сообщение поддержки.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LiveMessage {
+    /// `"{peer}:{seq}"` — ключ в IndexedDB.
+    #[serde(default)]
+    pub id: String,
+    /// Собеседник: `admin` либо `curator:<id>`.
+    #[serde(default = "default_peer")]
+    pub peer: String,
     pub seq: u64,
     /// Idempotency key the sender generated; present on server rows. Used to
     /// reconcile an optimistic outbox item once it returns as a server message.
@@ -41,10 +55,22 @@ pub struct LiveMessage {
     /// bubble renderer per `kind`. Old rows (no field) → None.
     #[serde(default)]
     pub payload: Option<String>,
+    /// Имя куратора под его пузырём. У поддержки пусто.
+    #[serde(default)]
+    pub sender_name: Option<String>,
 }
 
 fn default_kind() -> String {
     "text".to_string()
+}
+
+fn default_peer() -> String {
+    PEER_ADMIN.to_string()
+}
+
+/// Ключ сообщения в кэше.
+fn msg_id(peer: &str, seq: u64) -> String {
+    format!("{peer}:{seq}")
 }
 
 /// Optimistic outbox entry, keyed by `client_id` (idempotency key + IndexedDB
@@ -64,11 +90,16 @@ pub struct OutboxItem {
     pub payload: Option<String>,
 }
 
-/// Cursor singleton in the `support_meta` store, key "cursor".
+/// Курсор опроса — СВОЙ у каждого собеседника: номера в разных тредах свои, и
+/// один общий курсор пропустил бы половину сообщений.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Cursor {
     key: String,
     after_seq: u64,
+}
+
+fn cursor_key(peer: &str) -> String {
+    format!("{CURSOR_KEY}:{peer}")
 }
 
 #[derive(Serialize)]
@@ -88,6 +119,10 @@ struct SendReq<'a> {
 struct SendAck {
     seq: u64,
     created_at: String,
+    /// Куда сервер это положил. Развилку «куратор или админ» решает он, и
+    /// угадывать её на клиенте значит однажды разойтись.
+    #[serde(default = "default_peer")]
+    peer: String,
 }
 
 #[derive(Deserialize)]
@@ -95,6 +130,9 @@ struct PollResp {
     messages: Vec<LiveMessage>,
     next_after_seq: u64,
     has_more: bool,
+    /// Тред, который сервер только что отдал.
+    #[serde(default = "default_peer")]
+    peer: String,
 }
 
 #[derive(Serialize)]
@@ -106,7 +144,7 @@ fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-const MESSAGES_STORE: &str = "support_messages";
+const MESSAGES_STORE: &str = "support_msgs";
 const OUTBOX_STORE: &str = "support_outbox";
 const META_STORE: &str = "support_meta";
 const CURSOR_KEY: &str = "cursor";
@@ -257,6 +295,8 @@ async fn post_with_outbox(
     match post_json::<SendAck>("/message", &body).await {
         Ok(ack) => {
             let msg = LiveMessage {
+                id: msg_id(&ack.peer, ack.seq),
+                peer: ack.peer.clone(),
                 seq: ack.seq,
                 client_id: client_id.clone(),
                 sender: "user".to_string(),
@@ -264,14 +304,16 @@ async fn post_with_outbox(
                 created_at: ack.created_at,
                 kind,
                 payload,
+                sender_name: None,
             };
             db::put(MESSAGES_STORE, &msg).await;
             db::delete(OUTBOX_STORE, &client_id).await;
             // Advance the cursor past this seq so the next poll doesn't re-deliver it.
-            let cursor = load_cursor().await;
+            let cursor = load_cursor(&ack.peer).await;
             if ack.seq >= cursor {
-                store_cursor(ack.seq).await;
+                store_cursor(&ack.peer, ack.seq).await;
             }
+            set_current_peer(&ack.peer);
             Ok(msg)
         }
         Err(e) => {
@@ -308,12 +350,23 @@ async fn poll_inner(first_wait: u32) -> Result<(), String> {
     // Only the FIRST fetch holds open; subsequent drains use wait=0 so a backlog
     // empties without a 25s stall between pages.
     let mut wait = first_wait;
+    // Опрашивается ТЕКУЩИЙ тред: архивные не меняются, и их история приезжает
+    // синком. Кого считать текущим, решает сервер — он же и отвечает `peer`.
+    let mut peer = current_peer();
     loop {
-        let after = load_cursor().await;
+        let after = load_cursor(&peer).await;
         let r: PollResp =
             get_json(&format!("/messages?after_seq={after}&limit=100&wait={wait}")).await?;
+        // Смена куратора между опросами меняет адресата: дальше идём по нему.
+        peer = r.peer.clone();
+        set_current_peer(&peer);
         for m in &r.messages {
-            db::put(MESSAGES_STORE, m).await;
+            let m = LiveMessage {
+                id: msg_id(&peer, m.seq),
+                peer: peer.clone(),
+                ..m.clone()
+            };
+            db::put(MESSAGES_STORE, &m).await;
             // Reconcile a lost-ack optimistic send: if this server message carries
             // a client_id we still have in the outbox, drop the outbox row (it's now
             // a real message) — prevents a permanent duplicate + stuck "sending".
@@ -326,7 +379,7 @@ async fn poll_inner(first_wait: u32) -> Result<(), String> {
         apply_planka_directives(&r.messages).await;
         apply_curator_planka_directives(&r.messages).await;
         apply_week_directives(&r.messages).await;
-        store_cursor(r.next_after_seq).await;
+        store_cursor(&peer, r.next_after_seq).await;
         if !r.has_more {
             break;
         }
@@ -583,10 +636,14 @@ pub async fn read(seq: u64) -> Result<(), String> {
     Ok(())
 }
 
-/// All cached Live messages, ordered by `seq` ascending.
+/// Вся переписка человека — со всеми собеседниками разом, по времени.
+///
+/// Экран чата у него ОДИН, и история не обнуляется при смене куратора: между
+/// тредами рисуется разделитель, а не пустота. Порядок по времени, а не по seq:
+/// номера в разных тредах свои и между собой несравнимы.
 pub async fn list_messages() -> Vec<LiveMessage> {
     let mut msgs: Vec<LiveMessage> = db::list_all(MESSAGES_STORE).await;
-    msgs.sort_by_key(|m| m.seq);
+    msgs.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.seq.cmp(&b.seq)));
     msgs
 }
 
@@ -597,18 +654,43 @@ pub async fn list_outbox() -> Vec<OutboxItem> {
     items
 }
 
-async fn load_cursor() -> u64 {
-    let c: Option<Cursor> = db::get(META_STORE, CURSOR_KEY).await;
+async fn load_cursor(peer: &str) -> u64 {
+    let c: Option<Cursor> = db::get(META_STORE, &cursor_key(peer)).await;
     c.map(|c| c.after_seq).unwrap_or(0)
 }
 
-async fn store_cursor(after_seq: u64) {
+async fn store_cursor(peer: &str, after_seq: u64) {
     // Only ever advance forward (a stale page must not rewind the cursor).
-    let current = load_cursor().await;
+    let current = load_cursor(peer).await;
     if after_seq < current {
         return;
     }
-    db::put(META_STORE, &Cursor { key: CURSOR_KEY.to_string(), after_seq }).await;
+    db::put(META_STORE, &Cursor { key: cursor_key(peer), after_seq }).await;
+}
+
+// ── Текущий собеседник ───────────────────────────────────────────────────────
+//
+// Кто адресат — решает сервер, приложение лишь запоминает его ответ. Флаг
+// device-local: это не данные человека, а состояние опроса на этом устройстве, и
+// после смены куратора оно само выправится первым же ответом.
+
+const CURRENT_PEER_FLAG: &str = "support_current_peer";
+
+/// Собеседник, которого сервер назвал последним. До первого ответа — админ: без
+/// куратора так оно и есть, а с куратором первый же опрос это поправит.
+pub fn current_peer() -> String {
+    crate::services::app_flags::get(CURRENT_PEER_FLAG).unwrap_or_else(default_peer)
+}
+
+fn set_current_peer(peer: &str) {
+    if current_peer() != peer {
+        crate::services::app_flags::set(CURRENT_PEER_FLAG, peer);
+    }
+}
+
+/// Есть ли у человека куратор — по тому же признаку, по которому идут сообщения.
+pub fn has_curator() -> bool {
+    current_peer().starts_with("curator:")
 }
 
 // ── Persisted mode toggle (per-user-per-device, in app_flags; NOT synced) ──

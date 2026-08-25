@@ -147,7 +147,7 @@ pub fn ChatPage() -> impl IntoView {
     // writes these signals directly — it only writes the DB; the store-version
     // signals drive the re-render.
     create_effect(move |_| {
-        db::version("support_messages").get();
+        db::version("support_msgs").get();
         db::version("support_outbox").get();
         if mode.get() == ChatMode::Live {
             spawn_local(async move {
@@ -527,10 +527,41 @@ pub fn ChatPage() -> impl IntoView {
                             </p>
                         }
                     >
+                        // Лента ОДНА на всех собеседников: история не обнуляется,
+                        // когда меняется куратор, — на границе тредов рисуется
+                        // разделитель, чтобы человек видел, кому он тогда писал.
                         <For
-                            each=move || live_messages.get()
-                            key=|m| m.seq
-                            children=move |m| view! { <LiveBubble msg=m shared=shared_datasets /> }
+                            each=move || {
+                                let msgs = live_messages.get();
+                                let mut prev: Option<String> = None;
+                                let mut out = Vec::new();
+                                for m in msgs {
+                                    let first_of_thread = prev.as_deref() != Some(m.peer.as_str());
+                                    prev = Some(m.peer.clone());
+                                    out.push((first_of_thread, m));
+                                }
+                                out
+                            }
+                            key=|(_, m)| m.id.clone()
+                            children=move |(first_of_thread, m)| {
+                                let divider = first_of_thread.then(|| {
+                                    let who = if m.peer == support_chat::PEER_ADMIN {
+                                        t("chat.peer_support").to_string()
+                                    } else {
+                                        m.sender_name.clone().unwrap_or_else(|| t("chat.peer_curator").to_string())
+                                    };
+                                    view! {
+                                        <div attr:data-testid="chat-thread-divider"
+                                            style="display: flex; align-items: center; gap: 10px; \
+                                                   margin: 14px 0 10px;">
+                                            <span style="flex: 1; height: 1px; background: var(--bulma-border-weak);"></span>
+                                            <span class="is-size-7 has-text-grey">{who}</span>
+                                            <span style="flex: 1; height: 1px; background: var(--bulma-border-weak);"></span>
+                                        </div>
+                                    }
+                                });
+                                view! { {divider} <LiveBubble msg=m shared=shared_datasets /> }
+                            }
                         />
                         // Optimistic outbox: right-aligned bubbles with a sending /
                         // retry affordance.

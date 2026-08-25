@@ -492,7 +492,14 @@ async fn user_send(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
         }
     }
 
-    Response::from_json(&serde_json::json!({ "seq": result.seq, "created_at": result.created_at }))
+    // peer в ответе — чтобы приложение положило отправленное в тот же тред, куда
+    // его положил сервер. Развилку «куратор или админ» решает он, и угадывать её
+    // на клиенте значит однажды разойтись.
+    Response::from_json(&serde_json::json!({
+        "seq": result.seq,
+        "created_at": result.created_at,
+        "peer": routing.peer,
+    }))
 }
 
 

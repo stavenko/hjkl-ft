@@ -42,6 +42,9 @@ const DEVICE_LOCAL_KEYS: &[&str] = &[
     "ft_config_cache",
     "paywall_skipped_date",
     "support_chat_mode",
+    // Кто сейчас собеседник в чате. Это не данные человека, а состояние опроса
+    // на ЭТОМ устройстве: сервер назовёт его снова первым же ответом.
+    "support_current_peer",
 ];
 
 /// Is `key` a device-local flag (excluded from sync in BOTH directions)?

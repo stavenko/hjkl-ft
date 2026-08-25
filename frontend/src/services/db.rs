@@ -98,7 +98,7 @@ fn bump(store_name: &str) {
     });
 }
 
-const DB_VERSION: u32 = 21;
+const DB_VERSION: u32 = 22;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -109,7 +109,7 @@ const ALL_STORES: &[&str] = &[
     "goals", "food_drafts", "weight_entries", "step_entries",
     "progress_photos", "summaries", "chat", "profile", "deletions", "_sync_meta",
     "app_flags", "planka_history", "curator_plankas", "food_probe",
-    "support_messages", "support_outbox", "support_meta",
+    "support_msgs", "support_outbox", "support_meta",
 ];
 
 /// Per-user database name. Each account gets its own IndexedDB so a different
@@ -198,7 +198,12 @@ fn builder(name: &str) -> rexie::RexieBuilder {
         .add_object_store(ObjectStore::new("app_flags").key_path("key"))
         // Live support thread (separate server from the AI `chat` store). Not
         // synced — per-user-per-device cache, cursor, and optimistic outbox.
-        .add_object_store(ObjectStore::new("support_messages").key_path("seq"))
+        // Кэш переписки. Ключ составной («собеседник:номер»), потому что тред на
+        // сервере один на ПАРУ: у поддержки и у куратора номера идут каждый со
+        // своей единицы, и один только seq их бы перепутал. Store переименован —
+        // idb молча игнорирует смену key_path у существующего, а необъявленный
+        // удаляет сам: старый кэш уходит, новый наполняется с сервера.
+        .add_object_store(ObjectStore::new("support_msgs").key_path("id"))
         .add_object_store(ObjectStore::new("support_outbox").key_path("client_id"))
         .add_object_store(ObjectStore::new("support_meta").key_path("key"))
         // История планок: одна строка на «вид × день установки». Синкается — планка
@@ -909,7 +914,7 @@ pub async fn count(store_name: &str) -> u32 {
 }
 
 pub async fn wipe_all() {
-    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "step_entries", "chat", "support_messages", "support_outbox", "support_meta", "profile", "deletions", "_sync_meta"];
+    let stores = ["foods", "diary", "recipes", "recipe_ingredients", "goals", "food_drafts", "weight_entries", "step_entries", "chat", "support_msgs", "support_outbox", "support_meta", "profile", "deletions", "_sync_meta"];
     for store in stores {
         clear(store).await;
     }

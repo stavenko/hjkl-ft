@@ -473,7 +473,7 @@ fn outbox_target(store: &str, local_key: &str) -> Option<(String, String)> {
     match store {
         "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "profile"
         | "weight_entries" | "step_entries" | "deletions" | "planka_history"
-        | "curator_plankas" => Some((store.to_string(), local_key.to_string())),
+        | "curator_plankas" | "support_msgs" => Some((store.to_string(), local_key.to_string())),
         "app_flags" => (!crate::services::app_flags::is_device_local(local_key))
             .then(|| ("app_flags".to_string(), local_key.to_string())),
         "ind_protein" => Some(("ind_days".into(), format!("protein:{local_key}"))),
@@ -525,6 +525,11 @@ fn is_synced_store(store: &str) -> bool {
             // стало на кураторском отчёте, который историю планок как раз и шлёт.
             | "planka_history"
             | "curator_plankas"
+            // Переписка. Синкается, чтобы история — включая треды с прежними
+            // кураторами — была на каждом устройстве человека, а не только на том,
+            // где приложение было открыто. Очередь отправки и курсоры опроса
+            // остаются на устройстве: они по природе per-device.
+            | "support_msgs"
             | "ind_protein"
             | "ind_veg_fruit"
             | "ind_steps"

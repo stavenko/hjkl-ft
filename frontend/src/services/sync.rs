@@ -99,7 +99,7 @@ fn local_target(store: &str, id: &str) -> Option<(String, String)> {
     match store {
         "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "profile"
         | "weight_entries" | "step_entries" | "deletions" | "app_flags"
-        | "planka_history" | "curator_plankas" => {
+        | "planka_history" | "curator_plankas" | "support_msgs" => {
             Some((store.to_string(), id.to_string()))
         }
         "ind_days" => {
@@ -287,8 +287,10 @@ async fn apply_upsert(store: &str, row: &serde_json::Value, ctx: &mut ApplyCtx) 
                 ctx.curator_plankas_touched = true;
             }
         }
+        // Сообщения неизменяемы, а ключ уникален, поэтому LWW по created_at
+        // безобиден: два устройства, скачавшие одно и то же, пишут одно и то же.
         "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "weight_entries"
-        | "step_entries" | "deletions" | "planka_history" => {
+        | "step_entries" | "deletions" | "planka_history" | "support_msgs" => {
             let Some(id) = row.get("id").and_then(|v| v.as_str()) else {
                 leptos::logging::error!("sync v2: {store} row without id: {row}");
                 return;
@@ -445,7 +447,7 @@ async fn migration_days() -> std::collections::BTreeMap<String, Vec<serde_json::
     };
     for store in [
         "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries",
-        "step_entries", "profile", "planka_history", "curator_plankas",
+        "step_entries", "profile", "planka_history", "curator_plankas", "support_msgs",
     ] {
         for row in db::list_all::<serde_json::Value>(store).await {
             if store == "diary"
@@ -650,7 +652,7 @@ async fn migrate_inner(
 const ADOPT_WIPE_STORES: &[&str] = &[
     "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries",
     "step_entries", "profile", "deletions", "planka_history", "curator_plankas",
-    "ind_protein", "ind_veg_fruit", "ind_steps", "ind_calories",
+    "support_msgs", "ind_protein", "ind_veg_fruit", "ind_steps", "ind_calories",
 ];
 
 /// ADOPT: the store is initialized, so the source of truth has already been

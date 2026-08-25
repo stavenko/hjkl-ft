@@ -324,6 +324,7 @@ async fn poll_inner(first_wait: u32) -> Result<(), String> {
         // A curator `set_planka` directive is applied by THE APP here — the server
         // never writes the user's data. Idempotent (by seq).
         apply_planka_directives(&r.messages).await;
+        apply_curator_planka_directives(&r.messages).await;
         apply_week_directives(&r.messages).await;
         store_cursor(r.next_after_seq).await;
         if !r.has_more {
@@ -377,6 +378,123 @@ async fn apply_planka_directives(msgs: &[LiveMessage]) {
             action_done: false,
         });
     }
+}
+
+// ── Директива правки планки ──────────────────────────────────────────────────
+//
+// Одна директива на любой индикатор: `{key, amount?, locked?}`. Прежняя
+// `set_planka` умела только калории и присылала готовый русский текст; эта несёт
+// ЧИСЛО, а текст человек собирает у себя.
+//
+// Применяются ВСЕ новые, а не только последняя: планки разные, и две директивы
+// подряд означают две правки, а не одну. Порядок — по seq, чтобы две правки
+// одного индикатора легли в том порядке, в каком их сделал куратор.
+
+/// App-flag: наибольший `seq` уже применённой директивы правки планки.
+const CURATOR_PLANKA_SEQ_KEY: &str = "curator_planka_directive_seq";
+
+/// Разумные пределы значения по индикатору. Не «валидация ради валидации»: сюда
+/// приходит число из чужого приложения, и опечатка куратора не должна становиться
+/// планкой в 200 000 ккал, от которой потом считается ещё и белок.
+fn planka_range(key: &str) -> Option<(f64, f64)> {
+    Some(match key {
+        "calories" => (500.0, 20_000.0),
+        "protein" => (10.0, 500.0),
+        "steps" => (1_000.0, 100_000.0),
+        "veg_fruit" => (100.0, 5_000.0),
+        "calcium" => (100.0, 5_000.0),
+        "fiber" => (5.0, 200.0),
+        "iron" => (0.1, 100.0),
+        "heme" => (0.0, 21.0),
+        "epa_dha" => (0.1, 50.0),
+        "fat_ratio" => (0.1, 20.0),
+        "red_meat" => (0.0, 10_000.0),
+        "egg" => (0.0, 70.0),
+        _ => return None,
+    })
+}
+
+/// Записать действующее число в историю планок — для тех трёх, у кого история
+/// есть. Без этого день, в который куратор поменял планку, судился бы по
+/// прежнему числу, а дневник показывал бы не ту планку.
+async fn record_effective(key: &str) {
+    use crate::services::local;
+    match key {
+        "calories" => {
+            if let Some(v) = local::calorie_goal_amount().await {
+                local::record_planka(local::PLANKA_CALORIES, v).await;
+            }
+            // Белок выводится из калорий — его норма поехала вместе с ними.
+            local::record_protein_planka().await;
+        }
+        "steps" => {
+            if let Some(v) = crate::services::profile::get_steps_planka() {
+                local::record_planka(local::PLANKA_STEPS, v).await;
+            }
+        }
+        "protein" => local::record_protein_planka().await,
+        _ => {}
+    }
+}
+
+async fn apply_curator_planka_directives(msgs: &[LiveMessage]) {
+    use crate::services::{curator_plankas, directives, letters};
+
+    let last = crate::services::app_flags::get(CURATOR_PLANKA_SEQ_KEY)
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let mut ordered: Vec<(u64, String, Option<f64>, bool)> = Vec::new();
+    for m in msgs {
+        if m.kind != "set_planka_v2" || m.seq <= last {
+            continue;
+        }
+        let Some(payload) = m.payload.as_deref() else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) else { continue };
+        let Some(key) = v.get("key").and_then(|k| k.as_str()) else { continue };
+        let Some((lo, hi)) = planka_range(key) else {
+            leptos::logging::warn!("директива планки: неизвестный индикатор {key}");
+            continue;
+        };
+        let amount = match v.get("amount").and_then(|a| a.as_f64()) {
+            Some(a) if a.is_finite() && a >= lo && a <= hi => Some(a),
+            // Число вне пределов — это не «поправим молча», а испорченная
+            // директива: применять её нельзя, а терять молча тем более.
+            Some(a) => {
+                leptos::logging::error!("директива планки {key}: значение {a} вне [{lo}, {hi}]");
+                continue;
+            }
+            None => None,
+        };
+        let locked = v.get("locked").and_then(|l| l.as_bool()).unwrap_or(false);
+        ordered.push((m.seq, key.to_string(), amount, locked));
+    }
+    if ordered.is_empty() {
+        return;
+    }
+    ordered.sort_by_key(|(seq, _, _, _)| *seq);
+
+    let mut applied = last;
+    for (seq, key, amount, locked) in ordered {
+        curator_plankas::set(&key, amount, locked).await;
+        record_effective(&key).await;
+        applied = applied.max(seq);
+
+        // Письмо — чтобы человек узнал о правке, даже не открывая чат.
+        let body = match amount {
+            Some(a) => directives::set_planka_letter(&key, a),
+            None => directives::lock_letter(&key, locked),
+        };
+        letters::add(letters::Letter {
+            id: format!("curator-planka-{seq}"),
+            created_at: chrono::Local::now().to_rfc3339(),
+            body,
+            read: false,
+            action: None,
+            action_done: false,
+        });
+    }
+    crate::services::app_flags::set(CURATOR_PLANKA_SEQ_KEY, &applied.to_string());
+    crate::services::sync::push_background();
 }
 
 // ── Директива «открыть тему» ─────────────────────────────────────────────────
@@ -518,6 +636,30 @@ fn mode_str(m: ChatMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn predely_planok_zadany_dlya_vseh_indikatorov() {
+        // Каждый индикатор, который куратор может править, обязан иметь предел:
+        // без него директива с опечаткой прошла бы как есть.
+        for k in [
+            "calories", "protein", "steps", "veg_fruit", "calcium", "fiber", "iron", "heme",
+            "epa_dha", "fat_ratio", "red_meat", "egg",
+        ] {
+            let (lo, hi) = planka_range(k).unwrap_or_else(|| panic!("{k} без предела"));
+            assert!(lo < hi, "{k}: пустой диапазон");
+        }
+        // Колбасы числом не выражаются — правки для них нет вовсе.
+        assert!(planka_range("processed_meat").is_none());
+        assert!(planka_range("чушь").is_none());
+    }
+
+    #[test]
+    fn predel_kalorij_lovit_opechatku_a_ne_zhiznennoe_znachenie() {
+        let (lo, hi) = planka_range("calories").unwrap();
+        assert!(1800.0 >= lo && 1800.0 <= hi, "обычная планка обязана проходить");
+        assert!(200_000.0 > hi, "лишний ноль обязан отсекаться");
+        assert!(50.0 < lo, "полсотни ккал — не планка");
+    }
 
     #[test]
     fn mode_str_round_trips() {

@@ -62,6 +62,40 @@ pub fn LiveBubble(
         .into_view();
     }
 
+    // Правка любой планки — системной запиской: применяет её приложение, отвечать
+    // здесь не на что. Текст собирается из своих строк, на языке человека.
+    if msg.kind == "set_planka_v2" {
+        let v = msg
+            .payload
+            .as_deref()
+            .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok());
+        let key = v
+            .as_ref()
+            .and_then(|v| v.get("key").and_then(|k| k.as_str()))
+            .unwrap_or_default()
+            .to_string();
+        let amount = v.as_ref().and_then(|v| v.get("amount").and_then(|a| a.as_f64()));
+        let locked = v
+            .as_ref()
+            .and_then(|v| v.get("locked").and_then(|l| l.as_bool()))
+            .unwrap_or(false);
+        let text = match amount {
+            Some(a) => crate::services::directives::set_planka_note(&key, Some(a)),
+            None => crate::services::directives::lock_note(&key, locked),
+        };
+        let note_style = "background: #EEF6FF; color: #1E4E79; border: 1px solid #CFE2F7; \
+                          border-radius: 10px; padding: 8px 14px; max-width: 88%; text-align: center;";
+        return view! {
+            <div attr:data-testid="live-message" attr:data-role="system"
+                style="display: flex; justify-content: center; margin-bottom: 10px;">
+                <div style=note_style>
+                    <p class="is-size-7" style="margin: 0;">{text}</p>
+                </div>
+            </div>
+        }
+        .into_view();
+    }
+
     // Директива открытия темы — так же системной запиской: применяет её
     // приложение, отвечать здесь не на что.
     if msg.kind == "open_week" {

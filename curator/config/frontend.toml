@@ -1,0 +1,4 @@
+auth_base_url = "https://auth-worker-dev.vg-stavenko.workers.dev"
+support_base_url = "https://support-worker-dev.vg-stavenko.workers.dev"
+push_base_url = "https://main-flow-dev.vg-stavenko.workers.dev"
+app_origin = "https://renorma-fit-dev.pages.dev"

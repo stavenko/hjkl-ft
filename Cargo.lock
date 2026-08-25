@@ -1167,6 +1167,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "curator"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "console_error_panic_hook",
+ "datashare",
+ "js-sys",
+ "leptos",
+ "pwa-prompt",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "toml",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "dashmap"
 version = "5.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

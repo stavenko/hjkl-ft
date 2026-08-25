@@ -1,0 +1,4 @@
+auth_base_url = "https://auth.renorma.app"
+support_base_url = "https://support.renorma.app"
+push_base_url = "https://push.renorma.app"
+app_origin = "https://fit.renorma.app"

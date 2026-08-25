@@ -23,7 +23,6 @@ use std::collections::{HashMap, HashSet};
 use chrono::{Datelike, Duration, NaiveDate};
 
 use super::local;
-use super::profile::{self, Sex};
 
 /// Цвет индикатора переехал в общий крейт вместе с подъёмом планки шагов, который
 /// по нему решается. Реэкспорт — чтобы сто с лишним мест не менялись, и, что важнее,
@@ -34,7 +33,10 @@ pub use plankas::IndicatorState;
 // Норма клетчатки здесь БОЛЬШЕ НЕ ЖИВЁТ: она считается от калорийной планки
 // (`services::fiber::daily_target_g`), и вторая, забытая копия «25 г для всех»
 // разошлась бы с индикатором на любом калораже выше 1800.
-const CALCIUM_PER_DAY_MG: f64 = 1000.0; // user: 1 g/day for everyone
+// Норма кальция тоже переехала — в общий крейт, к остальным восьми. Здесь от неё
+// осталась одна ссылка: открытие недели кальция заводит цель, чтобы кальций начал
+// собираться из еды. Планкой это число больше не является.
+use plankas::defaults::CALCIUM_PER_DAY_MG;
 // Омеги-3 здесь БОЛЬШЕ НЕТ. Она собиралась общим проходом как обычный нутриент в
 // миллиграммах на 100 г — то есть «назови число» без таблицы категорий, — и одна
 // порция скумбрии закрывала недельную норму 3500 мг целиком. Теперь длинные морские
@@ -44,16 +46,15 @@ const CALCIUM_PER_DAY_MG: f64 = 1000.0; // user: 1 g/day for everyone
 /// Vegetables/fruit target (g/day): user-set — women 600, men 800. Unknown sex →
 /// 600 (the lower, so it isn't spuriously missed before the persona is complete).
 pub fn veg_fruit_per_day_g() -> f64 {
-    let ours = match profile::get_sex() {
-        Some(Sex::Male) => 800.0,
-        _ => 600.0,
-    };
-    crate::services::curator_plankas::or_ours("veg_fruit", ours)
+    use crate::services::plankas;
+    plankas::constant(plankas::Kind::VegFruit)
 }
 
-/// Суточная норма кальция: наша константа, если куратор не назвал свою.
+/// Суточная норма кальция: действующая планка — наша константа, пока куратор не
+/// назвал свою.
 pub fn calcium_per_day_mg() -> f64 {
-    crate::services::curator_plankas::or_ours("calcium", CALCIUM_PER_DAY_MG)
+    use crate::services::plankas;
+    plankas::constant(plankas::Kind::Calcium)
 }
 
 // Nutrient display names. `Food.nutrients` is keyed by the display name (same as
@@ -892,16 +893,14 @@ pub async fn invalidate_food(food_id: &str) {
 /// The daily target for `key` (0 → not computable yet, e.g. protein before the
 /// profile/weight is set).
 async fn target_for(key: &str) -> f64 {
+    use crate::services::plankas::{self, Kind};
     match key {
-        "protein" => match local::list_weight_entries().await.into_iter().last() {
-            Some(e) => profile::protein_target_from_profile(e.weight_kg).await as f64,
-            None => 0.0,
-        },
-        "veg_fruit" => veg_fruit_per_day_g(),
-        "steps" => crate::services::profile::get_steps_planka().unwrap_or(0.0),
-        "calories" => local::calorie_goal_amount().await.unwrap_or(0.0),
-        "calcium" => calcium_per_day_mg(),
-        "fiber" => crate::services::fiber::daily_target_effective_g().await,
+        // Ровно те виды, у которых цель СУТОЧНАЯ. Железо, гем, омега-3 и баланс
+        // жиров планку тоже имеют, но недельную — дневной цели у них нет, и день
+        // по ним не судится (столбик показывает количество).
+        "protein" | "veg_fruit" | "steps" | "calories" | "calcium" | "fiber" => {
+            Kind::from_key(key).and_then(plankas::current).unwrap_or(0.0)
+        }
         _ => 0.0,
     }
 }

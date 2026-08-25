@@ -26,36 +26,23 @@ pub const FIBER_UNLOCKED_KEY: &str = "fiber_week_unlocked";
 /// App-flag: день, от которого катится сетка недель клетчатки.
 pub const FIBER_WEEK_OPEN_KEY: &str = "fiber_week_opened_at";
 
-/// Граммов клетчатки на 1000 ккал рациона — IOM AI, те же 14 г в действующих
-/// Dietary Guidelines.
-pub const G_PER_1000_KCAL: f64 = 14.0;
-
-/// Нижняя граница суточной нормы, г. Минимум ВОЗ для взрослого: ниже не опускаемся,
-/// какой бы скромной ни была калорийная планка.
-pub const MIN_G_PER_DAY: f64 = 25.0;
-
-/// Суточная норма от калорийной планки. Без планки — минимум ВОЗ: выдумывать
-/// калорийность, чтобы посчитать от неё клетчатку, нечестно.
-pub fn daily_target_g(planka_kcal: Option<f64>) -> f64 {
-    let from_kcal = planka_kcal.unwrap_or(0.0) / 1000.0 * G_PER_1000_KCAL;
-    from_kcal.max(MIN_G_PER_DAY)
-}
+/// Само ПРАВИЛО живёт в общем крейте — там, где собраны все двенадцать норм и
+/// откуда их считает кураторское приложение. Здесь остаётся счёт по еде.
+pub use plankas::defaults::{daily_target_g, G_PER_1000_KCAL, MIN_G_PER_DAY};
 
 /// Действующая СУТОЧНАЯ норма: кураторская, если он её задал, иначе наша от
 /// калорийной планки.
-pub async fn daily_target_effective_g() -> f64 {
-    crate::services::curator_plankas::or_ours(
-        "fiber",
-        daily_target_g(local::calorie_goal_amount().await),
-    )
+pub fn daily_target_effective_g() -> f64 {
+    use crate::services::plankas;
+    plankas::constant(plankas::Kind::Fiber)
 }
 
 /// Недельная планка этого человека ПО СЕГОДНЯШНЕЙ калорийной планке, г.
 ///
 /// Годится для текущей недели; прошлые судятся своей планкой — см.
 /// [`weekly_target_on`].
-pub async fn weekly_target_g() -> f64 {
-    daily_target_effective_g().await * 7.0
+pub fn weekly_target_g() -> f64 {
+    daily_target_effective_g() * 7.0
 }
 
 /// Недельная планка ТОЙ НЕДЕЛИ, что началась `week_start`, г.
@@ -68,7 +55,14 @@ pub async fn weekly_target_g() -> f64 {
 ///
 /// Журнала может не быть у тех, кто получил планку до его появления: тогда падаем
 /// на сегодняшнюю — это лучше, чем судить их по минимуму ВОЗ.
+///
+/// Кураторская планка сюда не выводится: она названа числом, а не правилом, и
+/// действует как есть — выводить её из чужой калорийности нечего.
 async fn weekly_target_on(week_start: NaiveDate) -> f64 {
+    use crate::services::plankas;
+    if let Some(set) = plankas::current(plankas::Kind::Fiber) {
+        return set * 7.0;
+    }
     let day = week_start.format("%Y-%m-%d").to_string();
     let planka = match local::planka_on(local::PLANKA_CALORIES, &day).await {
         Some(v) => Some(v),
@@ -229,30 +223,4 @@ pub async fn week_closed_since_open() -> bool {
         s += Duration::days(7);
     }
     false
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn norma_rastyot_vmeste_s_planko() {
-        // 2600 ккал → 36.4 г/сут.
-        assert!((daily_target_g(Some(2600.0)) - 36.4).abs() < 1e-9);
-        // 3500 ккал → 49 г/сут.
-        assert!((daily_target_g(Some(3500.0)) - 49.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn nizhe_minimuma_vo_z_ne_opuskaemsya() {
-        // 1500 ккал дали бы 21 г — но ВОЗ говорит не меньше 25.
-        assert!((daily_target_g(Some(1500.0)) - MIN_G_PER_DAY).abs() < 1e-9);
-        // Планки ещё нет — тоже минимум, а не ноль.
-        assert!((daily_target_g(None) - MIN_G_PER_DAY).abs() < 1e-9);
-    }
-
-    #[test]
-    fn nedelnaya_planka_eto_sem_sutochnyh() {
-        assert!((daily_target_g(Some(2600.0)) * 7.0 - 254.8).abs() < 1e-9);
-    }
 }

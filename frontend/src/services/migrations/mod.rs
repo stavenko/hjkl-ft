@@ -265,7 +265,13 @@ pub async fn run_for_current_db() -> usize {
         return 0;
     }
     DONE_FOR.with(|c| *c.borrow_mut() = Some(name.clone()));
-    run_all().await
+    let done = run_all().await;
+    if done > 0 {
+        // Миграция могла завести планку в истории (m003) — синхронный кэш обязан
+        // её увидеть сейчас, а не после перезапуска.
+        crate::services::plankas::hydrate().await;
+    }
+    done
 }
 
 /// Прогнать все миграции, которые старше текущей версии базы.

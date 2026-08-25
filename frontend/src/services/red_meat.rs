@@ -33,12 +33,13 @@ pub const RED_MEAT_UNLOCKED_KEY: &str = "red_meat_week_unlocked";
 /// App-flag: день, от которого катится сетка недель красного мяса.
 pub const RED_MEAT_WEEK_OPEN_KEY: &str = "red_meat_week_opened_at";
 
-/// Недельная планка в граммах СЫРОГО мяса.
-pub const WEEKLY_LIMIT_RAW_G: f64 = 700.0;
+/// Недельная планка в граммах СЫРОГО мяса. Живёт в общем крейте.
+pub use plankas::defaults::RED_MEAT_WEEKLY_LIMIT_RAW_G as WEEKLY_LIMIT_RAW_G;
 
-/// Действующий недельный предел, г сырого: кураторский, если задан.
+/// Действующий недельный предел, г сырого — наш, пока куратор не назвал свой.
 pub fn weekly_limit_g() -> f64 {
-    crate::services::curator_plankas::or_ours("red_meat", WEEKLY_LIMIT_RAW_G)
+    use crate::services::plankas;
+    plankas::constant(plankas::Kind::RedMeat)
 }
 
 /// Сколько белка в 100 г сырого красного мяса. Говядина, свинина и баранина дают

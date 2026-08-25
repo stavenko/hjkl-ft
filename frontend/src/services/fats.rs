@@ -56,12 +56,8 @@ pub fn gate_anchor() -> Option<NaiveDate> {
 // 12.7, МНЖК 27.4, ПНЖК 17.5 — отношение 3.5. Две рыбные трапезы дают 7.6 г
 // EPA+DHA. Обе нормы закрываются с запасом.
 
-/// Недельная норма EPA+DHA, граммы. 250 мг/сут — AI, а не RDA: у длинных омега-3
-/// нормируется достаточное потребление, верхнего края потребности тут нет.
-pub const EPA_DHA_PER_WEEK_G: f64 = 1.75;
-
-/// Минимальное отношение (МНЖК+ПНЖК)/НЖК.
-pub const UNSAT_TO_SAT_MIN: f64 = 2.0;
+/// Обе нормы живут в общем крейте, вместе с остальными десятью.
+pub use plankas::defaults::{EPA_DHA_PER_WEEK_G, UNSAT_TO_SAT_MIN};
 
 // ── Открытие и неделя ────────────────────────────────────────────────────────
 
@@ -197,13 +193,13 @@ impl Fat {
         }
     }
 
-    /// Норма, с которой сравнивается значение.
+    /// Действующая норма, с которой сравнивается значение.
     pub fn target(self) -> f64 {
-        let ours = match self {
-            Fat::EpaDha => EPA_DHA_PER_WEEK_G,
-            Fat::Ratio => UNSAT_TO_SAT_MIN,
-        };
-        crate::services::curator_plankas::or_ours(self.key(), ours)
+        use crate::services::plankas;
+        plankas::constant(match self {
+            Fat::EpaDha => plankas::Kind::EpaDha,
+            Fat::Ratio => plankas::Kind::FatRatio,
+        })
     }
 
     /// Закрыта ли неделя по этому индикатору.

@@ -366,7 +366,7 @@ async fn build_targets() -> Value {
         "steps": profile::get_steps_planka(),
         "veg_fruit": indicators::veg_fruit_per_day_g(),
         "calcium": indicators::calcium_per_day_mg(),
-        "fiber": fiber::daily_target_effective_g().await,
+        "fiber": fiber::daily_target_effective_g(),
         "iron": iron::weekly_target_mg(),
         "heme": heme::weekly_portions(),
         "epa_dha": fats::Fat::EpaDha.target(),

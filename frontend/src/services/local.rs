@@ -235,21 +235,15 @@ pub async fn calorie_planka_suggestion() -> Option<f64> {
     Some(calorie_planka(avg, &trend, weight_kg))
 }
 
-/// The currently-set daily calorie planka (the `Calories`/`AtMost` goal), if any.
+/// ДЕЙСТВУЮЩАЯ суточная планка по калориям.
+///
+/// Берётся из истории планок — единственного места, где планка живёт. Цель
+/// `Calories`/`AtMost` в `goals` источником больше не является: она осталась тем,
+/// чем была на деле, — строкой в списке отслеживаемых нутриентов.
 pub async fn calorie_goal_amount() -> Option<f64> {
-    crate::services::curator_plankas::or_ours_opt("calories", our_calorie_goal_amount().await)
+    crate::services::plankas::current(crate::services::plankas::Kind::Calories)
 }
 
-/// Планка по калориям, которую посчитало САМО приложение, — без кураторского
-/// приоритета. Нужна ровно там, где приоритет неуместен: недельный пересчёт
-/// отталкивается от предыдущего значения, а перенос при отвязке возвращает наше.
-pub async fn our_calorie_goal_amount() -> Option<f64> {
-    list_goals()
-        .await
-        .into_iter()
-        .find(|g| g.nutrient == "Calories" && g.direction == GoalDirection::AtMost && g.amount > 0.0)
-        .map(|g| g.amount)
-}
 
 // ── История планок ───────────────────────────────────────────────────────────
 //
@@ -280,6 +274,10 @@ pub async fn record_planka(kind: &str, amount: f64) {
     if amount <= 0.0 {
         return;
     }
+    // Синхронный кэш действующих планок обновляется ЗДЕСЬ, а не у вызывающих:
+    // через эту функцию проходят все записи в историю, и после любой из них
+    // шкалы обязаны читать новое число, не дожидаясь гидратации.
+    crate::services::plankas::note_recorded(kind, amount);
     let date = today_date().format("%Y-%m-%d").to_string();
     if planka_on(kind, &date).await == Some(amount) {
         return;
@@ -346,6 +344,22 @@ pub async fn planka_on(kind: &str, date: &str) -> Option<f64> {
         .take_while(|e| e.date.as_str() <= date)
         .last()
         .map(|e| e.amount)
+}
+
+/// Забыть историю планки этого вида целиком — вернуть ей наше правило по
+/// умолчанию.
+///
+/// Удаление ОТСЛЕЖИВАЕМОЕ: запись могла приехать с другого устройства, и там она
+/// тоже должна исчезнуть, иначе следующий синк вернёт её обратно.
+///
+/// Зовётся при отвязке от куратора, и только для константных видов: у них запись
+/// в истории может появиться ТОЛЬКО от куратора — приложение их не пишет, — так
+/// что стирать больше нечего. Динамические (калории, шаги, белок) свою историю
+/// хранят и после отвязки: она нужна, чтобы прошлые дни судились по своей планке.
+pub async fn forget_planka_history(kind: &str) {
+    for entry in planka_history(kind).await {
+        db::delete("planka_history", &entry.id).await;
+    }
 }
 
 /// Progress toward the "one week of observations" the planka needs: for each of
@@ -2031,6 +2045,7 @@ pub async fn save_weight(weight_kg: f64, no_water: bool, no_food: bool, no_wash:
         existing.morning = morning;
         existing.updated_at = now();
         db::put("weight_entries", &existing).await;
+        crate::services::plankas::note_weight(weight_kg);
         // Перевзвешивание в тот же день — тоже новый вес, а значит и новые границы
         // нормы белка.
         record_protein_planka().await;
@@ -2049,6 +2064,7 @@ pub async fn save_weight(weight_kg: f64, no_water: bool, no_food: bool, no_wash:
         updated_at: now(),
     };
     db::put("weight_entries", &entry).await;
+    crate::services::plankas::note_weight(weight_kg);
     // Границы нормы белка (пол по безжировой массе, потолок по полному весу)
     // считаются от ВЕСА, значит новый вес может дать новую норму. Пишем её в
     // историю здесь: иначе прошлые дни пересуживались бы по сегодняшней норме.

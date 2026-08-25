@@ -17,7 +17,7 @@
 use api_types::Food;
 use chrono::{Duration, NaiveDate};
 
-use super::profile::{self, Sex};
+use super::profile;
 use super::{ai, app_flags, local};
 
 /// App-flag: the iron week (weekly gauge + weekly indicator) has been unlocked.
@@ -39,80 +39,13 @@ pub fn week_open_date() -> Option<NaiveDate> {
 }
 
 // ── The target ───────────────────────────────────────────────────────────────
-// Source: Dietary Reference Intakes (Institute of Medicine), the table NIH ODS
-// publishes — RDA in mg/day by life stage:
-//
-//   1–3 y   7  ·  4–8 y  10  ·  9–13 y  8   (both sexes)
-//   14–18 y   male 11   female 15
-//   19–50 y   male  8   female 18
-//   51+ y     male  8   female  8
-//
-// The female 19–50 figure (18 mg) covers menstrual losses; it drops to the male
-// level after menopause, which the 51-year boundary stands in for. We do not model
-// pregnancy (27 mg) or lactation (9 mg) — the app has no such flag, and guessing
-// would be worse than using the baseline.
-
-/// Daily iron RDA in mg for this sex/age. Unknown sex → the higher (female) figure:
-/// under-stating an intake target is the harmful direction.
-pub fn rda_mg_per_day(sex: Option<Sex>, age_years: Option<i32>) -> f64 {
-    // Age unknown → assume an adult.
-    let age = age_years.unwrap_or(30);
-    match age {
-        0..=3 => 7.0,
-        4..=8 => 10.0,
-        9..=13 => 8.0,
-        14..=18 => match sex {
-            Some(Sex::Male) => 11.0,
-            _ => 15.0,
-        },
-        19..=50 => match sex {
-            Some(Sex::Male) => 8.0,
-            _ => 18.0,
-        },
-        _ => 8.0,
-    }
-}
-
-/// The bioavailability the DRI itself assumes for a mixed Western diet (~18 %).
-/// The published RDA is stated in TOTAL milligrams eaten under that assumption, so
-/// to express the same requirement in ABSORBED milligrams — the currency we can
-/// actually measure per food — we scale it by this factor.
-pub const RDA_BIOAVAILABILITY: f64 = 0.18;
-
-/// Суточное потребление, из которого строится ПЛАНКА. Не всегда равно RDA.
-///
-/// RDA — это не средняя потребность. DRI берёт требование в усвоенном железе на
-/// **97,5-м процентиле** (запас на самые обильные менструации) и делит на верхнюю
-/// оценку усвоения. Для мужчин разброс потребности мал, и 97,5-й процентиль почти
-/// совпадает со средним: RDA 8 против EAR 6. У женщин разброс огромный — RDA 18
-/// против EAR 8,1, вдвое с лишним.
-///
-/// Планка по RDA означала бы 3,24 мг усвоенного в сутки. Живой рацион столько не
-/// даёт: даже западный смешанный с мясом по нашей же таблице долей выходит около
-/// 1,7 мг. Индикатор у женщин горел бы красным всегда и ничему не учил.
-///
-/// Поэтому у менструирующих женщин планка строится от EAR — СРЕДНЕЙ потребности.
-/// Той, у кого потери выше средних, планку надо поднимать отдельно и осознанно
-/// (планируется отметка «обильные менструации»), а не держать всех на верхнем крае.
-///
-/// Остальные возрастные группы — по RDA, как было: там разница между средним и
-/// верхним краем невелика, и менять устоявшееся без нужды незачем.
-fn intake_basis_mg_per_day(sex: Option<Sex>, age_years: Option<i32>) -> f64 {
-    let age = age_years.unwrap_or(30);
-    let menstruating = matches!(age, 19..=50) && !matches!(sex, Some(Sex::Male));
-    if menstruating {
-        // EAR по IOM для женщин 19–50: 8,1 мг/сут.
-        8.1
-    } else {
-        rda_mg_per_day(sex, age_years)
-    }
-}
-
-/// The weekly target in ABSORBED mg of iron: the daily intake basis for a week,
-/// converted from "eaten" to "absorbed" by the bioavailability the DRI assumes.
-pub fn weekly_absorbed_target_mg(sex: Option<Sex>, age_years: Option<i32>) -> f64 {
-    intake_basis_mg_per_day(sex, age_years) * 7.0 * RDA_BIOAVAILABILITY
-}
+// Таблица RDA, поправка на усвоение и разговор про EAR у менструирующих женщин
+// переехали в общий крейт `plankas` — в одно место со всеми двенадцатью нормами,
+// откуда их считает и кураторское приложение. Здесь остаётся счёт усвоенного
+// железа по еде.
+pub use plankas::defaults::{
+    intake_basis_mg_per_day, rda_mg_per_day, weekly_absorbed_target_mg, RDA_BIOAVAILABILITY,
+};
 
 /// То же суточное число, что стоит за планкой — для пояснения «?» на индикаторе.
 /// Показывать там RDA было бы враньём: планка построена не от него.
@@ -120,12 +53,11 @@ pub fn intake_basis_for_profile() -> f64 {
     intake_basis_mg_per_day(profile::get_sex(), profile::get_age_years())
 }
 
-/// This user's weekly absorbed-iron target, from their profile.
+/// Действующая недельная планка усвоенного железа — наша от профиля, пока куратор
+/// не назвал свою.
 pub fn weekly_target_mg() -> f64 {
-    crate::services::curator_plankas::or_ours(
-        "iron",
-        weekly_absorbed_target_mg(profile::get_sex(), profile::get_age_years()),
-    )
+    use crate::services::plankas;
+    plankas::constant(plankas::Kind::Iron)
 }
 
 // ── The week window ──────────────────────────────────────────────────────────
@@ -351,63 +283,6 @@ pub async fn enrich_iron(food: &Food, identity: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rda_follows_the_dri_table() {
-        // Children — same for both sexes.
-        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(2)), 7.0);
-        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(2)), 7.0);
-        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(6)), 10.0);
-        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(11)), 8.0);
-        // Teens diverge: menstrual losses.
-        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(16)), 11.0);
-        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(16)), 15.0);
-        // Adults.
-        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(35)), 8.0);
-        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(35)), 18.0);
-        // After menopause the female figure drops to the male one.
-        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(51)), 8.0);
-        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(70)), 8.0);
-        // Boundaries.
-        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(50)), 18.0);
-        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(18)), 11.0);
-        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(19)), 8.0);
-        // Unknown sex → the higher figure (under-stating the target is the harmful way).
-        assert_eq!(rda_mg_per_day(None, Some(35)), 18.0);
-        // Unknown age → treated as an adult.
-        assert_eq!(rda_mg_per_day(Some(Sex::Male), None), 8.0);
-    }
-
-    #[test]
-    fn weekly_target_is_the_intake_basis_in_absorbed_terms() {
-        // Женщина 35: планка от СРЕДНЕЙ потребности (EAR 8,1), а не от RDA 18.
-        // 8,1 × 7 × 0,18 ≈ 10,206 мг усвоенного в неделю.
-        let t = weekly_absorbed_target_mg(Some(Sex::Female), Some(35));
-        assert!((t - 10.206).abs() < 1e-9, "{t}");
-        // По RDA было бы 22,68 — недостижимо на живой еде.
-        assert!(t < 18.0 * 7.0 * RDA_BIOAVAILABILITY);
-        // Man 35: 8 × 7 × 0.18 ≈ 10.08 — по RDA, как было.
-        let t = weekly_absorbed_target_mg(Some(Sex::Male), Some(35));
-        assert!((t - 10.08).abs() < 1e-9, "{t}");
-    }
-
-    #[test]
-    fn snizhenie_kasaetsya_tolko_menstruiruyushchih() {
-        // Подросток 16 и женщина после менопаузы — по-прежнему по RDA.
-        assert_eq!(
-            weekly_absorbed_target_mg(Some(Sex::Female), Some(16)),
-            15.0 * 7.0 * RDA_BIOAVAILABILITY
-        );
-        assert_eq!(
-            weekly_absorbed_target_mg(Some(Sex::Female), Some(60)),
-            8.0 * 7.0 * RDA_BIOAVAILABILITY
-        );
-        // Пол неизвестен в 19–50 — считаем как женщину: занижать вреднее.
-        assert_eq!(
-            weekly_absorbed_target_mg(None, Some(35)),
-            8.1 * 7.0 * RDA_BIOAVAILABILITY
-        );
-    }
 
     #[test]
     fn absorbed_iron_needs_both_numbers() {

@@ -247,7 +247,7 @@ fn egg_hint_text() -> String {
 fn fiber_hint_text(planka: Option<f64>) -> String {
     use crate::services::fiber;
     // Действующая суточная норма: кураторская, если задана, иначе наша от планки.
-    let daily = crate::services::curator_plankas::or_ours("fiber", fiber::daily_target_g(planka));
+    let daily = fiber::daily_target_g(planka);
     format!(
         "Клетчатка — то, что мы сами не перевариваем, а отдаём кишечным бактериям. От неё          зависят стул, чувство сытости, уровень холестерина и сахара после еды.
 

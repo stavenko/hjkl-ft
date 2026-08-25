@@ -123,25 +123,21 @@ pub fn set_sex(sex: Sex) {
     write(|r| r.sex = Some(v.to_string()));
 }
 
-/// The daily steps planka (activity target), if set. System-set on the activity
-/// week — there is no manual editing UI. Lives here (not in `goals`) so no
-/// nutrient-iterating food UI can ever pick it up.
+/// Действующая суточная планка шагов. Читается из ИСТОРИИ планок — единственного
+/// места, где планка живёт; поле `steps_planka` в профиле её больше не хранит как
+/// источник (см. [`set_steps_planka`]).
 pub fn get_steps_planka() -> Option<f64> {
-    crate::services::curator_plankas::or_ours_opt("steps", our_steps_planka())
+    crate::services::plankas::current(crate::services::plankas::Kind::Steps)
 }
 
-/// Планка шагов, которую поставило САМО приложение, — без кураторского
-/// приоритета (см. [`crate::services::local::our_calorie_goal_amount`]).
-pub fn our_steps_planka() -> Option<f64> {
-    CACHE.with(|c| c.borrow().as_ref().and_then(|r| r.steps_planka).filter(|p| *p > 0.0))
-}
-
-/// Store the steps planka. A non-positive value clears it.
+/// Записать планку шагов. Непозитивное значение её снимает.
+///
+/// Пишет в ДВА места, и это не дублирование источника: истина — история, а поле в
+/// профиле осталось затем, чтобы старые сборки на других устройствах человека не
+/// потеряли планку, пока не обновятся. Читает её только [`get_steps_planka`], и
+/// читает из истории.
 pub fn set_steps_planka(planka: f64) {
     write(|r| r.steps_planka = if planka > 0.0 { Some(planka) } else { None });
-    // Установка попадает в ИСТОРИЮ: индикатор судит день по планке, действовавшей
-    // именно в тот день. Профиль хранит только текущее значение, и по нему прошлое
-    // не восстановить.
     if planka > 0.0 {
         leptos::spawn_local(async move {
             crate::services::local::record_planka(crate::services::local::PLANKA_STEPS, planka)
@@ -230,12 +226,12 @@ pub use plankas::{
     PROTEIN_MIN_PER_KG_FFM,
 };
 
+/// НАША норма белка по этому весу — та самая кривая от калорийной планки.
+///
+/// Это правило, а не действующая планка: действующая живёт в истории и может быть
+/// кураторской (см. [`crate::services::plankas::current`]). Отсюда её и пишут в
+/// историю, когда правило меняется вслед за весом или калориями.
 pub async fn protein_target_from_profile(weight_kg: f64) -> u32 {
-    // Кураторское число поверх нашей кривой: белок выводится из калорийной
-    // планки, но куратор вправе назвать своё.
-    if let Some(g) = crate::services::curator_plankas::get("protein") {
-        return g.max(0.0).round() as u32;
-    }
     let kcal = crate::services::local::calorie_goal_amount().await;
     match (get_height_cm(), get_age_years(), get_sex()) {
         (Some(h), Some(age), Some(sex)) => {

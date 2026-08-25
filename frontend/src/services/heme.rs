@@ -22,15 +22,15 @@ use chrono::{Duration, NaiveDate};
 
 use super::{iron, local};
 
-/// Сколько белка из подходящего продукта составляет ОДНУ порцию.
-pub const PORTION_PROTEIN_G: f64 = 25.0;
+/// Нормы — из общего крейта: одно место на все двенадцать планок.
+pub use plankas::defaults::{
+    HEME_PORTION_PROTEIN_G as PORTION_PROTEIN_G, HEME_WEEKLY_PORTIONS as WEEKLY_PORTIONS,
+};
 
-/// Недельная цель в порциях.
-pub const WEEKLY_PORTIONS: f64 = 3.0;
-
-/// Действующая недельная планка порций: кураторская, если задана.
+/// Действующая недельная планка порций — наша, пока куратор не назвал свою.
 pub fn weekly_portions() -> f64 {
-    crate::services::curator_plankas::or_ours("heme", WEEKLY_PORTIONS)
+    use crate::services::plankas;
+    plankas::constant(plankas::Kind::Heme)
 }
 
 /// Виден ли индикатор. Открывается ровно вместе с железом — отдельного условия

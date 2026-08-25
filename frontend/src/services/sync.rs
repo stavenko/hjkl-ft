@@ -217,6 +217,9 @@ struct ApplyCtx {
     flags_touched: bool,
     profile_touched: bool,
     curator_plankas_touched: bool,
+    /// Приехала запись в историю планок или новый вес — действующие планки могли
+    /// поменяться, синхронный кэш надо перечитать.
+    plankas_touched: bool,
     pending: PendingMap,
 }
 
@@ -295,7 +298,11 @@ async fn apply_upsert(store: &str, row: &serde_json::Value, ctx: &mut ApplyCtx) 
                 leptos::logging::error!("sync v2: {store} row without id: {row}");
                 return;
             };
-            upsert_row(store, id, row).await;
+            if upsert_row(store, id, row).await
+                && matches!(store, "planka_history" | "weight_entries")
+            {
+                ctx.plankas_touched = true;
+            }
         }
         other => {
             leptos::logging::error!("sync v2: unknown wire store {other:?}");
@@ -318,6 +325,7 @@ async fn apply_delete(store: &str, id: &str, ctx: &mut ApplyCtx) {
         "app_flags" => ctx.flags_touched = true,
         "profile" => ctx.profile_touched = true,
         "curator_plankas" => ctx.curator_plankas_touched = true,
+        "planka_history" | "weight_entries" => ctx.plankas_touched = true,
         _ => {}
     }
 }
@@ -389,6 +397,9 @@ async fn pull_v2() -> Result<(), String> {
     // число до следующего запуска.
     if ctx.curator_plankas_touched {
         super::curator_plankas::hydrate().await;
+    }
+    if ctx.plankas_touched {
+        super::plankas::hydrate().await;
     }
 
     // A bootstrap pull must record its version even when it is 0 (a fresh
@@ -680,6 +691,7 @@ async fn adopt_from_server(resp: SyncPullV2Response) -> Result<(), String> {
     super::stories::reseed();
     super::letters::refresh();
     super::profile::hydrate().await;
+    super::plankas::hydrate().await;
     set_client_version(resp.version).await;
     set_meta("last_pull_at", &chrono::Utc::now().to_rfc3339()).await;
     Ok(())

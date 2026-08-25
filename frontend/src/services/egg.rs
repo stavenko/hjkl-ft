@@ -26,12 +26,13 @@ pub const EGG_UNLOCKED_KEY: &str = "egg_week_unlocked";
 /// App-flag: день, от которого катится сетка недель яиц.
 pub const EGG_WEEK_OPEN_KEY: &str = "egg_week_opened_at";
 
-/// Недельная планка в ЯЙЦАХ. Минимум, а не потолок.
-pub const WEEKLY_MIN_EGGS: f64 = 7.0;
+/// Недельная планка в ЯЙЦАХ. Минимум, а не потолок. Живёт в общем крейте.
+pub use plankas::defaults::EGG_WEEKLY_MIN as WEEKLY_MIN_EGGS;
 
-/// Действующая недельная планка в штуках: кураторская, если задана.
+/// Действующая недельная планка в штуках — наша, пока куратор не назвал свою.
 pub fn weekly_min_eggs() -> f64 {
-    crate::services::curator_plankas::or_ours("egg", WEEKLY_MIN_EGGS)
+    use crate::services::plankas;
+    plankas::constant(plankas::Kind::Egg)
 }
 
 /// Одно яйцо, граммы. Столовое яйцо первой категории без скорлупы — около 50 г.

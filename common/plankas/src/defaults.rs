@@ -227,7 +227,7 @@ pub const RDA_BIOAVAILABILITY: f64 = 0.18;
 ///
 /// Остальные возрастные группы — по RDA, как было: там разница между средним и
 /// верхним краем невелика, и менять устоявшееся без нужды незачем.
-fn intake_basis_mg_per_day(sex: Option<Sex>, age_years: Option<i32>) -> f64 {
+pub fn intake_basis_mg_per_day(sex: Option<Sex>, age_years: Option<i32>) -> f64 {
     let age = age_years.unwrap_or(30);
     let menstruating = matches!(age, 19..=50) && !matches!(sex, Some(Sex::Male));
     if menstruating {
@@ -284,6 +284,88 @@ mod tests {
             weight_kg: Some(70.0),
             kcal_planka: Some(1800.0),
         }
+    }
+
+    // ── Нормы, переехавшие сюда вместе со своими тестами ──────────────────
+    // Тесты приехали БЕЗ ПРАВОК: неизменённый тест на переехавшей функции — это и
+    // есть доказательство, что переезд ничего не поменял.
+
+    #[test]
+    fn rda_follows_the_dri_table() {
+        // Children — same for both sexes.
+        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(2)), 7.0);
+        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(2)), 7.0);
+        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(6)), 10.0);
+        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(11)), 8.0);
+        // Teens diverge: menstrual losses.
+        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(16)), 11.0);
+        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(16)), 15.0);
+        // Adults.
+        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(35)), 8.0);
+        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(35)), 18.0);
+        // After menopause the female figure drops to the male one.
+        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(51)), 8.0);
+        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(70)), 8.0);
+        // Boundaries.
+        assert_eq!(rda_mg_per_day(Some(Sex::Female), Some(50)), 18.0);
+        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(18)), 11.0);
+        assert_eq!(rda_mg_per_day(Some(Sex::Male), Some(19)), 8.0);
+        // Unknown sex → the higher figure (under-stating the target is the harmful way).
+        assert_eq!(rda_mg_per_day(None, Some(35)), 18.0);
+        // Unknown age → treated as an adult.
+        assert_eq!(rda_mg_per_day(Some(Sex::Male), None), 8.0);
+    }
+
+    #[test]
+    fn weekly_target_is_the_intake_basis_in_absorbed_terms() {
+        // Женщина 35: планка от СРЕДНЕЙ потребности (EAR 8,1), а не от RDA 18.
+        // 8,1 × 7 × 0,18 ≈ 10,206 мг усвоенного в неделю.
+        let t = weekly_absorbed_target_mg(Some(Sex::Female), Some(35));
+        assert!((t - 10.206).abs() < 1e-9, "{t}");
+        // По RDA было бы 22,68 — недостижимо на живой еде.
+        assert!(t < 18.0 * 7.0 * RDA_BIOAVAILABILITY);
+        // Man 35: 8 × 7 × 0.18 ≈ 10.08 — по RDA, как было.
+        let t = weekly_absorbed_target_mg(Some(Sex::Male), Some(35));
+        assert!((t - 10.08).abs() < 1e-9, "{t}");
+    }
+
+    #[test]
+    fn snizhenie_kasaetsya_tolko_menstruiruyushchih() {
+        // Подросток 16 и женщина после менопаузы — по-прежнему по RDA.
+        assert_eq!(
+            weekly_absorbed_target_mg(Some(Sex::Female), Some(16)),
+            15.0 * 7.0 * RDA_BIOAVAILABILITY
+        );
+        assert_eq!(
+            weekly_absorbed_target_mg(Some(Sex::Female), Some(60)),
+            8.0 * 7.0 * RDA_BIOAVAILABILITY
+        );
+        // Пол неизвестен в 19–50 — считаем как женщину: занижать вреднее.
+        assert_eq!(
+            weekly_absorbed_target_mg(None, Some(35)),
+            8.1 * 7.0 * RDA_BIOAVAILABILITY
+        );
+    }
+
+    #[test]
+    fn norma_rastyot_vmeste_s_planko() {
+        // 2600 ккал → 36.4 г/сут.
+        assert!((daily_target_g(Some(2600.0)) - 36.4).abs() < 1e-9);
+        // 3500 ккал → 49 г/сут.
+        assert!((daily_target_g(Some(3500.0)) - 49.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn nizhe_minimuma_vo_z_ne_opuskaemsya() {
+        // 1500 ккал дали бы 21 г — но ВОЗ говорит не меньше 25.
+        assert!((daily_target_g(Some(1500.0)) - MIN_G_PER_DAY).abs() < 1e-9);
+        // Планки ещё нет — тоже минимум, а не ноль.
+        assert!((daily_target_g(None) - MIN_G_PER_DAY).abs() < 1e-9);
+    }
+
+    #[test]
+    fn nedelnaya_planka_eto_sem_sutochnyh() {
+        assert!((daily_target_g(Some(2600.0)) * 7.0 - 254.8).abs() < 1e-9);
     }
 
     /// Ключи и виды обязаны отображаться друг в друга без потерь: ключ едет в

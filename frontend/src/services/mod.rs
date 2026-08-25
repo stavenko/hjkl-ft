@@ -30,6 +30,7 @@ pub mod meal_split;
 pub mod migrations;
 pub mod nav;
 pub mod net;
+pub mod plankas;
 pub mod platform;
 pub mod profile;
 pub mod processed_meat;

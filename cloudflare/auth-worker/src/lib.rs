@@ -45,11 +45,19 @@ pub(crate) fn do_request(path: &str, body: &serde_json::Value) -> Result<Request
 
 /// Known origins only (no wildcard): the prod app + any renorma.app subdomain,
 /// the dev test env, and localhost for development.
+///
+/// Dev-адреса перечисляются ПОИМЁННО, и список приходится держать в голове: он
+/// скопирован в каждый воркер и разъезжается. Кураторское приложение здесь
+/// забыли, и вход в него не работал вовсе — `fetch` отбивался браузером ещё до
+/// ответа, а Safari называет это «Load failed», по которому причину не угадать.
+/// Прод такого не знает: `curator.renorma.app` проходит по общему правилу
+/// суффикса. Расходится только dev.
 fn is_allowed_origin(origin: &str) -> bool {
     origin == "https://renorma.app"
         || (origin.starts_with("https://") && origin.ends_with(".renorma.app"))
         || origin == "https://renorma-fit-dev.pages.dev"
         || origin == "https://renorma-admin-dev.pages.dev"
+        || origin == "https://renorma-curator-dev.pages.dev"
         || origin.starts_with("http://localhost")
         || origin.starts_with("http://127.0.0.1")
 }

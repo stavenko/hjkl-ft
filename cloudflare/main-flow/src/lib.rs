@@ -10,10 +10,16 @@ pub use schedule_do::ScheduleDO;
 
 /// Known origins only (no wildcard): the prod app + any renorma.app subdomain,
 /// the dev test env, and localhost for development.
+/// Кто вправе звать push-ручки. Dev-адреса поимённо — см. тот же список в
+/// `auth-worker`: кураторского здесь тоже не было, и подписка на уведомления у
+/// куратора не заводилась. Молча: отказ в подписке намеренно не мешает входу и
+/// уходит в `warn`, так что заметить это можно было только по отсутствию
+/// уведомлений.
 fn is_allowed_origin(origin: &str) -> bool {
     origin == "https://renorma.app"
         || (origin.starts_with("https://") && origin.ends_with(".renorma.app"))
         || origin == "https://renorma-fit-dev.pages.dev"
+        || origin == "https://renorma-curator-dev.pages.dev"
         || origin.starts_with("http://localhost")
         || origin.starts_with("http://127.0.0.1")
 }

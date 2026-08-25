@@ -244,7 +244,18 @@
     <p class="lead">Хорошее питание требует дисциплины и некоторых знаний. Но оно доступно любому человеку — не нужны ни добавки, ни «суперфуды», ни магазины здорового питания.</p>
     <p class="lead">Вот рационы из обычного супермаркета — девушкам на 1800 и 2200 ккал, мужчинам на 2200 и 2500. Эти продукты именно в таком объёме, как мы предлагаем, способны закрыть все необходимые нутриенты для человека.</p>
     <p class="lead">В современном мире человеку необходимо отслеживать кальций, железо, омега-3 и клетчатку. В основном именно по этим нутриентам у человека большой недобор.</p>
-    <a class="btn btn-ghost" href="#rations" style="margin-top:20px">Смотреть корзины →</a>
+    <a class="btn btn-ghost" href="#rations" style="margin-top:20px;font-size:15px;padding:15px 14px">
+      <!-- Стрелки СТОЯТ В СТРОКЕ с подписью, а не отдельными ячейками флекса: на узком
+           экране подпись переносится, и разнесённые по краям стрелки выглядели как
+           два случайных значка по углам кнопки. -->
+      <span style="display:inline">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+             stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+        Перейти к спискам продуктов
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+             stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </span>
+    </a>
   </section>
 
   <!-- 4-6 · Полноэкранные «странички» -->

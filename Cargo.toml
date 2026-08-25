@@ -1,3 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["backend", "frontend", "admin", "common/api-types", "cloudflare/auth-worker", "cloudflare/main-flow"]
+members = [
+    "backend",
+    "frontend",
+    "admin",
+    "common/api-types",
+    "common/datashare",
+    "cloudflare/auth-worker",
+    "cloudflare/main-flow",
+]

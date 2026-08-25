@@ -213,6 +213,7 @@ dependencies = [
  "base64",
  "chrono",
  "console_error_panic_hook",
+ "datashare",
  "js-sys",
  "leptos",
  "serde",
@@ -1176,6 +1177,16 @@ dependencies = [
  "lock_api",
  "once_cell",
  "parking_lot_core",
+]
+
+[[package]]
+name = "datashare"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "leptos",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

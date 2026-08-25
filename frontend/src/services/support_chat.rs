@@ -376,6 +376,8 @@ async fn apply_planka_directives(msgs: &[LiveMessage]) {
                  Она уже применена. Дальнейшие еженедельные пересчёты будут отталкиваться от неё.",
             ),
             read: false,
+            action: None,
+            action_done: false,
         });
     }
 }
@@ -465,6 +467,8 @@ async fn apply_week_directives(msgs: &[LiveMessage]) {
                  ждёт вас в ленте наверху."
             ),
             read: false,
+            action: None,
+            action_done: false,
         });
     }
     if applied > last {

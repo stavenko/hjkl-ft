@@ -19,6 +19,16 @@ const LETTERS_KEY: &str = "letters_v1";
 /// goal's creation date so the first letter arrives one week after the planka was set.
 const PLANKA_ANCHOR_KEY: &str = "planka_weekly_anchor";
 
+/// Что письмо ПРЕДЛАГАЕТ сделать. Письма до сих пор были только текстом, и
+/// этого хватало: они сообщали о случившемся. Отвязка от куратора — первый
+/// случай, когда письмо зовёт к действию («планки пересчитаются через неделю —
+/// или пересчитать сейчас»), и звать надо оттуда же, где человек об этом узнал.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LetterAction {
+    /// Пересчитать планки калорий и шагов немедленно, не дожидаясь недели.
+    RecomputePlankas,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Letter {
     pub id: String,
@@ -28,6 +38,14 @@ pub struct Letter {
     pub body: String,
     #[serde(default)]
     pub read: bool,
+    /// Кнопка под текстом. `None` — обычное письмо-сообщение. Старые письма в
+    /// блобе `letters_v1` разбираются как прежде.
+    #[serde(default)]
+    pub action: Option<LetterAction>,
+    /// Действие уже выполнено — кнопка больше не показывается. Нажать дважды
+    /// нечего: пересчёт уже случился, и второй раз он лишь запутает.
+    #[serde(default)]
+    pub action_done: bool,
 }
 
 thread_local! {
@@ -116,11 +134,44 @@ pub fn mark_all_read() {
     }
 }
 
+/// Выполнить действие письма и отметить его сделанным.
+///
+/// Отметка обязательна: без неё кнопка осталась бы на месте, а второй пересчёт
+/// в тот же день ничего не изменит и только собьёт человека с толку.
+pub async fn run_action(letter_id: String) {
+    let Some(action) = all().into_iter().find(|l| l.id == letter_id).and_then(|l| l.action) else {
+        return;
+    };
+    match action {
+        LetterAction::RecomputePlankas => {
+            recompute_calorie_planka_now().await;
+            recompute_steps_planka_now().await;
+        }
+    }
+    let mut list = all();
+    if let Some(l) = list.iter_mut().find(|l| l.id == letter_id) {
+        l.action_done = true;
+    }
+    save(&list);
+}
+
 // ── Weekly calorie-planka recompute ──────────────────────────────────────────
 
 /// One week after the planka was set (and weekly thereafter), recompute it and post
 /// a letter. Safe to call on every launch/resume — it self-limits via the anchor.
 pub async fn maybe_recompute_weekly_planka() {
+    recompute_calorie_planka(false).await;
+}
+
+/// Пересчитать планку по калориям НЕМЕДЛЕННО, не дожидаясь недели.
+///
+/// Тот же путь, что у недельного пересчёта, — те же данные, то же письмо, тот же
+/// сдвиг якоря. Отличие ровно одно: срок не проверяется.
+pub async fn recompute_calorie_planka_now() {
+    recompute_calorie_planka(true).await;
+}
+
+async fn recompute_calorie_planka(force: bool) {
     use crate::services::local;
     use crate::services::weight_trend::{self, DEFAULT_WINDOW_DAYS};
 
@@ -155,7 +206,7 @@ pub async fn maybe_recompute_weekly_planka() {
         .unwrap_or(today);
 
     let waited = (today - anchor).num_days();
-    if waited < 7 {
+    if !force && waited < 7 {
         leptos::logging::log!(
             "планка калорий: пересчёта нет — с {anchor} прошло {waited} дн., нужно 7"
         );
@@ -234,6 +285,8 @@ pub async fn maybe_recompute_weekly_planka() {
         created_at: chrono::Local::now().to_rfc3339(),
         body: planka_letter_body(&trend, weight_kg, previous, new_planka, wanted, adherence),
         read: false,
+        action: None,
+        action_done: false,
     });
 }
 
@@ -248,6 +301,15 @@ const STEPS_ANCHOR_KEY: &str = "steps_planka_weekly_anchor";
 /// the step indicator's own colour and post a letter. Safe to call on every
 /// launch/resume — it self-limits via the anchor.
 pub async fn maybe_recompute_weekly_steps_planka() {
+    recompute_steps_planka(false).await;
+}
+
+/// Пересчитать планку по шагам НЕМЕДЛЕННО — см. [`recompute_calorie_planka_now`].
+pub async fn recompute_steps_planka_now() {
+    recompute_steps_planka(true).await;
+}
+
+async fn recompute_steps_planka(force: bool) {
     use crate::services::indicators::{self, IndicatorState};
     use crate::services::{local, profile};
 
@@ -273,7 +335,7 @@ pub async fn maybe_recompute_weekly_steps_planka() {
         .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
         .unwrap_or(today);
     let waited = (today - anchor).num_days();
-    if waited < 7 {
+    if !force && waited < 7 {
         leptos::logging::log!(
             "планка шагов: пересчёта нет — с {anchor} прошло {waited} дн., нужно 7"
         );
@@ -325,6 +387,8 @@ pub async fn maybe_recompute_weekly_steps_planka() {
         created_at: chrono::Local::now().to_rfc3339(),
         body: steps_letter_body(next, total, baseline, recent),
         read: false,
+        action: None,
+        action_done: false,
     });
 }
 

@@ -1461,11 +1461,35 @@ fn LettersPanel() -> impl IntoView {
                 }
                 list.into_iter().map(|l| {
                     let date = l.created_at.get(0..10).unwrap_or("").to_string();
+                    // Кнопка под текстом — только у письма, которое к действию зовёт,
+                    // и только пока действие не выполнено.
+                    let action = (l.action.is_some() && !l.action_done).then(|| {
+                        let id = l.id.clone();
+                        let busy = create_rw_signal(false);
+                        view! {
+                            <button class="button is-link is-small is-fullwidth"
+                                style="margin-top: 12px;"
+                                attr:data-testid="letter-action"
+                                prop:disabled=move || busy.get()
+                                on:click=move |_| {
+                                    let id = id.clone();
+                                    busy.set(true);
+                                    spawn_local(async move {
+                                        crate::services::letters::run_action(id).await;
+                                        crate::services::sync::push_background();
+                                        busy.set(false);
+                                    });
+                                }>
+                                {move || t("letters.recompute_now")}
+                            </button>
+                        }
+                    });
                     view! {
                         <div style="border: 0.5px solid var(--bulma-border-weak); border-radius: 14px; \
                                 padding: 14px 16px; background: var(--bulma-scheme-main);">
                             <p class="is-size-7 has-text-grey" style="margin-bottom: 8px;">{date}</p>
                             <p class="is-size-6" style="white-space: pre-wrap; line-height: 1.5;">{l.body}</p>
+                            {action}
                         </div>
                     }
                 }).collect_view()

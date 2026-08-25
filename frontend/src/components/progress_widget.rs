@@ -845,6 +845,8 @@ pub fn ProgressWidget() -> impl IntoView {
                             created_at: chrono::Local::now().to_rfc3339(),
                             body: first_planka_letter(n).await,
                             read: false,
+                            action: None,
+                            action_done: false,
                         });
                     }
                 }

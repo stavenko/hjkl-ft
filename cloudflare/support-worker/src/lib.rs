@@ -162,6 +162,86 @@ async fn auth_curator(req: &Request, env: &Env) -> std::result::Result<String, R
     }
 }
 
+/// Ключ треда «худеющий ↔ собеседник».
+///
+/// Переписка ЛИЧНАЯ, поэтому тред один на ПАРУ, а не один на человека: новый
+/// куратор не должен читать разговор с предыдущим. Пара с админом сохраняет
+/// прежний ключ (голый `user_id`) — существующие переписки остаются ровно там,
+/// где лежат, и мигрировать нечего.
+fn thread_key(user_id: &str, peer: &str) -> String {
+    if peer == PEER_ADMIN {
+        user_id.to_string()
+    } else {
+        format!("{user_id}|{peer}")
+    }
+}
+
+const PEER_ADMIN: &str = "admin";
+
+fn curator_peer(curator_id: &str) -> String {
+    format!("curator:{curator_id}")
+}
+
+/// Собеседник, заданный клиентом в `?peer=`. Разрешены только две формы; всё
+/// прочее отбрасывается, чтобы произвольная строка не стала именем чужого DO.
+fn parse_peer(raw: &str) -> Option<String> {
+    if raw == PEER_ADMIN {
+        return Some(PEER_ADMIN.to_string());
+    }
+    let id = raw.strip_prefix("curator:")?;
+    let ok = !id.is_empty()
+        && id.len() <= 128
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    ok.then(|| raw.to_string())
+}
+
+/// Кому адресованы сообщения этого худеющего.
+pub struct Routing {
+    /// Ключ собеседника: `admin` либо `curator:<id>`.
+    peer: String,
+    /// Куратор и слот, которым он видит человека, — если куратор есть.
+    curator: Option<(String, String)>,
+}
+
+/// Привязка худеющего. Нет куратора — разговор идёт с админом, как и раньше.
+async fn routing_of_user(env: &Env, user_id: &str) -> std::result::Result<Routing, Response> {
+    let v = curator_do(env, "/binding", &serde_json::json!({ "user_id": user_id })).await?;
+    if !v.get("bound").and_then(|b| b.as_bool()).unwrap_or(false) {
+        return Ok(Routing { peer: PEER_ADMIN.to_string(), curator: None });
+    }
+    let cid = v
+        .get("curator_id")
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| json_status(500, "binding without curator_id"))?;
+    let slot = v
+        .get("client_id")
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| json_status(500, "binding without client_id"))?;
+    Ok(Routing {
+        peer: curator_peer(cid),
+        curator: Some((cid.to_string(), slot.to_string())),
+    })
+}
+
+/// `user_id` клиента куратора. 404, если слот чужой или ещё не привязан — чужой
+/// `cid` не должен отличаться от несуществующего.
+async fn client_user_id(
+    env: &Env,
+    curator_id: &str,
+    cid: &str,
+) -> std::result::Result<String, Response> {
+    let v = curator_do(
+        env,
+        "/client-user",
+        &serde_json::json!({ "curator_id": curator_id, "id": cid }),
+    )
+    .await?;
+    v.get("user_id")
+        .and_then(|u| u.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| json_status(404, "client not bound"))
+}
+
 fn truncate_preview(text: &str) -> String {
     text.chars().take(PREVIEW_MAX).collect()
 }
@@ -180,6 +260,19 @@ fn truncate_preview(text: &str) -> String {
 /// payment-worker's notifyPush policy.
 async fn nudge_user_push(env: &Env, user_id: &str, text: &str) -> Result<()> {
     push_via_main_flow(env, user_id, &truncate_preview(text), "/chat?notif=1").await
+}
+
+/// Пуш КУРАТОРУ о новом сообщении клиента. Тот же канал и та же политика
+/// «лучшее усилие», что у пуша худеющему: подписки куратора лежат в main-flow
+/// под его собственным `sub`, потому что паскей он заводил на своём домене.
+async fn nudge_curator_push(env: &Env, curator_id: &str, cid: &str, text: &str) -> Result<()> {
+    push_via_main_flow(
+        env,
+        curator_id,
+        &truncate_preview(text),
+        &format!("/?notif=1&client={cid}"),
+    )
+    .await
 }
 
 /// Raw push relay: `{userId, body, url}` → main-flow `/push/notify` over the
@@ -330,6 +423,13 @@ async fn user_send(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
     // forwarded verbatim to the DO. See the data-request/data-share protocol.
     let (kind, payload) = typed_envelope(&body);
 
+    // Кому адресовано: есть куратор — ему, нет — админу. Развилка здесь и только
+    // здесь, поэтому приложение худеющего про адресата ничего знать не обязано.
+    let routing = match routing_of_user(&ctx.env, &uid).await {
+        Ok(r) => r,
+        Err(resp) => return Ok(resp),
+    };
+
     let append_req = do_request(
         "/append",
         &serde_json::json!({
@@ -340,36 +440,65 @@ async fn user_send(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
             "payload": payload,
         }),
     )?;
-    let mut do_resp = conversation_stub(&ctx.env, &uid)?
+    let mut do_resp = conversation_stub(&ctx.env, &thread_key(&uid, &routing.peer))?
         .fetch_with_request(append_req)
         .await?;
     let result = read_append(&mut do_resp).await?;
 
-    // Index maintenance — ALWAYS call it, even on a deduped (retried) append.
-    // touch-user is idempotent + monotonic (a deduped/older seq is a no-op), so a
-    // retry self-heals a previously-failed index touch instead of corrupting the
-    // queue. We still fail loudly on a genuine index error so the client retries.
-    let touch_req = do_request(
-        "/touch-user",
-        &serde_json::json!({
-            "user_id": uid,
-            "preview": truncate_preview(text),
-            "last_ts": result.created_at,
-            "last_seq": result.seq,
-        }),
-    )?;
-    let touch_resp = index_stub(&ctx.env)?.fetch_with_request(touch_req).await?;
-    if touch_resp.status_code() != 200 {
-        return Err(Error::RustError("index touch-user failed".into()));
+    match &routing.curator {
+        // Куратора нет — разговор с админом, и очередь админа ведётся как прежде.
+        None => {
+            // Index maintenance — ALWAYS call it, even on a deduped (retried) append.
+            // touch-user is idempotent + monotonic (a deduped/older seq is a no-op), so a
+            // retry self-heals a previously-failed index touch instead of corrupting the
+            // queue. We still fail loudly on a genuine index error so the client retries.
+            let touch_req = do_request(
+                "/touch-user",
+                &serde_json::json!({
+                    "user_id": uid,
+                    "preview": truncate_preview(text),
+                    "last_ts": result.created_at,
+                    "last_seq": result.seq,
+                }),
+            )?;
+            let touch_resp = index_stub(&ctx.env)?.fetch_with_request(touch_req).await?;
+            if touch_resp.status_code() != 200 {
+                return Err(Error::RustError("index touch-user failed".into()));
+            }
+        }
+        // Есть куратор — в очередь админа это НЕ попадает: админ видит только то,
+        // что написали ему. Куратора будим пушем, лучшим усилием: сообщение уже
+        // записано, и падение пуша не имеет права его отменить.
+        Some((cid, slot)) => {
+            if let Err(e) = nudge_curator_push(&ctx.env, cid, slot, text).await {
+                console_error!("user_send push nudge to curator {cid} failed: {e}");
+            }
+        }
     }
 
     Response::from_json(&serde_json::json!({ "seq": result.seq, "created_at": result.created_at }))
 }
 
+
+/// Приложение опрашивает ТЕКУЩИЙ тред: архивные не меняются, и их история
+/// приезжает синком. `?peer=` — страховка для устройства, которое ещё не
+/// досинкалось и хочет дочитать конкретную переписку с сервера.
 async fn user_messages(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let uid = match auth_user(&req, &ctx.env).await {
         Ok(s) => s,
         Err(resp) => return Ok(resp),
+    };
+    let url = req.url()?;
+    let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+    let peer = match q.get("peer") {
+        Some(raw) => match parse_peer(raw) {
+            Some(p) => p,
+            None => return Ok(json_status(400, "bad peer")),
+        },
+        None => match routing_of_user(&ctx.env, &uid).await {
+            Ok(r) => r.peer,
+            Err(resp) => return Ok(resp),
+        },
     };
     let (after_seq, limit) = parse_paging(&req)?;
     let wait_ms = parse_wait_ms(&req);
@@ -377,9 +506,14 @@ async fn user_messages(req: Request, ctx: RouteContext<()>) -> Result<Response> 
         "/list",
         &serde_json::json!({ "after_seq": after_seq, "limit": limit, "wait_ms": wait_ms }),
     )?;
-    conversation_stub(&ctx.env, &uid)?
+    let mut resp = conversation_stub(&ctx.env, &thread_key(&uid, &peer))?
         .fetch_with_request(list_req)
-        .await
+        .await?;
+    // Отдаём собеседника вместе со страницей: клиент раскладывает кэш по
+    // собеседникам и без этого не знал бы, куда лёг ответ на «текущий тред».
+    let mut v: serde_json::Value = resp.json().await?;
+    v["peer"] = serde_json::Value::String(peer);
+    Response::from_json(&v)
 }
 
 async fn user_read(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
@@ -392,8 +526,12 @@ async fn user_read(mut req: Request, ctx: RouteContext<()>) -> Result<Response> 
         .get("seq")
         .and_then(|v| v.as_i64())
         .ok_or_else(|| Error::RustError("missing seq".into()))?;
+    let peer = match routing_of_user(&ctx.env, &uid).await {
+        Ok(r) => r.peer,
+        Err(resp) => return Ok(resp),
+    };
     let read_req = do_request("/read", &serde_json::json!({ "who": "user", "seq": seq }))?;
-    conversation_stub(&ctx.env, &uid)?
+    conversation_stub(&ctx.env, &thread_key(&uid, &peer))?
         .fetch_with_request(read_req)
         .await
 }
@@ -775,6 +913,116 @@ async fn curator_client_unbind(req: Request, ctx: RouteContext<()>) -> Result<Re
     }
 }
 
+/// Имя куратора для подписи под его сообщениями. Пустое — не беда: подпись
+/// пропадёт, а сообщение дойдёт.
+async fn curator_name(env: &Env, curator_id: &str) -> Option<String> {
+    let v = curator_do(env, "/curator-get", &serde_json::json!({ "curator_id": curator_id }))
+        .await
+        .ok()?;
+    v.get("curator")
+        .and_then(|c| c.get("name"))
+        .and_then(|n| n.as_str())
+        .filter(|n| !n.is_empty())
+        .map(|n| n.to_string())
+}
+
+/// GET /curator/clients/:cid/messages — тот же длинный опрос, что у эксперта, но
+/// только по СВОЕМУ клиенту.
+async fn curator_messages(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let Some(cid) = ctx.param("cid").map(|s| s.to_string()) else {
+        return Ok(json_status(400, "missing cid"));
+    };
+    let uid = match client_user_id(&ctx.env, &sub, &cid).await {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    let (after_seq, limit) = parse_paging(&req)?;
+    let wait_ms = parse_wait_ms(&req);
+    let list_req = do_request(
+        "/list",
+        &serde_json::json!({ "after_seq": after_seq, "limit": limit, "wait_ms": wait_ms }),
+    )?;
+    conversation_stub(&ctx.env, &thread_key(&uid, &curator_peer(&sub)))?
+        .fetch_with_request(list_req)
+        .await
+}
+
+/// POST /curator/clients/:cid/reply — ответ куратора, с подписью его именем.
+async fn curator_reply(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let Some(cid) = ctx.param("cid").map(|s| s.to_string()) else {
+        return Ok(json_status(400, "missing cid"));
+    };
+    let uid = match client_user_id(&ctx.env, &sub, &cid).await {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    let body: serde_json::Value = req.json().await?;
+    let client_id = body.get("client_id").and_then(|v| v.as_str()).unwrap_or("");
+    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    if client_id.is_empty() || text.is_empty() {
+        return Ok(json_status(400, "client_id and text are required"));
+    }
+    let (kind, payload) = typed_envelope(&body);
+    let name = curator_name(&ctx.env, &sub).await;
+
+    let append_req = do_request(
+        "/append",
+        &serde_json::json!({
+            "client_id": client_id,
+            "text": text,
+            "sender": "expert",
+            "expert_id": sub,
+            "kind": kind,
+            "payload": payload,
+            "sender_name": name,
+        }),
+    )?;
+    let mut do_resp = conversation_stub(&ctx.env, &thread_key(&uid, &curator_peer(&sub)))?
+        .fetch_with_request(append_req)
+        .await?;
+    let result = read_append(&mut do_resp).await?;
+
+    // Очередь админа тут ни при чём — это не его переписка. Единственное
+    // последействие: разбудить человека, лучшим усилием (ответ уже записан).
+    if let Err(e) = nudge_user_push(&ctx.env, &uid, text).await {
+        console_error!("curator_reply push nudge failed for user {uid}: {e}");
+    }
+
+    Response::from_json(&serde_json::json!({ "seq": result.seq }))
+}
+
+/// POST /curator/clients/:cid/read — отметка прочтения на стороне куратора.
+async fn curator_read(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let sub = match auth_curator(&req, &ctx.env).await {
+        Ok(s) => s,
+        Err(resp) => return Ok(resp),
+    };
+    let Some(cid) = ctx.param("cid").map(|s| s.to_string()) else {
+        return Ok(json_status(400, "missing cid"));
+    };
+    let uid = match client_user_id(&ctx.env, &sub, &cid).await {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    let body: serde_json::Value = req.json().await?;
+    let seq = body
+        .get("seq")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| Error::RustError("missing seq".into()))?;
+    let read_req = do_request("/read", &serde_json::json!({ "who": "expert", "seq": seq }))?;
+    conversation_stub(&ctx.env, &thread_key(&uid, &curator_peer(&sub)))?
+        .fetch_with_request(read_req)
+        .await
+}
+
 // ---- ADMIN authorization handlers ----
 
 /// GET /admin/me (user JWT). Returns the DO's {"approved":bool,"code":string|null}
@@ -1071,6 +1319,9 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/curator/clients/:cid/rename", curator_client_rename)
         .post_async("/curator/clients/:cid/delete", curator_client_delete)
         .post_async("/curator/clients/:cid/unbind", curator_client_unbind)
+        .get_async("/curator/clients/:cid/messages", curator_messages)
+        .post_async("/curator/clients/:cid/reply", curator_reply)
+        .post_async("/curator/clients/:cid/read", curator_read)
         // Сторона ХУДЕЮЩЕГО: приглашение, согласие, своя отвязка
         .get_async("/curator/invite/:code", curator_invite_peek)
         .post_async("/curator/invite/:code/accept", curator_invite_accept)

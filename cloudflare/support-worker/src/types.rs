@@ -34,6 +34,11 @@ pub struct Message {
     // read shape is stable; clients parse the string themselves.
     #[serde(default)]
     pub payload: Option<String>,
+    /// Подпись отправителя-эксперта: имя куратора. У худеющего один экран чата на
+    /// всех собеседников, и без подписи куратор неотличим от поддержки. Пусто у
+    /// сообщений самого человека и у старых строк.
+    #[serde(default)]
+    pub sender_name: Option<String>,
 }
 
 fn default_kind() -> String {

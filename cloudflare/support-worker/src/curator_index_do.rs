@@ -438,6 +438,16 @@ impl CuratorIndexDO {
         }))
     }
 
+    /// `user_id` привязанного клиента этого куратора. Чужой слот не находится —
+    /// выборка ограничена `curator_id` вызывающего.
+    fn handle_client_user(&self, curator_id: &str, id: &str) -> Result<Response> {
+        let row = self.client(curator_id, id)?;
+        Response::from_json(&serde_json::json!({
+            "found": row.is_some(),
+            "user_id": row.and_then(|r| r.user_id),
+        }))
+    }
+
     /// Кто курирует этого худеющего. Это же — маршрут его сообщений.
     fn handle_binding(&self, user_id: &str) -> Result<Response> {
         let Some(row) = self.bound_of_user(user_id)? else {
@@ -542,6 +552,9 @@ impl DurableObject for CuratorIndexDO {
                 body.get("user_id").and_then(|v| v.as_str()),
             ),
             "/binding" => self.handle_binding(str_field(&body, "user_id")?),
+            "/client-user" => {
+                self.handle_client_user(str_field(&body, "curator_id")?, str_field(&body, "id")?)
+            }
             _ => Response::error(format!("unknown DO path: {path}"), 404),
         }
     }

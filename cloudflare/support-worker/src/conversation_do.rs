@@ -31,6 +31,10 @@ struct MsgRow {
     kind: String,
     #[serde(default)]
     payload: Option<String>,
+    /// Подпись отправителя-эксперта (имя куратора). У худеющего один экран чата
+    /// на всех собеседников, и без подписи он не отличит куратора от поддержки.
+    #[serde(default)]
+    sender_name: Option<String>,
 }
 
 fn default_kind() -> String {
@@ -48,6 +52,7 @@ impl From<MsgRow> for Message {
             created_at: r.created_at,
             kind: r.kind,
             payload: r.payload,
+            sender_name: r.sender_name,
         }
     }
 }
@@ -127,6 +132,9 @@ impl ConversationDO {
         if !has("payload") {
             sql.exec("ALTER TABLE messages ADD COLUMN payload TEXT", None)?;
         }
+        if !has("sender_name") {
+            sql.exec("ALTER TABLE messages ADD COLUMN sender_name TEXT", None)?;
+        }
         Ok(())
     }
 
@@ -160,6 +168,7 @@ impl ConversationDO {
         expert_id: Option<&str>,
         kind: &str,
         payload: Option<&str>,
+        sender_name: Option<&str>,
     ) -> Result<Response> {
         let sql = self.state.storage().sql();
 
@@ -188,8 +197,8 @@ impl ConversationDO {
         //    any OTHER insert error (disk, schema, etc.) must SURFACE, not be
         //    swallowed as a fake dedup (repo policy: never swallow real errors).
         let insert = sql.exec(
-            "INSERT INTO messages(seq,client_id,sender,expert_id,text,created_at,kind,payload)
-             VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO messages(seq,client_id,sender,expert_id,text,created_at,kind,payload,sender_name)
+             VALUES (?,?,?,?,?,?,?,?,?)",
             vec![
                 seq.into(),
                 client_id.into(),
@@ -199,6 +208,7 @@ impl ConversationDO {
                 created_at.clone().into(),
                 kind.into(),
                 payload.into(),
+                sender_name.into(),
             ],
         );
         if let Err(e) = insert {
@@ -239,7 +249,7 @@ impl ConversationDO {
         // Fetch limit+1 to detect has_more.
         let mut rows: Vec<MsgRow> = sql
             .exec(
-                "SELECT seq, client_id, sender, expert_id, text, created_at, kind, payload
+                "SELECT seq, client_id, sender, expert_id, text, created_at, kind, payload, sender_name
                  FROM messages WHERE seq > ? ORDER BY seq ASC LIMIT ?",
                 vec![after_seq.into(), (limit + 1).into()],
             )?
@@ -327,11 +337,12 @@ impl DurableObject for ConversationDO {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| Error::RustError("missing text".into()))?;
                 let expert_id = body.get("expert_id").and_then(|v| v.as_str());
+                let sender_name = body.get("sender_name").and_then(|v| v.as_str());
                 // Typed envelope: default kind='text'. `payload` is a RAW JSON
                 // string (already stringified by the caller), stored verbatim.
                 let kind = body.get("kind").and_then(|v| v.as_str()).unwrap_or("text");
                 let payload = body.get("payload").and_then(|v| v.as_str());
-                self.handle_append(client_id, sender, text, expert_id, kind, payload)
+                self.handle_append(client_id, sender, text, expert_id, kind, payload, sender_name)
             }
             "/list" => {
                 let body: serde_json::Value = req.json().await?;

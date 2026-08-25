@@ -2076,7 +2076,14 @@ pub async fn save_weight(weight_kg: f64, no_water: bool, no_food: bool, no_wash:
 /// действующая калорийная планка) и записать её в историю сегодняшним днём.
 /// Ничего не делает, пока нет веса или неполон профиль. Идемпотентна: повторный
 /// вызов с тем же результатом не пишет ([`record_planka`]).
+///
+/// Пока человека ведёт куратор — не делает ничего. Белок выводится из калорий по
+/// НАШЕЙ кривой, и взвешивание при кураторе стёрло бы его число ровно так же, как
+/// это сделал бы недельный пересчёт.
 pub async fn record_protein_planka() {
+    if crate::services::support_chat::has_curator() {
+        return;
+    }
     let Some(weight_kg) = list_weight_entries().await.last().map(|e| e.weight_kg) else {
         return;
     };

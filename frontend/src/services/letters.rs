@@ -192,6 +192,21 @@ async fn recompute_calorie_planka(force: bool) {
     use crate::services::local;
     use crate::services::weight_trend::{self, DEFAULT_WINDOW_DAYS};
 
+    // Человека ведёт куратор — приложение планки не двигает. Одно условие на всё:
+    // не «куратор запретил эту планку», а «за планки теперь отвечает он».
+    //
+    // Выходим ДО всего остального и НЕ двигаем якорь: двинуть его значило бы, что
+    // после отвязки неделя пойдёт заново; человек и так ждал ровно столько,
+    // сколько ждал. (Якоря сдвигает сама отвязка — см. `curator::unbind_locally`.)
+    //
+    // Отсюда следствие, которое стоит назвать вслух: недельные письма про новую
+    // планку при кураторе НЕ ПРИХОДЯТ вовсе. Пересчёта нет — сообщать не о чем.
+    // И планка, которую куратор не трогал, стоит на месте: за неё теперь он.
+    if crate::services::support_chat::has_curator() {
+        leptos::logging::log!("планка калорий: пересчёта нет — человека ведёт куратор");
+        return;
+    }
+
     // No planka yet → nothing to recompute (the week-2 gate hasn't fired).
     let goals = local::list_goals().await;
     let Some(goal) = goals.iter().find(|g| {
@@ -314,6 +329,13 @@ pub async fn recompute_steps_planka_now() {
 async fn recompute_steps_planka(force: bool) {
     use crate::services::indicators::{self, IndicatorState};
     use crate::services::{local, profile};
+
+    // Куратор ведёт человека — приложение не двигает и эту планку; якорь стоит.
+    // См. подробности в пересчёте калорий выше.
+    if crate::services::support_chat::has_curator() {
+        leptos::logging::log!("планка шагов: пересчёта нет — человека ведёт куратор");
+        return;
+    }
 
     // No planka yet → the activity week hasn't opened; nothing to raise.
     // get_steps_planka возвращает ДЕЙСТВУЮЩУЮ планку из истории — ступенька идёт

@@ -225,6 +225,14 @@ export const FOODS = {
       kcal: 558, protein: 7.3, fat: 32, fibre: 3.4, calcium: 189, iron: 2.4,
       sfa: 60, mufa: 33, pufa: 3 }),
   // Жиры.
+  // Оливковое почти всё мононенасыщенное: полиненасыщенных в нём вшестеро меньше,
+  // чем в подсолнечном, но отношение ненасыщенных к насыщенным всё равно 6:1.
+  oliveOil: F("Масло оливковое", 738,
+    { pack: { brand: "Vesuvio", item: "масло оливковое для жарки, Италия", size: "1 л", price: 676 },
+      photo: null,
+      magnesium: 0, vitD: 0,
+      kcal: 884, protein: 0, fat: 100, calcium: 1, iron: 0.6,
+      sfa: 14, mufa: 73, pufa: 11 }),
   sunflowerOil: F("Масло подсолнечное", 154,
     { pack: { brand: "Золотая Семечка", item: "масло подсолнечное рафинированное", size: "1 л", price: 142 },
       photo: null,   // fats.jpg — это рыба; фото бутылки масла пока нет

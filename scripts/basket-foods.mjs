@@ -158,7 +158,7 @@ export const FOODS = {
       sfa: 21, mufa: 13, pufa: 48 }),
   buckwheat: F("Гречка", 97,
     { pack: { brand: "Агро-Альянс", item: "гречневая крупа ядрица", size: "900 г", price: 87 },
-      photo: "buckwheat",
+      photo: "buckwheat", photoFit: "contain",
       kcal: 308, protein: 12.6, fat: 3.3, fibre: 11.3, calcium: 20, iron: 6.7,
       sfa: 21, mufa: 30, pufa: 30 }),
   // Бобовые — клетчатка и железо задёшево.

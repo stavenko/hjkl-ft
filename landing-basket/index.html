@@ -230,11 +230,6 @@
   .mtotal .big{font-size:26px;font-weight:700}
   .mtotal .sub{font-size:14px;color:var(--muted)}
 
-  /* Индикаторы: что закрыто */
-  .inds{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
-  .ind{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--accent-ink);
-    border-radius:var(--pill);padding:7px 13px;font-size:13.5px;font-weight:600}
-  .ind i{font-style:normal;opacity:.75;font-weight:500}
 
   /* Переключатель рационов */
   .tabs{display:flex;gap:6px;background:var(--surface);border:1.5px solid var(--line);
@@ -545,26 +540,16 @@
           <div style="text-align:right"><div class="big">473 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 1828 ккал в день:</p>
-      <div class="inds">
-        <span class="ind">Белок <i>148 / 135 г</i></span>
-        <span class="ind">Фрукты и овощи <i>600 / 600 г</i></span>
-        <span class="ind">Кальций <i>1163 / 1000 мг</i></span>
-        <span class="ind">Клетчатка <i>32 / 25 г</i></span>
-        <span class="ind">Железо <i>18.1 / 10.2 мг</i></span>
-        <span class="ind">Гемовое железо <i>10 / 3 порции</i></span>
-        <span class="ind">Омега-3 <i>18.9 / 1.75 г</i></span>
-        <span class="ind">Баланс жиров <i>2.7 / 2.0</i></span>
-        <span class="ind">Яйца <i>7 / 7 шт</i></span>
-      </div>
-      <p class="lead" style="margin-top:22px">Что здесь хорошо:</p>
+      <p class="lead" style="margin-top:16px">Что здесь хорошо:</p>
       <ul class="list">
         <li><span class="check">✓</span><span><b>Калорийность.</b> 1828 ккал в день — ровно в коридор планки.</span></li>
         <li><span class="check">✓</span><span><b>Белок.</b> 148 г в день при планке 135 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Фрукты и овощи.</b> 600 г в день при норме 600 — капуста, морковь, свёкла и яблоки.</span></li>
         <li><span class="check">✓</span><span><b>Клетчатка.</b> 32 г в день против нормы 25 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
+        <li><span class="check">✓</span><span><b>Кальций.</b> 1163 мг в день при норме 1000 — кефир, творог, йогурт и сыр.</span></li>
+        <li><span class="check">✓</span><span><b>Железо.</b> 18.1 мг усвоенного за неделю при норме 10.2, из них 10 порции гемового при норме 3 — оно усваивается куда лучше растительного.</span></li>
         <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
         <li><span class="check">✓</span><span><b>Витамин D.</b> 15.7 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
-        <li><span class="check">✓</span><span><b>Гемовое железо.</b> 10 порции в неделю при норме 3 — печень и курица усваиваются куда лучше растительного железа.</span></li>
         <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 2.7 раза больше насыщенных — перекоса в сторону насыщенных нет.</span></li>
         <li><span class="check">✓</span><span><b>Магний.</b> 602 мг в день при норме 320 — гречка, семечки и чечевица.</span></li>
       </ul>
@@ -727,26 +712,16 @@
           <div style="text-align:right"><div class="big">510 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 2226 ккал в день:</p>
-      <div class="inds">
-        <span class="ind">Белок <i>170 / 143 г</i></span>
-        <span class="ind">Фрукты и овощи <i>600 / 600 г</i></span>
-        <span class="ind">Кальций <i>1192 / 1000 мг</i></span>
-        <span class="ind">Клетчатка <i>40 / 31 г</i></span>
-        <span class="ind">Железо <i>21.0 / 10.2 мг</i></span>
-        <span class="ind">Гемовое железо <i>12 / 3 порции</i></span>
-        <span class="ind">Омега-3 <i>18.9 / 1.75 г</i></span>
-        <span class="ind">Баланс жиров <i>3.3 / 2.0</i></span>
-        <span class="ind">Яйца <i>7 / 7 шт</i></span>
-      </div>
-      <p class="lead" style="margin-top:22px">Что здесь хорошо:</p>
+      <p class="lead" style="margin-top:16px">Что здесь хорошо:</p>
       <ul class="list">
         <li><span class="check">✓</span><span><b>Калорийность.</b> 2226 ккал в день — ровно в коридор планки.</span></li>
         <li><span class="check">✓</span><span><b>Белок.</b> 170 г в день при планке 143 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Фрукты и овощи.</b> 600 г в день при норме 600 — капуста, морковь, свёкла и яблоки.</span></li>
         <li><span class="check">✓</span><span><b>Клетчатка.</b> 40 г в день против нормы 31 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
+        <li><span class="check">✓</span><span><b>Кальций.</b> 1192 мг в день при норме 1000 — кефир, творог, йогурт и сыр.</span></li>
+        <li><span class="check">✓</span><span><b>Железо.</b> 21.0 мг усвоенного за неделю при норме 10.2, из них 12 порции гемового при норме 3 — оно усваивается куда лучше растительного.</span></li>
         <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
         <li><span class="check">✓</span><span><b>Витамин D.</b> 15.7 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
-        <li><span class="check">✓</span><span><b>Гемовое железо.</b> 12 порции в неделю при норме 3 — печень и курица усваиваются куда лучше растительного железа.</span></li>
         <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 3.3 раза больше насыщенных — перекоса в сторону насыщенных нет.</span></li>
         <li><span class="check">✓</span><span><b>Магний.</b> 803 мг в день при норме 320 — гречка, семечки и чечевица.</span></li>
       </ul>
@@ -909,26 +884,16 @@
           <div style="text-align:right"><div class="big">527 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 2231 ккал в день:</p>
-      <div class="inds">
-        <span class="ind">Белок <i>168 / 147 г</i></span>
-        <span class="ind">Фрукты и овощи <i>800 / 800 г</i></span>
-        <span class="ind">Кальций <i>1257 / 1000 мг</i></span>
-        <span class="ind">Клетчатка <i>43 / 31 г</i></span>
-        <span class="ind">Железо <i>21.2 / 10.1 мг</i></span>
-        <span class="ind">Гемовое железо <i>11 / 3 порции</i></span>
-        <span class="ind">Омега-3 <i>18.9 / 1.75 г</i></span>
-        <span class="ind">Баланс жиров <i>3.3 / 2.0</i></span>
-        <span class="ind">Яйца <i>7 / 7 шт</i></span>
-      </div>
-      <p class="lead" style="margin-top:22px">Что здесь хорошо:</p>
+      <p class="lead" style="margin-top:16px">Что здесь хорошо:</p>
       <ul class="list">
         <li><span class="check">✓</span><span><b>Калорийность.</b> 2231 ккал в день — ровно в коридор планки.</span></li>
         <li><span class="check">✓</span><span><b>Белок.</b> 168 г в день при планке 147 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Фрукты и овощи.</b> 800 г в день при норме 800 — капуста, морковь, свёкла и яблоки.</span></li>
         <li><span class="check">✓</span><span><b>Клетчатка.</b> 43 г в день против нормы 31 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
+        <li><span class="check">✓</span><span><b>Кальций.</b> 1257 мг в день при норме 1000 — кефир, творог, йогурт и сыр.</span></li>
+        <li><span class="check">✓</span><span><b>Железо.</b> 21.2 мг усвоенного за неделю при норме 10.1, из них 11 порции гемового при норме 3 — оно усваивается куда лучше растительного.</span></li>
         <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
         <li><span class="check">✓</span><span><b>Витамин D.</b> 15.7 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
-        <li><span class="check">✓</span><span><b>Гемовое железо.</b> 11 порции в неделю при норме 3 — печень и курица усваиваются куда лучше растительного железа.</span></li>
         <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 3.3 раза больше насыщенных — перекоса в сторону насыщенных нет.</span></li>
         <li><span class="check">✓</span><span><b>Магний.</b> 788 мг в день при норме 420 — гречка, семечки и чечевица.</span></li>
       </ul>
@@ -1091,26 +1056,16 @@
           <div style="text-align:right"><div class="big">572 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 2530 ккал в день:</p>
-      <div class="inds">
-        <span class="ind">Белок <i>189 / 155 г</i></span>
-        <span class="ind">Фрукты и овощи <i>800 / 800 г</i></span>
-        <span class="ind">Кальций <i>1296 / 1000 мг</i></span>
-        <span class="ind">Клетчатка <i>49 / 35 г</i></span>
-        <span class="ind">Железо <i>23.9 / 10.1 мг</i></span>
-        <span class="ind">Гемовое железо <i>14 / 3 порции</i></span>
-        <span class="ind">Омега-3 <i>18.9 / 1.75 г</i></span>
-        <span class="ind">Баланс жиров <i>3.2 / 2.0</i></span>
-        <span class="ind">Яйца <i>7 / 7 шт</i></span>
-      </div>
-      <p class="lead" style="margin-top:22px">Что здесь хорошо:</p>
+      <p class="lead" style="margin-top:16px">Что здесь хорошо:</p>
       <ul class="list">
         <li><span class="check">✓</span><span><b>Калорийность.</b> 2530 ккал в день — ровно в коридор планки.</span></li>
         <li><span class="check">✓</span><span><b>Белок.</b> 189 г в день при планке 155 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Фрукты и овощи.</b> 800 г в день при норме 800 — капуста, морковь, свёкла и яблоки.</span></li>
         <li><span class="check">✓</span><span><b>Клетчатка.</b> 49 г в день против нормы 35 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
+        <li><span class="check">✓</span><span><b>Кальций.</b> 1296 мг в день при норме 1000 — кефир, творог, йогурт и сыр.</span></li>
+        <li><span class="check">✓</span><span><b>Железо.</b> 23.9 мг усвоенного за неделю при норме 10.1, из них 14 порции гемового при норме 3 — оно усваивается куда лучше растительного.</span></li>
         <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
         <li><span class="check">✓</span><span><b>Витамин D.</b> 15.8 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
-        <li><span class="check">✓</span><span><b>Гемовое железо.</b> 14 порции в неделю при норме 3 — печень и курица усваиваются куда лучше растительного железа.</span></li>
         <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 3.2 раза больше насыщенных — перекоса в сторону насыщенных нет.</span></li>
         <li><span class="check">✓</span><span><b>Магний.</b> 923 мг в день при норме 420 — гречка, семечки и чечевица.</span></li>
       </ul>

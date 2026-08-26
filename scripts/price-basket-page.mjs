@@ -139,11 +139,9 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
       + ` · магний ${n(sum.magnesium / 7)}/${t.magnesiumDay} мг · вит. D ${n(sum.vitD / 7, 1)}/${t.vitDDay} мкг`);
   }
 
-  const indsHtml = inds
-    .map(([name, val]) => `        <span class="ind">${name} <i>${val}</i></span>`)
-    .join("\n");
-
-  // Плюсы и минусы — теми же числами, что и индикаторы выше.
+  // Плюсы и минусы — теми же числами, что и проверка индикаторов выше. Плашками
+  // «Белок 148 / 135» на странице их не дублируем: одно и то же дважды, только
+  // без объяснения, зачем это читателю.
   //
   // Магний и витамин D индикаторов в приложении не имеют, но про них честно
   // сказать надо: магний корзина закрывает с запасом, витамин D — на четверть.
@@ -153,9 +151,13 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
   const pros = [
     ["Калорийность", `${Math.round(kcalDay)} ккал в день — ровно в коридор планки.`],
     ["Белок", `${n(sum.protein / 7)} г в день при планке ${t.proteinDay} — на дефиците уходит жир, а не мышцы.`],
+    ["Фрукты и овощи", `${n(sum.veg / 7)} г в день при норме ${t.vegDay} — капуста, морковь, свёкла и яблоки.`],
     ["Клетчатка", `${n(sum.fibre / 7)} г в день против нормы ${n(t.fiberDay)} — из капусты, чечевицы и гречки, а не из добавок.`],
+    ["Кальций", `${n(sum.calcium / 7)} мг в день при норме ${t.calciumDay} — кефир, творог, йогурт и сыр.`],
+    ["Железо", `${n(sum.ironAbs, 1)} мг усвоенного за неделю при норме ${n(t.ironWeek, 1)},`
+      + ` из них ${n(sum.heme / RULES.hemePortionProtein)} порции гемового при норме ${RULES.hemePortionsWeek}`
+      + ` — оно усваивается куда лучше растительного.`],
     ["Дешёвая омега-3", `${n(sum.epa, 1)} г ЭПК+ДГК в неделю — из ${fish.grams} г рыбы за ${Math.round(fish.cost)} ₽.`],
-    ["Гемовое железо", `${n(sum.heme / RULES.hemePortionProtein)} порции в неделю при норме ${RULES.hemePortionsWeek} — печень и курица усваиваются куда лучше растительного железа.`],
     ["Жировой профиль", `Ненасыщенных в ${n(sum.unsat / sum.sat, 1)} раза больше насыщенных — перекоса в сторону насыщенных нет.`],
     ["Магний", `${n(sum.magnesium / 7)} мг в день при норме ${t.magnesiumDay} — гречка, семечки и чечевица.`],
   ];
@@ -168,7 +170,7 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
   // сказать прямо, а не молчать на странице «закрывает все дефициты».
   const vitDday = sum.vitD / 7;
   if (vitDday >= t.vitDDay) {
-    pros.splice(4, 0, ["Витамин D", `${n(vitDday, 1)} мкг в день при норме ${t.vitDDay} — редкий случай,`
+    pros.splice(7, 0, ["Витамин D", `${n(vitDday, 1)} мкг в день при норме ${t.vitDDay} — редкий случай,`
       + ` когда он набирается едой, а не добавкой. Даёт та же жирная рыба.`]);
   } else {
     cons.unshift(["Витамин D", `${n(vitDday, 1)} мкг в день из ${t.vitDDay} нужных. Едой он почти не`
@@ -189,11 +191,7 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
     `          <div style="text-align:right"><div class="big">${Math.round(sum.price / 7)} ₽</div><div class="sub">в день</div></div>`,
     "        </div>",
     "      </div>",
-    `      <p class="lead" style="margin-top:16px">Закрыто на ${Math.round(kcalDay)} ккал в день:</p>`,
-    '      <div class="inds">',
-    indsHtml,
-    "      </div>",
-    '      <p class="lead" style="margin-top:22px">Что здесь хорошо:</p>',
+    `      <p class="lead" style="margin-top:16px">Что здесь хорошо:</p>`,
     '      <ul class="list">',
     bullets(pros, "✓", ""),
     "      </ul>",

@@ -229,7 +229,7 @@ export const FOODS = {
   // чем в подсолнечном, но отношение ненасыщенных к насыщенным всё равно 6:1.
   oliveOil: F("Масло оливковое", 738,
     { pack: { brand: "Vesuvio", item: "масло оливковое для жарки, Италия", size: "1 л", price: 676 },
-      photo: null,
+      photo: "olive", photoFit: "contain",
       magnesium: 0, vitD: 0,
       kcal: 884, protein: 0, fat: 100, calcium: 1, iron: 0.6,
       sfa: 14, mufa: 73, pufa: 11 }),

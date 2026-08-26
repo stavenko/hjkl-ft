@@ -41,6 +41,7 @@ const FIT = {
 /// (`cropdetect` на этих файлах не срабатывает — фон не чисто белый).
 const PROBE = 128;
 const BG_LEVEL = 244;   // всё светлее — считаем фоном
+const EDGE_LEVEL = 24;  // темнее — чёрная рамка кадра, а не товар
 const MARGIN = 0.03;    // немного воздуха вокруг товара
 
 function trimWhite(src) {
@@ -48,9 +49,27 @@ function trimWhite(src) {
     "-f", "rawvideo", "-"], { maxBuffer: 1 << 22 }).stdout;
   if (!px || px.length !== PROBE * PROBE) throw new Error(`${src}: не прочитались пиксели`);
 
+  // Сначала снимаем ЧЁРНУЮ РАМКУ: у части пакшотов сверху и снизу лежат полосы,
+  // и без этого они сойдут за товар и растянут кадр на всю высоту. Рамкой
+  // считается только сплошь тёмный ряд с самого края — тёмная упаковка внутри
+  // кадра (чёрная пачка чечевицы) под это не подходит.
+  const rowDark = (y) => {
+    for (let x = 0; x < PROBE; x++) if (px[y * PROBE + x] > EDGE_LEVEL) return false;
+    return true;
+  };
+  const colDark = (x) => {
+    for (let y = 0; y < PROBE; y++) if (px[y * PROBE + x] > EDGE_LEVEL) return false;
+    return true;
+  };
+  let top = 0, bottom = PROBE - 1, left = 0, right = PROBE - 1;
+  while (top < bottom && rowDark(top)) top++;
+  while (bottom > top && rowDark(bottom)) bottom--;
+  while (left < right && colDark(left)) left++;
+  while (right > left && colDark(right)) right--;
+
   let x0 = PROBE, y0 = PROBE, x1 = -1, y1 = -1;
-  for (let y = 0; y < PROBE; y++) {
-    for (let x = 0; x < PROBE; x++) {
+  for (let y = top; y <= bottom; y++) {
+    for (let x = left; x <= right; x++) {
       if (px[y * PROBE + x] >= BG_LEVEL) continue;
       if (x < x0) x0 = x;
       if (x > x1) x1 = x;

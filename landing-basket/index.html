@@ -211,12 +211,14 @@
     overflow:hidden;font-weight:600;font-size:15px;line-height:1.22;color:var(--ink)}
   .mrow .mname span{display:block;font-size:12.5px;color:var(--muted);margin-top:1px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .mrow .mqty{flex:0 0 auto;font-size:13.5px;color:var(--ink-2);text-align:right;white-space:nowrap}
-  /* Цена подчёркнута пунктиром: по тапу показывает, из какой пачки она сложилась. */
-  .mrow .mcost{flex:0 0 auto;min-width:62px;text-align:right;font-weight:700;font-size:15px;
-    color:var(--ink);background:none;border:none;padding:0;font-family:inherit;cursor:pointer;
+  /* Вес и цена подчёркнуты пунктиром: по тапу вес показывает порцию на день,
+     цена — из какой пачки она сложилась. */
+  .mhint{background:none;border:none;padding:0;font-family:inherit;cursor:pointer;
     border-bottom:1px dashed var(--ink-2);line-height:1.35}
-  .mrow .mcost[aria-expanded="true"]{color:var(--accent-ink);border-bottom-color:var(--accent-ink)}
+  .mhint[aria-expanded="true"]{color:var(--accent-ink);border-bottom-color:var(--accent-ink)}
+  .mrow .mqty{flex:0 0 auto;font-size:13.5px;color:var(--ink-2);text-align:right;white-space:nowrap}
+  .mrow .mcost{flex:0 0 auto;min-width:62px;text-align:right;font-weight:700;font-size:15px;
+    color:var(--ink)}
   .mpop{position:absolute;right:0;top:calc(100% - 6px);z-index:5;max-width:min(300px,88vw);
     background:var(--ink);color:#fff;border-radius:12px;padding:10px 12px;font-size:13px;
     line-height:1.4;box-shadow:0 10px 30px rgba(0,0,0,.22)}
@@ -402,120 +404,137 @@
           <div class="mrow">
             <img class="mpic" src="/img/mini/teos.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Греческий йогурт</b><span>Teos</span></div>
-            <div class="mqty">1050 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-teos">592 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-teos">1050 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-teos">592 ₽</button>
+            <div class="mpop" id="qty-f1800-teos" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
             <div class="mpop" id="pack-f1800-teos" role="tooltip" hidden>Teos, йогурт греческий густой 2 %, 140 г — 79 ₽<i>564 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-chickenThigh">372 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-chickenThigh">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-chickenThigh">372 ₽</button>
+            <div class="mpop" id="qty-f1800-chickenThigh" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f1800-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cottage.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Творог 5%</b><span>Константиново</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-cottage">292 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-cottage">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-cottage">292 ₽</button>
+            <div class="mpop" id="qty-f1800-cottage" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f1800-cottage" role="tooltip" hidden>Константиново, творог 5 %, 180 г — 75 ₽<i>417 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/syrok.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сырок глазированный</b><span>Ростагроэкспорт</span></div>
-            <div class="mqty">315 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-syrok">291 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-syrok">315 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-syrok">291 ₽</button>
+            <div class="mpop" id="qty-f1800-syrok" role="tooltip" hidden>315 г на неделю<i>это 45 г в день</i></div>
             <div class="mpop" id="pack-f1800-syrok" role="tooltip" hidden>Ростагроэкспорт, сырок творожный глазированный с ванилью 20 %, 12 × 45 г — 499 ₽<i>924 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/breast.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Куриная грудка</b><span>Первая свежесть</span></div>
-            <div class="mqty">500 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-chickenBreast">286 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-chickenBreast">500 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-chickenBreast">286 ₽</button>
+            <div class="mpop" id="qty-f1800-chickenBreast" role="tooltip" hidden>500 г на неделю<i>это 71 г в день</i></div>
             <div class="mpop" id="pack-f1800-chickenBreast" role="tooltip" hidden>Первая свежесть, грудка цыплёнка-бройлера, 750 г — 429 ₽<i>572 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/apple.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Яблоки</b><span>весовой товар</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-apple">180 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-apple">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-apple">180 ₽</button>
+            <div class="mpop" id="qty-f1800-apple" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f1800-apple" role="tooltip" hidden>яблоки свежие российские, 2 кг — 514 ₽<i>257 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/herring.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сельдь солёная</b><span>Экстра Фиш</span></div>
-            <div class="mqty">250 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-herring">174 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-herring">250 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-herring">174 ₽</button>
+            <div class="mpop" id="qty-f1800-herring" role="tooltip" hidden>250 г на неделю<i>это 36 г в день</i></div>
             <div class="mpop" id="pack-f1800-herring" role="tooltip" hidden>Экстра Фиш, филе сельди слабосолёное, 200 г — 139 ₽<i>695 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cabbage.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Капуста</b><span>весовой товар</span></div>
-            <div class="mqty">2100 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-cabbage">170 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-cabbage">2100 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-cabbage">170 ₽</button>
+            <div class="mpop" id="qty-f1800-cabbage" role="tooltip" hidden>2100 г на неделю<i>это 300 г в день</i></div>
             <div class="mpop" id="pack-f1800-cabbage" role="tooltip" hidden>капуста кочанная, Россия, 1 кг — 81 ₽<i>81 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/kefir.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Кефир 2.5%</b><span>Простоквашино</span></div>
-            <div class="mqty">1400 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-kefir">158 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-kefir">1400 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-kefir">158 ₽</button>
+            <div class="mpop" id="qty-f1800-kefir" role="tooltip" hidden>1400 г на неделю<i>это 200 г в день</i></div>
             <div class="mpop" id="pack-f1800-kefir" role="tooltip" hidden>Простоквашино, кефир 2,5 %, 930 г — 105 ₽<i>113 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/lentils.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Чечевица</b><span>Увелка</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-lentils">135 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-lentils">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-lentils">135 ₽</button>
+            <div class="mpop" id="qty-f1800-lentils" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f1800-lentils" role="tooltip" hidden>Увелка, чечевица красная, 450 г — 87 ₽<i>193 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cheese.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сыр 45%</b><span>Брест-Литовск</span></div>
-            <div class="mqty">105 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-cheese">104 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-cheese">105 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-cheese">104 ₽</button>
+            <div class="mpop" id="qty-f1800-cheese" role="tooltip" hidden>105 г на неделю<i>это 15 г в день</i></div>
             <div class="mpop" id="pack-f1800-cheese" role="tooltip" hidden>Брест-Литовск, сыр Финский 45 %, 200 г — 199 ₽<i>995 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/seeds.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Семечки</b><span>Ореховец</span></div>
-            <div class="mqty">105 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-pumpkinSeeds">104 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-pumpkinSeeds">105 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-pumpkinSeeds">104 ₽</button>
+            <div class="mpop" id="qty-f1800-pumpkinSeeds" role="tooltip" hidden>105 г на неделю<i>это 15 г в день</i></div>
             <div class="mpop" id="pack-f1800-pumpkinSeeds" role="tooltip" hidden>Ореховец, семена тыквы очищенные, 500 г — 494 ₽<i>988 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/liver.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Печень куриная</b><span>Первая Свежесть</span></div>
-            <div class="mqty">250 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-chickenLiver">103 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-chickenLiver">250 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-chickenLiver">103 ₽</button>
+            <div class="mpop" id="qty-f1800-chickenLiver" role="tooltip" hidden>250 г на неделю<i>это 36 г в день</i></div>
             <div class="mpop" id="pack-f1800-chickenLiver" role="tooltip" hidden>Первая Свежесть, печень куриная охлаждённая, 450 г — 185 ₽<i>411 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/eggs.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Яйцо куриное</b><span>Ozon fresh</span></div>
-            <div class="mqty">350 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-egg">68 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-egg">350 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-egg">68 ₽</button>
+            <div class="mpop" id="qty-f1800-egg" role="tooltip" hidden>350 г на неделю<i>это 50 г в день</i></div>
             <div class="mpop" id="pack-f1800-egg" role="tooltip" hidden>Ozon fresh, яйцо куриное столовое С1, 10 шт — 99 ₽<i>194 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/beet.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Свёкла</b><span>весовой товар</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-beet">63 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-beet">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-beet">63 ₽</button>
+            <div class="mpop" id="qty-f1800-beet" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f1800-beet" role="tooltip" hidden>свёкла, Россия, 1 кг — 90 ₽<i>90 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/carrot.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Морковь</b><span>весовой товар</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-carrot">46 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-carrot">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-carrot">46 ₽</button>
+            <div class="mpop" id="qty-f1800-carrot" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f1800-carrot" role="tooltip" hidden>морковь колхозная, 1 кг — 65 ₽<i>65 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/buckwheat.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Гречка</b><span>Агро-Альянс</span></div>
-            <div class="mqty">400 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f1800-buckwheat">39 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-buckwheat">400 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-buckwheat">39 ₽</button>
+            <div class="mpop" id="qty-f1800-buckwheat" role="tooltip" hidden>400 г на неделю<i>это 57 г в день</i></div>
             <div class="mpop" id="pack-f1800-buckwheat" role="tooltip" hidden>Агро-Альянс, гречневая крупа ядрица, 900 г — 87 ₽<i>97 ₽/кг</i></div>
           </div>
         </div>
@@ -544,127 +563,145 @@
           <div class="mrow">
             <img class="mpic" src="/img/mini/teos.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Греческий йогурт</b><span>Teos</span></div>
-            <div class="mqty">1050 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-teos">592 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-teos">1050 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-teos">592 ₽</button>
+            <div class="mpop" id="qty-f2200-teos" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
             <div class="mpop" id="pack-f2200-teos" role="tooltip" hidden>Teos, йогурт греческий густой 2 %, 140 г — 79 ₽<i>564 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/breast.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Куриная грудка</b><span>Первая свежесть</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-chickenBreast">400 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-chickenBreast">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-chickenBreast">400 ₽</button>
+            <div class="mpop" id="qty-f2200-chickenBreast" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f2200-chickenBreast" role="tooltip" hidden>Первая свежесть, грудка цыплёнка-бройлера, 750 г — 429 ₽<i>572 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-chickenThigh">372 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-chickenThigh">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-chickenThigh">372 ₽</button>
+            <div class="mpop" id="qty-f2200-chickenThigh" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f2200-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cottage.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Творог 5%</b><span>Константиново</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-cottage">292 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-cottage">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-cottage">292 ₽</button>
+            <div class="mpop" id="qty-f2200-cottage" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f2200-cottage" role="tooltip" hidden>Константиново, творог 5 %, 180 г — 75 ₽<i>417 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/syrok.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сырок глазированный</b><span>Ростагроэкспорт</span></div>
-            <div class="mqty">315 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-syrok">291 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-syrok">315 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-syrok">291 ₽</button>
+            <div class="mpop" id="qty-f2200-syrok" role="tooltip" hidden>315 г на неделю<i>это 45 г в день</i></div>
             <div class="mpop" id="pack-f2200-syrok" role="tooltip" hidden>Ростагроэкспорт, сырок творожный глазированный с ванилью 20 %, 12 × 45 г — 499 ₽<i>924 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/herring.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сельдь солёная</b><span>Экстра Фиш</span></div>
-            <div class="mqty">300 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-herring">209 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-herring">300 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-herring">209 ₽</button>
+            <div class="mpop" id="qty-f2200-herring" role="tooltip" hidden>300 г на неделю<i>это 43 г в день</i></div>
             <div class="mpop" id="pack-f2200-herring" role="tooltip" hidden>Экстра Фиш, филе сельди слабосолёное, 200 г — 139 ₽<i>695 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/apple.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Яблоки</b><span>весовой товар</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-apple">180 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-apple">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-apple">180 ₽</button>
+            <div class="mpop" id="qty-f2200-apple" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f2200-apple" role="tooltip" hidden>яблоки свежие российские, 2 кг — 514 ₽<i>257 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/lentils.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Чечевица</b><span>Увелка</span></div>
-            <div class="mqty">900 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-lentils">174 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-lentils">900 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-lentils">174 ₽</button>
+            <div class="mpop" id="qty-f2200-lentils" role="tooltip" hidden>900 г на неделю<i>это 129 г в день</i></div>
             <div class="mpop" id="pack-f2200-lentils" role="tooltip" hidden>Увелка, чечевица красная, 450 г — 87 ₽<i>193 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/seeds.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Семечки</b><span>Ореховец</span></div>
-            <div class="mqty">175 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-pumpkinSeeds">173 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-pumpkinSeeds">175 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-pumpkinSeeds">173 ₽</button>
+            <div class="mpop" id="qty-f2200-pumpkinSeeds" role="tooltip" hidden>175 г на неделю<i>это 25 г в день</i></div>
             <div class="mpop" id="pack-f2200-pumpkinSeeds" role="tooltip" hidden>Ореховец, семена тыквы очищенные, 500 г — 494 ₽<i>988 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/kefir.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Кефир 2.5%</b><span>Простоквашино</span></div>
-            <div class="mqty">1400 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-kefir">158 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-kefir">1400 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-kefir">158 ₽</button>
+            <div class="mpop" id="qty-f2200-kefir" role="tooltip" hidden>1400 г на неделю<i>это 200 г в день</i></div>
             <div class="mpop" id="pack-f2200-kefir" role="tooltip" hidden>Простоквашино, кефир 2,5 %, 930 г — 105 ₽<i>113 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cabbage.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Капуста</b><span>весовой товар</span></div>
-            <div class="mqty">1750 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-cabbage">142 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-cabbage">1750 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-cabbage">142 ₽</button>
+            <div class="mpop" id="qty-f2200-cabbage" role="tooltip" hidden>1750 г на неделю<i>это 250 г в день</i></div>
             <div class="mpop" id="pack-f2200-cabbage" role="tooltip" hidden>капуста кочанная, Россия, 1 кг — 81 ₽<i>81 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cheese.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сыр 45%</b><span>Брест-Литовск</span></div>
-            <div class="mqty">105 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-cheese">104 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-cheese">105 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-cheese">104 ₽</button>
+            <div class="mpop" id="qty-f2200-cheese" role="tooltip" hidden>105 г на неделю<i>это 15 г в день</i></div>
             <div class="mpop" id="pack-f2200-cheese" role="tooltip" hidden>Брест-Литовск, сыр Финский 45 %, 200 г — 199 ₽<i>995 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/liver.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Печень куриная</b><span>Первая Свежесть</span></div>
-            <div class="mqty">250 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-chickenLiver">103 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-chickenLiver">250 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-chickenLiver">103 ₽</button>
+            <div class="mpop" id="qty-f2200-chickenLiver" role="tooltip" hidden>250 г на неделю<i>это 36 г в день</i></div>
             <div class="mpop" id="pack-f2200-chickenLiver" role="tooltip" hidden>Первая Свежесть, печень куриная охлаждённая, 450 г — 185 ₽<i>411 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/carrot.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Морковь</b><span>весовой товар</span></div>
-            <div class="mqty">1050 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-carrot">68 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-carrot">1050 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-carrot">68 ₽</button>
+            <div class="mpop" id="qty-f2200-carrot" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
             <div class="mpop" id="pack-f2200-carrot" role="tooltip" hidden>морковь колхозная, 1 кг — 65 ₽<i>65 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/buckwheat.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Гречка</b><span>Агро-Альянс</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-buckwheat">68 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-buckwheat">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-buckwheat">68 ₽</button>
+            <div class="mpop" id="qty-f2200-buckwheat" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f2200-buckwheat" role="tooltip" hidden>Агро-Альянс, гречневая крупа ядрица, 900 г — 87 ₽<i>97 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/eggs.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Яйцо куриное</b><span>Ozon fresh</span></div>
-            <div class="mqty">350 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-egg">68 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-egg">350 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-egg">68 ₽</button>
+            <div class="mpop" id="qty-f2200-egg" role="tooltip" hidden>350 г на неделю<i>это 50 г в день</i></div>
             <div class="mpop" id="pack-f2200-egg" role="tooltip" hidden>Ozon fresh, яйцо куриное столовое С1, 10 шт — 99 ₽<i>194 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/beet.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Свёкла</b><span>весовой товар</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-beet">63 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-beet">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-beet">63 ₽</button>
+            <div class="mpop" id="qty-f2200-beet" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f2200-beet" role="tooltip" hidden>свёкла, Россия, 1 кг — 90 ₽<i>90 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <span class="mpic mpic-blank" aria-hidden="true">М</span>
             <div class="mname"><b>Масло подсолнечное</b><span>Золотая Семечка</span></div>
-            <div class="mqty">70 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-f2200-sunflowerOil">11 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-sunflowerOil">70 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-sunflowerOil">11 ₽</button>
+            <div class="mpop" id="qty-f2200-sunflowerOil" role="tooltip" hidden>70 г на неделю<i>это 10 г в день</i></div>
             <div class="mpop" id="pack-f2200-sunflowerOil" role="tooltip" hidden>Золотая Семечка, масло подсолнечное рафинированное, 1 л — 142 ₽<i>154 ₽/кг</i></div>
           </div>
         </div>
@@ -693,127 +730,145 @@
           <div class="mrow">
             <img class="mpic" src="/img/mini/teos.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Греческий йогурт</b><span>Teos</span></div>
-            <div class="mqty">1050 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-teos">592 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-teos">1050 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-teos">592 ₽</button>
+            <div class="mpop" id="qty-m2200-teos" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
             <div class="mpop" id="pack-m2200-teos" role="tooltip" hidden>Teos, йогурт греческий густой 2 %, 140 г — 79 ₽<i>564 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/breast.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Куриная грудка</b><span>Первая свежесть</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-chickenBreast">400 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-chickenBreast">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-chickenBreast">400 ₽</button>
+            <div class="mpop" id="qty-m2200-chickenBreast" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-m2200-chickenBreast" role="tooltip" hidden>Первая свежесть, грудка цыплёнка-бройлера, 750 г — 429 ₽<i>572 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-chickenThigh">372 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-chickenThigh">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-chickenThigh">372 ₽</button>
+            <div class="mpop" id="qty-m2200-chickenThigh" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-m2200-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cottage.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Творог 5%</b><span>Константиново</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-cottage">292 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-cottage">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-cottage">292 ₽</button>
+            <div class="mpop" id="qty-m2200-cottage" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-m2200-cottage" role="tooltip" hidden>Константиново, творог 5 %, 180 г — 75 ₽<i>417 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/syrok.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сырок глазированный</b><span>Ростагроэкспорт</span></div>
-            <div class="mqty">315 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-syrok">291 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-syrok">315 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-syrok">291 ₽</button>
+            <div class="mpop" id="qty-m2200-syrok" role="tooltip" hidden>315 г на неделю<i>это 45 г в день</i></div>
             <div class="mpop" id="pack-m2200-syrok" role="tooltip" hidden>Ростагроэкспорт, сырок творожный глазированный с ванилью 20 %, 12 × 45 г — 499 ₽<i>924 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/apple.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Яблоки</b><span>весовой товар</span></div>
-            <div class="mqty">1050 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-apple">270 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-apple">1050 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-apple">270 ₽</button>
+            <div class="mpop" id="qty-m2200-apple" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
             <div class="mpop" id="pack-m2200-apple" role="tooltip" hidden>яблоки свежие российские, 2 кг — 514 ₽<i>257 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/herring.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сельдь солёная</b><span>Экстра Фиш</span></div>
-            <div class="mqty">300 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-herring">209 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-herring">300 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-herring">209 ₽</button>
+            <div class="mpop" id="qty-m2200-herring" role="tooltip" hidden>300 г на неделю<i>это 43 г в день</i></div>
             <div class="mpop" id="pack-m2200-herring" role="tooltip" hidden>Экстра Фиш, филе сельди слабосолёное, 200 г — 139 ₽<i>695 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cabbage.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Капуста</b><span>весовой товар</span></div>
-            <div class="mqty">2450 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-cabbage">198 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-cabbage">2450 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-cabbage">198 ₽</button>
+            <div class="mpop" id="qty-m2200-cabbage" role="tooltip" hidden>2450 г на неделю<i>это 350 г в день</i></div>
             <div class="mpop" id="pack-m2200-cabbage" role="tooltip" hidden>капуста кочанная, Россия, 1 кг — 81 ₽<i>81 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/lentils.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Чечевица</b><span>Увелка</span></div>
-            <div class="mqty">900 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-lentils">174 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-lentils">900 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-lentils">174 ₽</button>
+            <div class="mpop" id="qty-m2200-lentils" role="tooltip" hidden>900 г на неделю<i>это 129 г в день</i></div>
             <div class="mpop" id="pack-m2200-lentils" role="tooltip" hidden>Увелка, чечевица красная, 450 г — 87 ₽<i>193 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/seeds.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Семечки</b><span>Ореховец</span></div>
-            <div class="mqty">175 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-pumpkinSeeds">173 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-pumpkinSeeds">175 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-pumpkinSeeds">173 ₽</button>
+            <div class="mpop" id="qty-m2200-pumpkinSeeds" role="tooltip" hidden>175 г на неделю<i>это 25 г в день</i></div>
             <div class="mpop" id="pack-m2200-pumpkinSeeds" role="tooltip" hidden>Ореховец, семена тыквы очищенные, 500 г — 494 ₽<i>988 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/kefir.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Кефир 2.5%</b><span>Простоквашино</span></div>
-            <div class="mqty">1400 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-kefir">158 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-kefir">1400 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-kefir">158 ₽</button>
+            <div class="mpop" id="qty-m2200-kefir" role="tooltip" hidden>1400 г на неделю<i>это 200 г в день</i></div>
             <div class="mpop" id="pack-m2200-kefir" role="tooltip" hidden>Простоквашино, кефир 2,5 %, 930 г — 105 ₽<i>113 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cheese.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сыр 45%</b><span>Брест-Литовск</span></div>
-            <div class="mqty">105 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-cheese">104 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-cheese">105 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-cheese">104 ₽</button>
+            <div class="mpop" id="qty-m2200-cheese" role="tooltip" hidden>105 г на неделю<i>это 15 г в день</i></div>
             <div class="mpop" id="pack-m2200-cheese" role="tooltip" hidden>Брест-Литовск, сыр Финский 45 %, 200 г — 199 ₽<i>995 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/liver.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Печень куриная</b><span>Первая Свежесть</span></div>
-            <div class="mqty">250 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-chickenLiver">103 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-chickenLiver">250 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-chickenLiver">103 ₽</button>
+            <div class="mpop" id="qty-m2200-chickenLiver" role="tooltip" hidden>250 г на неделю<i>это 36 г в день</i></div>
             <div class="mpop" id="pack-m2200-chickenLiver" role="tooltip" hidden>Первая Свежесть, печень куриная охлаждённая, 450 г — 185 ₽<i>411 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/carrot.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Морковь</b><span>весовой товар</span></div>
-            <div class="mqty">1400 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-carrot">91 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-carrot">1400 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-carrot">91 ₽</button>
+            <div class="mpop" id="qty-m2200-carrot" role="tooltip" hidden>1400 г на неделю<i>это 200 г в день</i></div>
             <div class="mpop" id="pack-m2200-carrot" role="tooltip" hidden>морковь колхозная, 1 кг — 65 ₽<i>65 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/eggs.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Яйцо куриное</b><span>Ozon fresh</span></div>
-            <div class="mqty">350 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-egg">68 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-egg">350 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-egg">68 ₽</button>
+            <div class="mpop" id="qty-m2200-egg" role="tooltip" hidden>350 г на неделю<i>это 50 г в день</i></div>
             <div class="mpop" id="pack-m2200-egg" role="tooltip" hidden>Ozon fresh, яйцо куриное столовое С1, 10 шт — 99 ₽<i>194 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/beet.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Свёкла</b><span>весовой товар</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-beet">63 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-beet">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-beet">63 ₽</button>
+            <div class="mpop" id="qty-m2200-beet" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-m2200-beet" role="tooltip" hidden>свёкла, Россия, 1 кг — 90 ₽<i>90 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/buckwheat.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Гречка</b><span>Агро-Альянс</span></div>
-            <div class="mqty">600 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-buckwheat">58 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-buckwheat">600 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-buckwheat">58 ₽</button>
+            <div class="mpop" id="qty-m2200-buckwheat" role="tooltip" hidden>600 г на неделю<i>это 86 г в день</i></div>
             <div class="mpop" id="pack-m2200-buckwheat" role="tooltip" hidden>Агро-Альянс, гречневая крупа ядрица, 900 г — 87 ₽<i>97 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <span class="mpic mpic-blank" aria-hidden="true">М</span>
             <div class="mname"><b>Масло подсолнечное</b><span>Золотая Семечка</span></div>
-            <div class="mqty">70 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2200-sunflowerOil">11 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-sunflowerOil">70 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-sunflowerOil">11 ₽</button>
+            <div class="mpop" id="qty-m2200-sunflowerOil" role="tooltip" hidden>70 г на неделю<i>это 10 г в день</i></div>
             <div class="mpop" id="pack-m2200-sunflowerOil" role="tooltip" hidden>Золотая Семечка, масло подсолнечное рафинированное, 1 л — 142 ₽<i>154 ₽/кг</i></div>
           </div>
         </div>
@@ -842,127 +897,145 @@
           <div class="mrow">
             <img class="mpic" src="/img/mini/teos.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Греческий йогурт</b><span>Teos</span></div>
-            <div class="mqty">1050 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-teos">592 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-teos">1050 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-teos">592 ₽</button>
+            <div class="mpop" id="qty-m2500-teos" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
             <div class="mpop" id="pack-m2500-teos" role="tooltip" hidden>Teos, йогурт греческий густой 2 %, 140 г — 79 ₽<i>564 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
-            <div class="mqty">1050 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-chickenThigh">559 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-chickenThigh">1050 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-chickenThigh">559 ₽</button>
+            <div class="mpop" id="qty-m2500-chickenThigh" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
             <div class="mpop" id="pack-m2500-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/breast.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Куриная грудка</b><span>Первая свежесть</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-chickenBreast">400 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-chickenBreast">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-chickenBreast">400 ₽</button>
+            <div class="mpop" id="qty-m2500-chickenBreast" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-m2500-chickenBreast" role="tooltip" hidden>Первая свежесть, грудка цыплёнка-бройлера, 750 г — 429 ₽<i>572 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/syrok.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сырок глазированный</b><span>Ростагроэкспорт</span></div>
-            <div class="mqty">350 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-syrok">323 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-syrok">350 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-syrok">323 ₽</button>
+            <div class="mpop" id="qty-m2500-syrok" role="tooltip" hidden>350 г на неделю<i>это 50 г в день</i></div>
             <div class="mpop" id="pack-m2500-syrok" role="tooltip" hidden>Ростагроэкспорт, сырок творожный глазированный с ванилью 20 %, 12 × 45 г — 499 ₽<i>924 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cottage.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Творог 5%</b><span>Константиново</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-cottage">292 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-cottage">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-cottage">292 ₽</button>
+            <div class="mpop" id="qty-m2500-cottage" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-m2500-cottage" role="tooltip" hidden>Константиново, творог 5 %, 180 г — 75 ₽<i>417 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/apple.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Яблоки</b><span>весовой товар</span></div>
-            <div class="mqty">1050 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-apple">270 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-apple">1050 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-apple">270 ₽</button>
+            <div class="mpop" id="qty-m2500-apple" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
             <div class="mpop" id="pack-m2500-apple" role="tooltip" hidden>яблоки свежие российские, 2 кг — 514 ₽<i>257 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/herring.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сельдь солёная</b><span>Экстра Фиш</span></div>
-            <div class="mqty">300 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-herring">209 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-herring">300 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-herring">209 ₽</button>
+            <div class="mpop" id="qty-m2500-herring" role="tooltip" hidden>300 г на неделю<i>это 43 г в день</i></div>
             <div class="mpop" id="pack-m2500-herring" role="tooltip" hidden>Экстра Фиш, филе сельди слабосолёное, 200 г — 139 ₽<i>695 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/seeds.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Семечки</b><span>Ореховец</span></div>
-            <div class="mqty">210 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-pumpkinSeeds">207 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-pumpkinSeeds">210 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-pumpkinSeeds">207 ₽</button>
+            <div class="mpop" id="qty-m2500-pumpkinSeeds" role="tooltip" hidden>210 г на неделю<i>это 30 г в день</i></div>
             <div class="mpop" id="pack-m2500-pumpkinSeeds" role="tooltip" hidden>Ореховец, семена тыквы очищенные, 500 г — 494 ₽<i>988 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/lentils.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Чечевица</b><span>Увелка</span></div>
-            <div class="mqty">1050 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-lentils">203 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-lentils">1050 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-lentils">203 ₽</button>
+            <div class="mpop" id="qty-m2500-lentils" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
             <div class="mpop" id="pack-m2500-lentils" role="tooltip" hidden>Увелка, чечевица красная, 450 г — 87 ₽<i>193 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cabbage.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Капуста</b><span>весовой товар</span></div>
-            <div class="mqty">2450 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-cabbage">198 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-cabbage">2450 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-cabbage">198 ₽</button>
+            <div class="mpop" id="qty-m2500-cabbage" role="tooltip" hidden>2450 г на неделю<i>это 350 г в день</i></div>
             <div class="mpop" id="pack-m2500-cabbage" role="tooltip" hidden>капуста кочанная, Россия, 1 кг — 81 ₽<i>81 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/kefir.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Кефир 2.5%</b><span>Простоквашино</span></div>
-            <div class="mqty">1400 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-kefir">158 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-kefir">1400 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-kefir">158 ₽</button>
+            <div class="mpop" id="qty-m2500-kefir" role="tooltip" hidden>1400 г на неделю<i>это 200 г в день</i></div>
             <div class="mpop" id="pack-m2500-kefir" role="tooltip" hidden>Простоквашино, кефир 2,5 %, 930 г — 105 ₽<i>113 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cheese.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Сыр 45%</b><span>Брест-Литовск</span></div>
-            <div class="mqty">105 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-cheese">104 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-cheese">105 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-cheese">104 ₽</button>
+            <div class="mpop" id="qty-m2500-cheese" role="tooltip" hidden>105 г на неделю<i>это 15 г в день</i></div>
             <div class="mpop" id="pack-m2500-cheese" role="tooltip" hidden>Брест-Литовск, сыр Финский 45 %, 200 г — 199 ₽<i>995 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/liver.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Печень куриная</b><span>Первая Свежесть</span></div>
-            <div class="mqty">250 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-chickenLiver">103 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-chickenLiver">250 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-chickenLiver">103 ₽</button>
+            <div class="mpop" id="qty-m2500-chickenLiver" role="tooltip" hidden>250 г на неделю<i>это 36 г в день</i></div>
             <div class="mpop" id="pack-m2500-chickenLiver" role="tooltip" hidden>Первая Свежесть, печень куриная охлаждённая, 450 г — 185 ₽<i>411 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/carrot.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Морковь</b><span>весовой товар</span></div>
-            <div class="mqty">1400 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-carrot">91 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-carrot">1400 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-carrot">91 ₽</button>
+            <div class="mpop" id="qty-m2500-carrot" role="tooltip" hidden>1400 г на неделю<i>это 200 г в день</i></div>
             <div class="mpop" id="pack-m2500-carrot" role="tooltip" hidden>морковь колхозная, 1 кг — 65 ₽<i>65 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/buckwheat.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Гречка</b><span>Агро-Альянс</span></div>
-            <div class="mqty">800 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-buckwheat">78 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-buckwheat">800 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-buckwheat">78 ₽</button>
+            <div class="mpop" id="qty-m2500-buckwheat" role="tooltip" hidden>800 г на неделю<i>это 114 г в день</i></div>
             <div class="mpop" id="pack-m2500-buckwheat" role="tooltip" hidden>Агро-Альянс, гречневая крупа ядрица, 900 г — 87 ₽<i>97 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/eggs.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Яйцо куриное</b><span>Ozon fresh</span></div>
-            <div class="mqty">350 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-egg">68 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-egg">350 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-egg">68 ₽</button>
+            <div class="mpop" id="qty-m2500-egg" role="tooltip" hidden>350 г на неделю<i>это 50 г в день</i></div>
             <div class="mpop" id="pack-m2500-egg" role="tooltip" hidden>Ozon fresh, яйцо куриное столовое С1, 10 шт — 99 ₽<i>194 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/beet.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Свёкла</b><span>весовой товар</span></div>
-            <div class="mqty">700 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-beet">63 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-beet">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-beet">63 ₽</button>
+            <div class="mpop" id="qty-m2500-beet" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-m2500-beet" role="tooltip" hidden>свёкла, Россия, 1 кг — 90 ₽<i>90 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <span class="mpic mpic-blank" aria-hidden="true">М</span>
             <div class="mname"><b>Масло подсолнечное</b><span>Золотая Семечка</span></div>
-            <div class="mqty">70 г</div>
-            <button class="mcost" type="button" aria-expanded="false" aria-controls="pack-m2500-sunflowerOil">11 ₽</button>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-sunflowerOil">70 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-sunflowerOil">11 ₽</button>
+            <div class="mpop" id="qty-m2500-sunflowerOil" role="tooltip" hidden>70 г на неделю<i>это 10 г в день</i></div>
             <div class="mpop" id="pack-m2500-sunflowerOil" role="tooltip" hidden>Золотая Семечка, масло подсолнечное рафинированное, 1 л — 142 ₽<i>154 ₽/кг</i></div>
           </div>
         </div>
@@ -1066,7 +1139,7 @@
     render();
   })();
 
-  // Цена строки: по тапу показывает, из какой пачки она сложилась.
+  // Хинты в строке: вес разворачивает порцию на день, цена — карточку товара.
   //
   // Открыт всегда не больше одного окошка: на телефоне два раскрытых подряд
   // перекрывают соседние строки и читаются как одно.
@@ -1081,7 +1154,7 @@
     }
 
     document.addEventListener('click', function (e) {
-      var btn = e.target.closest ? e.target.closest('.mcost') : null;
+      var btn = e.target.closest ? e.target.closest('.mhint') : null;
       if (!btn) { close(); return; }
       var wasOpen = btn === open;
       close();

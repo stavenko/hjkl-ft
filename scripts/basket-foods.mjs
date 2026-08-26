@@ -75,7 +75,7 @@ export const FOODS = {
   // Печень — самый дешёвый гем и железо разом.
   chickenLiver: F("Печень куриная", 411,
     { pack: { brand: "Первая Свежесть", item: "печень куриная охлаждённая", size: "450 г", price: 185 },
-      photo: "liver",
+      photo: "liver", photoFit: "contain",
       kcal: 137, protein: 20.4, fat: 5.9, calcium: 11, iron: 8.6, absorption: 0.25,
       sfa: 33, mufa: 27, pufa: 24, heme: true }),
   // Мидии варёно-мороженые — гем и цинк, но железа меньше печени.
@@ -127,7 +127,7 @@ export const FOODS = {
   // скорлупы ≈ 510 г. Иначе яйцо кажется дешевле, чем оно есть.
   egg: F("Яйцо куриное", 194,
     { pack: { brand: "Ozon fresh", item: "яйцо куриное столовое С1", size: "10 шт", price: 99 },
-      photo: "eggs",
+      photo: "eggs", photoFit: "contain",
       kcal: 157, protein: 12.7, fat: 11.5, calcium: 55, iron: 1.75, absorption: 0.1,
       sfa: 31, mufa: 44, pufa: 15, epa: 1, egg: true }),
   // Овощи и фрукты — самые дешёвые «объёмные».

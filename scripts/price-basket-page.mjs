@@ -73,7 +73,7 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
   // Граммы — из самой страницы. Бренд в подписи не мешает: имя продукта лежит в
   // <b>, и берётся именно оно.
   const basket = {};
-  const rowRe = /<div class="mname"><b>([^<]+)<\/b>[\s\S]*?<div class="mqty">(\d+) г<\/div>/g;
+  const rowRe = /<div class="mname"><b>([^<]+)<\/b>[\s\S]*?class="mqty[^"]*"[^>]*>(\d+) г</g;
   for (const m of body.matchAll(rowRe)) {
     const key = BY_LABEL[m[1]];
     if (!key) throw new Error(`${id}: нет продукта под подписью «${m[1]}»`);
@@ -94,13 +94,16 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
     // У весового товара (капуста, морковь) бренда нет — и повторять название
     // второй строкой незачем.
     const brand = r.pack.brand || "весовой товар";
+    // Два хинта на строку: вес разворачивает суточную порцию, цена — карточку.
+    const qtyId = `qty-${id}-${r.key}`;
     const popId = `pack-${id}-${r.key}`;
     return [
       '          <div class="mrow">',
       pic,
       `            <div class="mname"><b>${label}</b><span>${brand}</span></div>`,
-      `            <div class="mqty">${r.grams} г</div>`,
-      `            <button class="mcost" type="button" aria-expanded="false" aria-controls="${popId}">${Math.round(r.cost)} ₽</button>`,
+      `            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="${qtyId}">${r.grams} г</button>`,
+      `            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="${popId}">${Math.round(r.cost)} ₽</button>`,
+      `            <div class="mpop" id="${qtyId}" role="tooltip" hidden>${r.grams} г на неделю<i>это ${r.day} г в день</i></div>`,
       `            <div class="mpop" id="${popId}" role="tooltip" hidden>${packLabel(r.pack)}<i>${r.pricePerKg} ₽/кг</i></div>`,
       "          </div>",
     ].join("\n");

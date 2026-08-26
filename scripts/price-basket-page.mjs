@@ -34,6 +34,7 @@ const LABEL_BY_KEY = {
   chickenLiver: "Печень куриная",
   egg: "Яйцо куриное",
   mackerel: "Скумбрия",
+  codLiver: "Печень трески",
   buckwheat: "Гречка",
   carrot: "Морковь",
   beet: "Свёкла",

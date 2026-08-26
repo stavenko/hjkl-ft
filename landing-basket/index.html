@@ -140,7 +140,10 @@
 
   /* outcome / feature lists */
   .list{list-style:none;padding:0;margin:16px 0 0;display:flex;flex-direction:column;gap:12px}
-  .list li{display:flex;gap:12px;align-items:flex-start;font-size:16px;color:var(--ink-2)}
+  .list li{position:relative;display:flex;gap:12px;align-items:flex-start;font-size:16px;color:var(--ink-2)}
+  /* Пояснение к цифре внутри буллета — та же механика, что у цен в таблице. */
+  .list .mhint{font:inherit;color:inherit}
+  .list .mpop{left:0;right:auto;top:100%;max-width:min(340px,88vw)}
   .list li b{color:var(--ink);font-weight:700}
   .check{flex:0 0 auto;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);
     display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;margin-top:1px}
@@ -283,7 +286,7 @@
       <div class="panel-inner">
         <img class="panel-photo" src="/img/chicken.jpg" alt="Куриное филе на доске" />
         <h2>Куриная грудь</h2>
-        <p>Чемпион по белку и калориям. Научитесь вкусно делать куро-грудь — например, вельветированное мясо.</p>
+        <p>Чемпион по соотношению белка к калориям. Научитесь вкусно делать куро-грудь — например, вельветированное мясо.</p>
         <p class="panel-sub">И вы никогда не будете голодать и сможете позволить себе больше сладкого.</p>
       </div>
     </section>
@@ -384,7 +387,7 @@
   <!-- 7 · Таблицы рационов -->
   <section id="rations">
     <h2>Корзины</h2>
-    <p class="lead">Продукты одни и те же, разница только в количестве. Граммы — на неделю на одного человека.</p>
+    <p class="lead">Граммы — на неделю на одного человека.</p>
     <div class="tabs" role="group" aria-label="Кому">
       <button type="button" data-sex="f" aria-pressed="true">Девушкам</button>
       <button type="button" data-sex="m" aria-pressed="false">Мужчинам</button>
@@ -543,11 +546,11 @@
       </div>
       <ul class="list" style="margin-top:18px">
         <li><span class="check">✓</span><span><b>Калорийность.</b> 1828 ккал в день — рацион собран ровно под неё.</span></li>
-        <li><span class="check">✓</span><span><b>Белок.</b> 148 г в день при норме 135 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Белок.</b> 148 г в день — на дефиците уходит жир, а не мышцы.</span></li>
         <li><span class="check">✓</span><span><b>Фрукты и овощи.</b> 600 г в день позволяют чувствовать себя сытым при минимальной калорийности — капуста, морковь, свёкла и яблоки.</span></li>
         <li><span class="check">✓</span><span><b>Клетчатка.</b> 32 г в день при норме 25 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
         <li><span class="check">✓</span><span><b>Кальций.</b> 1163 мг в день при норме 1000 — кефир, творог, йогурт и сыр.</span></li>
-        <li><span class="check">✓</span><span><b>Железо.</b> 18.1 мг усвоенного железа (при норме в 10.2). Большое количество биодоступного, гемового железа.</span></li>
+        <li><span class="check">✓</span><span><b>Железо.</b> 18.1 мг усвоенного железа в неделю (при норме в <button class="mhint" type="button" aria-expanded="false" aria-controls="iron-f1800">10.2</button>). Большое количество биодоступного, гемового железа.<span class="mpop" id="iron-f1800" role="tooltip" hidden>Из еды усваивается около 18 % железа. Норма поступления 8.1 мг в сутки — это 10.2 мг усвоенного за неделю.</span></span></li>
         <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
         <li><span class="check">✓</span><span><b>Витамин D.</b> 15.7 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
         <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 2.7 раза больше насыщенных — снижаем риски сердечно-сосудистых болезней.</span></li>
@@ -710,11 +713,11 @@
       </div>
       <ul class="list" style="margin-top:18px">
         <li><span class="check">✓</span><span><b>Калорийность.</b> 2224 ккал в день — рацион собран ровно под неё.</span></li>
-        <li><span class="check">✓</span><span><b>Белок.</b> 170 г в день при норме 143 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Белок.</b> 170 г в день — на дефиците уходит жир, а не мышцы.</span></li>
         <li><span class="check">✓</span><span><b>Фрукты и овощи.</b> 600 г в день позволяют чувствовать себя сытым при минимальной калорийности — капуста, морковь, свёкла и яблоки.</span></li>
         <li><span class="check">✓</span><span><b>Клетчатка.</b> 40 г в день при норме 31 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
         <li><span class="check">✓</span><span><b>Кальций.</b> 1192 мг в день при норме 1000 — кефир, творог, йогурт и сыр.</span></li>
-        <li><span class="check">✓</span><span><b>Железо.</b> 21.1 мг усвоенного железа (при норме в 10.2). Большое количество биодоступного, гемового железа.</span></li>
+        <li><span class="check">✓</span><span><b>Железо.</b> 21.1 мг усвоенного железа в неделю (при норме в <button class="mhint" type="button" aria-expanded="false" aria-controls="iron-f2200">10.2</button>). Большое количество биодоступного, гемового железа.<span class="mpop" id="iron-f2200" role="tooltip" hidden>Из еды усваивается около 18 % железа. Норма поступления 8.1 мг в сутки — это 10.2 мг усвоенного за неделю.</span></span></li>
         <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
         <li><span class="check">✓</span><span><b>Витамин D.</b> 15.7 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
         <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 3.2 раза больше насыщенных — снижаем риски сердечно-сосудистых болезней.</span></li>
@@ -877,11 +880,11 @@
       </div>
       <ul class="list" style="margin-top:18px">
         <li><span class="check">✓</span><span><b>Калорийность.</b> 2229 ккал в день — рацион собран ровно под неё.</span></li>
-        <li><span class="check">✓</span><span><b>Белок.</b> 168 г в день при норме 147 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Белок.</b> 168 г в день — на дефиците уходит жир, а не мышцы.</span></li>
         <li><span class="check">✓</span><span><b>Фрукты и овощи.</b> 800 г в день позволяют чувствовать себя сытым при минимальной калорийности — капуста, морковь, свёкла и яблоки.</span></li>
         <li><span class="check">✓</span><span><b>Клетчатка.</b> 43 г в день при норме 31 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
         <li><span class="check">✓</span><span><b>Кальций.</b> 1257 мг в день при норме 1000 — кефир, творог, йогурт и сыр.</span></li>
-        <li><span class="check">✓</span><span><b>Железо.</b> 21.2 мг усвоенного железа (при норме в 10.1). Большое количество биодоступного, гемового железа.</span></li>
+        <li><span class="check">✓</span><span><b>Железо.</b> 21.2 мг усвоенного железа в неделю (при норме в <button class="mhint" type="button" aria-expanded="false" aria-controls="iron-m2200">10.1</button>). Большое количество биодоступного, гемового железа.<span class="mpop" id="iron-m2200" role="tooltip" hidden>Из еды усваивается около 18 % железа. Норма поступления 8.0 мг в сутки — это 10.1 мг усвоенного за неделю.</span></span></li>
         <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
         <li><span class="check">✓</span><span><b>Витамин D.</b> 15.7 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
         <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 3.2 раза больше насыщенных — снижаем риски сердечно-сосудистых болезней.</span></li>
@@ -1044,11 +1047,11 @@
       </div>
       <ul class="list" style="margin-top:18px">
         <li><span class="check">✓</span><span><b>Калорийность.</b> 2528 ккал в день — рацион собран ровно под неё.</span></li>
-        <li><span class="check">✓</span><span><b>Белок.</b> 189 г в день при норме 155 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Белок.</b> 189 г в день — на дефиците уходит жир, а не мышцы.</span></li>
         <li><span class="check">✓</span><span><b>Фрукты и овощи.</b> 800 г в день позволяют чувствовать себя сытым при минимальной калорийности — капуста, морковь, свёкла и яблоки.</span></li>
         <li><span class="check">✓</span><span><b>Клетчатка.</b> 49 г в день при норме 35 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
         <li><span class="check">✓</span><span><b>Кальций.</b> 1296 мг в день при норме 1000 — кефир, творог, йогурт и сыр.</span></li>
-        <li><span class="check">✓</span><span><b>Железо.</b> 23.9 мг усвоенного железа (при норме в 10.1). Большое количество биодоступного, гемового железа.</span></li>
+        <li><span class="check">✓</span><span><b>Железо.</b> 23.9 мг усвоенного железа в неделю (при норме в <button class="mhint" type="button" aria-expanded="false" aria-controls="iron-m2500">10.1</button>). Большое количество биодоступного, гемового железа.<span class="mpop" id="iron-m2500" role="tooltip" hidden>Из еды усваивается около 18 % железа. Норма поступления 8.0 мг в сутки — это 10.1 мг усвоенного за неделю.</span></span></li>
         <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
         <li><span class="check">✓</span><span><b>Витамин D.</b> 15.8 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
         <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 3.1 раза больше насыщенных — снижаем риски сердечно-сосудистых болезней.</span></li>

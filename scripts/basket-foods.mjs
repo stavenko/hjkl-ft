@@ -55,7 +55,7 @@ export function ironWeekTarget(sex, age) {
 // kcal, protein, fat, carbs, fibre, calcium (мг), iron (мг), absorption (доля),
 // sfa/mufa/pufa/epa_dha — доли ОТ ЖИРА, %; heme/veg/egg/red/processed — признаки.
 const F = (name, price, o) => ({
-  name, price, pack: null, photo: null, kcal: 0, protein: 0, fat: 0, fibre: 0, calcium: 0, iron: 0,
+  name, price, pack: null, photo: null, photoFit: "cover", kcal: 0, protein: 0, fat: 0, fibre: 0, calcium: 0, iron: 0,
   absorption: 0.05, sfa: 0, mufa: 0, pufa: 0, epa: 0,
   heme: false, veg: false, egg: false, red: false, globule: false, ...o,
 });
@@ -102,7 +102,7 @@ export const FOODS = {
       sfa: 64, mufa: 28, pufa: 4, globule: true }),
   kefir: F("Кефир 2.5%", 113,
     { pack: { brand: "Простоквашино", item: "кефир 2,5 %", size: "930 г", price: 105 },
-      photo: null,
+      photo: "kefir", photoFit: "contain",
       kcal: 53, protein: 3, fat: 2.5, calcium: 120, iron: 0.1,
       sfa: 64, mufa: 28, pufa: 4, globule: true }),
   // Сыр — самый дешёвый кальций на грамм после молока, и при этом ПЛОТНЫЙ по
@@ -115,7 +115,7 @@ export const FOODS = {
   // Греческий йогурт: белок вдвое гуще обычного йогурта, жир — глобульный.
   teos: F("Греческий йогурт Teos 2%", 564,
     { pack: { brand: "Teos", item: "йогурт греческий густой 2 %", size: "140 г", price: 79 },
-      photo: null,
+      photo: "teos", photoFit: "contain",
       kcal: 66, protein: 9, fat: 2, calcium: 120, iron: 0.1,
       sfa: 64, mufa: 28, pufa: 4, globule: true }),
   cottage: F("Творог 5%", 417,
@@ -137,15 +137,15 @@ export const FOODS = {
       kcal: 28, protein: 1.8, fat: 0.1, fibre: 2.0, calcium: 48, iron: 0.6, veg: true }),
   carrot: F("Морковь", 65,
     { pack: { brand: null, item: "морковь колхозная", size: "1 кг", price: 65 },
-      photo: null,
+      photo: "carrot", photoFit: "contain",
       kcal: 35, protein: 1.3, fat: 0.1, fibre: 2.4, calcium: 27, iron: 0.7, veg: true }),
   beet: F("Свёкла", 90,
     { pack: { brand: null, item: "свёкла, Россия", size: "1 кг", price: 90 },
-      photo: null,
+      photo: "beet", photoFit: "contain",
       kcal: 42, protein: 1.5, fat: 0.1, fibre: 2.5, calcium: 37, iron: 1.4, veg: true }),
   apple: F("Яблоко", 257,
     { pack: { brand: null, item: "яблоки свежие российские", size: "2 кг", price: 514 },
-      photo: null,
+      photo: "apple", photoFit: "contain",
       kcal: 47, protein: 0.4, fat: 0.4, fibre: 1.8, calcium: 16, iron: 2.2, veg: true }),
   frozenVeg: F("Овощная смесь замороженная", 160,
     { kcal: 45, protein: 2.2, fat: 0.3, fibre: 3.0, calcium: 30, iron: 0.8, veg: true }),

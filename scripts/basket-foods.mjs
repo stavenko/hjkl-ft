@@ -64,12 +64,12 @@ export const FOODS = {
   // Белок. Бедро дешевле грудки и жирнее — жир здесь союзник: он идёт в баланс.
   chickenThigh: F("Куриное бедро (без кости)", 532,
     { pack: { brand: "Ярославский бройлер", item: "бедро цыплёнка-бройлера", size: "750 г", price: 399 },
-      photo: "chicken",
+      photo: "thigh", photoFit: "contain",
       kcal: 185, protein: 19, fat: 12, calcium: 12, iron: 1.3, absorption: 0.2,
       sfa: 28, mufa: 45, pufa: 22, heme: true }),
   chickenBreast: F("Куриная грудка", 572,
     { pack: { brand: "Первая свежесть", item: "грудка цыплёнка-бройлера", size: "750 г", price: 429 },
-      photo: "chicken",
+      photo: "breast", photoFit: "contain",
       kcal: 113, protein: 23.6, fat: 1.9, calcium: 10, iron: 1.0, absorption: 0.2,
       sfa: 28, mufa: 36, pufa: 21, heme: true }),
   // Печень — самый дешёвый гем и железо разом.
@@ -87,7 +87,7 @@ export const FOODS = {
   // голова, хребет и кожа, и «дешевле за килограмм» там обманчиво.
   herring: F("Сельдь атлантическая (филе)", 695,
     { pack: { brand: "Экстра Фиш", item: "филе сельди слабосолёное", size: "200 г", price: 139 },
-      photo: "omega",
+      photo: "herring", photoFit: "contain",
       kcal: 158, protein: 18, fat: 9, calcium: 57, iron: 1.1, absorption: 0.15,
       sfa: 23, mufa: 41, pufa: 24, epa: 18 }),
   mackerel: F("Скумбрия", 340,
@@ -109,7 +109,7 @@ export const FOODS = {
   // калориям: закрывает и недобор ккал, освободившийся после урезанного кефира.
   cheese: F("Сыр полутвёрдый 45%", 995,
     { pack: { brand: "Брест-Литовск", item: "сыр Финский 45 %", size: "200 г", price: 199 },
-      photo: "cheese",
+      photo: "cheese", photoFit: "contain",
       kcal: 340, protein: 25, fat: 26, calcium: 900, iron: 0.7,
       sfa: 63, mufa: 28, pufa: 3, globule: true }),
   // Греческий йогурт: белок вдвое гуще обычного йогурта, жир — глобульный.
@@ -120,7 +120,7 @@ export const FOODS = {
       sfa: 64, mufa: 28, pufa: 4, globule: true }),
   cottage: F("Творог 5%", 417,
     { pack: { brand: "Константиново", item: "творог 5 %", size: "180 г", price: 75 },
-      photo: "protein",
+      photo: "cottage", photoFit: "contain",
       kcal: 121, protein: 17, fat: 5, calcium: 164, iron: 0.4,
       sfa: 63, mufa: 28, pufa: 4, globule: true }),
   // Цена яйца — за СЪЕДОБНЫЙ килограмм: десяток С1 ≈ 580 г брутто, за вычетом
@@ -133,7 +133,7 @@ export const FOODS = {
   // Овощи и фрукты — самые дешёвые «объёмные».
   cabbage: F("Капуста белокочанная", 81,
     { pack: { brand: null, item: "капуста кочанная, Россия", size: "1 кг", price: 81 },
-      photo: "cabbage",
+      photo: "cabbage", photoFit: "contain",
       kcal: 28, protein: 1.8, fat: 0.1, fibre: 2.0, calcium: 48, iron: 0.6, veg: true }),
   carrot: F("Морковь", 65,
     { pack: { brand: null, item: "морковь колхозная", size: "1 кг", price: 65 },
@@ -164,7 +164,7 @@ export const FOODS = {
   // Бобовые — клетчатка и железо задёшево.
   lentils: F("Чечевица", 193,
     { pack: { brand: "Увелка", item: "чечевица красная", size: "450 г", price: 87 },
-      photo: "lentils",
+      photo: "lentils", photoFit: "contain",
       kcal: 295, protein: 24, fat: 1.5, fibre: 11.5, calcium: 83, iron: 11.8,
       sfa: 15, mufa: 18, pufa: 46 }),
   // ВКУСНЕНЬКОЕ. Жир у сырка молочный (глобула) — в баланс не идёт; у батончика и
@@ -172,7 +172,7 @@ export const FOODS = {
   // Сырок дешевле КОРОБКОЙ: поштучно тот же вес обходится вдвое дороже.
   syrok: F("Сырок глазированный", 924,
     { pack: { brand: "Ростагроэкспорт", item: "сырок творожный глазированный с ванилью 20 %", size: "12 × 45 г", price: 499 },
-      photo: "syrok",
+      photo: "syrok", photoFit: "contain",
       kcal: 407, protein: 8.5, fat: 26, calcium: 135, iron: 0.3,
       sfa: 63, mufa: 28, pufa: 4, globule: true }),
   barni: F("Мишка Барни", 700,
@@ -198,7 +198,7 @@ export const FOODS = {
   // подсолнечные: у тыквенных вчетверо цена, вдвое железо и другой профиль жира.
   pumpkinSeeds: F("Семечки тыквенные", 988,
     { pack: { brand: "Ореховец", item: "семена тыквы очищенные", size: "500 г", price: 494 },
-      photo: "seeds",
+      photo: "seeds", photoFit: "contain",
       kcal: 559, protein: 30.2, fat: 49.1, fibre: 6.0, calcium: 46, iron: 8.8,
       sfa: 17, mufa: 31, pufa: 46 }),
 };

@@ -144,6 +144,8 @@
   .list li b{color:var(--ink);font-weight:700}
   .check{flex:0 0 auto;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);
     display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;margin-top:1px}
+  /* Оговорка, а не галочка: то, что рацион НЕ закрывает. */
+  .check.warn{background:#fdeecf;color:#8a5a00}
 
   /* refund / disclaimer note */
   .note{background:var(--accent-soft);border:1px solid #C6EBDC;border-radius:var(--radius);padding:18px 20px;color:var(--accent-ink)}
@@ -410,12 +412,12 @@
             <div class="mpop" id="pack-f1800-teos" role="tooltip" hidden>Teos, йогурт греческий густой 2 %, 140 г — 79 ₽<i>564 ₽/кг</i></div>
           </div>
           <div class="mrow">
-            <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
-            <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
-            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-chickenThigh">700 г</button>
-            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-chickenThigh">372 ₽</button>
-            <div class="mpop" id="qty-f1800-chickenThigh" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
-            <div class="mpop" id="pack-f1800-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
+            <span class="mpic mpic-blank" aria-hidden="true">С</span>
+            <div class="mname"><b>Скумбрия</b><span>Лента</span></div>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-mackerel">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-mackerel">467 ₽</button>
+            <div class="mpop" id="qty-f1800-mackerel" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
+            <div class="mpop" id="pack-f1800-mackerel" role="tooltip" hidden>Лента, скумбрия неразделанная свежемороженая, 800 г — 320 ₽<i>667 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cottage.jpg" alt="" loading="lazy" width="44" height="44" />
@@ -442,20 +444,20 @@
             <div class="mpop" id="pack-f1800-chickenBreast" role="tooltip" hidden>Первая свежесть, грудка цыплёнка-бройлера, 750 г — 429 ₽<i>572 ₽/кг</i></div>
           </div>
           <div class="mrow">
+            <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
+            <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-chickenThigh">400 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-chickenThigh">213 ₽</button>
+            <div class="mpop" id="qty-f1800-chickenThigh" role="tooltip" hidden>400 г на неделю<i>это 57 г в день</i></div>
+            <div class="mpop" id="pack-f1800-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
+          </div>
+          <div class="mrow">
             <img class="mpic" src="/img/mini/apple.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Яблоки</b><span>весовой товар</span></div>
             <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-apple">700 г</button>
             <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-apple">180 ₽</button>
             <div class="mpop" id="qty-f1800-apple" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f1800-apple" role="tooltip" hidden>яблоки свежие российские, 2 кг — 514 ₽<i>257 ₽/кг</i></div>
-          </div>
-          <div class="mrow">
-            <img class="mpic" src="/img/mini/herring.jpg" alt="" loading="lazy" width="44" height="44" />
-            <div class="mname"><b>Сельдь солёная</b><span>Экстра Фиш</span></div>
-            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f1800-herring">250 г</button>
-            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f1800-herring">174 ₽</button>
-            <div class="mpop" id="qty-f1800-herring" role="tooltip" hidden>250 г на неделю<i>это 36 г в день</i></div>
-            <div class="mpop" id="pack-f1800-herring" role="tooltip" hidden>Экстра Фиш, филе сельди слабосолёное, 200 г — 139 ₽<i>695 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cabbage.jpg" alt="" loading="lazy" width="44" height="44" />
@@ -539,22 +541,37 @@
           </div>
         </div>
         <div class="mtotal">
-          <div><div class="big">3177 ₽</div><div class="sub">в неделю</div></div>
-          <div style="text-align:right"><div class="big">454 ₽</div><div class="sub">в день</div></div>
+          <div><div class="big">3310 ₽</div><div class="sub">в неделю</div></div>
+          <div style="text-align:right"><div class="big">473 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 1773 ккал в день:</p>
+      <p class="lead" style="margin-top:16px">Закрыто на 1828 ккал в день:</p>
       <div class="inds">
-        <span class="ind">Белок <i>144 / 135 г</i></span>
+        <span class="ind">Белок <i>148 / 135 г</i></span>
         <span class="ind">Фрукты и овощи <i>600 / 600 г</i></span>
-        <span class="ind">Кальций <i>1176 / 1000 мг</i></span>
+        <span class="ind">Кальций <i>1163 / 1000 мг</i></span>
         <span class="ind">Клетчатка <i>32 / 25 г</i></span>
-        <span class="ind">Железо <i>17.6 / 10.2 мг</i></span>
-        <span class="ind">Гемовое железо <i>12 / 3 порции</i></span>
-        <span class="ind">Омега-3 <i>4.5 / 1.75 г</i></span>
-        <span class="ind">Баланс жиров <i>2.6 / 2.0</i></span>
+        <span class="ind">Железо <i>18.1 / 10.2 мг</i></span>
+        <span class="ind">Гемовое железо <i>10 / 3 порции</i></span>
+        <span class="ind">Омега-3 <i>18.9 / 1.75 г</i></span>
+        <span class="ind">Баланс жиров <i>2.7 / 2.0</i></span>
         <span class="ind">Яйца <i>7 / 7 шт</i></span>
       </div>
+      <p class="lead" style="margin-top:22px">Что здесь хорошо:</p>
+      <ul class="list">
+        <li><span class="check">✓</span><span><b>Калорийность.</b> 1828 ккал в день — ровно в коридор планки.</span></li>
+        <li><span class="check">✓</span><span><b>Белок.</b> 148 г в день при планке 135 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Клетчатка.</b> 32 г в день против нормы 25 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
+        <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
+        <li><span class="check">✓</span><span><b>Витамин D.</b> 15.7 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
+        <li><span class="check">✓</span><span><b>Гемовое железо.</b> 10 порции в неделю при норме 3 — печень и курица усваиваются куда лучше растительного железа.</span></li>
+        <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 2.7 раза больше насыщенных — перекоса в сторону насыщенных нет.</span></li>
+        <li><span class="check">✓</span><span><b>Магний.</b> 602 мг в день при норме 320 — гречка, семечки и чечевица.</span></li>
+      </ul>
+      <p class="lead" style="margin-top:22px">О чём помнить:</p>
+      <ul class="list">
+        <li><span class="check warn">!</span><span><b>Однообразие.</b> Продуктов 17, и они повторяются каждый день. Это и есть цена дешевизны.</span></li>
+      </ul>
     </div>
 
     <div class="ration" data-r="f2200" hidden>
@@ -569,20 +586,20 @@
             <div class="mpop" id="pack-f2200-teos" role="tooltip" hidden>Teos, йогурт греческий густой 2 %, 140 г — 79 ₽<i>564 ₽/кг</i></div>
           </div>
           <div class="mrow">
+            <span class="mpic mpic-blank" aria-hidden="true">С</span>
+            <div class="mname"><b>Скумбрия</b><span>Лента</span></div>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-mackerel">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-mackerel">467 ₽</button>
+            <div class="mpop" id="qty-f2200-mackerel" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
+            <div class="mpop" id="pack-f2200-mackerel" role="tooltip" hidden>Лента, скумбрия неразделанная свежемороженая, 800 г — 320 ₽<i>667 ₽/кг</i></div>
+          </div>
+          <div class="mrow">
             <img class="mpic" src="/img/mini/breast.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Куриная грудка</b><span>Первая свежесть</span></div>
             <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-chickenBreast">700 г</button>
             <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-chickenBreast">400 ₽</button>
             <div class="mpop" id="qty-f2200-chickenBreast" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-f2200-chickenBreast" role="tooltip" hidden>Первая свежесть, грудка цыплёнка-бройлера, 750 г — 429 ₽<i>572 ₽/кг</i></div>
-          </div>
-          <div class="mrow">
-            <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
-            <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
-            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-chickenThigh">700 г</button>
-            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-chickenThigh">372 ₽</button>
-            <div class="mpop" id="qty-f2200-chickenThigh" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
-            <div class="mpop" id="pack-f2200-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cottage.jpg" alt="" loading="lazy" width="44" height="44" />
@@ -601,12 +618,12 @@
             <div class="mpop" id="pack-f2200-syrok" role="tooltip" hidden>Ростагроэкспорт, сырок творожный глазированный с ванилью 20 %, 12 × 45 г — 499 ₽<i>924 ₽/кг</i></div>
           </div>
           <div class="mrow">
-            <img class="mpic" src="/img/mini/herring.jpg" alt="" loading="lazy" width="44" height="44" />
-            <div class="mname"><b>Сельдь солёная</b><span>Экстра Фиш</span></div>
-            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-herring">300 г</button>
-            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-herring">209 ₽</button>
-            <div class="mpop" id="qty-f2200-herring" role="tooltip" hidden>300 г на неделю<i>это 43 г в день</i></div>
-            <div class="mpop" id="pack-f2200-herring" role="tooltip" hidden>Экстра Фиш, филе сельди слабосолёное, 200 г — 139 ₽<i>695 ₽/кг</i></div>
+            <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
+            <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-f2200-chickenThigh">400 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-f2200-chickenThigh">213 ₽</button>
+            <div class="mpop" id="qty-f2200-chickenThigh" role="tooltip" hidden>400 г на неделю<i>это 57 г в день</i></div>
+            <div class="mpop" id="pack-f2200-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/apple.jpg" alt="" loading="lazy" width="44" height="44" />
@@ -706,22 +723,37 @@
           </div>
         </div>
         <div class="mtotal">
-          <div><div class="big">3468 ₽</div><div class="sub">в неделю</div></div>
-          <div style="text-align:right"><div class="big">495 ₽</div><div class="sub">в день</div></div>
+          <div><div class="big">3567 ₽</div><div class="sub">в неделю</div></div>
+          <div style="text-align:right"><div class="big">510 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 2182 ккал в день:</p>
+      <p class="lead" style="margin-top:16px">Закрыто на 2226 ккал в день:</p>
       <div class="inds">
-        <span class="ind">Белок <i>167 / 143 г</i></span>
+        <span class="ind">Белок <i>170 / 143 г</i></span>
         <span class="ind">Фрукты и овощи <i>600 / 600 г</i></span>
-        <span class="ind">Кальций <i>1209 / 1000 мг</i></span>
+        <span class="ind">Кальций <i>1192 / 1000 мг</i></span>
         <span class="ind">Клетчатка <i>40 / 31 г</i></span>
-        <span class="ind">Железо <i>20.6 / 10.2 мг</i></span>
-        <span class="ind">Гемовое железо <i>14 / 3 порции</i></span>
-        <span class="ind">Омега-3 <i>5.3 / 1.75 г</i></span>
+        <span class="ind">Железо <i>21.0 / 10.2 мг</i></span>
+        <span class="ind">Гемовое железо <i>12 / 3 порции</i></span>
+        <span class="ind">Омега-3 <i>18.9 / 1.75 г</i></span>
         <span class="ind">Баланс жиров <i>3.3 / 2.0</i></span>
         <span class="ind">Яйца <i>7 / 7 шт</i></span>
       </div>
+      <p class="lead" style="margin-top:22px">Что здесь хорошо:</p>
+      <ul class="list">
+        <li><span class="check">✓</span><span><b>Калорийность.</b> 2226 ккал в день — ровно в коридор планки.</span></li>
+        <li><span class="check">✓</span><span><b>Белок.</b> 170 г в день при планке 143 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Клетчатка.</b> 40 г в день против нормы 31 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
+        <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
+        <li><span class="check">✓</span><span><b>Витамин D.</b> 15.7 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
+        <li><span class="check">✓</span><span><b>Гемовое железо.</b> 12 порции в неделю при норме 3 — печень и курица усваиваются куда лучше растительного железа.</span></li>
+        <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 3.3 раза больше насыщенных — перекоса в сторону насыщенных нет.</span></li>
+        <li><span class="check">✓</span><span><b>Магний.</b> 803 мг в день при норме 320 — гречка, семечки и чечевица.</span></li>
+      </ul>
+      <p class="lead" style="margin-top:22px">О чём помнить:</p>
+      <ul class="list">
+        <li><span class="check warn">!</span><span><b>Однообразие.</b> Продуктов 18, и они повторяются каждый день. Это и есть цена дешевизны.</span></li>
+      </ul>
     </div>
 
     <div class="ration" data-r="m2200" hidden>
@@ -736,20 +768,20 @@
             <div class="mpop" id="pack-m2200-teos" role="tooltip" hidden>Teos, йогурт греческий густой 2 %, 140 г — 79 ₽<i>564 ₽/кг</i></div>
           </div>
           <div class="mrow">
+            <span class="mpic mpic-blank" aria-hidden="true">С</span>
+            <div class="mname"><b>Скумбрия</b><span>Лента</span></div>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-mackerel">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-mackerel">467 ₽</button>
+            <div class="mpop" id="qty-m2200-mackerel" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
+            <div class="mpop" id="pack-m2200-mackerel" role="tooltip" hidden>Лента, скумбрия неразделанная свежемороженая, 800 г — 320 ₽<i>667 ₽/кг</i></div>
+          </div>
+          <div class="mrow">
             <img class="mpic" src="/img/mini/breast.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Куриная грудка</b><span>Первая свежесть</span></div>
             <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-chickenBreast">700 г</button>
             <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-chickenBreast">400 ₽</button>
             <div class="mpop" id="qty-m2200-chickenBreast" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-m2200-chickenBreast" role="tooltip" hidden>Первая свежесть, грудка цыплёнка-бройлера, 750 г — 429 ₽<i>572 ₽/кг</i></div>
-          </div>
-          <div class="mrow">
-            <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
-            <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
-            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-chickenThigh">700 г</button>
-            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-chickenThigh">372 ₽</button>
-            <div class="mpop" id="qty-m2200-chickenThigh" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
-            <div class="mpop" id="pack-m2200-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/cottage.jpg" alt="" loading="lazy" width="44" height="44" />
@@ -776,14 +808,6 @@
             <div class="mpop" id="pack-m2200-apple" role="tooltip" hidden>яблоки свежие российские, 2 кг — 514 ₽<i>257 ₽/кг</i></div>
           </div>
           <div class="mrow">
-            <img class="mpic" src="/img/mini/herring.jpg" alt="" loading="lazy" width="44" height="44" />
-            <div class="mname"><b>Сельдь солёная</b><span>Экстра Фиш</span></div>
-            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-herring">300 г</button>
-            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-herring">209 ₽</button>
-            <div class="mpop" id="qty-m2200-herring" role="tooltip" hidden>300 г на неделю<i>это 43 г в день</i></div>
-            <div class="mpop" id="pack-m2200-herring" role="tooltip" hidden>Экстра Фиш, филе сельди слабосолёное, 200 г — 139 ₽<i>695 ₽/кг</i></div>
-          </div>
-          <div class="mrow">
             <img class="mpic" src="/img/mini/cabbage.jpg" alt="" loading="lazy" width="44" height="44" />
             <div class="mname"><b>Капуста</b><span>весовой товар</span></div>
             <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-cabbage">2450 г</button>
@@ -798,6 +822,14 @@
             <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-lentils">174 ₽</button>
             <div class="mpop" id="qty-m2200-lentils" role="tooltip" hidden>900 г на неделю<i>это 129 г в день</i></div>
             <div class="mpop" id="pack-m2200-lentils" role="tooltip" hidden>Увелка, чечевица красная, 450 г — 87 ₽<i>193 ₽/кг</i></div>
+          </div>
+          <div class="mrow">
+            <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
+            <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2200-chickenThigh">325 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2200-chickenThigh">173 ₽</button>
+            <div class="mpop" id="qty-m2200-chickenThigh" role="tooltip" hidden>325 г на неделю<i>это 46 г в день</i></div>
+            <div class="mpop" id="pack-m2200-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/seeds.jpg" alt="" loading="lazy" width="44" height="44" />
@@ -873,22 +905,37 @@
           </div>
         </div>
         <div class="mtotal">
-          <div><div class="big">3628 ₽</div><div class="sub">в неделю</div></div>
-          <div style="text-align:right"><div class="big">518 ₽</div><div class="sub">в день</div></div>
+          <div><div class="big">3687 ₽</div><div class="sub">в неделю</div></div>
+          <div style="text-align:right"><div class="big">527 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 2207 ккал в день:</p>
+      <p class="lead" style="margin-top:16px">Закрыто на 2231 ккал в день:</p>
       <div class="inds">
         <span class="ind">Белок <i>168 / 147 г</i></span>
         <span class="ind">Фрукты и овощи <i>800 / 800 г</i></span>
-        <span class="ind">Кальций <i>1276 / 1000 мг</i></span>
+        <span class="ind">Кальций <i>1257 / 1000 мг</i></span>
         <span class="ind">Клетчатка <i>43 / 31 г</i></span>
-        <span class="ind">Железо <i>21.0 / 10.1 мг</i></span>
-        <span class="ind">Гемовое железо <i>14 / 3 порции</i></span>
-        <span class="ind">Омега-3 <i>5.3 / 1.75 г</i></span>
+        <span class="ind">Железо <i>21.2 / 10.1 мг</i></span>
+        <span class="ind">Гемовое железо <i>11 / 3 порции</i></span>
+        <span class="ind">Омега-3 <i>18.9 / 1.75 г</i></span>
         <span class="ind">Баланс жиров <i>3.3 / 2.0</i></span>
         <span class="ind">Яйца <i>7 / 7 шт</i></span>
       </div>
+      <p class="lead" style="margin-top:22px">Что здесь хорошо:</p>
+      <ul class="list">
+        <li><span class="check">✓</span><span><b>Калорийность.</b> 2231 ккал в день — ровно в коридор планки.</span></li>
+        <li><span class="check">✓</span><span><b>Белок.</b> 168 г в день при планке 147 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Клетчатка.</b> 43 г в день против нормы 31 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
+        <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
+        <li><span class="check">✓</span><span><b>Витамин D.</b> 15.7 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
+        <li><span class="check">✓</span><span><b>Гемовое железо.</b> 11 порции в неделю при норме 3 — печень и курица усваиваются куда лучше растительного железа.</span></li>
+        <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 3.3 раза больше насыщенных — перекоса в сторону насыщенных нет.</span></li>
+        <li><span class="check">✓</span><span><b>Магний.</b> 788 мг в день при норме 420 — гречка, семечки и чечевица.</span></li>
+      </ul>
+      <p class="lead" style="margin-top:22px">О чём помнить:</p>
+      <ul class="list">
+        <li><span class="check warn">!</span><span><b>Однообразие.</b> Продуктов 18, и они повторяются каждый день. Это и есть цена дешевизны.</span></li>
+      </ul>
     </div>
 
     <div class="ration" data-r="m2500" hidden>
@@ -903,12 +950,12 @@
             <div class="mpop" id="pack-m2500-teos" role="tooltip" hidden>Teos, йогурт греческий густой 2 %, 140 г — 79 ₽<i>564 ₽/кг</i></div>
           </div>
           <div class="mrow">
-            <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
-            <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
-            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-chickenThigh">1050 г</button>
-            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-chickenThigh">559 ₽</button>
-            <div class="mpop" id="qty-m2500-chickenThigh" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
-            <div class="mpop" id="pack-m2500-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
+            <span class="mpic mpic-blank" aria-hidden="true">С</span>
+            <div class="mname"><b>Скумбрия</b><span>Лента</span></div>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-mackerel">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-mackerel">467 ₽</button>
+            <div class="mpop" id="qty-m2500-mackerel" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
+            <div class="mpop" id="pack-m2500-mackerel" role="tooltip" hidden>Лента, скумбрия неразделанная свежемороженая, 800 г — 320 ₽<i>667 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/breast.jpg" alt="" loading="lazy" width="44" height="44" />
@@ -917,6 +964,14 @@
             <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-chickenBreast">400 ₽</button>
             <div class="mpop" id="qty-m2500-chickenBreast" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
             <div class="mpop" id="pack-m2500-chickenBreast" role="tooltip" hidden>Первая свежесть, грудка цыплёнка-бройлера, 750 г — 429 ₽<i>572 ₽/кг</i></div>
+          </div>
+          <div class="mrow">
+            <img class="mpic" src="/img/mini/thigh.jpg" alt="" loading="lazy" width="44" height="44" />
+            <div class="mname"><b>Куриное бедро</b><span>Ярославский бройлер</span></div>
+            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-chickenThigh">700 г</button>
+            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-chickenThigh">372 ₽</button>
+            <div class="mpop" id="qty-m2500-chickenThigh" role="tooltip" hidden>700 г на неделю<i>это 100 г в день</i></div>
+            <div class="mpop" id="pack-m2500-chickenThigh" role="tooltip" hidden>Ярославский бройлер, бедро цыплёнка-бройлера, 750 г — 399 ₽<i>532 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/syrok.jpg" alt="" loading="lazy" width="44" height="44" />
@@ -941,14 +996,6 @@
             <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-apple">270 ₽</button>
             <div class="mpop" id="qty-m2500-apple" role="tooltip" hidden>1050 г на неделю<i>это 150 г в день</i></div>
             <div class="mpop" id="pack-m2500-apple" role="tooltip" hidden>яблоки свежие российские, 2 кг — 514 ₽<i>257 ₽/кг</i></div>
-          </div>
-          <div class="mrow">
-            <img class="mpic" src="/img/mini/herring.jpg" alt="" loading="lazy" width="44" height="44" />
-            <div class="mname"><b>Сельдь солёная</b><span>Экстра Фиш</span></div>
-            <button class="mqty mhint" type="button" aria-expanded="false" aria-controls="qty-m2500-herring">300 г</button>
-            <button class="mcost mhint" type="button" aria-expanded="false" aria-controls="pack-m2500-herring">209 ₽</button>
-            <div class="mpop" id="qty-m2500-herring" role="tooltip" hidden>300 г на неделю<i>это 43 г в день</i></div>
-            <div class="mpop" id="pack-m2500-herring" role="tooltip" hidden>Экстра Фиш, филе сельди слабосолёное, 200 г — 139 ₽<i>695 ₽/кг</i></div>
           </div>
           <div class="mrow">
             <img class="mpic" src="/img/mini/seeds.jpg" alt="" loading="lazy" width="44" height="44" />
@@ -1040,22 +1087,37 @@
           </div>
         </div>
         <div class="mtotal">
-          <div><div class="big">3929 ₽</div><div class="sub">в неделю</div></div>
-          <div style="text-align:right"><div class="big">561 ₽</div><div class="sub">в день</div></div>
+          <div><div class="big">4001 ₽</div><div class="sub">в неделю</div></div>
+          <div style="text-align:right"><div class="big">572 ₽</div><div class="sub">в день</div></div>
         </div>
       </div>
-      <p class="lead" style="margin-top:16px">Закрыто на 2499 ккал в день:</p>
+      <p class="lead" style="margin-top:16px">Закрыто на 2530 ккал в день:</p>
       <div class="inds">
-        <span class="ind">Белок <i>188 / 155 г</i></span>
+        <span class="ind">Белок <i>189 / 155 г</i></span>
         <span class="ind">Фрукты и овощи <i>800 / 800 г</i></span>
-        <span class="ind">Кальций <i>1315 / 1000 мг</i></span>
+        <span class="ind">Кальций <i>1296 / 1000 мг</i></span>
         <span class="ind">Клетчатка <i>49 / 35 г</i></span>
-        <span class="ind">Железо <i>23.6 / 10.1 мг</i></span>
-        <span class="ind">Гемовое железо <i>17 / 3 порции</i></span>
-        <span class="ind">Омега-3 <i>5.3 / 1.75 г</i></span>
+        <span class="ind">Железо <i>23.9 / 10.1 мг</i></span>
+        <span class="ind">Гемовое железо <i>14 / 3 порции</i></span>
+        <span class="ind">Омега-3 <i>18.9 / 1.75 г</i></span>
         <span class="ind">Баланс жиров <i>3.2 / 2.0</i></span>
         <span class="ind">Яйца <i>7 / 7 шт</i></span>
       </div>
+      <p class="lead" style="margin-top:22px">Что здесь хорошо:</p>
+      <ul class="list">
+        <li><span class="check">✓</span><span><b>Калорийность.</b> 2530 ккал в день — ровно в коридор планки.</span></li>
+        <li><span class="check">✓</span><span><b>Белок.</b> 189 г в день при планке 155 — на дефиците уходит жир, а не мышцы.</span></li>
+        <li><span class="check">✓</span><span><b>Клетчатка.</b> 49 г в день против нормы 35 — из капусты, чечевицы и гречки, а не из добавок.</span></li>
+        <li><span class="check">✓</span><span><b>Дешёвая омега-3.</b> 18.9 г ЭПК+ДГК в неделю — из 700 г рыбы за 467 ₽.</span></li>
+        <li><span class="check">✓</span><span><b>Витамин D.</b> 15.8 мкг в день при норме 15 — редкий случай, когда он набирается едой, а не добавкой. Даёт та же жирная рыба.</span></li>
+        <li><span class="check">✓</span><span><b>Гемовое железо.</b> 14 порции в неделю при норме 3 — печень и курица усваиваются куда лучше растительного железа.</span></li>
+        <li><span class="check">✓</span><span><b>Жировой профиль.</b> Ненасыщенных в 3.2 раза больше насыщенных — перекоса в сторону насыщенных нет.</span></li>
+        <li><span class="check">✓</span><span><b>Магний.</b> 923 мг в день при норме 420 — гречка, семечки и чечевица.</span></li>
+      </ul>
+      <p class="lead" style="margin-top:22px">О чём помнить:</p>
+      <ul class="list">
+        <li><span class="check warn">!</span><span><b>Однообразие.</b> Продуктов 18, и они повторяются каждый день. Это и есть цена дешевизны.</span></li>
+      </ul>
     </div>
 
   </section>

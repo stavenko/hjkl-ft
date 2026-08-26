@@ -69,3 +69,11 @@ console.log(line("Баланс жира", n(sum.unsat / sum.sat, 2), RULES.unsat
 console.log(line("Яйца (нед)", n(sum.egg), RULES.eggGramsWeek, "г", sum.egg >= RULES.eggGramsWeek));
 console.log(line("Красное мясо (нед)", n(sum.red), RULES.redMeatWeek, "г ≤", sum.red <= RULES.redMeatWeek));
 console.log(line("Калории (в день)", n(sum.kcal / 7), KCAL, "ккал", Math.abs(sum.kcal / 7 - KCAL) < 50));
+
+// Индикаторов у этих двух в приложении нет, но знать про них надо: магний
+// корзина закрывает с запасом, а витамин D едой не набирается почти никогда.
+console.log("\nБЕЗ ИНДИКАТОРА (для справки)");
+console.log(line("Магний (в день)", n(sum.magnesium / 7), t.magnesiumDay, "мг",
+  sum.magnesium / 7 >= t.magnesiumDay));
+console.log(line("Витамин D (в день)", n(sum.vitD / 7, 1), t.vitDDay, "мкг",
+  sum.vitD / 7 >= t.vitDDay));

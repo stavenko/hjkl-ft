@@ -33,7 +33,7 @@ const LABEL_BY_KEY = {
   apple: "Яблоки",
   chickenLiver: "Печень куриная",
   egg: "Яйцо куриное",
-  herring: "Сельдь солёная",
+  mackerel: "Скумбрия",
   buckwheat: "Гречка",
   carrot: "Морковь",
   beet: "Свёкла",
@@ -48,6 +48,7 @@ const BY_LABEL = {
   "Греческий йогурт 2%": "teos",
   "Капуста белокочанная": "cabbage",
   "Сыр полутвёрдый 45%": "cheese",
+  "Сельдь солёная": "herring",
 };
 
 /// Кому какой рацион. Тело — то же, на котором рационы подбирались.
@@ -134,11 +135,48 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
     failed++;
     console.log(`❌ ${id}: не закрыто [${bad.join(", ")}]${kcalOk ? "" : ` · ккал ${n(kcalDay)} против ${profile.kcal}`}`);
   } else {
-    console.log(`✅ ${id}: ${n(sum.price)} ₽/нед · ${n(sum.price / 7)} ₽/день · ${n(kcalDay)} ккал`);
+    console.log(`✅ ${id}: ${n(sum.price)} ₽/нед · ${n(sum.price / 7)} ₽/день · ${n(kcalDay)} ккал`
+      + ` · магний ${n(sum.magnesium / 7)}/${t.magnesiumDay} мг · вит. D ${n(sum.vitD / 7, 1)}/${t.vitDDay} мкг`);
   }
 
   const indsHtml = inds
     .map(([name, val]) => `        <span class="ind">${name} <i>${val}</i></span>`)
+    .join("\n");
+
+  // Плюсы и минусы — теми же числами, что и индикаторы выше.
+  //
+  // Магний и витамин D индикаторов в приложении не имеют, но про них честно
+  // сказать надо: магний корзина закрывает с запасом, витамин D — на четверть.
+  // Витамин D едой не набирается почти ни в одном рационе, и умалчивать об этом
+  // на странице «закрывает все дефициты» нельзя.
+  const fish = rows.find((r) => r.key === "mackerel" || r.key === "herring");
+  const pros = [
+    ["Калорийность", `${Math.round(kcalDay)} ккал в день — ровно в коридор планки.`],
+    ["Белок", `${n(sum.protein / 7)} г в день при планке ${t.proteinDay} — на дефиците уходит жир, а не мышцы.`],
+    ["Клетчатка", `${n(sum.fibre / 7)} г в день против нормы ${n(t.fiberDay)} — из капусты, чечевицы и гречки, а не из добавок.`],
+    ["Дешёвая омега-3", `${n(sum.epa, 1)} г ЭПК+ДГК в неделю — из ${fish.grams} г рыбы за ${Math.round(fish.cost)} ₽.`],
+    ["Гемовое железо", `${n(sum.heme / RULES.hemePortionProtein)} порции в неделю при норме ${RULES.hemePortionsWeek} — печень и курица усваиваются куда лучше растительного железа.`],
+    ["Жировой профиль", `Ненасыщенных в ${n(sum.unsat / sum.sat, 1)} раза больше насыщенных — перекоса в сторону насыщенных нет.`],
+    ["Магний", `${n(sum.magnesium / 7)} мг в день при норме ${t.magnesiumDay} — гречка, семечки и чечевица.`],
+  ];
+  const cons = [
+    ["Однообразие", `Продуктов ${rows.length}, и они повторяются каждый день. Это и есть цена дешевизны.`],
+  ];
+
+  // Витамин D — в плюсы или в минусы ПО ФАКТУ. Обычной едой он не набирается, и
+  // если корзина его закрывает, это её сильная сторона; если нет — про это надо
+  // сказать прямо, а не молчать на странице «закрывает все дефициты».
+  const vitDday = sum.vitD / 7;
+  if (vitDday >= t.vitDDay) {
+    pros.splice(4, 0, ["Витамин D", `${n(vitDday, 1)} мкг в день при норме ${t.vitDDay} — редкий случай,`
+      + ` когда он набирается едой, а не добавкой. Даёт та же жирная рыба.`]);
+  } else {
+    cons.unshift(["Витамин D", `${n(vitDday, 1)} мкг в день из ${t.vitDDay} нужных. Едой он почти не`
+      + ` набирается — нужна добавка или заметно больше жирной рыбы.`]);
+  }
+  const bullets = (items, mark, cls) => items
+    .map(([head, text]) =>
+      `        <li><span class="check${cls}">${mark}</span><span><b>${head}.</b> ${text}</span></li>`)
     .join("\n");
 
   const rebuilt = [
@@ -155,6 +193,14 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
     '      <div class="inds">',
     indsHtml,
     "      </div>",
+    '      <p class="lead" style="margin-top:22px">Что здесь хорошо:</p>',
+    '      <ul class="list">',
+    bullets(pros, "✓", ""),
+    "      </ul>",
+    '      <p class="lead" style="margin-top:22px">О чём помнить:</p>',
+    '      <ul class="list">',
+    bullets(cons, "!", " warn"),
+    "      </ul>",
   ].join("\n");
 
   return head + rebuilt + tail;

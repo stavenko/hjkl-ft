@@ -29,6 +29,13 @@ export const RULES = {
   redMeatWeek: 700,           // red_meat::WEEKLY_LIMIT_RAW_G (сырой эквивалент)
   eggGramsWeek: 350,          // egg::weekly_min_grams()
   ironBioavailability: 0.18,  // iron::RDA_BIOAVAILABILITY
+  // Магний и витамин D приложение НЕ судит — индикаторов у них нет. Считаем их
+  // здесь, чтобы про корзину было что сказать честно: магний она закрывает с
+  // запасом, витамин D едой не закрывается почти никогда. Нормы — RDA (IOM):
+  // магний 420 мг мужчинам и 320 женщинам, витамин D 15 мкг всем.
+  magnesiumPerDayM: 420,
+  magnesiumPerDayF: 320,
+  vitDPerDay: 15,
 };
 
 /// Планка по белку — кривая profile::protein_from_kcal, зажатая телом.
@@ -56,6 +63,7 @@ export function ironWeekTarget(sex, age) {
 // sfa/mufa/pufa/epa_dha — доли ОТ ЖИРА, %; heme/veg/egg/red/processed — признаки.
 const F = (name, price, o) => ({
   name, price, pack: null, photo: null, photoFit: "cover", kcal: 0, protein: 0, fat: 0, fibre: 0, calcium: 0, iron: 0,
+  magnesium: 0, vitD: 0,
   absorption: 0.05, sfa: 0, mufa: 0, pufa: 0, epa: 0,
   heme: false, veg: false, egg: false, red: false, globule: false, ...o,
 });
@@ -65,22 +73,26 @@ export const FOODS = {
   chickenThigh: F("Куриное бедро (без кости)", 532,
     { pack: { brand: "Ярославский бройлер", item: "бедро цыплёнка-бройлера", size: "750 г", price: 399 },
       photo: "thigh", photoFit: "contain",
+      magnesium: 23, vitD: 0.1,
       kcal: 185, protein: 19, fat: 12, calcium: 12, iron: 1.3, absorption: 0.2,
       sfa: 28, mufa: 45, pufa: 22, heme: true }),
   chickenBreast: F("Куриная грудка", 572,
     { pack: { brand: "Первая свежесть", item: "грудка цыплёнка-бройлера", size: "750 г", price: 429 },
       photo: "breast", photoFit: "contain",
+      magnesium: 27, vitD: 0.1,
       kcal: 113, protein: 23.6, fat: 1.9, calcium: 10, iron: 1.0, absorption: 0.2,
       sfa: 28, mufa: 36, pufa: 21, heme: true }),
   // Печень — самый дешёвый гем и железо разом.
   chickenLiver: F("Печень куриная", 411,
     { pack: { brand: "Первая Свежесть", item: "печень куриная охлаждённая", size: "450 г", price: 185 },
       photo: "liver", photoFit: "contain",
+      magnesium: 19, vitD: 0.4,
       kcal: 137, protein: 20.4, fat: 5.9, calcium: 11, iron: 8.6, absorption: 0.25,
       sfa: 33, mufa: 27, pufa: 24, heme: true }),
   // Мидии варёно-мороженые — гем и цинк, но железа меньше печени.
   mussels: F("Мидии варёно-мороженые", 600,
-    { kcal: 86, protein: 24, fat: 2.2, calcium: 33, iron: 6.7, absorption: 0.25,
+    { magnesium: 34, vitD: 0.2,
+      kcal: 86, protein: 24, fat: 2.2, calcium: 33, iron: 6.7, absorption: 0.25,
       sfa: 19, mufa: 25, pufa: 27, epa: 25, heme: true }),
   // Жирная рыба — единственный дешёвый источник ЭПК+ДГК.
   // Сельдь берётся ФИЛЕ: считаем съедобные граммы, а у целой рыбы половина веса —
@@ -88,21 +100,36 @@ export const FOODS = {
   herring: F("Сельдь атлантическая (филе)", 695,
     { pack: { brand: "Экстра Фиш", item: "филе сельди слабосолёное", size: "200 г", price: 139 },
       photo: "herring", photoFit: "contain",
+      magnesium: 32, vitD: 4.2,
       kcal: 158, protein: 18, fat: 9, calcium: 57, iron: 1.1, absorption: 0.15,
       sfa: 23, mufa: 41, pufa: 24, epa: 18 }),
-  mackerel: F("Скумбрия", 340,
-    { kcal: 191, protein: 18, fat: 13.2, calcium: 12, iron: 1.6, absorption: 0.15,
+  // Печень трески — единственный продукт, которым витамин D закрывается разом:
+  // банка в неделю даёт больше, чем вся остальная корзина. Ограничитель — не
+  // калории, а РЕТИНОЛ: 4400 мкг на 100 г при верхнем пределе 3000 мкг в сутки,
+  // так что больше банки в неделю брать нельзя.
+  codLiver: F("Печень трески натуральная", 2191,
+    { pack: { brand: "Капитан Вкусов", item: "печень трески натуральная", size: "115 г", price: 252 },
+      photo: null,
+      magnesium: 20, vitD: 100,
+      kcal: 613, protein: 4.2, fat: 65.7, calcium: 35, iron: 1.9, absorption: 0.15,
+      sfa: 18, mufa: 47, pufa: 28, epa: 15 }),
+  mackerel: F("Скумбрия", 667,
+    { pack: { brand: "Лента", item: "скумбрия неразделанная свежемороженая", size: "800 г", price: 320 },
+      magnesium: 76, vitD: 13.8,
+      kcal: 191, protein: 18, fat: 13.2, calcium: 12, iron: 1.6, absorption: 0.15,
       sfa: 24, mufa: 40, pufa: 24, epa: 20 }),
   // Молочка — кальций. Дешевле кефира на грамм кальция ничего нет.
   // ЖИР МОЛОЧКИ — в целой глобуле, и в баланс он НЕ идёт (local.rs: глобульный
   // ингредиент исключается из fa_balance). Поэтому насыщенный жир кефира и творога
   // ничего здесь не портит, а обезжиренные версии брать незачем.
   milk: F("Молоко 2.5%", 90,
-    { kcal: 54, protein: 2.9, fat: 2.5, calcium: 120, iron: 0.1,
+    { magnesium: 11, vitD: 0.1,
+      kcal: 54, protein: 2.9, fat: 2.5, calcium: 120, iron: 0.1,
       sfa: 64, mufa: 28, pufa: 4, globule: true }),
   kefir: F("Кефир 2.5%", 113,
     { pack: { brand: "Простоквашино", item: "кефир 2,5 %", size: "930 г", price: 105 },
       photo: "kefir", photoFit: "contain",
+      magnesium: 12, vitD: 0.1,
       kcal: 53, protein: 3, fat: 2.5, calcium: 120, iron: 0.1,
       sfa: 64, mufa: 28, pufa: 4, globule: true }),
   // Сыр — самый дешёвый кальций на грамм после молока, и при этом ПЛОТНЫЙ по
@@ -110,17 +137,20 @@ export const FOODS = {
   cheese: F("Сыр полутвёрдый 45%", 995,
     { pack: { brand: "Брест-Литовск", item: "сыр Финский 45 %", size: "200 г", price: 199 },
       photo: "cheese", photoFit: "contain",
+      magnesium: 29, vitD: 0.6,
       kcal: 340, protein: 25, fat: 26, calcium: 900, iron: 0.7,
       sfa: 63, mufa: 28, pufa: 3, globule: true }),
   // Греческий йогурт: белок вдвое гуще обычного йогурта, жир — глобульный.
   teos: F("Греческий йогурт Teos 2%", 564,
     { pack: { brand: "Teos", item: "йогурт греческий густой 2 %", size: "140 г", price: 79 },
       photo: "teos", photoFit: "contain",
+      magnesium: 11, vitD: 0.1,
       kcal: 66, protein: 9, fat: 2, calcium: 120, iron: 0.1,
       sfa: 64, mufa: 28, pufa: 4, globule: true }),
   cottage: F("Творог 5%", 417,
     { pack: { brand: "Константиново", item: "творог 5 %", size: "180 г", price: 75 },
       photo: "cottage", photoFit: "contain",
+      magnesium: 8, vitD: 0.1,
       kcal: 121, protein: 17, fat: 5, calcium: 164, iron: 0.4,
       sfa: 63, mufa: 28, pufa: 4, globule: true }),
   // Цена яйца — за СЪЕДОБНЫЙ килограмм: десяток С1 ≈ 580 г брутто, за вычетом
@@ -128,43 +158,53 @@ export const FOODS = {
   egg: F("Яйцо куриное", 194,
     { pack: { brand: "Ozon fresh", item: "яйцо куриное столовое С1", size: "10 шт", price: 99 },
       photo: "eggs", photoFit: "contain",
+      magnesium: 12, vitD: 2,
       kcal: 157, protein: 12.7, fat: 11.5, calcium: 55, iron: 1.75, absorption: 0.1,
       sfa: 31, mufa: 44, pufa: 15, epa: 1, egg: true }),
   // Овощи и фрукты — самые дешёвые «объёмные».
   cabbage: F("Капуста белокочанная", 81,
     { pack: { brand: null, item: "капуста кочанная, Россия", size: "1 кг", price: 81 },
       photo: "cabbage", photoFit: "contain",
+      magnesium: 12, vitD: 0,
       kcal: 28, protein: 1.8, fat: 0.1, fibre: 2.0, calcium: 48, iron: 0.6, veg: true }),
   carrot: F("Морковь", 65,
     { pack: { brand: null, item: "морковь колхозная", size: "1 кг", price: 65 },
       photo: "carrot", photoFit: "contain",
+      magnesium: 12, vitD: 0,
       kcal: 35, protein: 1.3, fat: 0.1, fibre: 2.4, calcium: 27, iron: 0.7, veg: true }),
   beet: F("Свёкла", 90,
     { pack: { brand: null, item: "свёкла, Россия", size: "1 кг", price: 90 },
       photo: "beet", photoFit: "contain",
+      magnesium: 23, vitD: 0,
       kcal: 42, protein: 1.5, fat: 0.1, fibre: 2.5, calcium: 37, iron: 1.4, veg: true }),
   apple: F("Яблоко", 257,
     { pack: { brand: null, item: "яблоки свежие российские", size: "2 кг", price: 514 },
       photo: "apple", photoFit: "contain",
+      magnesium: 5, vitD: 0,
       kcal: 47, protein: 0.4, fat: 0.4, fibre: 1.8, calcium: 16, iron: 2.2, veg: true }),
   frozenVeg: F("Овощная смесь замороженная", 160,
-    { kcal: 45, protein: 2.2, fat: 0.3, fibre: 3.0, calcium: 30, iron: 0.8, veg: true }),
+    { magnesium: 20, vitD: 0,
+      kcal: 45, protein: 2.2, fat: 0.3, fibre: 3.0, calcium: 30, iron: 0.8, veg: true }),
   // Крупы.
   oats: F("Овсяные хлопья", 130,
-    { kcal: 352, protein: 12.3, fat: 6.2, fibre: 10.0, calcium: 52, iron: 3.6,
+    { magnesium: 138, vitD: 0,
+      kcal: 352, protein: 12.3, fat: 6.2, fibre: 10.0, calcium: 52, iron: 3.6,
       sfa: 18, mufa: 33, pufa: 38 }),
   barley: F("Перловка", 60,
-    { kcal: 315, protein: 9.3, fat: 1.1, fibre: 15.6, calcium: 38, iron: 1.8,
+    { magnesium: 79, vitD: 0,
+      kcal: 315, protein: 9.3, fat: 1.1, fibre: 15.6, calcium: 38, iron: 1.8,
       sfa: 21, mufa: 13, pufa: 48 }),
   buckwheat: F("Гречка", 97,
     { pack: { brand: "Агро-Альянс", item: "гречневая крупа ядрица", size: "900 г", price: 87 },
       photo: "buckwheat", photoFit: "contain",
+      magnesium: 231, vitD: 0,
       kcal: 308, protein: 12.6, fat: 3.3, fibre: 11.3, calcium: 20, iron: 6.7,
       sfa: 21, mufa: 30, pufa: 30 }),
   // Бобовые — клетчатка и железо задёшево.
   lentils: F("Чечевица", 193,
     { pack: { brand: "Увелка", item: "чечевица красная", size: "450 г", price: 87 },
       photo: "lentils", photoFit: "contain",
+      magnesium: 122, vitD: 0,
       kcal: 295, protein: 24, fat: 1.5, fibre: 11.5, calcium: 83, iron: 11.8,
       sfa: 15, mufa: 18, pufa: 46 }),
   // ВКУСНЕНЬКОЕ. Жир у сырка молочный (глобула) — в баланс не идёт; у батончика и
@@ -173,25 +213,31 @@ export const FOODS = {
   syrok: F("Сырок глазированный", 924,
     { pack: { brand: "Ростагроэкспорт", item: "сырок творожный глазированный с ванилью 20 %", size: "12 × 45 г", price: 499 },
       photo: "syrok", photoFit: "contain",
+      magnesium: 20, vitD: 0.2,
       kcal: 407, protein: 8.5, fat: 26, calcium: 135, iron: 0.3,
       sfa: 63, mufa: 28, pufa: 4, globule: true }),
   barni: F("Мишка Барни", 700,
-    { kcal: 463, protein: 6, fat: 21, fibre: 1.5, calcium: 60, iron: 1.2,
+    { magnesium: 18, vitD: 0,
+      kcal: 463, protein: 6, fat: 21, fibre: 1.5, calcium: 60, iron: 1.2,
       sfa: 45, mufa: 38, pufa: 13 }),
   chocolate: F("Шоколад молочный", 900,
-    { kcal: 558, protein: 7.3, fat: 32, fibre: 3.4, calcium: 189, iron: 2.4,
+    { magnesium: 63, vitD: 0,
+      kcal: 558, protein: 7.3, fat: 32, fibre: 3.4, calcium: 189, iron: 2.4,
       sfa: 60, mufa: 33, pufa: 3 }),
   // Жиры.
   sunflowerOil: F("Масло подсолнечное", 154,
     { pack: { brand: "Золотая Семечка", item: "масло подсолнечное рафинированное", size: "1 л", price: 142 },
       photo: null,   // fats.jpg — это рыба; фото бутылки масла пока нет
+      magnesium: 0, vitD: 0,
       kcal: 899, protein: 0, fat: 99.9, sfa: 11, mufa: 24, pufa: 63 }),
   walnuts: F("Грецкий орех (ядро)", 900,
-    { kcal: 654, protein: 15.2, fat: 65.2, fibre: 6.7, calcium: 98, iron: 2.9,
+    { magnesium: 158, vitD: 0,
+      kcal: 654, protein: 15.2, fat: 65.2, fibre: 6.7, calcium: 98, iron: 2.9,
       sfa: 10, mufa: 14, pufa: 72 }),
   sunflowerSeeds: F("Семечки подсолнечника", 240,
     { pack: { brand: null, item: "семечки подсолнечника очищенные сырые", size: "500 г", price: 120 },
       photo: null,
+      magnesium: 325, vitD: 0,
       kcal: 601, protein: 20.7, fat: 52.9, fibre: 8.6, calcium: 78, iron: 5.3,
       sfa: 10, mufa: 20, pufa: 66 }),
   // На странице корзины семечки названы ТЫКВЕННЫМИ — считаем их же, а не
@@ -199,6 +245,7 @@ export const FOODS = {
   pumpkinSeeds: F("Семечки тыквенные", 988,
     { pack: { brand: "Ореховец", item: "семена тыквы очищенные", size: "500 г", price: 494 },
       photo: "seeds", photoFit: "contain",
+      magnesium: 592, vitD: 0,
       kcal: 559, protein: 30.2, fat: 49.1, fibre: 6.0, calcium: 46, iron: 8.8,
       sfa: 17, mufa: 31, pufa: 46 }),
 };
@@ -222,9 +269,12 @@ export function evaluate(basket, { kcal, sex, weight, height, age }) {
     calciumDay: RULES.calciumPerDay,
     fiberDay: Math.max(kcal / 1000 * RULES.fiberPer1000, RULES.fiberMinPerDay),
     ironWeek: ironWeekTarget(sex, age),
+    magnesiumDay: sex === "male" ? RULES.magnesiumPerDayM : RULES.magnesiumPerDayF,
+    vitDDay: RULES.vitDPerDay,
   };
 
   const sum = { kcal: 0, protein: 0, fat: 0, fibre: 0, calcium: 0, ironAbs: 0,
+                magnesium: 0, vitD: 0,
                 veg: 0, egg: 0, red: 0, heme: 0, epa: 0, sat: 0, unsat: 0, price: 0 };
   const rows = [];
   for (const [key, grams] of Object.entries(basket)) {
@@ -239,6 +289,8 @@ export function evaluate(basket, { kcal, sex, weight, height, age }) {
     sum.fibre += f.fibre * k;
     sum.calcium += f.calcium * k;
     sum.ironAbs += f.iron * k * f.absorption;
+    sum.magnesium += f.magnesium * k;
+    sum.vitD += f.vitD * k;
     if (f.veg) sum.veg += grams;
     if (f.egg) sum.egg += grams;
     if (f.red) sum.red += grams;

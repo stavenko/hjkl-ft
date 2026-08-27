@@ -448,7 +448,7 @@ function drawChart(r) {
     $("dots").innerHTML = dots;
     steps.forEach(function (el) { el.classList.toggle("on", Number(el.dataset.step) === step); });
     $("back").style.visibility = step === 0 ? "hidden" : "visible";
-    $("next").textContent = step === STEPS - 2 ? "Показать график" : "Далее";
+    $("next").textContent = step === STEPS - 2 ? "Показать график похудения" : "Далее";
     $("nav").hidden = step === STEPS - 1;
     $("cta").hidden = step !== STEPS - 1;
 

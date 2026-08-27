@@ -296,11 +296,9 @@ var W = (function () {
     for (var y = AGE_PEAK; y < age; y++) f *= 1 - muscleLossPerYear(y);
     return f;
   }
-  /// Здоровая доля жира: с возрастом её норма растёт.
-  function targetFatPct(age, sex) {
-    if (sex === "male") return age < 40 ? 16 : age < 60 ? 19 : 21;
-    return age < 40 ? 27 : age < 60 ? 29 : 31;
-  }
+  /// Доля жира, к которой целимся: 12 % у мужчин, 22 % у женщин.
+  var TARGET_FAT = { male: 12, female: 22 };
+  function targetFatPct(age, sex) { return TARGET_FAT[sex]; }
   /// Прибавка FFMI за стаж силовых. Первый год даёт больше всего, дальше рост
   /// замедляется: к пяти годам натуральный потолок практически выбран.
   function trainGain(years) {

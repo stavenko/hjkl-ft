@@ -1036,6 +1036,13 @@ fn Settings(view: RwSignal<View>) -> impl IntoView {
     let busy = create_rw_signal(false);
     let saved = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);
+    // Уведомления. Подписка заводилась ТОЛЬКО при входе и молча: отказ в ней
+    // намеренно не мешает войти. Значит куратор, у которого она не удалась,
+    // узнавал об этом лишь по тому, что сообщения клиентов не приходят, и
+    // починить не мог — включить её было негде.
+    let push_on = create_rw_signal(crate::push::is_subscribed());
+    let push_busy = create_rw_signal(false);
+    let push_err = create_rw_signal(None::<String>);
 
     create_effect(move |_| {
         spawn_local(async move {
@@ -1111,6 +1118,48 @@ fn Settings(view: RwSignal<View>) -> impl IntoView {
                         attr:data-testid="settings-lang-en"
                         on:click=move |_| lang.set(Lang::En)>"English"</button>
                 </div>
+            </div>
+
+            <div class="card" style="margin-top: 12px;">
+                <p class="sub" style="font-size: .82rem;">{move || t("settings.push")}</p>
+                {move || if !crate::push::is_supported() {
+                    // На iOS `Notification` и `PushManager` существуют только в
+                    // УСТАНОВЛЕННОМ приложении. Во вкладке кнопка была бы обманом.
+                    view! {
+                        <p class="sub" style="margin-top: 8px; font-size: .8rem;">
+                            {move || t("settings.push_unsupported")}
+                        </p>
+                    }.into_view()
+                } else {
+                    view! {
+                        <p class="sub" style="margin-top: 8px; font-size: .8rem;">
+                            {move || if push_on.get() { t("settings.push_on") } else { t("settings.push_off") }}
+                        </p>
+                        <button class="btn btn--block" style="margin-top: 10px;"
+                            attr:data-testid="settings-push"
+                            prop:disabled=move || push_busy.get()
+                            on:click=move |_| {
+                                if push_busy.get_untracked() { return; }
+                                push_busy.set(true);
+                                push_err.set(None);
+                                spawn_local(async move {
+                                    match crate::push::subscribe().await {
+                                        Ok(()) => push_on.set(true),
+                                        Err(e) => {
+                                            leptos::logging::error!("подписка на уведомления: {e}");
+                                            push_err.set(Some(t("settings.push_failed").to_string()));
+                                        }
+                                    }
+                                    push_busy.set(false);
+                                });
+                            }>
+                            {move || if push_on.get() { t("settings.push_again") } else { t("settings.push_enable") }}
+                        </button>
+                        {move || push_err.get().map(|e| view! {
+                            <p class="sub" style="margin-top: 8px; font-size: .8rem; color: var(--danger);">{e}</p>
+                        })}
+                    }.into_view()
+                }}
             </div>
 
             <button class="btn btn--primary btn--block" style="margin-top: 16px;"

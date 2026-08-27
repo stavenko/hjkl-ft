@@ -898,41 +898,55 @@ fn ChatScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView {
             </button>
             <div class="appbar__title">{title.get_value()}</div>
         </div>
-        <div class="screen screen--noflow">
+        // Экран чата — ТОТ ЖЕ, что видит худеющий: обои, пузыри и плашки берутся
+        // из общего крейта `chat-ui`. Разговор один, и выглядеть он обязан
+        // одинаково с обоих концов. Отличается только обрамление: у худеющего
+        // чат занимает весь экран и живёт во вкладке, здесь он под шапкой с
+        // кнопкой «назад» — навигация к виду переписки не относится.
+        <div class="screen screen--noflow"
+            style=format!("display: flex; flex-direction: column; position: relative; {}", chat_ui::WALLPAPER)>
             {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
-            <div class="msgs" attr:data-testid="curator-chat">
-                {move || {
-                    let list = messages.get();
-                    if list.is_empty() {
-                        return view! { <p class="sub" style="padding: 20px;">{t("chat.empty")}</p> }
-                            .into_view();
-                    }
-                    list.into_iter().map(|m| {
-                        // Директивы — не разговор: их текст человек собирает у
-                        // себя, и показывать здесь пустой пузырь незачем.
-                        if m.kind != "text" {
-                            return view! {
-                                <p class="row__meta" style="align-self: center; text-align: center;">
-                                    {directive_note(&m)}
-                                </p>
-                            }.into_view();
-                        }
-                        let mine = m.sender == "expert";
-                        let class = if mine { "bubble bubble--me" } else { "bubble bubble--them" };
-                        view! { <div class=class attr:data-testid="curator-msg">{m.text}</div> }
-                            .into_view()
-                    }).collect_view()
-                }}
+            <div style=chat_ui::SCROLL attr:data-testid="curator-chat">
+                <div style=chat_ui::WRAP>
+                    <div style=chat_ui::PATTERN></div>
+                    <div style=format!("{} padding: 12px 12px 6.5rem;", chat_ui::LIST)>
+                        {move || {
+                            let list = messages.get();
+                            if list.is_empty() {
+                                return view! {
+                                    <p style="font-size: 12px; color: #69748C; text-align: center; padding: 20px;">
+                                        {t("chat.empty")}
+                                    </p>
+                                }.into_view();
+                            }
+                            list.into_iter().map(|m| {
+                                // Директивы — не разговор: их текст человек
+                                // собирает у себя, и пузырь здесь был бы пустым.
+                                if m.kind != "text" {
+                                    return view! { <chat_ui::Note text=directive_note(&m) /> }
+                                        .into_view();
+                                }
+                                view! {
+                                    <chat_ui::Bubble text=m.text mine=m.sender == "expert"
+                                        sender_name=None />
+                                }.into_view()
+                            }).collect_view()
+                        }}
+                    </div>
+                </div>
             </div>
-            <div class="composer">
-                <textarea class="field" rows="1" placeholder=move || t("chat.placeholder")
-                    attr:data-testid="chat-input"
-                    prop:value=move || input.get()
-                    on:input=move |ev| input.set(event_target_value(&ev))></textarea>
-                <button class="btn btn--primary" attr:data-testid="chat-send"
-                    prop:disabled=move || sending.get() on:click=send>
-                    {move || t("chat.send")}
-                </button>
+            <div style=chat_ui::COMPOSER>
+                <div style="display: flex; align-items: flex-end; gap: 0.5rem;">
+                    <textarea rows="1" style=chat_ui::TEXTAREA
+                        placeholder=move || t("chat.placeholder")
+                        attr:data-testid="chat-input"
+                        prop:value=move || input.get()
+                        on:input=move |ev| input.set(event_target_value(&ev))></textarea>
+                    <button class="btn btn--primary" attr:data-testid="chat-send"
+                        prop:disabled=move || sending.get() on:click=send>
+                        {move || t("chat.send")}
+                    </button>
+                </div>
             </div>
         </div>
     }

@@ -50,17 +50,7 @@ pub fn LiveBubble(
         // число, и язык плашки не должен зависеть от настроек куратора.
         let text = crate::services::directives::set_planka_note("calories", amount);
         // Colours in a `let` (matches the bubble styles below) — soft info card.
-        let note_style = "background: #EEF6FF; color: #1E4E79; border: 1px solid #CFE2F7; \
-                          border-radius: 10px; padding: 8px 14px; max-width: 88%; text-align: center;";
-        return view! {
-            <div attr:data-testid="live-message" attr:data-role="system"
-                style="display: flex; justify-content: center; margin-bottom: 10px;">
-                <div style=note_style>
-                    <p class="is-size-7" style="margin: 0;">{text}</p>
-                </div>
-            </div>
-        }
-        .into_view();
+        return view! { <chat_ui::Note text=text /> }.into_view();
     }
 
     // Правка любой планки — системной запиской: применяет её приложение, отвечать
@@ -80,17 +70,7 @@ pub fn LiveBubble(
         // Рисовать по ней плашку нечем.
         let Some(amount) = amount else { return view! {}.into_view() };
         let text = crate::services::directives::set_planka_note(&key, amount);
-        let note_style = "background: #EEF6FF; color: #1E4E79; border: 1px solid #CFE2F7; \
-                          border-radius: 10px; padding: 8px 14px; max-width: 88%; text-align: center;";
-        return view! {
-            <div attr:data-testid="live-message" attr:data-role="system"
-                style="display: flex; justify-content: center; margin-bottom: 10px;">
-                <div style=note_style>
-                    <p class="is-size-7" style="margin: 0;">{text}</p>
-                </div>
-            </div>
-        }
-        .into_view();
+        return view! { <chat_ui::Note text=text /> }.into_view();
     }
 
     // Директива открытия темы — так же системной запиской: применяет её
@@ -102,17 +82,7 @@ pub fn LiveBubble(
             .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
             .and_then(|v| v.get("week").and_then(|w| w.as_u64()));
         let text = crate::services::directives::open_week_note(week.map(|w| w as u32));
-        let note_style = "background: #EEF6FF; color: #1E4E79; border: 1px solid #CFE2F7; \
-                          border-radius: 10px; padding: 8px 14px; max-width: 88%; text-align: center;";
-        return view! {
-            <div attr:data-testid="live-message" attr:data-role="system"
-                style="display: flex; justify-content: center; margin-bottom: 10px;">
-                <div style=note_style>
-                    <p class="is-size-7" style="margin: 0;">{text}</p>
-                </div>
-            </div>
-        }
-        .into_view();
+        return view! { <chat_ui::Note text=text /> }.into_view();
     }
 
     // Подпись под пузырём собеседника. Экран чата один на всех, и без имени
@@ -122,30 +92,13 @@ pub fn LiveBubble(
         .then(|| msg.sender_name.clone())
         .flatten();
 
-    let is_user = msg.sender == "user";
-    // re:Norma palette: the user bubble is the soft-emerald brand tint (not the
-    // stock nuclear-blue link); the curator bubble is a white surface. Both carry
-    // a light brand-coloured border so they read on the pastel wallpaper.
-    let bubble_style = if is_user {
-        "background: #DEF7EC; color: #04603F; border: 1px solid #A7E3CD; border-radius: 12px; padding: 14px 16px; max-width: 80%; margin-left: auto;"
-    } else {
-        "background: #FFFFFF; color: var(--bulma-text); border: 1px solid #E4E8F0; border-radius: 12px; padding: 14px 16px; max-width: 80%; margin-right: auto;"
-    };
-
-    let text = msg.text.clone();
-    let name_line = sender_name.map(|n| view! {
-        <span class="is-size-7 has-text-grey" attr:data-testid="live-sender-name"
-            style="margin: 0 0 3px 4px;">{n}</span>
-    });
+    // Пузырь рисует ОБЩИЙ крейт: тот же разговор виден куратору с его конца, и
+    // выглядеть он обязан так же. `mine` — не «от кого пришло», а «моё ли»: у
+    // худеющего своё то, что от него.
     view! {
-        <div attr:data-testid="live-message" attr:data-role=msg.sender.clone()
-            style="display: flex; flex-direction: column; margin-bottom: 10px;">
-            {name_line}
-            <div style=bubble_style>
-                <p class="is-size-6" style="white-space: pre-wrap; line-height: 1.45; margin: 0;">
-                    {text}
-                </p>
-            </div>
+        <div attr:data-testid="live-message" attr:data-role=msg.sender.clone()>
+            <chat_ui::Bubble text=msg.text.clone() mine=msg.sender == "user"
+                sender_name=sender_name />
         </div>
     }
     .into_view()

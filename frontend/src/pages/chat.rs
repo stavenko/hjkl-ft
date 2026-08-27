@@ -436,12 +436,8 @@ pub fn ChatPage() -> impl IntoView {
         // flex-shrink: 0 (pinned); only the messages area scrolls under it. The
         // Soft pastel gradient wallpaper (blue base with purple / periwinkle /
         // green glows) fills the whole viewport behind the messages.
-        <div style="position: fixed; inset: 0; padding: env(safe-area-inset-top) 0.75rem 0; display: flex; flex-direction: column; \
-                background: \
-                    radial-gradient(120% 80% at 0% 12%, #E7CCFB 0%, rgba(231,204,251,0) 60%), \
-                    radial-gradient(120% 90% at 0% 100%, #A5B3F9 0%, rgba(165,179,249,0) 60%), \
-                    radial-gradient(120% 90% at 100% 100%, #DDE9CE 0%, rgba(221,233,206,0) 62%), \
-                    #C1E1FC;">
+        <div style=format!("position: fixed; inset: 0; padding: env(safe-area-inset-top) 0.75rem 0; \
+                display: flex; flex-direction: column; {}", chat_ui::WALLPAPER)>
 
             // Live/AI selector hidden while MODE_SELECTOR_ENABLED is off (Live-only).
             {MODE_SELECTOR_ENABLED.then(|| view! { <ModeToggle mode=mode /> })}
@@ -482,14 +478,12 @@ pub fn ChatPage() -> impl IntoView {
             // momentum. The inner wrapper (`min-height: 100%; justify-content: flex-end`)
             // anchors messages to the BOTTOM when the thread is short — the reference's
             // pattern — so the newest message shows without a jump.
-            <div node_ref=messages_ref on:scroll=on_messages_scroll attr:data-testid="chat-messages" attr:data-ios-scroll="1" style="flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; max-width: 30rem; width: 100%; margin: 0 auto;">
-              <div style="position: relative; min-height: 100%;">
+            <div node_ref=messages_ref on:scroll=on_messages_scroll attr:data-testid="chat-messages" attr:data-ios-scroll="1" style=chat_ui::SCROLL>
+              <div style=chat_ui::WRAP>
                 // Line-art pattern OVERLAY blended onto the gradient, behind the
                 // messages (so the bubbles stay crisp). Repeats down the thread.
-                <div style="position: absolute; inset: 0; z-index: 0; pointer-events: none; \
-                        background-image: url('/chat-bg-pattern.svg'); background-repeat: repeat-y; \
-                        background-size: 100% auto; background-position: top center; mix-blend-mode: overlay;"></div>
-                <div style="position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100%; justify-content: flex-end; padding-bottom: 9rem;">
+                <div style=chat_ui::PATTERN></div>
+                <div style=format!("{} padding-bottom: 9rem;", chat_ui::LIST)>
                 // ── AI thread ──
                 <Show when=move || mode.get() == ChatMode::Ai>
                     <Show
@@ -579,13 +573,8 @@ pub fn ChatPage() -> impl IntoView {
                                 let failed = o.status == "failed";
                                 let client_id = o.client_id.clone();
                                 view! {
-                                    <div attr:data-testid="live-outbox" attr:data-status=o.status.clone()
-                                        style="display: flex; flex-direction: column; margin-bottom: 10px;">
-                                        <div style="background: #DEF7EC; color: #04603F; border: 1px solid #A7E3CD; border-radius: 12px; padding: 14px 16px; max-width: 80%; margin-left: auto; opacity: 0.6;">
-                                            <p class="is-size-6" style="white-space: pre-wrap; line-height: 1.45; margin: 0;">
-                                                {o.text.clone()}
-                                            </p>
-                                        </div>
+                                    <div attr:data-testid="live-outbox" attr:data-status=o.status.clone()>
+                                        <chat_ui::Bubble text=o.text.clone() mine=true sender_name=None pending=true />
                                         {if failed {
                                             let client_id = client_id.clone();
                                             view! {

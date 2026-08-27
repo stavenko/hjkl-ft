@@ -116,6 +116,11 @@
   .fact{background:var(--accent-soft);color:var(--accent-ink);border-radius:var(--pill);
     padding:7px 13px;font-size:13.5px;font-weight:600}
   .fact i{font-style:normal;opacity:.75;font-weight:500}
+  /* Зачем идти в приложение — под текстом результата, перед кнопками. */
+  .promo{margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
+  .promo h3{font-size:18px;line-height:1.2}
+  .promo p{color:var(--ink-2);font-size:15.5px;margin-top:8px}
+
   /* Две плашки с главными числами — над текстом. */
   .minis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}
   .mini{background:var(--accent-soft);border-radius:var(--radius);padding:14px 12px;text-align:center}
@@ -217,6 +222,10 @@
         </div>
         <p class="ask" id="way" hidden></p>
         <p class="verdict" id="verdict" style="margin-top:0;text-align:left"></p>
+        <div class="promo" id="promo">
+          <h3>Вы можете начать движение к идеальному телу прямо сейчас</h3>
+          <p>Чтобы худеть правильно, не торопясь и с удовольствием, попробуйте <i>re:Norma</i>: она считает вашу планку по тому, как вы едите на самом деле, и каждую неделю поправляет её по весу.</p>
+        </div>
         <div class="nav">
           <button type="button" class="btn btn-ghost btn-back" id="back2" aria-label="Назад">←</button>
           <a class="btn btn-primary" id="goApp" href="https://ig0.renorma.app/">Перейти в re:Norma →</a>
@@ -475,6 +484,7 @@ var W = (function () {
       // Человеку в идеальном весе ни цифры похудения, ни переход в приложение не нужны.
       $("minis").hidden = r.already;
       $("goApp").hidden = r.already;
+      $("promo").hidden = r.already;
       if (r.already) {
         $("way").hidden = false;
         $("way").innerHTML = "Вы уже <b>в своём идеальном весе</b>.";

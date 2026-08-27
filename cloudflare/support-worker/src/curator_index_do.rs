@@ -39,7 +39,7 @@ struct OwnedClientRow {
 struct ReportRow {
     last_report: Option<String>,
     last_report_at: Option<String>,
-    request_days: Option<i64>,
+    request_scope: Option<String>,
     request_at: Option<String>,
 }
 
@@ -52,7 +52,7 @@ struct ClientSqlRow {
     bound_at: Option<String>,
     unbound_at: Option<String>,
     last_report_at: Option<String>,
-    request_days: Option<i64>,
+    request_scope: Option<String>,
     request_at: Option<String>,
 }
 
@@ -69,7 +69,7 @@ impl From<ClientSqlRow> for ClientRow {
             bound_at: r.bound_at,
             unbound_at: r.unbound_at,
             last_report_at: r.last_report_at,
-            request_days: r.request_days.map(|d| d as u32),
+            request_scope: r.request_scope.clone(),
             request_at: r.request_at,
         }
     }
@@ -120,11 +120,21 @@ impl CuratorIndexDO {
                 last_report_at TEXT,
                 last_report    TEXT,
                 request_days   INTEGER,
+                request_scope  TEXT,
                 request_at     TEXT,
                 created_at     TEXT NOT NULL
             )",
             None,
         )?;
+        // Столбец добавлен позже: у DO нет механизма миграций, а `CREATE TABLE IF
+        // NOT EXISTS` существующую таблицу не трогает. ALTER на уже добавленном
+        // столбце — ошибка, и это НОРМАЛЬНЫЙ путь при каждом втором запуске:
+        // отсюда игнорирование результата, а не `?`.
+        //
+        // `request_days` остался в таблице мёртвым: SQLite столбцы удаляет плохо,
+        // а пустой столбец никому не мешает. Ничего его больше не читает и не
+        // пишет.
+        let _ = sql.exec("ALTER TABLE clients ADD COLUMN request_scope TEXT", None);
         sql.exec(
             "CREATE INDEX IF NOT EXISTS idx_clients_curator ON clients(curator_id)",
             None,
@@ -256,7 +266,7 @@ impl CuratorIndexDO {
         let rows: Vec<ClientSqlRow> = sql
             .exec(
                 "SELECT id, name, invite_code, user_id, bound_at, unbound_at,
-                        last_report_at, request_days, request_at
+                        last_report_at, request_scope, request_at
                  FROM clients WHERE curator_id = ? AND id = ?",
                 vec![curator_id.into(), id.into()],
             )?
@@ -269,7 +279,7 @@ impl CuratorIndexDO {
         let rows: Vec<ClientSqlRow> = sql
             .exec(
                 "SELECT id, name, invite_code, user_id, bound_at, unbound_at,
-                        last_report_at, request_days, request_at
+                        last_report_at, request_scope, request_at
                  FROM clients WHERE curator_id = ? ORDER BY created_at",
                 vec![curator_id.into()],
             )?
@@ -361,7 +371,7 @@ impl CuratorIndexDO {
             match sql.exec(
                 "UPDATE clients
                  SET user_id = NULL, unbound_at = ?, invite_code = ?,
-                     request_days = NULL, request_at = NULL,
+                     request_scope = NULL, request_at = NULL,
                      last_report_at = NULL, last_report = NULL
                  WHERE id = ?",
                 vec![now.as_str().into(), code.as_str().into(), id.into()],
@@ -458,16 +468,16 @@ impl CuratorIndexDO {
 
     /// Открытый запрос данных: на сколько дней и когда попросили. Запрос ОДИН —
     /// новый затирает прежний, потому что и виджет у человека один.
-    fn handle_request_set(&self, curator_id: &str, id: &str, days: i64) -> Result<Response> {
+    fn handle_request_set(&self, curator_id: &str, id: &str, scope: &str) -> Result<Response> {
         if self.client(curator_id, id)?.is_none() {
             return Response::error("client not found", 404);
         }
         let sql = self.state.storage().sql();
         let now = now_rfc3339();
         sql.exec(
-            "UPDATE clients SET request_days = ?, request_at = ?
+            "UPDATE clients SET request_scope = ?, request_at = ?
              WHERE curator_id = ? AND id = ?",
-            vec![days.into(), now.as_str().into(), curator_id.into(), id.into()],
+            vec![scope.into(), now.as_str().into(), curator_id.into(), id.into()],
         )?;
         Response::from_json(&serde_json::json!({ "ok": true, "request_at": now }))
     }
@@ -486,7 +496,7 @@ impl CuratorIndexDO {
         let now = now_rfc3339();
         sql.exec(
             "UPDATE clients SET last_report = ?, last_report_at = ?,
-                                request_days = NULL, request_at = NULL
+                                request_scope = NULL, request_at = NULL
              WHERE id = ?",
             vec![payload.into(), now.as_str().into(), row.id.as_str().into()],
         )?;
@@ -498,7 +508,7 @@ impl CuratorIndexDO {
         let sql = self.state.storage().sql();
         let rows: Vec<ReportRow> = sql
             .exec(
-                "SELECT last_report, last_report_at, request_days, request_at
+                "SELECT last_report, last_report_at, request_scope, request_at
                  FROM clients WHERE curator_id = ? AND id = ?",
                 vec![curator_id.into(), id.into()],
             )?
@@ -509,7 +519,7 @@ impl CuratorIndexDO {
         Response::from_json(&serde_json::json!({
             "report": row.last_report,
             "report_at": row.last_report_at,
-            "request_days": row.request_days,
+            "request_scope": row.request_scope,
             "request_at": row.request_at,
         }))
     }
@@ -635,9 +645,7 @@ impl DurableObject for CuratorIndexDO {
             "/request-set" => self.handle_request_set(
                 str_field(&body, "curator_id")?,
                 str_field(&body, "id")?,
-                body.get("days")
-                    .and_then(|v| v.as_i64())
-                    .ok_or_else(|| Error::RustError("missing days".into()))?,
+                str_field(&body, "scope")?,
             ),
             "/report-put" => self.handle_report_put(
                 str_field(&body, "user_id")?,

@@ -113,13 +113,13 @@ async function main() {
 
   // ── 5. Запрос данных и отчёт ──
   r = await call(curator, 'POST', `/curator/clients/${cid}/request`,
-    { client_id: randomUUID(), days: 21 });
+    { client_id: randomUUID(), scope: 'all' });
   assert(r.status === 200, `запрос данных: ${r.status} ${r.text}`);
 
   r = await call(user, 'GET', '/messages?after_seq=0&limit=50');
   const req = r.json.messages.find((m) => m.kind === 'data_request');
   assert(req, 'запрос не дошёл до худеющего');
-  assert(JSON.parse(req.payload).days === 21, 'срок запроса потерялся');
+  assert(JSON.parse(req.payload).scope === 'all', 'что просили — потерялось');
 
   // Отчёт настоящей формы: по нему куратор считает планку, и потерять по дороге
   // что-нибудь из этого — значит остаться без расчёта.
@@ -138,7 +138,7 @@ async function main() {
 
   r = await call(curator, 'GET', `/curator/clients/${cid}/report`);
   assert(r.json.report, 'отчёт не лёг в слот');
-  assert(!r.json.request_days, 'выполненный запрос пережил свой ответ');
+  assert(!r.json.request_scope, 'выполненный запрос пережил свой ответ');
   const got = JSON.parse(r.json.report).report;
   assert(got.targets?.calories === 2000, 'действующие планки не доехали до куратора');
   assert(got.avg_kcal_7d === 1980, 'среднее съеденное потерялось — считать будет не от чего');

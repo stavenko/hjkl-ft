@@ -402,11 +402,42 @@ async fn build_planka_history(from: &str) -> Value {
 }
 
 /// Собрать отчёт за `days` завершённых дней плюс сегодняшний.
-pub async fn build_report(days: u32) -> Value {
-    let days = days.clamp(1, 366);
-    let today = local::today_date();
-    let from = (today - chrono::Duration::days(days as i64)).format("%Y-%m-%d").to_string();
-    let to = today.format("%Y-%m-%d").to_string();
+/// Последний день, который вообще может попасть в отчёт, — ВЧЕРА.
+///
+/// Сегодняшний не едет никогда, и это не осторожность, а правило: день ещё
+/// заполняется. Куратор, увидевший «съедено 400 ккал» в обед, прочтёт это как
+/// недобор и начнёт лечить то, чего нет. Незаконченный день нельзя ни судить,
+/// ни считать от него планку.
+pub fn report_through() -> String {
+    (local::today_date() - chrono::Duration::days(1)).format("%Y-%m-%d").to_string()
+}
+
+/// Самый ранний день, о котором у нас вообще есть данные, — начало «всей
+/// истории». `None`, когда данных нет ни одного дня.
+async fn earliest_day() -> Option<String> {
+    let w = local::list_weight_entries().await.first().map(|e| e.date.clone());
+    let s = local::list_step_entries().await.iter().map(|e| e.date.clone()).min();
+    match (w, s) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
+
+/// Собрать отчёт за отрезок `[from, to]` включительно.
+///
+/// `from = None` — вся история. Не «366 дней назад», как было при счёте днями:
+/// человек, попросивший «все данные», имеет в виду все, а молчаливое обрезание
+/// сроком выглядело бы как потеря.
+pub async fn build_report(from: Option<String>, to: String) -> Value {
+    let from = match from {
+        Some(f) => f,
+        None => earliest_day().await.unwrap_or_else(|| to.clone()),
+    };
+    // Сколько дней просить у индикаторов: они считают от сегодня назад.
+    let days = {
+        let f = chrono::NaiveDate::parse_from_str(&from, "%Y-%m-%d").unwrap_or(local::today_date());
+        (local::today_date() - f).num_days().clamp(1, 3660) as u32
+    };
 
     let weight = local::list_weight_entries().await;
     let weight_series: Vec<Value> = weight
@@ -448,6 +479,9 @@ pub async fn build_report(days: u32) -> Value {
         .collect();
 
     json!({ "report": {
+        // `to` — последний день ДАННЫХ, а не день отправки. От него отсчитывается
+        // следующий отчёт «только новое», и читается он прямо отсюда: отдельного
+        // хранилища границы нет и не нужно.
         "period": { "from": from, "to": to, "days": days },
         "generated_at": chrono::Local::now().to_rfc3339(),
         "body": build_body().await,
@@ -476,8 +510,8 @@ pub async fn build_report(days: u32) -> Value {
 }
 
 /// Готовое сообщение с отчётом: JSON-строка и короткая подпись.
-pub async fn report_message(days: u32) -> Result<(String, String), String> {
-    let value = build_report(days).await;
+pub async fn report_message(from: Option<String>, to: String) -> Result<(String, String), String> {
+    let value = build_report(from, to).await;
     let payload = serde_json::to_string(&value).map_err(|e| format!("serialize error: {e}"))?;
     Ok((i18n::t("curator.report_sent").to_string(), payload))
 }

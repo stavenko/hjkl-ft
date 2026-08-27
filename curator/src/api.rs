@@ -113,7 +113,7 @@ pub struct Client {
     #[serde(default)]
     pub last_report_at: Option<String>,
     #[serde(default)]
-    pub request_days: Option<u32>,
+    pub request_scope: Option<String>,
     #[serde(default)]
     pub request_at: Option<String>,
 }
@@ -147,7 +147,7 @@ pub struct ReportResp {
     #[serde(default)]
     pub report_at: Option<String>,
     #[serde(default)]
-    pub request_days: Option<u32>,
+    pub request_scope: Option<String>,
     #[serde(default)]
     pub request_at: Option<String>,
 }
@@ -282,10 +282,10 @@ pub async fn unbind_client(id: &str) -> Result<(), ApiError> {
 
 /// Попросить данные за `days` дней. Запрос уходит СООБЩЕНИЕМ в тред: приложение
 /// худеющего и так читает его, и из него же считает состояние своего виджета.
-pub async fn request_data(id: &str, days: u32) -> Result<u64, ApiError> {
+pub async fn request_data(id: &str, scope: datashare::report::Scope) -> Result<u64, ApiError> {
     let body = serde_json::json!({
         "client_id": uuid::Uuid::now_v7().to_string(),
-        "days": days,
+        "scope": scope.key(),
     })
     .to_string();
     let v: serde_json::Value =

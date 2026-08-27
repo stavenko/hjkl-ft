@@ -650,23 +650,43 @@ const REPORT_SEEN_FLAG: &str = "report_request_seen_seq";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ReportStatus {
-    /// Открытый запрос куратора: на сколько дней. `None` — запроса нет.
-    pub request_days: Option<u32>,
+    /// Открытый запрос куратора: что просит прислать. `None` — запроса нет.
+    pub request: Option<datashare::report::Scope>,
     /// Когда отчёт отправляли в последний раз.
     pub last_report_at: Option<String>,
+    /// ПОСЛЕДНИЙ ДЕНЬ прошлого отчёта — граница, от которой начинается «только
+    /// новое». Читается из самого отчёта (`period.to`), а не хранится отдельно:
+    /// отчёты лежат в этом же треде и синкаются вместе с ним, так что заводить
+    /// для границы своё синхронизируемое поле было бы второй копией правды.
+    ///
+    /// `None` — этому куратору мы ещё ничего не отправляли, и «только новое»
+    /// предлагать не от чего.
+    pub last_report_through: Option<String>,
     /// Запрос есть, и панель после него ещё не открывали.
     pub needs_attention: bool,
 }
 
-/// Разобрать срок из запроса куратора. Старые запросы админки несут `dataset`, а
-/// не `days`, — они живут своей панелью в чате, и виджету до них дела нет.
-fn request_days(m: &LiveMessage) -> Option<u32> {
+/// Разобрать запрос куратора. Старые запросы админки несут `dataset` — они живут
+/// своей панелью в чате, и виджету до них дела нет.
+///
+/// Директива от сборки старше этой несёт `days` вместо `scope`. Такой запрос
+/// читается как «все данные»: прислать больше нужного не вредно, а промолчать —
+/// вредно.
+fn request_scope(m: &LiveMessage) -> Option<datashare::report::Scope> {
     if m.kind != "data_request" {
         return None;
     }
     let v: serde_json::Value = serde_json::from_str(m.payload.as_deref()?).ok()?;
-    let d = v.get("days")?.as_u64()?;
-    (d >= 1).then_some(d as u32)
+    if let Some(s) = v.get("scope").and_then(|s| s.as_str()) {
+        return Some(datashare::report::Scope::from_key(s));
+    }
+    v.get("days").map(|_| datashare::report::Scope::All)
+}
+
+/// Последний день, покрытый отчётом: `report.period.to`.
+fn report_through(m: &LiveMessage) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(m.payload.as_deref()?).ok()?;
+    v.get("report")?.get("period")?.get("to")?.as_str().map(str::to_string)
 }
 
 /// Отчёт ли это (а не старый датасетный обмен).
@@ -688,21 +708,22 @@ pub async fn report_status() -> ReportStatus {
         .filter(|m| m.peer == peer)
         .collect();
 
-    let last_request = msgs.iter().filter_map(|m| request_days(m).map(|d| (m.seq, d))).last();
+    let last_request = msgs.iter().filter_map(|m| request_scope(m).map(|s| (m.seq, s))).last();
     let last_report = msgs.iter().filter(|m| is_report(m)).last();
     // Запрос закрыт отчётом, ПРИШЕДШИМ ПОСЛЕ него: повторный запрос за тем же
     // сроком должен снова ждать ответа, а не считаться выполненным старым.
     let open = match (last_request, last_report) {
         (Some((rseq, _)), Some(rep)) if rep.seq > rseq => None,
-        (Some((rseq, days)), _) => Some((rseq, days)),
+        (Some((rseq, scope)), _) => Some((rseq, scope)),
         (None, _) => None,
     };
     let seen = crate::services::app_flags::get(REPORT_SEEN_FLAG)
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
     ReportStatus {
-        request_days: open.map(|(_, d)| d),
+        request: open.map(|(_, s)| s),
         last_report_at: last_report.map(|m| m.created_at.clone()),
+        last_report_through: last_report.and_then(report_through),
         needs_attention: open.map(|(seq, _)| seq > seen).unwrap_or(false),
     }
 }
@@ -715,7 +736,7 @@ pub async fn mark_report_seen() {
         .await
         .into_iter()
         .filter(|m| m.peer == peer)
-        .filter_map(|m| request_days(&m).map(|_| m.seq))
+        .filter_map(|m| request_scope(&m).map(|_| m.seq))
         .last()
         .unwrap_or(0);
     if newest > 0 {
@@ -725,8 +746,26 @@ pub async fn mark_report_seen() {
 
 /// Отправить отчёт за `days` дней. Тот же путь, что у любого сообщения, — с
 /// очередью отправки и повторами.
-pub async fn send_report(days: u32) -> Result<LiveMessage, String> {
-    let (text, payload) = crate::services::curator_share::report_message(days).await?;
+/// Отправить отчёт куратору.
+///
+/// `Scope::New` — всё, что накопилось ПОСЛЕ последнего отчёта: от следующего дня
+/// за его границей по вчерашний. Границы нет (ещё ничего не отправляли) — это
+/// то же самое, что «все данные», и притворяться иначе незачем.
+pub async fn send_report(scope: datashare::report::Scope) -> Result<LiveMessage, String> {
+    use crate::services::curator_share;
+    let to = curator_share::report_through();
+    let from = match scope {
+        datashare::report::Scope::All => None,
+        datashare::report::Scope::New => report_status()
+            .await
+            .last_report_through
+            .and_then(|through| {
+                chrono::NaiveDate::parse_from_str(&through, "%Y-%m-%d")
+                    .ok()
+                    .map(|d| (d + chrono::Duration::days(1)).format("%Y-%m-%d").to_string())
+            }),
+    };
+    let (text, payload) = curator_share::report_message(from, to).await?;
     send_data_share(text, payload).await
 }
 

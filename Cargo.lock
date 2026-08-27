@@ -1546,6 +1546,7 @@ dependencies = [
  "chat-ui",
  "chrono",
  "console_error_panic_hook",
+ "datashare",
  "fast_qr",
  "futures",
  "gloo-net",

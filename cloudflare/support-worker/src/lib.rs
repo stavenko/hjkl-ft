@@ -1054,9 +1054,11 @@ async fn curator_read(mut req: Request, ctx: RouteContext<()>) -> Result<Respons
 /// Предел на период запроса. Куратор пишет число дней свободно, но отчёт
 /// собирается на устройстве человека, и «за всё время» — это не запрос, а
 /// выгрузка. Год покрывает любую осмысленную работу.
-const REQUEST_DAYS_MAX: i64 = 366;
+/// Что можно попросить. Дней в запросе больше нет: куратор не знает, за сколько
+/// дней у клиента накопилось, — он знает «пришлите новое» и «пришлите всё».
+const REQUEST_SCOPES: [&str; 2] = ["new", "all"];
 
-/// POST /curator/clients/:cid/request {days} — «пришлите данные за N дней».
+/// POST /curator/clients/:cid/request {scope} — «пришлите новое» или «пришлите всё».
 ///
 /// Запрос — это СООБЩЕНИЕ в треде (kind=data_request), а не флаг на сервере:
 /// приложение худеющего и так читает тред, и из него же считает состояние
@@ -1074,9 +1076,9 @@ async fn curator_request_data(mut req: Request, ctx: RouteContext<()>) -> Result
         Err(resp) => return Ok(resp),
     };
     let body: serde_json::Value = req.json().await?;
-    let days = body.get("days").and_then(|v| v.as_i64()).unwrap_or(1);
-    if days < 1 || days > REQUEST_DAYS_MAX {
-        return Ok(json_status(400, "days out of range"));
+    let scope = body.get("scope").and_then(|v| v.as_str()).unwrap_or("all");
+    if !REQUEST_SCOPES.contains(&scope) {
+        return Ok(json_status(400, "unknown scope"));
     }
     let client_id = body.get("client_id").and_then(|v| v.as_str()).unwrap_or("");
     if client_id.is_empty() {
@@ -1094,7 +1096,7 @@ async fn curator_request_data(mut req: Request, ctx: RouteContext<()>) -> Result
             "sender": "expert",
             "expert_id": sub,
             "kind": "data_request",
-            "payload": serde_json::json!({ "days": days }).to_string(),
+            "payload": serde_json::json!({ "scope": scope }).to_string(),
             "sender_name": name,
         }),
     )?;
@@ -1106,7 +1108,7 @@ async fn curator_request_data(mut req: Request, ctx: RouteContext<()>) -> Result
     if let Err(resp) = curator_do(
         &ctx.env,
         "/request-set",
-        &serde_json::json!({ "curator_id": sub, "id": cid, "days": days }),
+        &serde_json::json!({ "curator_id": sub, "id": cid, "scope": scope }),
     )
     .await
     {

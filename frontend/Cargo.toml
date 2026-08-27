@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 api-types = { path = "../common/api-types" }
 pwa-prompt = { path = "../common/pwa-prompt" }
 chat-ui = { path = "../common/chat-ui" }
+datashare = { path = "../common/datashare" }
 plankas = { path = "../common/plankas" }
 leptos = { version = "0.6", features = ["csr"] }
 leptos_router = { version = "0.6", features = ["csr"] }

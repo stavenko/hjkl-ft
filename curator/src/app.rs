@@ -417,8 +417,9 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
     let error = create_rw_signal(None::<String>);
     let busy = create_rw_signal(false);
     let copied = create_rw_signal(false);
-    let days = create_rw_signal(String::from("1"));
     let requested = create_rw_signal(false);
+    /// Модалка выбора: что именно попросить.
+    let asking = create_rw_signal(false);
     // Разобранный отчёт и открытый редактор планки.
     let parsed = create_rw_signal(None::<datashare::report::Report>);
     let parse_error = create_rw_signal(None::<String>);
@@ -465,19 +466,15 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
     };
     create_effect(move |_| reload());
 
-    let ask = move |_| {
+    let ask = move |scope: datashare::report::Scope| {
         if busy.get_untracked() {
             return;
         }
-        let n = days.get_untracked().trim().parse::<u32>().unwrap_or(1);
-        if n == 0 || n > 366 {
-            error.set(Some("Срок — от 1 до 366 дней".to_string()));
-            return;
-        }
         busy.set(true);
+        asking.set(false);
         error.set(None);
         spawn_local(async move {
-            match api::request_data(&cid.get_value(), n).await {
+            match api::request_data(&cid.get_value(), scope).await {
                 Ok(_) => {
                     requested.set(true);
                     reload();
@@ -566,18 +563,12 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
                     let r = report.get();
                     view! {
                         <div class="card" style="margin-bottom: 12px;">
-                            <div style="display: flex; gap: 8px; align-items: center;">
-                                <input class="field" type="number" min="1" max="366"
-                                    style="max-width: 92px;" attr:data-testid="request-days"
-                                    prop:value=move || days.get()
-                                    on:input=move |ev| days.set(event_target_value(&ev)) />
-                                <span class="sub" style="font-size: .8rem;">{move || t("client.request_days")}</span>
-                                <button class="btn btn--primary" style="margin-left: auto;"
-                                    attr:data-testid="request-data"
-                                    prop:disabled=move || busy.get() on:click=ask>
-                                    {move || t("client.request")}
-                                </button>
-                            </div>
+                            <button class="btn btn--primary btn--block"
+                                attr:data-testid="request-data"
+                                prop:disabled=move || busy.get()
+                                on:click=move |_| { error.set(None); asking.set(true); }>
+                                {move || t("client.request")}
+                            </button>
                             <p class="sub" style="margin-top: 10px; font-size: .82rem;">
                                 {match (&r.report_at, &r.request_at) {
                                     (_, Some(at)) => t("client.waiting")
@@ -590,6 +581,10 @@ fn ClientScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView
                             {move || requested.get().then(|| view! {
                                 <p class="sub" style="margin-top: 6px; color: var(--accent);"
                                     attr:data-testid="request-sent">{move || t("client.requested")}</p>
+                            })}
+                            {move || asking.get().then(|| view! {
+                                <AskChoice has_report=report.get().report.is_some()
+                                    ask=ask on_close=Callback::new(move |_| asking.set(false)) />
                             })}
                         </div>
 
@@ -952,7 +947,54 @@ fn ChatScreen(id: String, name: String, view: RwSignal<View>) -> impl IntoView {
     }
 }
 
-/// Короткая пометка о служебном сообщении. Куратору важно видеть, что директива
+/// Что попросить у клиента. Двумя кнопками, а не полем «за сколько дней».
+///
+/// Куратор не знает, сколько дней у клиента накопилось: он знает «я это уже
+/// видел» и «я не видел ничего». Число дней — перевод, который ему пришлось бы
+/// делать в уме, и ошибаться в нём.
+///
+/// Пока отчёта от клиента нет ни одного, «только новое» не показывается: новое
+/// относительно ЧЕГО — ответа нет, и выбор был бы ложным.
+#[component]
+fn AskChoice(
+    has_report: bool,
+    ask: impl Fn(datashare::report::Scope) + Copy + 'static,
+    on_close: Callback<()>,
+) -> impl IntoView {
+    use datashare::report::Scope;
+    view! {
+        <div style="position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.55); \
+                    display: flex; align-items: flex-end;"
+            attr:data-testid="request-choice"
+            on:click=move |_| on_close.call(())>
+            <div class="card" style="width: 100%; border-radius: 18px 18px 0 0; padding: 20px;"
+                on:click=|ev| ev.stop_propagation()>
+                <p style="font-weight: 640; font-size: 1.05rem;">{move || t("client.request_what")}</p>
+                {has_report.then(|| view! {
+                    <button class="btn btn--primary btn--block" style="margin-top: 16px;"
+                        attr:data-testid="request-new"
+                        on:click=move |_| ask(Scope::New)>
+                        {move || t("client.request_new")}
+                    </button>
+                    <p class="sub" style="margin-top: 6px; font-size: .8rem;">
+                        {move || t("client.request_new_hint")}
+                    </p>
+                })}
+                <button class=move || if has_report { "btn btn--block" } else { "btn btn--primary btn--block" }
+                    style="margin-top: 12px;" attr:data-testid="request-all"
+                    on:click=move |_| ask(Scope::All)>
+                    {move || t("client.request_all")}
+                </button>
+                <button class="btn btn--ghost btn--block" style="margin-top: 8px;"
+                    on:click=move |_| on_close.call(())>
+                    {move || t("clients.cancel")}
+                </button>
+            </div>
+        </div>
+    }
+}
+
+/// Короткая пометка о служебном сообщении./// Короткая пометка о служебном сообщении. Куратору важно видеть, что директива
 /// ушла; полный текст её человек прочтёт у себя и на своём языке.
 fn directive_note(m: &api::Message) -> String {
     match m.kind.as_str() {
@@ -1006,7 +1048,7 @@ mod sort_tests {
             bound,
             bound_at: None,
             last_report_at: at.map(str::to_string),
-            request_days: None,
+            request_scope: None,
             request_at: None,
         }
     }

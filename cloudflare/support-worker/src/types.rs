@@ -110,7 +110,7 @@ pub struct ClientRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_report_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub request_days: Option<u32>,
+    pub request_scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_at: Option<String>,
 }

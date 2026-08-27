@@ -18,7 +18,53 @@ use crate::services::{curator, support_chat};
 /// куратор срок не называл.
 const DEFAULT_DAYS: u32 = 1;
 
-/// Панель виджета: имя куратора, состояние, отправка и отвязка.
+/// Выбор, что отправить. Двумя кнопками, а не полем «за сколько дней».
+///
+/// Число дней человек не знает. Он знает «я уже присылал» и «я ещё ничего не
+/// присылал» — и перевести это в 17 не может ни он, ни куратор. Поэтому выбор из
+/// двух, и оба названы его словами.
+///
+/// Когда прошлого отчёта нет, «только новое» не показывается вовсе: отсчитывать
+/// не от чего, и предлагать выбор, у которого один осмысленный ответ, — значит
+/// заставлять человека думать впустую.
+#[component]
+fn SendChoice(
+    status: RwSignal<support_chat::ReportStatus>,
+    send: impl Fn(datashare::report::Scope) + Copy + 'static,
+) -> impl IntoView {
+    use datashare::report::Scope;
+    let sheet = "position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.45); \
+                 display: flex; align-items: flex-end;";
+    let card = "width: 100%; background: var(--bulma-scheme-main); border-radius: 18px 18px 0 0; \
+                padding: 20px;";
+    view! {
+        <div style=sheet attr:data-testid="report-choice">
+            <div style=card on:click=|ev| ev.stop_propagation()>
+                <p class="is-size-6 has-text-weight-semibold">{move || t("curator.report.what")}</p>
+                {move || status.get().last_report_through.map(|through| view! {
+                    <button class="button is-link is-fullwidth" style="margin-top: 16px;"
+                        attr:data-testid="report-send-new"
+                        on:click=move |_| send(Scope::New)>
+                        {move || t("curator.report.only_new")}
+                    </button>
+                    <p class="is-size-7 has-text-grey" style="margin-top: 6px;">
+                        {t("curator.report.only_new_hint").replace("{date}", &through)}
+                    </p>
+                })}
+                <button class="button is-fullwidth" style="margin-top: 12px;"
+                    attr:data-testid="report-send-all"
+                    on:click=move |_| send(Scope::All)>
+                    {move || t("curator.report.everything")}
+                </button>
+                <p class="is-size-7 has-text-grey" style="margin-top: 6px;">
+                    {move || t("curator.report.through_hint")}
+                </p>
+            </div>
+        </div>
+    }
+}
+
+/// Панель виджета: имя куратора, состояние, отправка и отвязка./// Панель виджета: имя куратора, состояние, отправка и отвязка.
 #[component]
 pub fn ReportPanel(
     /// Закрыть панель (после отвязки смотреть в ней больше не на что).
@@ -28,8 +74,9 @@ pub fn ReportPanel(
     let curator_name = create_rw_signal(String::new());
     let busy = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);
-    let days = create_rw_signal(DEFAULT_DAYS.to_string());
     let sent = create_rw_signal(false);
+    /// Модалка выбора: что именно отправить. `false` — панель как была.
+    let choosing = create_rw_signal(false);
 
     // Открытие панели гасит дребезжание — это и есть «увидел».
     create_effect(move |_| {
@@ -42,21 +89,15 @@ pub fn ReportPanel(
         });
     });
 
-    let send = move |requested: Option<u32>| {
+    let send = move |scope: datashare::report::Scope| {
         if busy.get_untracked() {
             return;
         }
-        let n = requested.unwrap_or_else(|| {
-            days.get_untracked().trim().parse::<u32>().unwrap_or(DEFAULT_DAYS)
-        });
-        if n == 0 || n > 366 {
-            error.set(Some(t("curator.report.bad_period").to_string()));
-            return;
-        }
         busy.set(true);
+        choosing.set(false);
         error.set(None);
         spawn_local(async move {
-            match support_chat::send_report(n).await {
+            match support_chat::send_report(scope).await {
                 Ok(_) => {
                     sent.set(true);
                     status.set(support_chat::report_status().await);
@@ -108,52 +149,22 @@ pub fn ReportPanel(
             </div>
 
             <div style=card>
-                {move || match status.get().request_days {
-                    // Куратор ждёт данные за названный им срок — одна кнопка, и
-                    // выбирать человеку нечего: он отвечает на конкретную просьбу.
-                    Some(d) => {
-                        let label = t("curator.report.send_requested")
-                            .replace("{days}", &d.to_string());
-                        view! {
-                            <p class="is-size-6" style="line-height: 1.5;">
-                                {t("curator.report.requested").replace("{days}", &d.to_string())}
-                            </p>
-                            <button class="button is-link is-fullwidth" style="margin-top: 14px;"
-                                attr:data-testid="report-send-requested"
-                                prop:disabled=move || busy.get()
-                                on:click=move |_| send(Some(d))>
-                                {label}
-                            </button>
-                        }.into_view()
-                    }
-                    // Запроса нет — человек отправляет по своей воле и сам
-                    // называет срок.
-                    None => view! {
-                        <p class="is-size-6" style="line-height: 1.5;">
-                            {move || match status.get().last_report_at {
-                                Some(at) => t("curator.report.last_sent")
-                                    .replace("{date}", at.get(0..10).unwrap_or("")),
-                                None => t("curator.report.never_sent").to_string(),
-                            }}
-                        </p>
-                        <div style="display: flex; gap: 8px; align-items: center; margin-top: 14px;">
-                            <input class="input" type="number" min="1" max="366"
-                                attr:data-testid="report-days"
-                                style="max-width: 110px;"
-                                prop:value=move || days.get()
-                                on:input=move |ev| days.set(event_target_value(&ev)) />
-                            <span class="is-size-7 has-text-grey">
-                                {move || t("curator.report.days_hint")}
-                            </span>
-                        </div>
-                        <button class="button is-link is-fullwidth" style="margin-top: 12px;"
-                            attr:data-testid="report-send"
-                            prop:disabled=move || busy.get()
-                            on:click=move |_| send(None)>
-                            {move || t("curator.report.send")}
-                        </button>
-                    }.into_view(),
-                }}
+                <p class="is-size-6" style="line-height: 1.5;">
+                    {move || match (status.get().request, status.get().last_report_at) {
+                        // Куратор ждёт данные — говорим об этом прямо: человек
+                        // отвечает на просьбу, а не действует по своей воле.
+                        (Some(_), _) => t("curator.report.requested").to_string(),
+                        (None, Some(at)) => t("curator.report.last_sent")
+                            .replace("{date}", at.get(0..10).unwrap_or("")),
+                        (None, None) => t("curator.report.never_sent").to_string(),
+                    }}
+                </p>
+                <button class="button is-link is-fullwidth" style="margin-top: 14px;"
+                    attr:data-testid="report-send"
+                    prop:disabled=move || busy.get()
+                    on:click=move |_| { error.set(None); choosing.set(true); }>
+                    {move || t("curator.report.send")}
+                </button>
                 {move || sent.get().then(|| view! {
                     <p class="is-size-7" style="margin-top: 10px; color: #1fa463;"
                         attr:data-testid="report-sent">
@@ -163,6 +174,7 @@ pub fn ReportPanel(
                 {move || error.get().map(|e| view! {
                     <p class="is-size-7 has-text-danger" style="margin-top: 10px;">{e}</p>
                 })}
+                {move || choosing.get().then(|| view! { <SendChoice status=status send=send /> })}
             </div>
 
             <div style=card>

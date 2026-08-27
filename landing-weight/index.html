@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light" />
 <meta name="theme-color" content="#F1F4F9" />
-<title>Калькулятор идеального веса — и сколько идти до него | re:Norma</title>
-<meta name="description" content="Считает идеальный вес по составу тела, а не по формуле из справочника, и показывает график: как прийти к нему на комфортном дефиците, не теряя мышцы." />
+<title>Калькулятор идеального веса | re:Norma</title>
+<meta name="description" content="Считает идеальный вес от безжировой массы — с поправкой на возраст и силовые тренировки — и показывает график пути к нему на комфортном дефиците." />
 <style>
   /* Golos Text — self-hosted (bundled woff2); no third-party font host. */
   @font-face{font-family:'Golos Text';font-style:normal;font-weight:400 900;font-display:swap;
@@ -35,44 +35,57 @@
   a{color:inherit;text-decoration:none}
   h1,h2,h3{margin:0;letter-spacing:-.01em;line-height:1.14}
   h1{font-size:30px;font-weight:600}
-  h2{font-size:23px;font-weight:600}
-  h3{font-size:18px;font-weight:600}
-  section{padding:30px 0}
-  .lead{color:var(--ink-2);font-size:16px;margin-top:12px}
+  h2{font-size:22px;font-weight:600}
+  section{padding:26px 0}
 
   .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
     font-weight:700;font-size:16px;padding:16px 22px;border-radius:var(--pill);
-    border:1.5px solid transparent;cursor:pointer;text-align:center}
+    border:1.5px solid transparent;cursor:pointer;text-align:center;font-family:inherit}
   .btn-primary{background:var(--accent);color:#04331F;box-shadow:var(--shadow-btn)}
+  .btn-ghost{background:var(--surface);color:var(--ink);border-color:var(--line)}
 
   .topbar{display:flex;align-items:center;gap:12px;padding:16px 0 6px}
   .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px}
   .brand .dot{width:26px;height:26px;border-radius:8px;background:var(--ink);position:relative;flex:0 0 auto}
   .brand .dot::after{content:"";position:absolute;inset:7px;border-radius:50%;background:var(--accent)}
-  .hero{padding-top:14px}
+  .hero{padding-top:14px;padding-bottom:16px}
   .hero h1 .hl{color:var(--accent-700)}
 
   .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);
-    padding:20px;box-shadow:var(--shadow)}
+    padding:22px 20px;box-shadow:var(--shadow)}
 
-  /* ── Форма ────────────────────────────────────────────────────────────── */
-  .tabs{display:flex;gap:8px}
+  /* ── Мастер ───────────────────────────────────────────────────────────── */
+  .dots{display:flex;gap:6px;justify-content:center;margin-bottom:18px}
+  .dots i{width:7px;height:7px;border-radius:50%;background:var(--line);display:block;
+    transition:background .2s,width .2s}
+  .dots i.on{background:var(--accent);width:22px;border-radius:4px}
+  .step{display:none}
+  .step.on{display:block}
+  .step .ask{font-size:17px;color:var(--ink-2)}
+  .step .ask b{color:var(--ink)}
+
+  .tabs{display:flex;gap:8px;margin-top:16px}
   .tabs button{flex:1 1 0;border:1.5px solid var(--line);background:var(--surface);color:var(--muted);
     font-family:inherit;font-weight:700;font-size:15px;padding:12px 10px;border-radius:var(--pill);cursor:pointer}
   .tabs button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#04331F}
+  /* Варианты в столбик — когда подпись длиннее пары слов. */
+  .opts{display:flex;flex-direction:column;gap:8px;margin-top:16px}
+  .opts button{width:100%;text-align:left;border:1.5px solid var(--line);background:var(--surface);
+    font-family:inherit;font-size:16px;font-weight:600;color:var(--ink);padding:14px 16px;
+    border-radius:var(--radius);cursor:pointer}
+  .opts button span{display:block;font-weight:400;font-size:14px;color:var(--muted);margin-top:2px}
+  .opts button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+
   .field{margin-top:18px}
   .field-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
   .field-top label{font-weight:700;font-size:15px}
-  .field-val{display:flex;align-items:baseline;gap:5px}
-  /* Поле должно выглядеть полем: в него можно вписать своё число, а не только
-     двигать ползунок. */
-  .field-val input{width:74px;font-family:inherit;font-weight:700;font-size:19px;color:var(--ink);
+  .field-val{display:flex;align-items:baseline;gap:6px}
+  .field-val input{width:84px;font-family:inherit;font-weight:700;font-size:20px;color:var(--ink);
     text-align:center;border:1.5px solid var(--line);border-radius:12px;background:var(--bg);
-    padding:7px 8px;transition:border-color .15s,box-shadow .15s}
+    padding:8px;transition:border-color .15s,box-shadow .15s}
   .field-val input:focus{outline:none;border-color:var(--accent);
     box-shadow:0 0 0 3px rgba(16,185,129,.18);background:var(--surface)}
-  /* Штатные стрелки number-поля не нужны: значение меняют ползунком, а стрелки
-     лезут поверх цифры и на телефоне всё равно непопадаемые. */
+  /* Штатные стрелки number-поля лезут поверх цифры и на телефоне непопадаемы. */
   .field-val input::-webkit-outer-spin-button,
   .field-val input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .field-val input[type=number]{-moz-appearance:textfield;appearance:textfield}
@@ -85,16 +98,20 @@
   input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;background:var(--accent);
     border:3px solid #fff;box-shadow:0 4px 12px -2px rgba(14,22,48,.35)}
 
+  [hidden]{display:none !important}
+  .nav{display:flex;gap:10px;margin-top:22px}
+  .nav .btn{flex:1 1 auto}
+  .nav .btn-back{flex:0 0 auto;width:54px;padding:16px 0;font-size:19px}
+
   /* ── Результат ────────────────────────────────────────────────────────── */
-  .result{margin-top:16px;text-align:center}
-  .result .big{font-size:44px;font-weight:700;letter-spacing:-.02em;line-height:1.05}
-  .result .big small{font-size:20px;font-weight:600;color:var(--muted);margin-left:4px}
-  .result .cap{color:var(--muted);font-size:14px;margin-top:4px}
+  .big{font-size:46px;font-weight:700;letter-spacing:-.02em;line-height:1.05;text-align:center}
+  .big small{font-size:20px;font-weight:600;color:var(--muted);margin-left:5px}
+  .cap{color:var(--muted);font-size:14px;text-align:center;margin-top:4px}
   .facts{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;justify-content:center}
   .fact{background:var(--accent-soft);color:var(--accent-ink);border-radius:var(--pill);
     padding:7px 13px;font-size:13.5px;font-weight:600}
   .fact i{font-style:normal;opacity:.75;font-weight:500}
-  .chart{margin-top:18px}
+  .chart{margin-top:16px}
   .chart svg{width:100%;height:auto;display:block;overflow:visible}
   .legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:10px;
     color:var(--muted);font-size:13px}
@@ -102,19 +119,16 @@
   .legend .l-band{height:10px;border-radius:3px;background:rgba(16,185,129,.22)}
   .legend .l-line{background:var(--accent-700)}
   .legend .l-goal{background:var(--ink);opacity:.45}
+  .verdict{color:var(--ink-2);font-size:16px;text-align:center;margin-top:14px}
+  .verdict b{color:var(--ink)}
 
-  .list{list-style:none;padding:0;margin:16px 0 0;display:flex;flex-direction:column;gap:12px}
-  .list li{position:relative;display:flex;gap:12px;align-items:flex-start;font-size:16px;color:var(--ink-2)}
-  .list li b{color:var(--ink);font-weight:700}
-  .check{flex:0 0 auto;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);
-    display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;margin-top:1px}
-
-  .cta-band{background:var(--ink);color:#fff;border-radius:var(--radius-lg);padding:28px 22px;text-align:center}
-  .cta-band h2{color:#fff}
+  .cta-band{background:var(--ink);color:#fff;border-radius:var(--radius-lg);padding:26px 22px;
+    text-align:center;margin-top:18px}
+  .cta-band h2{color:#fff;font-size:21px}
   .cta-band p{color:#C9D2E6;margin-top:10px;font-size:15.5px}
   .cta-band .btn{margin-top:18px}
 
-  footer{padding:26px 0 8px;text-align:center;border-top:1px solid var(--line);margin-top:10px}
+  footer{padding:26px 0 8px;text-align:center;border-top:1px solid var(--line);margin-top:24px}
   .freq{color:var(--muted);font-size:13px}
   .flinks{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:10px;font-size:14px;font-weight:600}
   .flinks a{color:var(--accent-700)}
@@ -128,62 +142,93 @@
     <div class="brand"><span class="dot"></span>re:Norma</div>
   </div>
 
-  <!-- 1 · Заголовок -->
   <section class="hero">
     <h1>Калькулятор <span class="hl">идеального веса</span></h1>
   </section>
 
-  <!-- 2 · Калькулятор -->
   <section style="padding-top:0">
     <div class="card">
-      <div class="tabs" role="group" aria-label="Пол">
-        <button type="button" data-sex="female" aria-pressed="true">Женщина</button>
-        <button type="button" data-sex="male" aria-pressed="false">Мужчина</button>
-      </div>
+      <div class="dots" id="dots"></div>
 
-      <div class="field">
-        <div class="field-top">
-          <label for="age">Возраст</label>
-          <span class="field-val"><input id="age" type="number" min="18" max="90" step="1" value="35" inputmode="numeric" /><span>лет</span></span>
+      <!-- 1 · Пол -->
+      <div class="step on" data-step="0">
+        <p class="ask">Мужчины и женщины при одном росте несут <b>разную мышечную массу</b> — и здоровая доля жира у них тоже разная.</p>
+        <div class="opts" role="group" aria-label="Пол">
+          <button type="button" data-sex="female" aria-pressed="true">Женщина</button>
+          <button type="button" data-sex="male" aria-pressed="false">Мужчина</button>
         </div>
-        <input id="ageR" type="range" min="18" max="90" step="1" value="35" aria-label="Возраст, лет" />
       </div>
 
-      <div class="field">
-        <div class="field-top">
-          <label for="height">Рост</label>
-          <span class="field-val"><input id="height" type="number" min="140" max="210" step="1" value="165" inputmode="numeric" /><span>см</span></span>
+      <!-- 2 · Рост -->
+      <div class="step" data-step="1">
+        <p class="ask">Для расчёта идеального веса нужен ваш <b>рост</b>. Чем человек выше, тем больше он должен весить.</p>
+        <div class="field">
+          <div class="field-top">
+            <label for="height">Рост</label>
+            <span class="field-val"><input id="height" type="number" min="140" max="210" step="1" value="170" inputmode="numeric" /><span>см</span></span>
+          </div>
+          <input id="heightR" type="range" min="140" max="210" step="1" value="170" aria-label="Рост, см" />
         </div>
-        <input id="heightR" type="range" min="140" max="210" step="1" value="165" aria-label="Рост, см" />
       </div>
 
-      <div class="field">
-        <div class="field-top">
-          <label for="weight">Вес сейчас</label>
-          <span class="field-val"><input id="weight" type="number" min="40" max="200" step="1" value="82" inputmode="numeric" /><span>кг</span></span>
+      <!-- 3 · Возраст -->
+      <div class="step" data-step="2">
+        <p class="ask">С возрастом мы теряем мышцы, а значит, наш <b>безжировой вес</b> будет уменьшаться.</p>
+        <div class="field">
+          <div class="field-top">
+            <label for="age">Возраст</label>
+            <span class="field-val"><input id="age" type="number" min="18" max="90" step="1" value="35" inputmode="numeric" /><span>лет</span></span>
+          </div>
+          <input id="ageR" type="range" min="18" max="90" step="1" value="35" aria-label="Возраст, лет" />
         </div>
-        <input id="weightR" type="range" min="40" max="200" step="1" value="82" aria-label="Вес, кг" />
+        <p class="cap" id="ageNote" style="margin-top:14px"></p>
       </div>
 
-      <div class="result">
+      <!-- 4 · Силовые -->
+      <div class="step" data-step="3">
+        <p class="ask">Если вы тренируетесь на гипертрофию, ваш идеальный <b>безжировой вес</b> будет увеличиваться.</p>
+        <div class="opts" role="group" aria-label="Силовые тренировки">
+          <button type="button" data-train="0" aria-pressed="true">Не тренируюсь<span>или только ходьба и кардио</span></button>
+          <button type="button" data-train="1" aria-pressed="false">Тренируюсь до трёх лет<span>штанга или тренажёры, регулярно</span></button>
+          <button type="button" data-train="2" aria-pressed="false">Тренируюсь много лет<span>заметная мышечная масса</span></button>
+        </div>
+      </div>
+
+      <!-- 5 · Идеальный вес + текущий -->
+      <div class="step" data-step="4">
         <div class="big" id="ideal">—</div>
-        <div class="cap" id="idealCap">идеальный вес</div>
+        <div class="cap">ваш идеальный вес</div>
         <div class="facts" id="facts"></div>
+        <p class="ask" style="margin-top:22px">А сколько вы <b>сейчас</b> весите?</p>
+        <div class="field">
+          <div class="field-top">
+            <label for="weight">Вес сейчас</label>
+            <span class="field-val"><input id="weight" type="number" min="40" max="220" step="1" value="75" inputmode="numeric" /><span>кг</span></span>
+          </div>
+          <input id="weightR" type="range" min="40" max="220" step="1" value="75" aria-label="Вес, кг" />
+        </div>
       </div>
 
-      <div class="chart" id="chart"></div>
-      <div class="legend" id="legend" hidden>
-        <span><i class="l-band"></i>комфортный коридор</span>
-        <span><i class="l-line"></i>ожидаемый путь</span>
-        <span><i class="l-goal"></i>идеальный вес</span>
+      <!-- 6 · График -->
+      <div class="step" data-step="5">
+        <p class="ask" id="way"></p>
+        <div class="chart" id="chart"></div>
+        <div class="legend" id="legend">
+          <span><i class="l-band"></i>комфортный коридор</span>
+          <span><i class="l-line"></i>ожидаемый путь</span>
+          <span><i class="l-goal"></i>идеальный вес</span>
+        </div>
+        <p class="verdict" id="verdict"></p>
+        <div class="nav"><button type="button" class="btn btn-ghost" id="back2">← Изменить данные</button></div>
       </div>
-      <p class="lead" id="verdict" style="text-align:center"></p>
+
+      <div class="nav" id="nav">
+        <button type="button" class="btn btn-ghost btn-back" id="back" aria-label="Назад">←</button>
+        <button type="button" class="btn btn-primary" id="next">Далее</button>
+      </div>
     </div>
-  </section>
 
-  <!-- 3 · CTA -->
-  <section style="padding-top:6px">
-    <div class="cta-band">
+    <div class="cta-band" id="cta" hidden>
       <h2>Вы можете начать движение к идеальному телу прямо сейчас</h2>
       <p>График рисует то, что произойдёт, если держать дефицит. Держать его помогает <i>re:Norma</i>: она считает вашу планку по тому, как вы едите на самом деле, и каждую неделю поправляет её по весу.</p>
       <a class="btn btn-primary" href="https://ig0.renorma.app/">Перейти в re:Norma →</a>
@@ -204,127 +249,126 @@
 <script>
 // ── РАСЧЁТ ──────────────────────────────────────────────────────────────────
 //
-// Идеальный вес считается НЕ по росту, а от состава тела: сколько в человеке
-// безжировой массы (мышцы, кости, органы) плюс здоровая доля жира сверху.
-// Формула жира — Deurenberg (1991), та же, что в самом приложении.
+// Идеальный вес показывается РАНЬШЕ, чем спрошен текущий: мастер выдаёт его на
+// четвёртом шаге, зная только рост, возраст, пол и силовые. Поэтому безжировая
+// масса берётся не из формулы процента жира (той нужен вес), а из ИНДЕКСА
+// безжировой массы FFMI = FFM / рост²: у нетренированных он держится около 19 у
+// мужчин и 15,5 у женщин почти независимо от полноты.
 //
-// Темп снижения — тот же коридор, что в re:Norma (`local.rs`): 0,3–0,7 % массы
-// тела в неделю. Медленнее не отличить от колебаний воды, быстрее — уходит
-// мышца.
+// Две поправки к нему:
+//   • ВОЗРАСТ. После тридцати мышцы уходят сами: 0,3–0,5 % в год в 30–50 лет,
+//     около 1 % в 50–70, 1,5–2 % после семидесяти.
+//   • СИЛОВЫЕ. Гипертрофия поднимает FFMI: +1,5 за первые годы регулярных
+//     тренировок, +3 у тех, кто занимается давно. Натуральный потолок — около 25
+//     у мужчин, за ним уже фармакология, и такие случаи мы не считаем.
 //
-// Мышцы убывают и сами по себе, с возрастом: 0,3–0,5 % в год в 30–50 лет,
-// около 1 % в 50–70, 1,5–2 % после семидесяти. Поэтому цель на графике не
-// горизонтальная линия, а медленно снижающаяся.
+// Идеальный вес = безжировая масса + здоровая доля жира; норма жира растёт с
+// возрастом — это физиология, а не поблажка.
+//
+// Темп снижения — тот же коридор, что в самой re:Norma (`local.rs`): 0,3–0,7 %
+// массы тела в неделю. Медленнее не отличить от колебаний воды, быстрее — уходит
+// мышца, то есть та самая безжировая масса, от которой мы считали цель.
 var W = (function () {
-  var LOSS_MIN = 0.003, LOSS_MAX = 0.007;      // доля веса в неделю
-  var LOSS_MID = (LOSS_MIN + LOSS_MAX) / 2;
-  var BMI_MIN = 18.5, BMI_MAX = 24.9;          // здоровый диапазон
+  var LOSS_MIN = 0.003, LOSS_MAX = 0.007, LOSS_MID = 0.005;
+  var FFMI_BASE = { male: 19.0, female: 15.5 };   // нетренированный ориентир
+  var FFMI_TRAIN = [0, 1.5, 3.0];                  // прибавка за силовые
+  var AGE_PEAK = 30;                               // до тридцати мышцы не убывают
 
-  /// Процент жира по Deurenberg: BF% = 1.2·BMI + 0.23·возраст − 10.8·(муж) − 5.4.
-  function bodyFatPct(w, h, age, sex) {
-    var bmi = w / Math.pow(h / 100, 2);
-    var pct = 1.2 * bmi + 0.23 * age - 10.8 * (sex === "male" ? 1 : 0) - 5.4;
-    return Math.min(60, Math.max(3, pct));
-  }
-  function fatFreeMass(w, h, age, sex) { return w * (1 - bodyFatPct(w, h, age, sex) / 100); }
-
-  /// Здоровая доля жира: с возрастом норма растёт — это физиология, а не поблажка.
-  function targetFatPct(age, sex) {
-    if (sex === "male") return age < 40 ? 15 : age < 60 ? 18 : 20;
-    return age < 40 ? 24 : age < 60 ? 27 : 29;
-  }
-
-  /// Возрастная потеря мышечной массы, доля в год.
   function muscleLossPerYear(age) {
-    if (age < 30) return 0;
+    if (age < AGE_PEAK) return 0;
     if (age < 50) return 0.004;   // 0,3–0,5 %
     if (age < 70) return 0.01;    // около 1 %
     return 0.0175;                // 1,5–2 %
   }
-
-  /// Идеальный вес: безжировая масса + здоровая доля жира, зажатый в здоровый ИМТ.
-  /// Без зажима формула у очень полных даёт цель за пределами нормы: жир там
-  /// оценивается по ИМТ, и «безжировая масса» вместе с ним завышается.
-  function ideal(ffm, h, age, sex) {
-    var raw = ffm / (1 - targetFatPct(age, sex) / 100);
-    var lo = BMI_MIN * Math.pow(h / 100, 2), hi = BMI_MAX * Math.pow(h / 100, 2);
-    return Math.min(hi, Math.max(lo, raw));
+  /// Доля мышц, оставшаяся к возрасту `age` от пика в тридцать лет.
+  function ageFactor(age) {
+    var f = 1;
+    for (var y = AGE_PEAK; y < age; y++) f *= 1 - muscleLossPerYear(y);
+    return f;
   }
-
-  /// Путь к цели по неделям. Вес падает на `rate` в неделю; цель уходит вниз
-  /// вместе с мышцами. Останавливаемся, когда вес догнал цель (или пять лет —
-  /// дальше это уже не план, а гадание).
-  function path(w0, h, age, sex, rate) {
-    var ffm0 = fatFreeMass(w0, h, age, sex);
+  /// Здоровая доля жира: с возрастом её норма растёт.
+  function targetFatPct(age, sex) {
+    if (sex === "male") return age < 40 ? 16 : age < 60 ? 19 : 21;
+    return age < 40 ? 27 : age < 60 ? 29 : 31;
+  }
+  function fatFreeMass(h, age, sex, train) {
+    return (FFMI_BASE[sex] + FFMI_TRAIN[train]) * ageFactor(age) * Math.pow(h / 100, 2);
+  }
+  /// Идеальный вес — безжировая масса плюс здоровая доля жира, но не ниже
+  /// разумного ИМТ. Без нижней границы саркопения уводит цель в дистрофию: у
+  /// женщины 165 см в 75 лет формула даёт 42 кг, а у пожилых недовес опаснее
+  /// лишнего веса, и рекомендуемый ИМТ там как раз ВЫШЕ обычного.
+  var BMI_FLOOR_OLD = 20, BMI_FLOOR = 18.5, BMI_CEIL = 28;
+  function ideal(h, age, sex, train) {
+    var raw = fatFreeMass(h, age, sex, train) / (1 - targetFatPct(age, sex) / 100);
+    var h2 = Math.pow(h / 100, 2);
+    var floor = (age >= 60 ? BMI_FLOOR_OLD : BMI_FLOOR) * h2;
+    return Math.min(BMI_CEIL * h2, Math.max(floor, raw));
+  }
+  /// Процент жира при ТЕКУЩЕМ весе — Deurenberg (1991), как в приложении.
+  function bodyFatPct(w, h, age, sex) {
+    var bmi = w / Math.pow(h / 100, 2);
+    return Math.min(60, Math.max(3, 1.2 * bmi + 0.23 * age - 10.8 * (sex === "male" ? 1 : 0) - 5.4));
+  }
+  /// Путь к цели по неделям: вес падает на `rate` в неделю, цель уходит вниз
+  /// вместе с мышцами. Пять лет — предел, дальше это уже не план, а гадание.
+  function path(w0, h, age, sex, train, rate) {
     var pts = [], w = w0, weeks = 0, MAX = 260;
     for (; weeks <= MAX; weeks++) {
-      var years = weeks / 52;
-      var ffm = ffm0 * Math.pow(1 - muscleLossPerYear(age + years), years);
-      var goal = ideal(ffm, h, age + years, sex);
+      var goal = ideal(h, age + weeks / 52, sex, train);
       pts.push({ week: weeks, weight: w, goal: goal });
       if (w <= goal) break;
       w = w * (1 - rate);
     }
-    return { points: pts, weeks: Math.min(weeks, MAX), reached: w <= pts[pts.length - 1].goal };
+    return { points: pts, weeks: Math.min(weeks, MAX) };
   }
-
-  function calc(input) {
-    var w = input.weight, h = input.height, age = input.age, sex = input.sex;
-    var ffm = fatFreeMass(w, h, age, sex);
-    var goal = ideal(ffm, h, age, sex);
-    var mid = path(w, h, age, sex, LOSS_MID);
+  function calc(i) {
+    var goal = ideal(i.height, i.age, i.sex, i.train);
     return {
-      bodyFat: bodyFatPct(w, h, age, sex),
-      fatFree: ffm,
       ideal: goal,
-      bmi: w / Math.pow(h / 100, 2),
-      healthy: { lo: BMI_MIN * Math.pow(h / 100, 2), hi: BMI_MAX * Math.pow(h / 100, 2) },
-      toLose: Math.max(0, w - goal),
-      already: w <= goal,
-      weeks: mid.weeks,
-      fast: path(w, h, age, sex, LOSS_MAX),
-      slow: path(w, h, age, sex, LOSS_MIN),
-      mid: mid,
-      muscleLoss: muscleLossPerYear(age),
+      fatFree: fatFreeMass(i.height, i.age, i.sex, i.train),
+      idealBmi: goal / Math.pow(i.height / 100, 2),
+      targetFat: targetFatPct(i.age, i.sex),
+      muscleLoss: muscleLossPerYear(i.age),
+      bodyFat: bodyFatPct(i.weight, i.height, i.age, i.sex),
+      toLose: Math.max(0, i.weight - goal),
+      // Килограмм разницы — это вода, а не лишний вес: гнать за ним незачем.
+      already: i.weight <= goal + 1,
+      mid: path(i.weight, i.height, i.age, i.sex, i.train, LOSS_MID),
+      fast: path(i.weight, i.height, i.age, i.sex, i.train, LOSS_MAX),
+      slow: path(i.weight, i.height, i.age, i.sex, i.train, LOSS_MIN),
     };
   }
-  return { calc: calc, bodyFatPct: bodyFatPct, ideal: ideal, path: path,
+  return { calc: calc, ideal: ideal, fatFreeMass: fatFreeMass, bodyFatPct: bodyFatPct,
+           muscleLossPerYear: muscleLossPerYear, ageFactor: ageFactor,
            LOSS_MIN: LOSS_MIN, LOSS_MAX: LOSS_MAX };
 })();
 
 // ── ГРАФИК ──────────────────────────────────────────────────────────────────
-//
-// Рисуется вручную в SVG: подключать библиотеку ради двух кривых незачем, а
-// сторонние хосты на страницу мы не пускаем.
+// Рисуется вручную в SVG: библиотека ради двух кривых не нужна, а сторонние
+// хосты на страницу мы не пускаем.
 function drawChart(r) {
-  var W_ = 400, H = 210, L = 34, R = 8, T = 10, B = 26;
+  var W_ = 400, H = 200, L = 34, R = 8, T = 10, B = 26;
   var weeks = Math.max(r.slow.weeks, 8);
   var wMax = r.mid.points[0].weight, wMin = r.fast.points[r.fast.points.length - 1].goal;
   var pad = Math.max(1.5, (wMax - wMin) * 0.12);
   var yTop = wMax + pad, yBot = wMin - pad;
-
-  var x = function (week) { return L + (W_ - L - R) * week / weeks; };
+  var x = function (wk) { return L + (W_ - L - R) * wk / weeks; };
   var y = function (kg) { return T + (H - T - B) * (yTop - kg) / (yTop - yBot); };
   var line = function (pts, key) {
     return pts.map(function (p, i) { return (i ? "L" : "M") + x(p.week).toFixed(1) + " " + y(p[key]).toFixed(1); }).join(" ");
   };
-  // Полоса между быстрым и медленным краем коридора.
   var band = line(r.fast.points, "weight") + " "
     + r.slow.points.slice().reverse().map(function (p) { return "L" + x(p.week).toFixed(1) + " " + y(p.weight).toFixed(1); }).join(" ") + " Z";
 
-  // Подписи по оси X — в месяцах, не чаще четырёх штук.
-  var months = Math.ceil(weeks / 4.345);
-  var stepM = Math.max(1, Math.ceil(months / 4));
-  var ticks = [];
+  var months = Math.ceil(weeks / 4.345), stepM = Math.max(1, Math.ceil(months / 4)), ticks = [];
   for (var m = 0; m <= months; m += stepM) ticks.push(m);
-
   var gridKg = [], kgStep = (yTop - yBot) > 30 ? 10 : 5;
   for (var k = Math.ceil(yBot / kgStep) * kgStep; k <= yTop; k += kgStep) gridKg.push(k);
 
   var svg = '<svg viewBox="0 0 ' + W_ + ' ' + H + '" role="img" aria-label="График снижения веса">';
   gridKg.forEach(function (k) {
-    svg += '<line x1="' + L + '" y1="' + y(k).toFixed(1) + '" x2="' + (W_ - R) + '" y2="' + y(k).toFixed(1)
-      + '" stroke="#E4E8F0" stroke-width="1"/>'
+    svg += '<line x1="' + L + '" y1="' + y(k).toFixed(1) + '" x2="' + (W_ - R) + '" y2="' + y(k).toFixed(1) + '" stroke="#E4E8F0"/>'
       + '<text x="' + (L - 6) + '" y="' + (y(k) + 4).toFixed(1) + '" text-anchor="end" font-size="11" fill="#6B7491">' + k + '</text>';
   });
   ticks.forEach(function (m) {
@@ -333,28 +377,22 @@ function drawChart(r) {
       + (m === 0 ? "сейчас" : m + " мес") + '</text>';
   });
   svg += '<path d="' + band + '" fill="rgba(16,185,129,.22)"/>';
-  // Цель рисуем по САМОМУ ДЛИННОМУ пути: иначе пунктир обрывается там, где
-  // средний путь дошёл, и график выглядит недорисованным.
+  // Цель — по самому длинному пути, иначе пунктир обрывается на полуслове.
   svg += '<path d="' + line(r.slow.points, "goal") + '" fill="none" stroke="#0E1630" stroke-opacity=".45" stroke-width="2" stroke-dasharray="5 4"/>';
   svg += '<path d="' + line(r.mid.points, "weight") + '" fill="none" stroke="#059669" stroke-width="3" stroke-linecap="round"/>';
   var last = r.mid.points[r.mid.points.length - 1];
   svg += '<circle cx="' + x(last.week).toFixed(1) + '" cy="' + y(last.weight).toFixed(1) + '" r="5" fill="#059669" stroke="#fff" stroke-width="2.5"/>';
   svg += '<circle cx="' + x(0) + '" cy="' + y(r.mid.points[0].weight).toFixed(1) + '" r="4" fill="#0E1630"/>';
-  svg += "</svg>";
-  return svg;
+  return svg + "</svg>";
 }
 
-// ── СТРАНИЦА ────────────────────────────────────────────────────────────────
+// ── МАСТЕР ──────────────────────────────────────────────────────────────────
 (function () {
-  var sex = "female";
-  var els = {
-    age: document.getElementById("age"), ageR: document.getElementById("ageR"),
-    height: document.getElementById("height"), heightR: document.getElementById("heightR"),
-    weight: document.getElementById("weight"), weightR: document.getElementById("weightR"),
-    ideal: document.getElementById("ideal"), idealCap: document.getElementById("idealCap"),
-    facts: document.getElementById("facts"), chart: document.getElementById("chart"),
-    legend: document.getElementById("legend"), verdict: document.getElementById("verdict"),
-  };
+  var STEPS = 6;
+  var state = { sex: "female", height: 170, age: 35, train: 0, weight: 75 };
+  var step = 0;
+  var $ = function (id) { return document.getElementById(id); };
+  var steps = document.querySelectorAll(".step");
 
   function plural(n, one, few, many) {
     var d = n % 10, dd = n % 100;
@@ -373,15 +411,6 @@ function drawChart(r) {
     var f = UNITS[kind][gen ? "gen" : "nom"];
     return n + " " + plural(n, f[0], f[1], f[2]);
   }
-  /// «от 7 до 17 месяцев», а не «от 7 месяцев до 17 месяцев»: если единица у
-  /// краёв одна, во втором упоминании она лишняя.
-  function range_(a, b) {
-    var ta = term(a, true), tb = term(b, true);
-    var ua = ta.replace(/^\d+\s/, ""), ub = tb.replace(/^\d+\s/, "");
-    if (ua === ub) return "от " + ta.replace(/\s.*$/, "") + " до " + tb;
-    return "от " + ta + " до " + tb;
-  }
-
   function term(weeks, gen) {
     if (weeks < 9) return unit(weeks, "week", gen);
     var m = Math.round(weeks / 4.345);
@@ -389,58 +418,100 @@ function drawChart(r) {
     var y = Math.floor(m / 12), rest = m % 12;
     return unit(y, "year", gen) + (rest ? " и " + unit(rest, "month", gen) : "");
   }
+  /// «от 7 до 17 месяцев», а не «от 7 месяцев до 17 месяцев».
+  function range_(a, b) {
+    var ta = term(a, true), tb = term(b, true);
+    if (ta.replace(/^\d+\s/, "") === tb.replace(/^\d+\s/, "")) return "от " + ta.replace(/\s.*$/, "") + " до " + tb;
+    return "от " + ta + " до " + tb;
+  }
+  var nf = function (x, d) { return x.toFixed(d === undefined ? 1 : d).replace(".", ","); };
 
   function render() {
-    var input = {
-      sex: sex,
-      age: Math.min(90, Math.max(18, Number(els.age.value) || 18)),
-      height: Math.min(210, Math.max(140, Number(els.height.value) || 140)),
-      weight: Math.min(200, Math.max(40, Number(els.weight.value) || 40)),
-    };
-    var r = W.calc(input);
+    var dots = "";
+    for (var i = 0; i < STEPS; i++) dots += '<i class="' + (i === step ? "on" : "") + '"></i>';
+    $("dots").innerHTML = dots;
+    steps.forEach(function (el) { el.classList.toggle("on", Number(el.dataset.step) === step); });
+    $("back").style.visibility = step === 0 ? "hidden" : "visible";
+    $("next").textContent = step === STEPS - 2 ? "Показать график" : "Далее";
+    $("nav").hidden = step === STEPS - 1;
+    $("cta").hidden = step !== STEPS - 1;
 
-    els.ideal.innerHTML = r.ideal.toFixed(1).replace(".", ",") + '<small>кг</small>';
-    els.facts.innerHTML = ""
-      + '<span class="fact">Жира сейчас <i>' + r.bodyFat.toFixed(0) + ' %</i></span>'
-      + '<span class="fact">Без жира <i>' + r.fatFree.toFixed(0) + ' кг</i></span>'
-      + '<span class="fact">Здоровый вес <i>' + r.healthy.lo.toFixed(0) + '–' + r.healthy.hi.toFixed(0) + ' кг</i></span>';
+    var r = W.calc(state);
 
-    if (r.already || r.toLose < 2) {
-      els.idealCap.textContent = "идеальный вес — вы уже в нём";
-      els.chart.innerHTML = "";
-      els.legend.hidden = true;
-      els.verdict.textContent = "Ваш вес уже в здоровом диапазоне. Дальше важнее не цифра на весах, а состав тела: "
-        + (r.muscleLoss > 0
-            ? "мышцы в вашем возрасте уходят сами по " + (r.muscleLoss * 100).toFixed(1).replace(".", ",")
-              + " % в год, и удерживают их только белок и движение."
-            : "после тридцати мышцы начнут уходить сами, и удерживать их будут только белок и движение.");
-      return;
+    if (step === 2) {
+      $("ageNote").textContent = state.age <= 30
+        ? "До тридцати мышечная масса ещё не убывает."
+        : "К " + state.age + " годам от пика формы уходит около "
+          + nf((1 - W.ageFactor(state.age)) * 100, 0) + " % мышц — если ничего с этим не делать.";
     }
+    if (step === 4) {
+      $("ideal").innerHTML = nf(r.ideal) + "<small>кг</small>";
+      $("facts").innerHTML = ""
+        + '<span class="fact">Без жира <i>' + nf(r.fatFree, 0) + ' кг</i></span>'
+        + '<span class="fact">Здоровая доля жира <i>' + r.targetFat + ' %</i></span>'
+        + '<span class="fact">ИМТ <i>' + nf(r.idealBmi) + '</i></span>';
+    }
+    if (step === 5) {
+      if (r.already) {
+        $("way").innerHTML = "Вы уже <b>в своём идеальном весе</b>.";
+        $("chart").innerHTML = "";
+        $("legend").hidden = true;
+        $("verdict").innerHTML = "Дальше важнее не цифра на весах, а состав тела: "
+          + (r.muscleLoss > 0
+              ? "мышцы в вашем возрасте уходят сами по " + nf(r.muscleLoss * 100) + " % в год, и удерживают их только белок и движение."
+              : "после тридцати мышцы начнут уходить сами, и удерживать их будут только белок и движение.");
+      } else {
+        $("way").innerHTML = "Вот как вы можете прийти к идеальному весу — с тем самым дефицитом, "
+          + "на котором уходит жир, а не мышцы.";
+        $("chart").innerHTML = drawChart(r);
+        $("legend").hidden = false;
+        $("verdict").innerHTML = "Сбросить: <b>" + nf(r.toLose) + " кг</b>. На комфортном темпе это примерно <b>"
+          + term(r.mid.weeks) + "</b> — " + range_(r.fast.weeks, r.slow.weeks) + ", смотря как пойдёт.";
+      }
+    }
+  }
 
-    els.idealCap.textContent = "идеальный вес";
-    els.chart.innerHTML = drawChart(r);
-    els.legend.hidden = false;
-    els.verdict.innerHTML = "Сбросить: <b>" + r.toLose.toFixed(1).replace(".", ",") + " кг</b>. "
-      + "На комфортном темпе это примерно <b>" + term(r.mid.weeks) + "</b> — "
-      + range_(r.fast.weeks, r.slow.weeks) + ", смотря как пойдёт.";
+  function go(to) {
+    step = Math.min(STEPS - 1, Math.max(0, to));
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   // Поле и ползунок — две ручки одного значения.
-  [["age", "ageR"], ["height", "heightR"], ["weight", "weightR"]].forEach(function (pair) {
-    var a = els[pair[0]], b = els[pair[1]];
-    a.addEventListener("input", function () { b.value = a.value; render(); });
-    b.addEventListener("input", function () { a.value = b.value; render(); });
-    a.addEventListener("blur", function () { render(); });
+  [["height", "heightR"], ["age", "ageR"], ["weight", "weightR"]].forEach(function (pair) {
+    var a = $(pair[0]), b = $(pair[1]);
+    var apply = function (v) {
+      var n = Number(v);
+      if (!isFinite(n) || v === "") return;
+      state[pair[0]] = Math.min(Number(a.max), Math.max(Number(a.min), n));
+      render();
+    };
+    a.addEventListener("input", function () { b.value = a.value; apply(a.value); });
+    b.addEventListener("input", function () { a.value = b.value; apply(b.value); });
+    // Пустое или выходящее за границы поле возвращаем к принятому значению.
+    a.addEventListener("blur", function () { a.value = state[pair[0]]; b.value = state[pair[0]]; render(); });
   });
   document.querySelectorAll("[data-sex]").forEach(function (btn) {
     btn.addEventListener("click", function () {
-      sex = btn.dataset.sex;
+      state.sex = btn.dataset.sex;
       document.querySelectorAll("[data-sex]").forEach(function (b) {
         b.setAttribute("aria-pressed", b === btn ? "true" : "false");
       });
       render();
     });
   });
+  document.querySelectorAll("[data-train]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      state.train = Number(btn.dataset.train);
+      document.querySelectorAll("[data-train]").forEach(function (b) {
+        b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+      });
+      render();
+    });
+  });
+  $("next").addEventListener("click", function () { go(step + 1); });
+  $("back").addEventListener("click", function () { go(step - 1); });
+  $("back2").addEventListener("click", function () { go(0); });
   render();
 })();
 </script>

@@ -332,6 +332,18 @@ var W = (function () {
     var bmi = w / Math.pow(h / 100, 2);
     return Math.min(60, Math.max(3, 1.2 * bmi + 0.23 * age - 10.8 * (sex === "male" ? 1 : 0) - 5.4));
   }
+  /// Какая доля потерянного веса приходится на ЖИР, а не на мышцы и воду.
+  ///
+  /// Правило Форбса: чем больше у человека жировых запасов, тем охотнее тело
+  /// берёт энергию из них, а не из безжировой массы. Доля жира = FM / (FM + C),
+  /// где C ≈ 10,4 кг. Белок и силовые удерживают мышцы примерно вдвое лучше,
+  /// поэтому у тренирующихся константа вдвое меньше — и доля жира выше.
+  var FORBES_C = 10.4;
+  function fatShare(fatMass, train) {
+    var c = FORBES_C / (train >= 1 ? 2 : 1);
+    return fatMass / (fatMass + c);
+  }
+
   /// Безопасный темп снижения — доля веса в неделю.
   ///
   /// Чем больше в человеке жира, тем быстрее ему МОЖНО худеть: жировая ткань
@@ -339,7 +351,7 @@ var W = (function () {
   /// человека с 35 кг жира этот потолок вчетверо выше, чем у человека с 9 кг.
   /// Поэтому берём меньшее из двух: практический коридор по проценту жира и
   /// шестьдесят процентов физиологического предела.
-  function rateBand(w, h, age, sex) {
+  function rateBand(w, h, age, sex, train) {
     var bf = bodyFatPct(w, h, age, sex);
     var lean = sex === "male" ? bf <= 20 : bf <= 30;
     var high = bf >= HIGH_FAT[sex];
@@ -351,7 +363,8 @@ var W = (function () {
     var cap = FAT_YIELD_KCAL * fatMass * FAT_YIELD_SAFE * 7 / KCAL_PER_KG_FAT / w;
     return { min: Math.min(band.min, cap), mid: Math.min(band.mid, cap),
              max: Math.min(band.max, cap), bodyFat: bf, high: high, fatMass: fatMass,
-             kcalPerDay: FAT_YIELD_KCAL * fatMass * FAT_YIELD_SAFE };
+             kcalPerDay: FAT_YIELD_KCAL * fatMass * FAT_YIELD_SAFE,
+             fatShare: fatShare(fatMass, train || 0) };
   }
 
   /// Путь к цели по неделям: вес падает на свой безопасный темп, цель уходит вниз
@@ -364,7 +377,7 @@ var W = (function () {
       var goal = ideal(h, age + weeks / 52, sex, train);
       pts.push({ week: weeks, weight: w, goal: goal });
       if (w <= goal) break;
-      w = w * (1 - rateBand(w, h, age + weeks / 52, sex)[which]);
+      w = w * (1 - rateBand(w, h, age + weeks / 52, sex, train)[which]);
     }
     return { points: pts, weeks: Math.min(weeks, MAX) };
   }
@@ -380,14 +393,14 @@ var W = (function () {
       toLose: Math.max(0, i.weight - goal),
       // Килограмм разницы — это вода, а не лишний вес: гнать за ним незачем.
       already: i.weight <= goal + 1,
-      rate: rateBand(i.weight, i.height, i.age, i.sex),
+      rate: rateBand(i.weight, i.height, i.age, i.sex, i.train),
       mid: path(i.weight, i.height, i.age, i.sex, i.train, "mid"),
       fast: path(i.weight, i.height, i.age, i.sex, i.train, "max"),
       slow: path(i.weight, i.height, i.age, i.sex, i.train, "min"),
     };
   }
   return { calc: calc, ideal: ideal, fatFreeMass: fatFreeMass, bodyFatPct: bodyFatPct, trainGain: trainGain,
-           rateBand: rateBand,
+           rateBand: rateBand, fatShare: fatShare,
            muscleLossPerYear: muscleLossPerYear, ageFactor: ageFactor,
            LOSS_MIN: LOSS_MIN, LOSS_MAX: LOSS_MAX };
 })();
@@ -532,16 +545,18 @@ function drawChart(r) {
         $("legend").hidden = false;
         // Если даже медленный край укладывается в восемь месяцев, путь короткий —
         // и говорить о нём стоит бодро, без вилки сроков.
-        var perWeek = Math.round(state.weight * r.rate.mid / 0.01) * 10;   // г жира в неделю, до десятков
+        // Не весь потерянный вес — жир: часть уходит мышцами и водой (Форбс).
+        var fatPerWeek = Math.round(state.weight * r.rate.mid * r.rate.fatShare / 0.01) * 10;
         $("verdict").innerHTML = r.rate.high
           ? "Ваш вес неидеален. И процент жира в вашем организме очень высок. Это даёт вам преимущество перед "
             + "более тощими людьми: вы можете <b>безопасно худеть быстрее</b>. Ваши результаты с первых дней будут "
             + "гораздо более ярко выражены, чем у людей, которым нужно сбросить пять-десять килограмм. "
-            + "Ваш безопасный темп — до <b>" + nf(state.weight * r.rate.mid) + " кг в неделю</b>, весь путь займёт "
+            + "Ваш безопасный темп — до <b>" + nf(state.weight * r.rate.mid) + " кг в неделю</b>, из них "
+            + "<b>" + nf(state.weight * r.rate.mid * r.rate.fatShare) + " кг жира</b>. Весь путь займёт "
             + "около <b>" + term(r.mid.weeks, true) + "</b>."
           : "Ваш вес не идеален, однако прийти к нему можно довольно просто. Для этого нужно поддерживать "
             + "постоянный комфортный дефицит калорий. Лучший дефицит калорий обеспечивает потерю примерно <b>"
-            + perWeek + " г жира в неделю</b>. При таком темпе вы похудеете "
+            + fatPerWeek + " г жира в неделю</b>. При таком темпе вы похудеете "
             + (r.slow.weeks <= SHORT_WAY_WEEKS ? "всего " : "") + "за <b>" + term(r.mid.weeks)
             + "</b>. Даже если вы будете срываться и иногда переедать, вы справитесь за <b>" + term(r.slow.weeks) + "</b>.";
       }

@@ -279,6 +279,15 @@
 // мышца, то есть та самая безжировая масса, от которой мы считали цель.
 var W = (function () {
   var LOSS_MIN = 0.003, LOSS_MAX = 0.007, LOSS_MID = 0.005;
+  /// Сколько энергии жировая ткань способна отдать за сутки — 290 кДж на кг жира
+  /// (Alpert, 2005). Дефицит сверх этого берётся уже не из жира, а из мышц.
+  var FAT_YIELD_KCAL = 69;
+  /// Какую долю этого предела считаем безопасной: предел выведен на голодающих,
+  /// выбирать его целиком нельзя.
+  var FAT_YIELD_SAFE = 0.6;
+  var KCAL_PER_KG_FAT = 7700;
+  /// «Очень высокий» процент жира — примерно ожирение II степени по составу тела.
+  var HIGH_FAT = { male: 30, female: 40 };
   var FFMI_BASE = { male: 19.0, female: 15.5 };   // нетренированный ориентир
   var FFMI_GAIN_MAX = 3.0;                         // потолок прибавки за силовые
   var FFMI_GAIN_TAU = 1.8;                         // за сколько лет набирается основное
@@ -323,15 +332,39 @@ var W = (function () {
     var bmi = w / Math.pow(h / 100, 2);
     return Math.min(60, Math.max(3, 1.2 * bmi + 0.23 * age - 10.8 * (sex === "male" ? 1 : 0) - 5.4));
   }
-  /// Путь к цели по неделям: вес падает на `rate` в неделю, цель уходит вниз
-  /// вместе с мышцами. Пять лет — предел, дальше это уже не план, а гадание.
-  function path(w0, h, age, sex, train, rate) {
+  /// Безопасный темп снижения — доля веса в неделю.
+  ///
+  /// Чем больше в человеке жира, тем быстрее ему МОЖНО худеть: жировая ткань
+  /// физически способна отдавать лишь около 69 ккал на килограмм в сутки, и у
+  /// человека с 35 кг жира этот потолок вчетверо выше, чем у человека с 9 кг.
+  /// Поэтому берём меньшее из двух: практический коридор по проценту жира и
+  /// шестьдесят процентов физиологического предела.
+  function rateBand(w, h, age, sex) {
+    var bf = bodyFatPct(w, h, age, sex);
+    var lean = sex === "male" ? bf <= 20 : bf <= 30;
+    var high = bf >= HIGH_FAT[sex];
+    var band = lean ? { min: LOSS_MIN, mid: LOSS_MID, max: LOSS_MAX }
+             : high ? { min: 0.007, mid: 0.011, max: 0.015 }
+                    : { min: 0.005, mid: 0.0075, max: 0.010 };
+    // Предохранитель Alpert: сколько веса в неделю обеспечивает жировая ткань.
+    var fatMass = w * bf / 100;
+    var cap = FAT_YIELD_KCAL * fatMass * FAT_YIELD_SAFE * 7 / KCAL_PER_KG_FAT / w;
+    return { min: Math.min(band.min, cap), mid: Math.min(band.mid, cap),
+             max: Math.min(band.max, cap), bodyFat: bf, high: high, fatMass: fatMass,
+             kcalPerDay: FAT_YIELD_KCAL * fatMass * FAT_YIELD_SAFE };
+  }
+
+  /// Путь к цели по неделям: вес падает на свой безопасный темп, цель уходит вниз
+  /// вместе с мышцами. Темп ПЕРЕСЧИТЫВАЕТСЯ каждую неделю: чем меньше остаётся
+  /// жира, тем медленнее можно худеть, и хвост пути пологий.
+  /// Пять лет — предел, дальше это уже не план, а гадание.
+  function path(w0, h, age, sex, train, which) {
     var pts = [], w = w0, weeks = 0, MAX = 260;
     for (; weeks <= MAX; weeks++) {
       var goal = ideal(h, age + weeks / 52, sex, train);
       pts.push({ week: weeks, weight: w, goal: goal });
       if (w <= goal) break;
-      w = w * (1 - rate);
+      w = w * (1 - rateBand(w, h, age + weeks / 52, sex)[which]);
     }
     return { points: pts, weeks: Math.min(weeks, MAX) };
   }
@@ -347,12 +380,14 @@ var W = (function () {
       toLose: Math.max(0, i.weight - goal),
       // Килограмм разницы — это вода, а не лишний вес: гнать за ним незачем.
       already: i.weight <= goal + 1,
-      mid: path(i.weight, i.height, i.age, i.sex, i.train, LOSS_MID),
-      fast: path(i.weight, i.height, i.age, i.sex, i.train, LOSS_MAX),
-      slow: path(i.weight, i.height, i.age, i.sex, i.train, LOSS_MIN),
+      rate: rateBand(i.weight, i.height, i.age, i.sex),
+      mid: path(i.weight, i.height, i.age, i.sex, i.train, "mid"),
+      fast: path(i.weight, i.height, i.age, i.sex, i.train, "max"),
+      slow: path(i.weight, i.height, i.age, i.sex, i.train, "min"),
     };
   }
   return { calc: calc, ideal: ideal, fatFreeMass: fatFreeMass, bodyFatPct: bodyFatPct, trainGain: trainGain,
+           rateBand: rateBand,
            muscleLossPerYear: muscleLossPerYear, ageFactor: ageFactor,
            LOSS_MIN: LOSS_MIN, LOSS_MAX: LOSS_MAX };
 })();
@@ -502,8 +537,14 @@ function drawChart(r) {
         $("legend").hidden = false;
         // Если даже медленный край укладывается в восемь месяцев, путь короткий —
         // и говорить о нём стоит бодро, без вилки сроков.
-        var perWeek = Math.round(state.weight * 0.005 / 0.01) * 10;   // г жира в неделю, до десятков
-        $("verdict").innerHTML = r.slow.weeks <= SHORT_WAY_WEEKS
+        var perWeek = Math.round(state.weight * r.rate.mid / 0.01) * 10;   // г жира в неделю, до десятков
+        $("verdict").innerHTML = r.rate.high
+          ? "Ваш вес неидеален. И процент жира в вашем организме очень высок. Это даёт вам преимущество перед "
+            + "более тощими людьми: вы можете <b>безопасно худеть быстрее</b>. Ваши результаты с первых дней будут "
+            + "гораздо более ярко выражены, чем у людей, которым нужно сбросить пять-десять килограмм. "
+            + "Ваш безопасный темп — до <b>" + nf(state.weight * r.rate.mid) + " кг в неделю</b>, весь путь займёт "
+            + "около <b>" + term(r.mid.weeks, true) + "</b>."
+          : r.slow.weeks <= SHORT_WAY_WEEKS
           ? "Ваш вес не идеален, однако прийти к нему можно довольно просто. Для этого нужно поддерживать "
             + "постоянный комфортный дефицит калорий. Лучший дефицит калорий обеспечивает потерю примерно <b>"
             + perWeek + " г жира в неделю</b>. При таком темпе вы похудеете всего за <b>" + term(r.mid.weeks)

@@ -293,7 +293,7 @@ fn Clients(view: RwSignal<View>) -> impl IntoView {
         spawn_local(async move {
             match api::clients().await {
                 Ok(list) => {
-                    clients.set(list);
+                    clients.set(sorted(list));
                     error.set(None);
                 }
                 Err(e) => {
@@ -964,7 +964,67 @@ fn directive_note(m: &api::Message) -> String {
     }
 }
 
-/// Настройки куратора: имя и язык.
+/// Порядок в списке: сверху те, от кого дольше всего нет отчёта.
+///
+/// Список — рабочая очередь, а не картотека. Куратор открывает его, чтобы
+/// увидеть, кем пора заняться, и первым должен стоять тот, о ком он дольше всего
+/// ничего не знает.
+///
+/// Три ступени, и порядок между ними важнее сортировки внутри:
+/// 1. Привязанные БЕЗ единого отчёта — человек согласился и молчит. Это самый
+///    громкий случай, и никакая давность не должна его перебивать.
+/// 2. Привязанные с отчётом — по давности, старые выше.
+/// 3. Непривязанные слоты — приглашение ещё не приняли, отчёту взяться неоткуда,
+///    и торопить тут некого.
+fn sorted(mut list: Vec<api::Client>) -> Vec<api::Client> {
+    list.sort_by(|a, b| {
+        let rank = |c: &api::Client| match (c.bound, c.last_report_at.is_some()) {
+            (true, false) => 0,
+            (true, true) => 1,
+            _ => 2,
+        };
+        rank(a)
+            .cmp(&rank(b))
+            // Даты в RFC3339 — сравнение строк совпадает со сравнением времени.
+            .then_with(|| a.last_report_at.cmp(&b.last_report_at))
+            // Устойчивость: без имени два одинаково молчащих клиента менялись бы
+            // местами при каждом обновлении списка.
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    list
+}
+
+#[cfg(test)]
+mod sort_tests {
+    use super::*;
+
+    fn c(name: &str, bound: bool, at: Option<&str>) -> api::Client {
+        api::Client {
+            id: name.into(),
+            name: name.into(),
+            invite_code: None,
+            bound,
+            bound_at: None,
+            last_report_at: at.map(str::to_string),
+            request_days: None,
+            request_at: None,
+        }
+    }
+
+    #[test]
+    fn molchashchie_vyshe_otchitavshihsya_a_slovy_v_konce() {
+        let out = sorted(vec![
+            c("свежий", true, Some("2026-08-27T10:00:00Z")),
+            c("слот", false, None),
+            c("давний", true, Some("2026-08-20T10:00:00Z")),
+            c("молчит", true, None),
+        ]);
+        let names: Vec<&str> = out.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(names, vec!["молчит", "давний", "свежий", "слот"]);
+    }
+}
+
+/// Настройки куратора: имя и язык./// Настройки куратора: имя и язык.
 ///
 /// Имя видят клиенты — в приглашении и под каждым его сообщением. Язык здесь
 /// только про этот интерфейс: тексты, которые получает худеющий, собираются у

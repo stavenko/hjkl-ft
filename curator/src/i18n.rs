@@ -111,7 +111,7 @@ fn ru(key: &str) -> &'static str {
         "planka.save" => "Применить",
 
         // Чат
-        "chat.placeholder" => "Сообщение",
+        "chat.placeholder" => "",
         "chat.send" => "Отправить",
         "chat.empty" => "Переписки пока нет.",
 
@@ -176,7 +176,7 @@ fn en(key: &str) -> &'static str {
         "planka.calc_hint" => "From the client's latest data — the same figure their app would have arrived at on its own.",
         "planka.save" => "Apply",
 
-        "chat.placeholder" => "Message",
+        "chat.placeholder" => "",
         "chat.send" => "Send",
         "chat.empty" => "No messages yet.",
 

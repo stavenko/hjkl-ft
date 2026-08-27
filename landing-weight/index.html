@@ -187,11 +187,14 @@
       <!-- 4 · Силовые -->
       <div class="step" data-step="3">
         <p class="ask">Если вы тренируетесь на гипертрофию, ваш идеальный <b>безжировой вес</b> будет увеличиваться.</p>
-        <div class="opts" role="group" aria-label="Силовые тренировки">
-          <button type="button" data-train="0" aria-pressed="true">Не тренируюсь<span>или только ходьба и кардио</span></button>
-          <button type="button" data-train="1" aria-pressed="false">Тренируюсь до трёх лет<span>штанга или тренажёры, регулярно</span></button>
-          <button type="button" data-train="2" aria-pressed="false">Тренируюсь много лет<span>заметная мышечная масса</span></button>
+        <div class="field">
+          <div class="field-top">
+            <label for="train">Стаж силовых</label>
+            <span class="field-val"><input id="train" type="number" min="0" max="5" step="1" value="0" inputmode="numeric" /><span id="trainUnit">лет</span></span>
+          </div>
+          <input id="trainR" type="range" min="0" max="5" step="1" value="0" aria-label="Стаж силовых тренировок, лет" />
         </div>
+        <p class="cap" id="trainNote" style="margin-top:14px"></p>
       </div>
 
       <!-- 5 · Идеальный вес + текущий -->
@@ -271,7 +274,8 @@
 var W = (function () {
   var LOSS_MIN = 0.003, LOSS_MAX = 0.007, LOSS_MID = 0.005;
   var FFMI_BASE = { male: 19.0, female: 15.5 };   // нетренированный ориентир
-  var FFMI_TRAIN = [0, 1.5, 3.0];                  // прибавка за силовые
+  var FFMI_GAIN_MAX = 3.0;                         // потолок прибавки за силовые
+  var FFMI_GAIN_TAU = 1.8;                         // за сколько лет набирается основное
   var AGE_PEAK = 30;                               // до тридцати мышцы не убывают
 
   function muscleLossPerYear(age) {
@@ -291,8 +295,13 @@ var W = (function () {
     if (sex === "male") return age < 40 ? 16 : age < 60 ? 19 : 21;
     return age < 40 ? 27 : age < 60 ? 29 : 31;
   }
+  /// Прибавка FFMI за стаж силовых. Первый год даёт больше всего, дальше рост
+  /// замедляется: к пяти годам натуральный потолок практически выбран.
+  function trainGain(years) {
+    return FFMI_GAIN_MAX * (1 - Math.exp(-Math.max(0, years) / FFMI_GAIN_TAU));
+  }
   function fatFreeMass(h, age, sex, train) {
-    return (FFMI_BASE[sex] + FFMI_TRAIN[train]) * ageFactor(age) * Math.pow(h / 100, 2);
+    return (FFMI_BASE[sex] + trainGain(train)) * ageFactor(age) * Math.pow(h / 100, 2);
   }
   /// Идеальный вес — безжировая масса плюс здоровая доля жира, но не ниже
   /// разумного ИМТ. Без нижней границы саркопения уводит цель в дистрофию: у
@@ -339,7 +348,7 @@ var W = (function () {
       slow: path(i.weight, i.height, i.age, i.sex, i.train, LOSS_MIN),
     };
   }
-  return { calc: calc, ideal: ideal, fatFreeMass: fatFreeMass, bodyFatPct: bodyFatPct,
+  return { calc: calc, ideal: ideal, fatFreeMass: fatFreeMass, bodyFatPct: bodyFatPct, trainGain: trainGain,
            muscleLossPerYear: muscleLossPerYear, ageFactor: ageFactor,
            LOSS_MIN: LOSS_MIN, LOSS_MAX: LOSS_MAX };
 })();
@@ -444,6 +453,19 @@ function drawChart(r) {
         : "К " + state.age + " годам от пика формы уходит около "
           + nf((1 - W.ageFactor(state.age)) * 100, 0) + " % мышц — если ничего с этим не делать.";
     }
+    if (step === 3) {
+      var extra = W.fatFreeMass(state.height, state.age, state.sex, state.train)
+        - W.fatFreeMass(state.height, state.age, state.sex, 0);
+      // Идеальный вес растёт БОЛЬШЕ, чем масса мышц: вместе с ними полагается и
+      // пропорциональная доля жира.
+      var extraW = W.ideal(state.height, state.age, state.sex, state.train)
+        - W.ideal(state.height, state.age, state.sex, 0);
+      $("trainUnit").textContent = state.train === 5 ? "лет и больше" : plural(state.train, "год", "года", "лет");
+      $("trainNote").textContent = state.train === 0
+        ? "Без силовых считаем обычную, нетренированную мышечную массу."
+        : "Столько тренировок добавляют примерно " + nf(extra) + " кг мышц — идеальный вес поднимается на "
+          + nf(extraW) + " кг.";
+    }
     if (step === 4) {
       $("ideal").innerHTML = nf(r.ideal) + "<small>кг</small>";
       $("facts").innerHTML = ""
@@ -478,7 +500,7 @@ function drawChart(r) {
   }
 
   // Поле и ползунок — две ручки одного значения.
-  [["height", "heightR"], ["age", "ageR"], ["weight", "weightR"]].forEach(function (pair) {
+  [["height", "heightR"], ["age", "ageR"], ["weight", "weightR"], ["train", "trainR"]].forEach(function (pair) {
     var a = $(pair[0]), b = $(pair[1]);
     var apply = function (v) {
       var n = Number(v);
@@ -495,15 +517,6 @@ function drawChart(r) {
     btn.addEventListener("click", function () {
       state.sex = btn.dataset.sex;
       document.querySelectorAll("[data-sex]").forEach(function (b) {
-        b.setAttribute("aria-pressed", b === btn ? "true" : "false");
-      });
-      render();
-    });
-  });
-  document.querySelectorAll("[data-train]").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      state.train = Number(btn.dataset.train);
-      document.querySelectorAll("[data-train]").forEach(function (b) {
         b.setAttribute("aria-pressed", b === btn ? "true" : "false");
       });
       render();

@@ -348,7 +348,7 @@ var W = (function () {
     var fatMass = w * bf / 100;
     var cap = FAT_YIELD_KCAL * fatMass * FAT_YIELD_SAFE * 7 / KCAL_PER_KG_FAT / w;
     return { min: Math.min(band.min, cap), mid: Math.min(band.mid, cap),
-             max: Math.min(band.max, cap), bodyFat: bf, high: high, fatMass: fatMass,
+             max: Math.min(band.max, cap), bodyFat: bf, high: high, lean: lean, fatMass: fatMass,
              kcalPerDay: FAT_YIELD_KCAL * fatMass * FAT_YIELD_SAFE,
              fatShare: fatShare(fatMass, train || 0) };
   }
@@ -488,7 +488,13 @@ var W = (function () {
         // Не весь потерянный вес — жир: часть уходит мышцами и водой (Форбс).
         var fatPerWeek = Math.round(state.weight * r.rate.mid * r.rate.fatShare / 0.01) * 10;
         var perMonth = state.weight * r.rate.mid * 4.345;   // комфортный темп, кг в месяц
-        $("verdict").innerHTML = r.rate.high
+        var maxMonth = state.weight * r.rate.max * 4.345;   // предел, кг в месяц
+        $("verdict").innerHTML = r.rate.lean
+          ? "Ваш вес близок к идеальному, но вам не помешает скинуть <b>" + nf(r.toLose) + " кг</b>. "
+            + "К сожалению, вы не можете худеть слишком быстро: избыточный жир у вас слишком низок, поэтому "
+            + "вы можете терять <b>не более " + nf(maxMonth) + " кг в месяц</b>. При этом вам необходимо "
+            + "заботиться о правильном составе нутриентов."
+          : r.rate.high
           ? "Вам необходимо скинуть <b>" + nf(r.toLose) + " кг</b>. Ваш процент жира довольно высок, а значит, "
             + "вы можете <b>безопасно худеть очень быстро</b>. Уже через месяц возможны первые результаты. "
             + "Некоторые наши особо заряженные клиенты худели на десять килограмм в месяц. Мы не рекомендуем "

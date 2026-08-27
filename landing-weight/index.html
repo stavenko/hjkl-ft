@@ -68,6 +68,11 @@
   .tabs button{flex:1 1 0;border:1.5px solid var(--line);background:var(--surface);color:var(--muted);
     font-family:inherit;font-weight:700;font-size:15px;padding:12px 10px;border-radius:var(--pill);cursor:pointer}
   .tabs button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#04331F}
+  /* Короткие варианты — сеткой в три колонки. */
+  .chips{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px}
+  .chips button{border:1.5px solid var(--line);background:var(--surface);color:var(--ink-2);
+    font-family:inherit;font-weight:600;font-size:15px;padding:12px 6px;border-radius:var(--radius);cursor:pointer}
+  .chips button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)}
   /* Варианты в столбик — когда подпись длиннее пары слов. */
   .opts{display:flex;flex-direction:column;gap:8px;margin-top:16px}
   .opts button{width:100%;text-align:left;border:1.5px solid var(--line);background:var(--surface);
@@ -187,14 +192,15 @@
       <!-- 4 · Силовые -->
       <div class="step" data-step="3">
         <p class="ask">Если вы тренируетесь на гипертрофию, ваш идеальный <b>безжировой вес</b> будет увеличиваться.</p>
-        <div class="field">
-          <div class="field-top">
-            <label for="train">Стаж силовых</label>
-            <span class="field-val"><input id="train" type="number" min="0" max="5" step="1" value="0" inputmode="numeric" /><span id="trainUnit">лет</span></span>
-          </div>
-          <input id="trainR" type="range" min="0" max="5" step="1" value="0" aria-label="Стаж силовых тренировок, лет" />
+        <div class="chips" role="group" aria-label="Стаж силовых тренировок">
+          <button type="button" data-train="0" aria-pressed="true">Нет</button>
+          <button type="button" data-train="1" aria-pressed="false">1 год</button>
+          <button type="button" data-train="2" aria-pressed="false">2 года</button>
+          <button type="button" data-train="3" aria-pressed="false">3 года</button>
+          <button type="button" data-train="4" aria-pressed="false">4 года</button>
+          <button type="button" data-train="8" aria-pressed="false">Больше пяти</button>
         </div>
-        <p class="cap" id="trainNote" style="margin-top:14px"></p>
+        <p class="cap" id="trainNote" style="margin-top:16px"></p>
       </div>
 
       <!-- 5 · Идеальный вес + текущий -->
@@ -460,7 +466,6 @@ function drawChart(r) {
       // пропорциональная доля жира.
       var extraW = W.ideal(state.height, state.age, state.sex, state.train)
         - W.ideal(state.height, state.age, state.sex, 0);
-      $("trainUnit").textContent = state.train === 5 ? "лет и больше" : plural(state.train, "год", "года", "лет");
       $("trainNote").textContent = state.train === 0
         ? "Без силовых считаем обычную, нетренированную мышечную массу."
         : "Столько тренировок добавляют примерно " + nf(extra) + " кг мышц — идеальный вес поднимается на "
@@ -500,7 +505,7 @@ function drawChart(r) {
   }
 
   // Поле и ползунок — две ручки одного значения.
-  [["height", "heightR"], ["age", "ageR"], ["weight", "weightR"], ["train", "trainR"]].forEach(function (pair) {
+  [["height", "heightR"], ["age", "ageR"], ["weight", "weightR"]].forEach(function (pair) {
     var a = $(pair[0]), b = $(pair[1]);
     var apply = function (v) {
       var n = Number(v);
@@ -512,6 +517,15 @@ function drawChart(r) {
     b.addEventListener("input", function () { a.value = b.value; apply(b.value); });
     // Пустое или выходящее за границы поле возвращаем к принятому значению.
     a.addEventListener("blur", function () { a.value = state[pair[0]]; b.value = state[pair[0]]; render(); });
+  });
+  document.querySelectorAll("[data-train]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      state.train = Number(btn.dataset.train);
+      document.querySelectorAll("[data-train]").forEach(function (b) {
+        b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+      });
+      render();
+    });
   });
   document.querySelectorAll("[data-sex]").forEach(function (btn) {
     btn.addEventListener("click", function () {

@@ -434,7 +434,7 @@ var W = (function () {
     $("dots").innerHTML = dots;
     steps.forEach(function (el) { el.classList.toggle("on", Number(el.dataset.step) === step); });
     $("back").style.visibility = step === 0 ? "hidden" : "visible";
-    $("next").textContent = step === STEPS - 2 ? "Показать график похудения" : "Далее";
+    $("next").textContent = step === STEPS - 2 ? "Как достичь идеального веса" : "Далее";
     $("nav").hidden = step === STEPS - 1;
     var r = W.calc(state);
     // Человеку в идеальном весе продавать похудение незачем.

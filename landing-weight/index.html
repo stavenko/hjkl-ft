@@ -403,6 +403,9 @@ function drawChart(r) {
 (function () {
   var STEPS = 6;
   var state = { sex: "female", height: 170, age: 35, train: 0, weight: 75 };
+  // Пока человек не тронул вес, поле стоит на идеальном: сдвигать от своей цели
+  // понятнее, чем набирать число с нуля.
+  var weightTouched = false;
   var step = 0;
   var $ = function (id) { return document.getElementById(id); };
   var steps = document.querySelectorAll(".step");
@@ -450,6 +453,12 @@ function drawChart(r) {
     $("cta").hidden = step !== STEPS - 1;
 
     var r = W.calc(state);
+    if (!weightTouched) {
+      state.weight = Math.round(r.ideal);
+      $("weight").value = state.weight;
+      $("weightR").value = state.weight;
+      r = W.calc(state);
+    }
 
     if (step === 2) {
       $("ageNote").textContent = state.age <= 30
@@ -511,8 +520,9 @@ function drawChart(r) {
       state[pair[0]] = Math.min(Number(a.max), Math.max(Number(a.min), n));
       render();
     };
-    a.addEventListener("input", function () { b.value = a.value; apply(a.value); });
-    b.addEventListener("input", function () { a.value = b.value; apply(b.value); });
+    var touch = function () { if (pair[0] === "weight") weightTouched = true; };
+    a.addEventListener("input", function () { touch(); b.value = a.value; apply(a.value); });
+    b.addEventListener("input", function () { touch(); a.value = b.value; apply(b.value); });
     // Пустое или выходящее за границы поле возвращаем к принятому значению.
     a.addEventListener("blur", function () { a.value = state[pair[0]]; b.value = state[pair[0]]; render(); });
   });

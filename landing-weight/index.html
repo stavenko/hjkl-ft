@@ -116,14 +116,6 @@
   .fact{background:var(--accent-soft);color:var(--accent-ink);border-radius:var(--pill);
     padding:7px 13px;font-size:13.5px;font-weight:600}
   .fact i{font-style:normal;opacity:.75;font-weight:500}
-  .chart{margin-top:16px}
-  .chart svg{width:100%;height:auto;display:block;overflow:visible}
-  .legend{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:10px;
-    color:var(--muted);font-size:13px}
-  .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
-  .legend .l-band{height:10px;border-radius:3px;background:rgba(16,185,129,.22)}
-  .legend .l-line{background:var(--accent-700)}
-  .legend .l-goal{background:var(--ink);opacity:.45}
   .verdict{color:var(--ink-2);font-size:16px;text-align:center;margin-top:14px}
   .verdict b{color:var(--ink)}
 
@@ -222,12 +214,6 @@
       <div class="step" data-step="5">
         <p class="ask" id="way" hidden></p>
         <p class="verdict" id="verdict" style="margin-top:0;text-align:left"></p>
-        <div class="chart" id="chart"></div>
-        <div class="legend" id="legend">
-          <span><i class="l-band"></i>комфортный коридор</span>
-          <span><i class="l-line"></i>ожидаемый путь</span>
-          <span><i class="l-goal"></i>идеальный вес</span>
-        </div>
         <div class="nav"><button type="button" class="btn btn-ghost" id="back2">← Изменить данные</button></div>
       </div>
 
@@ -239,7 +225,7 @@
 
     <div class="cta-band" id="cta" hidden>
       <h2>Вы можете начать движение к идеальному телу прямо сейчас</h2>
-      <p>График рисует то, что произойдёт, если держать дефицит. Держать его помогает <i>re:Norma</i>: она считает вашу планку по тому, как вы едите на самом деле, и каждую неделю поправляет её по весу.</p>
+      <p>Чтобы худеть правильно, не торопясь и с удовольствием, попробуйте <i>re:Norma</i>: она считает вашу планку по тому, как вы едите на самом деле, и каждую неделю поправляет её по весу.</p>
       <a class="btn btn-primary" href="https://ig0.renorma.app/">Перейти в re:Norma →</a>
     </div>
   </section>
@@ -405,48 +391,6 @@ var W = (function () {
            LOSS_MIN: LOSS_MIN, LOSS_MAX: LOSS_MAX };
 })();
 
-// ── ГРАФИК ──────────────────────────────────────────────────────────────────
-// Рисуется вручную в SVG: библиотека ради двух кривых не нужна, а сторонние
-// хосты на страницу мы не пускаем.
-function drawChart(r) {
-  var W_ = 400, H = 200, L = 34, R = 8, T = 10, B = 26;
-  var weeks = Math.max(r.slow.weeks, 8);
-  var wMax = r.mid.points[0].weight, wMin = r.fast.points[r.fast.points.length - 1].goal;
-  var pad = Math.max(1.5, (wMax - wMin) * 0.12);
-  var yTop = wMax + pad, yBot = wMin - pad;
-  var x = function (wk) { return L + (W_ - L - R) * wk / weeks; };
-  var y = function (kg) { return T + (H - T - B) * (yTop - kg) / (yTop - yBot); };
-  var line = function (pts, key) {
-    return pts.map(function (p, i) { return (i ? "L" : "M") + x(p.week).toFixed(1) + " " + y(p[key]).toFixed(1); }).join(" ");
-  };
-  var band = line(r.fast.points, "weight") + " "
-    + r.slow.points.slice().reverse().map(function (p) { return "L" + x(p.week).toFixed(1) + " " + y(p.weight).toFixed(1); }).join(" ") + " Z";
-
-  var months = Math.ceil(weeks / 4.345), stepM = Math.max(1, Math.ceil(months / 4)), ticks = [];
-  for (var m = 0; m <= months; m += stepM) ticks.push(m);
-  var gridKg = [], kgStep = (yTop - yBot) > 30 ? 10 : 5;
-  for (var k = Math.ceil(yBot / kgStep) * kgStep; k <= yTop; k += kgStep) gridKg.push(k);
-
-  var svg = '<svg viewBox="0 0 ' + W_ + ' ' + H + '" role="img" aria-label="График снижения веса">';
-  gridKg.forEach(function (k) {
-    svg += '<line x1="' + L + '" y1="' + y(k).toFixed(1) + '" x2="' + (W_ - R) + '" y2="' + y(k).toFixed(1) + '" stroke="#E4E8F0"/>'
-      + '<text x="' + (L - 6) + '" y="' + (y(k) + 4).toFixed(1) + '" text-anchor="end" font-size="11" fill="#6B7491">' + k + '</text>';
-  });
-  ticks.forEach(function (m) {
-    var wk = Math.min(weeks, m * 4.345);
-    svg += '<text x="' + x(wk).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="#6B7491">'
-      + (m === 0 ? "сейчас" : m + " мес") + '</text>';
-  });
-  svg += '<path d="' + band + '" fill="rgba(16,185,129,.22)"/>';
-  // Цель — по самому длинному пути, иначе пунктир обрывается на полуслове.
-  svg += '<path d="' + line(r.slow.points, "goal") + '" fill="none" stroke="#0E1630" stroke-opacity=".45" stroke-width="2" stroke-dasharray="5 4"/>';
-  svg += '<path d="' + line(r.mid.points, "weight") + '" fill="none" stroke="#059669" stroke-width="3" stroke-linecap="round"/>';
-  var last = r.mid.points[r.mid.points.length - 1];
-  svg += '<circle cx="' + x(last.week).toFixed(1) + '" cy="' + y(last.weight).toFixed(1) + '" r="5" fill="#059669" stroke="#fff" stroke-width="2.5"/>';
-  svg += '<circle cx="' + x(0) + '" cy="' + y(r.mid.points[0].weight).toFixed(1) + '" r="4" fill="#0E1630"/>';
-  return svg + "</svg>";
-}
-
 // ── МАСТЕР ──────────────────────────────────────────────────────────────────
 (function () {
   var STEPS = 6;
@@ -534,26 +478,22 @@ function drawChart(r) {
       if (r.already) {
         $("way").hidden = false;
         $("way").innerHTML = "Вы уже <b>в своём идеальном весе</b>.";
-        $("chart").innerHTML = "";
-        $("legend").hidden = true;
         $("verdict").innerHTML = "У вас нет лишнего жира. Это лучший из факторов здоровья. Тем не менее… "
           + "Вполне возможно, что у вас есть какие-то дефициты, к которым вы пришли незаметно и которые "
           + "могут сказаться на вашем здоровье. Вам нужно не похудение, а правильное удержание и физическая нагрузка.";
       } else {
         $("way").hidden = true;
-        $("chart").innerHTML = drawChart(r);
-        $("legend").hidden = false;
         // Если даже медленный край укладывается в восемь месяцев, путь короткий —
         // и говорить о нём стоит бодро, без вилки сроков.
         // Не весь потерянный вес — жир: часть уходит мышцами и водой (Форбс).
         var fatPerWeek = Math.round(state.weight * r.rate.mid * r.rate.fatShare / 0.01) * 10;
+        var perMonth = state.weight * r.rate.mid * 4.345;   // комфортный темп, кг в месяц
         $("verdict").innerHTML = r.rate.high
-          ? "Ваш вес неидеален. И процент жира в вашем организме очень высок. Это даёт вам преимущество перед "
-            + "более тощими людьми: вы можете <b>безопасно худеть быстрее</b>. Ваши результаты с первых дней будут "
-            + "гораздо более ярко выражены, чем у людей, которым нужно сбросить пять-десять килограмм. "
-            + "Ваш безопасный темп — до <b>" + nf(state.weight * r.rate.mid) + " кг в неделю</b>, из них "
-            + "<b>" + nf(state.weight * r.rate.mid * r.rate.fatShare) + " кг жира</b>. Весь путь займёт "
-            + "около <b>" + term(r.mid.weeks, true) + "</b>."
+          ? "Вам необходимо скинуть <b>" + nf(r.toLose) + " кг</b>. Ваш процент жира довольно высок, а значит, "
+            + "вы можете <b>безопасно худеть очень быстро</b>. Уже через месяц возможны первые результаты. "
+            + "Некоторые наши особо заряженные клиенты худели на десять килограмм в месяц. Мы не рекомендуем "
+            + "худеть так быстро — гораздо лучше обеспечить комфортный дефицит калорий и худеть по <b>"
+            + nf(perMonth) + " кг в месяц</b>."
           : "Ваш вес не идеален, однако прийти к нему можно довольно просто. Для этого нужно поддерживать "
             + "постоянный комфортный дефицит калорий. Лучший дефицит калорий обеспечивает потерю примерно <b>"
             + fatPerWeek + " г жира в неделю</b>. При таком темпе вы похудеете "

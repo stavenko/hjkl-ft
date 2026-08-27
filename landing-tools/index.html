@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light" />
+<meta name="theme-color" content="#F1F4F9" />
+<title>Инструменты re:Norma</title>
+<meta name="description" content="Бесплатные инструменты re:Norma: калькулятор идеального веса и продуктовая корзина, которая закрывает все дефициты." />
+<style>
+  /* Golos Text — self-hosted (bundled woff2); no third-party font host. */
+  @font-face{font-family:'Golos Text';font-style:normal;font-weight:400 900;font-display:swap;
+    src:url('/fonts/golos-cyrillic.woff2') format('woff2');
+    unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+  @font-face{font-family:'Golos Text';font-style:normal;font-weight:400 900;font-display:swap;
+    src:url('/fonts/golos-latin.woff2') format('woff2');
+    unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+2074,U+20AC,U+2122,U+2212,U+2215,U+FEFF,U+FFFD}
+  :root{
+    --bg:#F1F4F9;--bg-2:#E8EDF5;--surface:#FFFFFF;
+    --ink:#0E1630;--ink-2:#39425F;--muted:#6B7491;--line:#E4E8F0;
+    --accent:#10B981;--accent-700:#059669;--accent-ink:#04603F;--accent-soft:#DEF7EC;
+    --radius:16px;--radius-lg:24px;--pill:999px;
+    --sans:'Golos Text',-apple-system,system-ui,sans-serif;
+    --shadow:0 16px 40px -22px rgba(14,22,48,.4);
+    --shadow-btn:0 10px 26px -10px rgba(16,185,129,.55);
+    --safe-b:env(safe-area-inset-bottom,0px);
+  }
+  html{color-scheme:light;-webkit-text-size-adjust:100%}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-2);color:var(--ink);font-family:var(--sans);
+    font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .app{max-width:440px;margin:0 auto;background:var(--bg);min-height:100vh;
+    padding:0 20px calc(40px + var(--safe-b))}
+  p{margin:0}
+  a{color:inherit;text-decoration:none}
+  h1,h2{margin:0;letter-spacing:-.01em;line-height:1.14}
+  h1{font-size:30px;font-weight:600}
+  h2{font-size:20px;font-weight:600}
+  section{padding:26px 0}
+  .topbar{display:flex;align-items:center;gap:12px;padding:16px 0 6px}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px}
+  .brand .dot{width:26px;height:26px;border-radius:8px;background:var(--ink);position:relative;flex:0 0 auto}
+  .brand .dot::after{content:"";position:absolute;inset:7px;border-radius:50%;background:var(--accent)}
+  .hero{padding-top:14px;padding-bottom:10px}
+  .hero h1 .hl{color:var(--accent-700)}
+  .lead{color:var(--ink-2);font-size:16px;margin-top:12px}
+
+  .tools{display:flex;flex-direction:column;gap:14px;margin-top:20px}
+  .tool{display:block;background:var(--surface);border:1px solid var(--line);
+    border-radius:var(--radius-lg);padding:20px;box-shadow:var(--shadow)}
+  .tool .ico{font-size:26px;line-height:1;display:block;margin-bottom:12px}
+  .tool p{color:var(--ink-2);font-size:15.5px;margin-top:8px}
+  .tool .go{display:inline-block;margin-top:14px;color:var(--accent-700);font-weight:700;font-size:15px}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+    font-weight:700;font-size:16px;padding:16px 22px;border-radius:var(--pill);
+    border:1.5px solid transparent;text-align:center;background:var(--accent);color:#04331F;
+    box-shadow:var(--shadow-btn);margin-top:22px}
+
+  footer{padding:26px 0 8px;text-align:center;border-top:1px solid var(--line);margin-top:24px}
+  .freq{color:var(--muted);font-size:13px}
+  .flinks{display:flex;flex-wrap:wrap;gap:14px;justify-content:center;margin-top:10px;font-size:14px;font-weight:600}
+  .flinks a{color:var(--accent-700)}
+  .fcopy{color:var(--muted);font-size:13px;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span>re:Norma</div>
+  </div>
+
+  <section class="hero">
+    <h1>Считалки <span class="hl">re:Norma</span></h1>
+    <p class="lead">Бесплатно и без регистрации. Тем же, чем считает само приложение.</p>
+  </section>
+
+  <section style="padding-top:0">
+    <div class="tools">
+      <a class="tool" href="/ideal-weight-calc">
+        <span class="ico">⚖️</span>
+        <h2>Калькулятор идеального веса</h2>
+        <p>Считает вес не по росту, а по составу тела — с поправкой на возраст и силовые. И говорит, с какой скоростью до него безопасно идти.</p>
+        <span class="go">Посчитать →</span>
+      </a>
+      <a class="tool" href="/basket">
+        <span class="ico">🛒</span>
+        <h2>Дешёвая продуктовая корзина</h2>
+        <p>Четыре рациона из обычного супермаркета — 1800, 2200 и 2500 ккал. Закрывают белок, кальций, железо, омега-3 и клетчатку, с ценами за неделю.</p>
+        <span class="go">Посмотреть →</span>
+      </a>
+    </div>
+
+    <a class="btn" href="https://ig0.renorma.app/">Узнать про re:Norma →</a>
+  </section>
+
+  <footer>
+    <div class="freq">Ставенко Василий Григорьевич · Самозанятый (НПД) · ИНН 410105361330</div>
+    <div class="flinks">
+      <a href="https://renorma.app/offer">Договор оферты</a>
+      <a href="https://renorma.app/privacy">Политика конфиденциальности</a>
+      <a href="https://t.me/vstavenko">Техподдержка</a>
+    </div>
+    <div class="fcopy">© re:Norma</div>
+  </footer>
+</div>
+</body>
+</html>

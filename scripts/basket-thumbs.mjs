@@ -3,7 +3,7 @@
 // В строке рациона фото стоит кружком 44 px, и уменьшается оно до 128 px (с
 // запасом на retina).
 //
-// Исходники лежат ОТДЕЛЬНО от панельных — в `landing-basket/img/pack/`. В
+// Исходники лежат ОТДЕЛЬНО от панельных — в `landing-tools/basket/img/pack/`. В
 // карусели продуктов остаются свои, «настроенческие» снимки; в таблице стоят
 // пакшоты конкретных товаров, и путать их нельзя: у нескольких продуктов имя
 // файла совпадает (cheese, cabbage, syrok…), но картинки разные.
@@ -18,8 +18,8 @@ import path from "node:path";
 import { FOODS } from "./basket-foods.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const SRC = path.join(ROOT, "landing-basket/img/pack");
-const OUT = path.join(ROOT, "landing-basket/img/mini");
+const SRC = path.join(ROOT, "landing-tools/basket/img/pack");
+const OUT = path.join(ROOT, "landing-tools/basket/img/mini");
 const SIZE = 128;
 
 mkdirSync(OUT, { recursive: true });

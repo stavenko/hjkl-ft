@@ -1,4 +1,4 @@
-// ПЕРЕСЧЁТ ТАБЛИЦ НА СТРАНИЦЕ КОРЗИНЫ (`landing-basket/index.html`).
+// ПЕРЕСЧЁТ ТАБЛИЦ НА СТРАНИЦЕ КОРЗИНЫ (`landing-tools/basket/index.html`).
 //
 // Граммы задаёт сама страница — их подбирали руками под каждую калорийность. Всё
 // остальное (цена строки, итог за неделю и день, строка индикаторов, ккал в
@@ -16,7 +16,7 @@ import path from "node:path";
 import { RULES, evaluate, packLabel } from "./basket-foods.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const PAGE = path.join(ROOT, "landing-basket/index.html");
+const PAGE = path.join(ROOT, "landing-tools/basket/index.html");
 
 /// Как продукт подписан в таблице. Название держится в одну строку, поэтому оно
 /// короткое: жирность и фасовка всё равно видны в окошке с ценой пачки.
@@ -92,7 +92,7 @@ html = html.replace(RATION, (whole, head, id, body, tail) => {
     // Фото есть не у всех позиций; вместо чужой картинки — плашка с буквой.
     const label = LABEL_BY_KEY[r.key];
     const pic = r.photo
-      ? `            <img class="mpic" src="/img/mini/${r.photo}.jpg" alt="" loading="lazy" width="44" height="44" />`
+      ? `            <img class="mpic" src="/basket/img/mini/${r.photo}.jpg" alt="" loading="lazy" width="44" height="44" />`
       : `            <span class="mpic mpic-blank" aria-hidden="true">${label[0]}</span>`;
     // У весового товара (капуста, морковь) бренда нет — и повторять название
     // второй строкой незачем.

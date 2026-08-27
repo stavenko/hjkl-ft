@@ -220,14 +220,14 @@
 
       <!-- 6 · График -->
       <div class="step" data-step="5">
-        <p class="ask" id="way"></p>
+        <p class="ask" id="way" hidden></p>
+        <p class="verdict" id="verdict" style="margin-top:0;text-align:left"></p>
         <div class="chart" id="chart"></div>
         <div class="legend" id="legend">
           <span><i class="l-band"></i>комфортный коридор</span>
           <span><i class="l-line"></i>ожидаемый путь</span>
           <span><i class="l-goal"></i>идеальный вес</span>
         </div>
-        <p class="verdict" id="verdict"></p>
         <div class="nav"><button type="button" class="btn btn-ghost" id="back2">← Изменить данные</button></div>
       </div>
 
@@ -524,6 +524,7 @@ function drawChart(r) {
     }
     if (step === 5) {
       if (r.already) {
+        $("way").hidden = false;
         $("way").innerHTML = "Вы уже <b>в своём идеальном весе</b>.";
         $("chart").innerHTML = "";
         $("legend").hidden = true;
@@ -531,8 +532,7 @@ function drawChart(r) {
           + "Вполне возможно, что у вас есть какие-то дефициты, к которым вы пришли незаметно и которые "
           + "могут сказаться на вашем здоровье. Вам нужно не похудение, а правильное удержание и физическая нагрузка.";
       } else {
-        $("way").innerHTML = "Вот как вы можете прийти к идеальному весу — с тем самым дефицитом, "
-          + "на котором уходит жир, а не мышцы.";
+        $("way").hidden = true;
         $("chart").innerHTML = drawChart(r);
         $("legend").hidden = false;
         // Если даже медленный край укладывается в восемь месяцев, путь короткий —

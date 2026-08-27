@@ -116,14 +116,13 @@
   .fact{background:var(--accent-soft);color:var(--accent-ink);border-radius:var(--pill);
     padding:7px 13px;font-size:13.5px;font-weight:600}
   .fact i{font-style:normal;opacity:.75;font-weight:500}
+  /* Две плашки с главными числами — над текстом. */
+  .minis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}
+  .mini{background:var(--accent-soft);border-radius:var(--radius);padding:14px 12px;text-align:center}
+  .mini b{display:block;font-size:22px;font-weight:700;color:var(--accent-ink);line-height:1.1}
+  .mini span{display:block;font-size:12.5px;color:var(--accent-ink);opacity:.75;margin-top:4px}
   .verdict{color:var(--ink-2);font-size:16px;text-align:center;margin-top:14px}
   .verdict b{color:var(--ink)}
-
-  .cta-band{background:var(--ink);color:#fff;border-radius:var(--radius-lg);padding:26px 22px;
-    text-align:center;margin-top:18px}
-  .cta-band h2{color:#fff;font-size:21px}
-  .cta-band p{color:#C9D2E6;margin-top:10px;font-size:15.5px}
-  .cta-band .btn{margin-top:18px}
 
   footer{padding:26px 0 8px;text-align:center;border-top:1px solid var(--line);margin-top:24px}
   .freq{color:var(--muted);font-size:13px}
@@ -212,9 +211,16 @@
 
       <!-- 6 · График -->
       <div class="step" data-step="5">
+        <div class="minis" id="minis">
+          <div class="mini"><b id="miniLose">—</b><span>надо скинуть</span></div>
+          <div class="mini"><b id="miniRate">—</b><span>примерная скорость похудения</span></div>
+        </div>
         <p class="ask" id="way" hidden></p>
         <p class="verdict" id="verdict" style="margin-top:0;text-align:left"></p>
-        <div class="nav"><button type="button" class="btn btn-ghost" id="back2">← Изменить данные</button></div>
+        <div class="nav">
+          <button type="button" class="btn btn-ghost btn-back" id="back2" aria-label="Назад">←</button>
+          <a class="btn btn-primary" id="goApp" href="https://ig0.renorma.app/">Перейти в re:Norma →</a>
+        </div>
       </div>
 
       <div class="nav" id="nav">
@@ -223,11 +229,6 @@
       </div>
     </div>
 
-    <div class="cta-band" id="cta" hidden>
-      <h2>Вы можете начать движение к идеальному телу прямо сейчас</h2>
-      <p>Чтобы худеть правильно, не торопясь и с удовольствием, попробуйте <i>re:Norma</i>: она считает вашу планку по тому, как вы едите на самом деле, и каждую неделю поправляет её по весу.</p>
-      <a class="btn btn-primary" href="https://ig0.renorma.app/">Перейти в re:Norma →</a>
-    </div>
   </section>
 
   <footer>
@@ -437,8 +438,7 @@ var W = (function () {
     $("next").textContent = step === STEPS - 2 ? "Как достичь идеального веса" : "Далее";
     $("nav").hidden = step === STEPS - 1;
     var r = W.calc(state);
-    // Человеку в идеальном весе продавать похудение незачем.
-    $("cta").hidden = step !== STEPS - 1 || r.already;
+
     if (!weightTouched) {
       state.weight = Math.round(r.ideal);
       $("weight").value = state.weight;
@@ -472,6 +472,9 @@ var W = (function () {
         + '<span class="fact">ИМТ <i>' + nf(r.idealBmi) + '</i></span>';
     }
     if (step === 5) {
+      // Человеку в идеальном весе ни цифры похудения, ни переход в приложение не нужны.
+      $("minis").hidden = r.already;
+      $("goApp").hidden = r.already;
       if (r.already) {
         $("way").hidden = false;
         $("way").innerHTML = "Вы уже <b>в своём идеальном весе</b>.";
@@ -486,6 +489,8 @@ var W = (function () {
         // быстро не выйдет». Комфортный темп и предел — в килограммах за месяц.
         var perMonth = state.weight * r.rate.mid * 4.345;
         var maxMonth = state.weight * r.rate.max * 4.345;
+        $("miniLose").textContent = nf(r.toLose) + " кг";
+        $("miniRate").textContent = nf(r.rate.high ? perMonth : maxMonth) + " кг/мес";
         $("verdict").innerHTML = r.rate.high
           ? "Вам необходимо скинуть <b>" + nf(r.toLose) + " кг</b>. Ваш процент жира довольно высок, а значит, "
             + "вы можете <b>безопасно худеть очень быстро</b>. Уже через месяц возможны первые результаты. "

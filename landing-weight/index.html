@@ -546,7 +546,7 @@ function drawChart(r) {
   });
   $("next").addEventListener("click", function () { go(step + 1); });
   $("back").addEventListener("click", function () { go(step - 1); });
-  $("back2").addEventListener("click", function () { go(0); });
+  $("back2").addEventListener("click", function () { go(step - 1); });
   render();
 })();
 </script>

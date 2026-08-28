@@ -33,10 +33,17 @@ fn SendChoice(
     send: impl Fn(datashare::report::Scope) + Copy + 'static,
 ) -> impl IntoView {
     use datashare::report::Scope;
-    let sheet = "position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.45); \
-                 display: flex; align-items: flex-end;";
-    let card = "width: 100%; background: var(--bulma-scheme-main); border-radius: 18px 18px 0 0; \
-                padding: 20px;";
+    // Карточка поднята НАД плавающей нижней навигацией, а не положена под неё.
+    // Раньше «Все данные» приходилось ровно на панель навигации, и нажать кнопку
+    // было нельзя: она нарисована, а клик перехватывает панель. Поднять z-index
+    // не помогает — карточка внутри чужого контекста наложения и панель ей не
+    // перебить. Поймано браузерной проверкой `check-curator-flow.mjs`; глазами
+    // такое не видно, кнопка на месте.
+    let sheet = "position: fixed; inset: 0; z-index: 120; background: rgba(0,0,0,.45); \
+                 display: flex; align-items: flex-end; justify-content: center;";
+    let card = "width: min(26rem, calc(100% - 1.5rem)); margin-bottom: 5.5rem; \
+                background: var(--bulma-scheme-main); border-radius: 18px; \
+                box-shadow: 0 4px 24px rgba(0,0,0,0.2); padding: 20px;";
     view! {
         <div style=sheet attr:data-testid="report-choice">
             <div style=card on:click=|ev| ev.stop_propagation()>

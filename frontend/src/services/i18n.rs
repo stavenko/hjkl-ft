@@ -386,6 +386,18 @@ fn en(key: &str) -> &'static str {
 
         // Curator data-request panel + share
         // ── Кураторские директивы: тексты собираются НА УСТРОЙСТВЕ ──
+        "planka.label.calories" => "Calories",
+        "planka.label.protein" => "Protein",
+        "planka.label.steps" => "Steps",
+        "planka.label.veg_fruit" => "Vegetables and fruit",
+        "planka.label.calcium" => "Calcium",
+        "planka.label.fiber" => "Fibre",
+        "planka.label.iron" => "Iron",
+        "planka.label.heme" => "Heme iron",
+        "planka.label.epa_dha" => "Omega-3 (EPA+DHA)",
+        "planka.label.fat_ratio" => "Fat balance",
+        "planka.label.red_meat" => "Red meat",
+        "planka.label.egg" => "Eggs",
         "planka.name.calories" => "calorie target",
         "planka.name.protein" => "protein target",
         "planka.name.steps" => "step target",
@@ -1364,6 +1376,18 @@ fn ru(key: &str) -> &'static str {
 
         // Запрос данных куратора: панель + отправка
         // ── Кураторские директивы: тексты собираются НА УСТРОЙСТВЕ ──
+        "planka.label.calories" => "Калории",
+        "planka.label.protein" => "Белок",
+        "planka.label.steps" => "Шаги",
+        "planka.label.veg_fruit" => "Овощи и фрукты",
+        "planka.label.calcium" => "Кальций",
+        "planka.label.fiber" => "Клетчатка",
+        "planka.label.iron" => "Железо",
+        "planka.label.heme" => "Гемовое железо",
+        "planka.label.epa_dha" => "Омега-3 (EPA+DHA)",
+        "planka.label.fat_ratio" => "Баланс жиров",
+        "planka.label.red_meat" => "Красное мясо",
+        "planka.label.egg" => "Яйца",
         "planka.name.calories" => "планку по калориям",
         "planka.name.protein" => "планку по белку",
         "planka.name.steps" => "планку по шагам",

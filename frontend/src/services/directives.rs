@@ -34,6 +34,30 @@ pub fn planka_name(key: &str) -> String {
     t(k).to_string()
 }
 
+/// Имя индикатора в именительном падеже — для перечней, где нет предложения.
+///
+/// `planka_name` возвращает оборот, встроенный в фразу («установил вам *планку по
+/// калориям*»), и в списке маркированных строк он читается косо. Здесь тот же вид
+/// назван так, как он подписан на шкале.
+pub fn planka_label(key: &str) -> String {
+    let k = match key {
+        "calories" => "planka.label.calories",
+        "protein" => "planka.label.protein",
+        "steps" => "planka.label.steps",
+        "veg_fruit" => "planka.label.veg_fruit",
+        "calcium" => "planka.label.calcium",
+        "fiber" => "planka.label.fiber",
+        "iron" => "planka.label.iron",
+        "heme" => "planka.label.heme",
+        "epa_dha" => "planka.label.epa_dha",
+        "fat_ratio" => "planka.label.fat_ratio",
+        "red_meat" => "planka.label.red_meat",
+        "egg" => "planka.label.egg",
+        _ => return key.to_string(),
+    };
+    t(k).to_string()
+}
+
 /// Единица измерения планки — та же, в которой её видит человек на шкале.
 pub fn planka_unit(key: &str) -> String {
     let k = match key {
@@ -89,7 +113,7 @@ pub fn planka_list() -> String {
         .iter()
         .filter_map(|k| {
             let v = plankas::current(*k)?;
-            Some(format!("• {} — {}", planka_name(k.key()), planka_value(k.key(), v)))
+            Some(format!("• {} — {}", planka_label(k.key()), planka_value(k.key(), v)))
         })
         .collect::<Vec<_>>()
         .join("\n")

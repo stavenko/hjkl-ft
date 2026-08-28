@@ -36,6 +36,11 @@ const SUPPORT = process.env.SUPPORT ?? 'https://support-worker-dev.vg-stavenko.w
 const OLD_CAL = 2500;
 const OLD_STEPS = 9000;
 const NEW_CAL = 1850;
+// То же, что кладёт `seed`: проверке нужны те же числа, что и посеву, иначе она
+// сверяет отчёт сама с собой.
+const SEED_STEPS = OLD_STEPS + 1500;
+const SEED_KCAL = 2000; // 2000 г каши по 100 ккал на 100 г
+const BIRTH_YEAR = 1985;
 
 let fail = 0;
 const check = (n, ok, extra = '') => {
@@ -47,6 +52,11 @@ const section = (n) => console.log(`\n── ${n} ──`);
 const ymd = (b) => { const d = new Date(); d.setDate(d.getDate() - b); return d.toISOString().slice(0, 10); };
 const iso = (b) => { const d = new Date(); d.setDate(d.getDate() - b); return d.toISOString(); };
 const uuid = () => crypto.randomUUID();
+
+const SEED_WEIGHT_DAYS = Array.from({ length: 21 }, (_, i) => ymd(i));
+const SEED_WEIGHT = Object.fromEntries(SEED_WEIGHT_DAYS.map((d, i) => [d, 90 + i * 0.14]));
+const SEED_STEP_DAYS = Array.from({ length: 12 }, (_, i) => ymd(i + 1));
+const AGE = new Date().getFullYear() - BIRTH_YEAR;
 
 const api = async (token, method, path, body) => {
   const r = await fetch(SUPPORT + path, {
@@ -337,6 +347,63 @@ if (got) {
   check('последний день отчёта — ВЧЕРА (сегодняшний не едет)', rep.period.to === ymd(1),
     `${rep.period.to} (вчера ${ymd(1)})`);
   check('выполненный запрос погашен', !got.request_scope, `request_scope = ${got.request_scope}`);
+
+  // ── Содержимое отчёта сверяется С ПОСЕВОМ ─────────────────────────────────
+  // Доехавший отчёт — ещё не верный отчёт. Потерянный ряд, сдвиг дат на день,
+  // чужая единица измерения доедут ровно так же успешно, и до сих пор ни одна
+  // проверка на это не смотрела. Здесь утверждается не «что-то пришло», а
+  // «пришло ровно то, что человек у себя записал».
+  const wRows = rep.weight?.series ?? [];
+  const sRows = rep.steps?.series ?? [];
+  const wDates = wRows.map((r) => r.date);
+  const sDates = sRows.map((r) => r.date);
+  // Правило «сегодняшнее не едет» — про ДАННЫЕ, а не только про границу
+  // периода: день ещё заполняется, и судить по нему нельзя.
+  check('в ряду веса нет сегодняшнего дня', !wDates.includes(ymd(0)),
+    wDates.includes(ymd(0)) ? `есть ${ymd(0)}` : `последний ${wDates.at(-1) ?? 'ряд пуст'}`);
+  check('в ряду шагов нет сегодняшнего дня', !sDates.includes(ymd(0)),
+    sDates.includes(ymd(0)) ? `есть ${ymd(0)}` : `последний ${sDates.at(-1) ?? 'ряд пуст'}`);
+
+  const wantW = SEED_WEIGHT_DAYS.filter((d) => d >= rep.period.from && d <= rep.period.to);
+  check('ряд веса — все дни периода, ни одного лишнего',
+    JSON.stringify([...wDates].sort()) === JSON.stringify([...wantW].sort()),
+    `${wDates.length} из ${wantW.length}`);
+  const wBad = wRows.find((r) => Math.abs(r.kg - SEED_WEIGHT[r.date]) > 1e-9);
+  check('вес в отчёте — тот, что человек записывал', !wBad,
+    wBad ? `${wBad.date}: ${wBad.kg} вместо ${SEED_WEIGHT[wBad.date]}` : `${wRows.length} записей сошлись`);
+
+  const wantS = SEED_STEP_DAYS.filter((d) => d >= rep.period.from && d <= rep.period.to);
+  const sBad = sRows.find((r) => r.steps !== SEED_STEPS);
+  check('ряд шагов — все дни периода с теми же числами',
+    JSON.stringify([...sDates].sort()) === JSON.stringify([...wantS].sort()) && !sBad,
+    sBad ? `${sBad.date}: ${sBad.steps} вместо ${SEED_STEPS}` : `${sRows.length} из ${wantS.length}`);
+
+  // Среднее едет ради расчёта на стороне куратора: по нему он отличает «планка
+  // велика» от «планку не держат». Ошибка здесь тихо испортит его решение.
+  check('среднее за 7 завершённых дней — то, что съедено',
+    Math.abs((rep.avg_kcal_7d ?? 0) - SEED_KCAL) < 1,
+    `${rep.avg_kcal_7d} (ожидали ${SEED_KCAL})`);
+
+  const body = rep.body ?? {};
+  check('тело — из профиля человека',
+    body.sex === 'male' && body.height_cm === 180 && body.age_years === AGE,
+    `${body.sex}, ${body.height_cm} см, ${body.age_years} лет (ожидали male, 180, ${AGE})`);
+
+  // Планки в отчёте берутся из того же `plankas::current`, что рисует человеку
+  // его собственные шкалы: сойтись они обязаны до числа.
+  const mine = await bound.page.evaluate(readState);
+  check('планки в отчёте — те же, что действуют у человека',
+    rep.targets?.calories === mine.calories && rep.targets?.steps === mine.steps,
+    `калории ${rep.targets?.calories} / ${mine.calories}, шаги ${rep.targets?.steps} / ${mine.steps}`);
+  // Индикаторы судят дни по съеденному. Сегодняшний день ещё пуст — «съедено
+  // ноль» прочитается как «планка соблюдена», и куратор увидит зелёный там, где
+  // не произошло ничего.
+  const indPts = (rep.indicators ?? []).flatMap((i) => (i.points ?? []).map((p) => p.date));
+  check('в рядах индикаторов нет сегодняшнего дня', !indPts.includes(ymd(0)),
+    indPts.includes(ymd(0)) ? `есть ${ymd(0)}` : `дней ${new Set(indPts).size}`);
+
+  check('история планок доехала', (rep.plankas?.calories ?? []).some((p) => p.amount === NEW_CAL),
+    JSON.stringify(rep.plankas?.calories ?? []));
 }
 section('5. отвязка возвращает наши правила');
 // Сперва куратор ставит ПОСТОЯННУЮ планку: на ней и видно, что при отвязке

@@ -1,6 +1,6 @@
-// Кураторский путь целиком, в ЗАПУЩЕННОМ приложении худеющего.
+// Кураторский путь целиком, в ЗАПУЩЕННЫХ приложениях — и худеющего, и куратора.
 //
-// Проверяет ровно четыре утверждения, и в таком порядке:
+// Проверяет шесть утверждений, и в таком порядке:
 //
 //   1. Без куратора приложение ведёт планки САМО — все, что оно ведёт: калории,
 //      шаги и следующий за ними белок.
@@ -8,7 +8,8 @@
 //      приложении и соглашается.
 //   3. С куратором приложение планки НЕ ТРОГАЕТ — ни одну, пока не тронет он.
 //   4. Передача работает в обе стороны: директива планки и запрос данных
-//      доезжают до человека, отчёт доезжает до куратора.
+//      доезжают до человека, отчёт доезжает до куратора — и везёт ИМЕННО ТО,
+//      что человек у себя записал, а кураторский экран показывает те же числа.
 //   5. Отвязка возвращает НАШИ правила: девять постоянных планок забываются,
 //      три подвижные остаются кураторскими до первого пересчёта, и человек
 //      получает письмо с перечнем того, что теперь соблюдать.
@@ -19,6 +20,12 @@
 // назад, человек всё это время ест, ходит и взвешивается. Отличается только
 // наличие куратора, поэтому разница в поведении и есть доказательство.
 //
+// Про отчёт мало знать, что он доехал: потерянный ряд, сдвиг дат на день или
+// чужая единица измерения доедут так же успешно. Поэтому часть 4в сверяет его
+// содержимое с посевом, а 4г открывает кураторское приложение и сверяет то, что
+// оно НАРИСОВАЛО, с числами человека: экран не показывает payload как есть, он
+// пересчитывает его заново — цвета, график, тренд, — и разойтись может там.
+//
 // Девять постоянных планок (кальций, клетчатка, железо, гем, овощи, омега-3,
 // баланс жиров, красное мясо, яйца) здесь не проверяются намеренно: они чистые
 // функции от профиля и калорийной планки, и их считает `cargo test -p plankas`.
@@ -26,12 +33,14 @@
 //
 // Запуск: node scripts/check-curator-flow.mjs
 //   FE      — каталог собранного фронтенда (по умолчанию ../frontend/dist)
+//   CUR     — каталог собранного куратора (по умолчанию ../curator/dist)
 //   VERBOSE — печатать все запросы приложения к воркерам
 
 import { serveWithProxy, launchBrowser } from './lib/devserver.mjs';
 import { createPaidUser, mintToken } from './lib/devuser.mjs';
 
 const DIST = process.env.FE ?? new URL('../frontend/dist', import.meta.url).pathname;
+const CUR_DIST = process.env.CUR ?? new URL('../curator/dist', import.meta.url).pathname;
 const SUPPORT = process.env.SUPPORT ?? 'https://support-worker-dev.vg-stavenko.workers.dev';
 const OLD_CAL = 2500;
 const OLD_STEPS = 9000;
@@ -249,7 +258,8 @@ await free.ctx.close();
 // ── 2. Привязка по ссылке ───────────────────────────────────────────────────
 section('2. привязка ПО ССЫЛКЕ: экран согласия в приложении');
 const bound = await boot(b, server, 'flow-bound');
-const curator = mintToken(`e2e-curator-${uuid().slice(0, 8)}`);
+const curatorId = `e2e-curator-${uuid().slice(0, 8)}`;
+const curator = mintToken(curatorId);
 let r = await api(curator, 'POST', '/curator/register', {});
 check('куратор зарегистрировался', r.status === 200, `${r.status}`);
 r = await api(curator, 'POST', '/curator/clients', { name: 'Проверочный клиент' });
@@ -405,6 +415,99 @@ if (got) {
   check('история планок доехала', (rep.plankas?.calories ?? []).some((p) => p.amount === NEW_CAL),
     JSON.stringify(rep.plankas?.calories ?? []));
 }
+section('4г. кураторское приложение показывает ТО ЖЕ, что у человека');
+// Отчёт, доехавший до воркера, — ещё не отчёт, увиденный куратором. Кураторский
+// экран показывает не payload как есть: он пересчитывает его заново — цвета
+// индикаторов, график веса, подсказку. Расхождение с числами человека заводится
+// именно там, и до сих пор туда не смотрела ни одна проверка: тест сам ходил в
+// воркер и сам разбирал JSON, а приложение куратора не открывалось ни разу.
+const curServer = await serveWithProxy({
+  root: CUR_DIST,
+  configFor: (o) => [
+    `auth_base_url = "${o}/api/auth"`, `support_base_url = "${o}/api/support"`,
+    `push_base_url = "${o}/api/push"`, `app_origin = "${o}"`,
+  ].join('\n'),
+});
+const cctx = await b.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+// Кураторское приложение работает только установленным: во вкладке оно
+// показывает экран «поставьте на домашний экран» и дальше не идёт. Проверке
+// нужен не этот заслон, а то, что за ним, — представляемся установленным ровно
+// тем полем, по которому приложение и судит на iOS.
+await cctx.addInitScript(() => {
+  Object.defineProperty(navigator, 'standalone', { get: () => true, configurable: true });
+});
+const cpage = await cctx.newPage();
+const cpanics = [];
+cpage.on('pageerror', (e) => cpanics.push(e.message));
+cpage.on('console', (m) => { if (/panicked at/.test(m.text())) cpanics.push(m.text().slice(0, 200)); });
+// Вход тем же способом, что и у человека: паскей проверяет личность, а проверке
+// нужна не она, а всё, что происходит после входа.
+await cpage.goto(curServer.url, { waitUntil: 'domcontentloaded' });
+await cpage.evaluate(({ id, token }) => {
+  localStorage.clear();
+  localStorage.setItem('curator_id', id);
+  localStorage.setItem('curator_token', token);
+}, { id: curatorId, token: curator });
+await cpage.goto(curServer.url, { waitUntil: 'domcontentloaded' });
+
+const row = await cpage.waitForSelector('[data-testid="client-row"]', { timeout: 30000 })
+  .then((h) => h).catch(() => null);
+check('куратор вошёл и видит клиента', !!row,
+  row ? '' : (await cpage.evaluate(() => document.body.innerText.slice(0, 160))));
+if (row && got) {
+  const rep = JSON.parse(got.report).report;
+  await row.click();
+  const shown = await cpage.waitForSelector('[data-testid="client-report"]', { timeout: 30000 })
+    .then(() => true).catch(() => false);
+  check('отчёт открылся на экране куратора', shown,
+    shown ? '' : (await cpage.evaluate(() => document.body.innerText.slice(0, 160))));
+
+  const seen = await cpage.evaluate(() => {
+    const root = document.querySelector('[data-testid="client-report"]');
+    if (!root) return null;
+    return {
+      text: root.innerText,
+      // Столбик шага подписан «дата · число» — это ровно те числа, по которым
+      // куратор судит, и их можно сверить, а не разглядывать. Берём столбики
+      // именно из карточки шагов: полоски индикаторов подписаны так же.
+      steps: (() => {
+        const card = [...root.querySelectorAll('.card')].find(
+          (c) => !c.dataset.testid && c.querySelector('p')?.textContent.trim() === 'Шаги');
+        return card ? [...card.querySelectorAll('span[title]')].map((e) => e.getAttribute('title')) : [];
+      })(),
+      indicators: [...root.querySelectorAll('[data-testid="indicator-row"]')].map((e) => e.innerText),
+    };
+  });
+
+  check('период на экране — тот же, что в отчёте',
+    seen.text.includes(rep.period.from) && seen.text.includes(rep.period.to),
+    seen.text.split('\n')[0]);
+
+  const wantSteps = rep.steps.series.map((r) => `${r.date} · ${r.steps}`);
+  check('столбики шагов — те же дни и те же числа',
+    JSON.stringify(seen.steps) === JSON.stringify(wantSteps),
+    seen.steps.length === wantSteps.length ? 'ряды совпали' : `${seen.steps.length} против ${wantSteps.length}`);
+
+  const slope = rep.weight.slope_kg_per_week;
+  const wantSlope = slope == null ? 'тренд не определён'
+    : `${slope >= 0 ? '+' : ''}${slope.toFixed(2)} кг/нед`;
+  check('тренд веса на экране — из данных человека, а не выдуман',
+    seen.text.includes(wantSlope), `ждали «${wantSlope}»`);
+
+  // Планка на карточке индикатора — то самое число, по которому судится человек
+  // у себя. Разойтись они не имеют права: судят-то одного и того же.
+  const mine = await bound.page.evaluate(readState);
+  const calRow = seen.indicators.find((t) => /Калори/i.test(t));
+  check('планка калорий на экране куратора — та же, что у человека',
+    !!calRow && calRow.includes(String(mine.calories)),
+    calRow ? calRow.replace(/\n/g, ' ') : 'строки калорий нет');
+  check('история планок на экране — с кураторским числом',
+    seen.text.includes(String(NEW_CAL)), `${NEW_CAL} в тексте`);
+  check('кураторское приложение без паник', cpanics.length === 0, cpanics[0] ?? 'паник нет');
+}
+await cctx.close();
+curServer.close();
+
 section('5. отвязка возвращает наши правила');
 // Сперва куратор ставит ПОСТОЯННУЮ планку: на ней и видно, что при отвязке
 // возвращается наше правило. У девяти констант запись в истории может появиться

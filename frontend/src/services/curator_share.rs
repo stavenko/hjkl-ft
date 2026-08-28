@@ -442,7 +442,11 @@ pub async fn build_report(from: Option<String>, to: String) -> Value {
     let weight = local::list_weight_entries().await;
     let weight_series: Vec<Value> = weight
         .iter()
-        .filter(|e| e.date >= from)
+        // Обе границы, а не только нижняя. `to` — последний ЗАВЕРШЁННЫЙ день, и
+        // ряд, вылезающий за него, врёт дважды: он противоречит объявленному
+        // периоду и уедет второй раз завтра, когда следующий отчёт начнётся с
+        // этого же дня.
+        .filter(|e| e.date >= from && e.date <= to)
         .map(|e| {
             json!({
                 "date": e.date,
@@ -474,7 +478,7 @@ pub async fn build_report(from: Option<String>, to: String) -> Value {
     let steps_series: Vec<Value> = local::list_step_entries()
         .await
         .iter()
-        .filter(|e| e.date >= from)
+        .filter(|e| e.date >= from && e.date <= to)
         .map(|e| json!({ "date": e.date, "steps": e.steps }))
         .collect();
 

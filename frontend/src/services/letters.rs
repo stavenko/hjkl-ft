@@ -206,6 +206,15 @@ async fn recompute_calorie_planka(force: bool) {
         leptos::logging::log!("планка калорий: пересчёта нет — человека ведёт куратор");
         return;
     }
+    // Адресата ещё не спрашивали — значит и про куратора мы ничего не знаем.
+    // Считать в этот момент «куратора нет» нельзя: на свежем устройстве пересчёт
+    // успевал отработать до первого опроса и двигал планку человеку, которого
+    // ведёт куратор. Ждём ответа сервера: пересчёт недельный, одна отложенная
+    // попытка ничего не стоит, а испорченная планка стоит недели.
+    if !crate::services::support_chat::peer_known() {
+        leptos::logging::log!("планка калорий: пересчёта нет — адресат ещё не известен");
+        return;
+    }
 
     // No planka yet → nothing to recompute (the week-2 gate hasn't fired).
     let goals = local::list_goals().await;
@@ -334,6 +343,11 @@ async fn recompute_steps_planka(force: bool) {
     // См. подробности в пересчёте калорий выше.
     if crate::services::support_chat::has_curator() {
         leptos::logging::log!("планка шагов: пересчёта нет — человека ведёт куратор");
+        return;
+    }
+    // См. пересчёт калорий: пока адресат неизвестен, о кураторе судить не по чему.
+    if !crate::services::support_chat::peer_known() {
+        leptos::logging::log!("планка шагов: пересчёта нет — адресат ещё не известен");
         return;
     }
 

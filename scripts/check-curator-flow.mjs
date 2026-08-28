@@ -9,6 +9,11 @@
 //   3. С куратором приложение планки НЕ ТРОГАЕТ — ни одну, пока не тронет он.
 //   4. Передача работает в обе стороны: директива планки и запрос данных
 //      доезжают до человека, отчёт доезжает до куратора.
+//   5. Отвязка возвращает НАШИ правила: девять постоянных планок забываются,
+//      три подвижные остаются кураторскими до первого пересчёта, и человек
+//      получает письмо с перечнем того, что теперь соблюдать.
+//   6. Подсчёт ВОЗОБНОВЛЯЕТСЯ: недельный цикл, молчавший при кураторе, снова
+//      считает — и забирает кураторское число себе как отправную точку.
 //
 // Первый и третий пункты — один и тот же посев: планку поставили десять дней
 // назад, человек всё это время ест, ходит и взвешивается. Отличается только
@@ -132,6 +137,8 @@ const readState = async () => {
   const kind = (k) => history.filter((h) => h.kind === k).sort((a, b) => a.date.localeCompare(b.date));
   return {
     calories: kind('calories').at(-1)?.amount,
+    fiber: kind('fiber').at(-1)?.amount,
+    fiberDays: kind('fiber').map((h) => h.date),
     calorieDays: kind('calories').map((h) => h.date),
     steps: kind('steps').at(-1)?.amount,
     stepDays: kind('steps').map((h) => h.date),
@@ -331,6 +338,86 @@ if (got) {
     `${rep.period.to} (вчера ${ymd(1)})`);
   check('выполненный запрос погашен', !got.request_scope, `request_scope = ${got.request_scope}`);
 }
+section('5. отвязка возвращает наши правила');
+// Сперва куратор ставит ПОСТОЯННУЮ планку: на ней и видно, что при отвязке
+// возвращается наше правило. У девяти констант запись в истории может появиться
+// ТОЛЬКО от него — приложение их не пишет, — поэтому её исчезновение и есть
+// доказательство, а не совпадение.
+const FIBER = 32;
+r = await api(curator, 'POST', `/curator/clients/${clientId}/reply`, {
+  client_id: uuid(), text: '', kind: 'set_planka_v2',
+  payload: JSON.stringify({ key: 'fiber', amount: FIBER }),
+});
+check('директива по клетчатке принята', r.status === 200, `${r.status}`);
+await bound.page.reload({ waitUntil: 'domcontentloaded' });
+await waitFor(bound.page, 30, async () =>
+  (await bound.page.evaluate(readState)).fiber === FIBER ? true : null);
+let u = await bound.page.evaluate(readState);
+check('постоянная планка встала от куратора', u.fiber === FIBER, `клетчатка ${u.fiber}`);
+
+r = await api(curator, 'POST', `/curator/clients/${clientId}/unbind`, {});
+check('куратор прекратил работу', r.status === 200, `${r.status} ${r.text ?? ''}`);
+// Приложение узнаёт об отвязке ПО СМЕНЕ АДРЕСАТА в опросе — других признаков у
+// него нет, кто бы её ни начал.
+await bound.page.reload({ waitUntil: 'domcontentloaded' });
+await waitFor(bound.page, 30, async () =>
+  (await bound.page.evaluate(readState)).peer === 'admin' ? true : null);
+await bound.page.waitForTimeout(4000);
+u = await bound.page.evaluate(readState);
+console.log(`   адресат ${u.peer}; калории ${u.calories}, клетчатка ${u.fiber ?? '—'}`);
+check('адресат снова админ', u.peer === 'admin', u.peer);
+check('постоянная планка забыта — вернулось наше правило', u.fiber === undefined,
+  u.fiberDays.join(', ') || 'записей нет');
+// Стирается ЗАПИСЬ, а не пишется наше число: клетчатка обязана и дальше следовать
+// за калорийной планкой, а замороженное число ходило бы за ней не умея.
+check('подвижная планка осталась кураторской', u.calories === NEW_CAL,
+  `${u.calories} (ожидали ${NEW_CAL})`);
+check('письмо об отвязке пришло', u.letters.some((i) => i.startsWith('curator-unbound-')),
+  u.letters.join(', ') || 'писем нет');
+const body = await bound.page.evaluate(async () => {
+  const uid = localStorage.getItem('user_id');
+  const db = await new Promise((r) => { const q = indexedDB.open(`hjkl-ft-${uid}`); q.onsuccess = () => r(q.result); });
+  const rows = await new Promise((r) => { const q = db.transaction(['app_flags'], 'readonly').objectStore('app_flags').getAll(); q.onsuccess = () => r(q.result); });
+  db.close();
+  const ls = JSON.parse(rows.find((x) => x.key === 'letters_v1')?.value || '[]');
+  return ls.find((l) => l.id.startsWith('curator-unbound-'))?.body ?? '';
+});
+// Перечень обязан называть планки ИМЕНЕМ, а не оборотом из фразы: в столбце
+// «• планку по яйцам — 7 шт» читается нелепо.
+const listed = body.split('\n').filter((l) => l.startsWith('•'));
+check('в письме перечислены планки с числами', listed.length >= 10 && body.includes(String(NEW_CAL)),
+  `строк ${listed.length}` + (listed[0] ? `, первая: ${listed[0]}` : ''));
+check('подписи в перечне — имена, а не обороты',
+  listed.every((l) => !/планку по|предел по|your |target/i.test(l)),
+  listed.find((l) => /планку по|предел по/i.test(l)) ?? 'все именами');
+check('оба якоря сдвинуты на сегодня', u.calAnchor === ymd(0) && u.stepAnchor === ymd(0),
+  `${u.calAnchor} / ${u.stepAnchor}`);
+
+section('6. подсчёт возобновляется');
+// Якоря отвязка поставила на сегодня — цикл сработает через неделю. Отматываем
+// их назад: это то же самое, что подождать неделю, только без ожидания.
+await bound.page.evaluate(async (back) => {
+  const uid = localStorage.getItem('user_id');
+  const db = await new Promise((r) => { const q = indexedDB.open(`hjkl-ft-${uid}`); q.onsuccess = () => r(q.result); });
+  await new Promise((res) => {
+    const tx = db.transaction(['app_flags'], 'readwrite');
+    tx.objectStore('app_flags').put({ key: 'planka_weekly_anchor', value: back });
+    tx.objectStore('app_flags').put({ key: 'steps_planka_weekly_anchor', value: back });
+    tx.oncomplete = () => res();
+  });
+  db.close();
+}, ymd(10));
+await bound.page.reload({ waitUntil: 'domcontentloaded' });
+await bound.page.waitForTimeout(18000);
+const back = await bound.page.evaluate(readState);
+console.log(`   калории ${NEW_CAL}→${back.calories}, шаги ${back.steps}; якорь ${back.calAnchor}`);
+check('калорийный цикл снова работает', back.calAnchor === ymd(0), back.calAnchor);
+check('шаговый цикл снова работает', back.stepAnchor === ymd(0), back.stepAnchor);
+check('письмо о недельной планке снова приходит',
+  back.letters.some((i) => i.startsWith('planka-')), back.letters.join(', '));
+// Кураторское число — отправная точка, а не помеха: цикл считает ОТ него.
+check('цикл оттолкнулся от кураторского числа', back.calorieDays.includes(ymd(0)),
+  back.calorieDays.join(', '));
 await bound.ctx.close();
 
 if (process.env.VERBOSE) {

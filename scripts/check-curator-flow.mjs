@@ -472,6 +472,17 @@ if (got) {
   check('планки в отчёте — те же, что действуют у человека',
     rep.targets?.calories === mine.calories && rep.targets?.steps === mine.steps,
     `калории ${rep.targets?.calories} / ${mine.calories}, шаги ${rep.targets?.steps} / ${mine.steps}`);
+  // Часы человека: у куратора своя дата и свой пояс, а весь отчёт — даты. Без
+  // этого блока он не отличит полные сутки от заполняемых.
+  const clock = rep.clock ?? {};
+  check('отчёт везёт часы человека',
+    clock.today === ymd(0) && clock.day_start_hour === 4 && !!clock.day_ends_at,
+    `${clock.tz ?? 'пояс не назван'}, сегодня ${clock.today}, сутки ломаются в ${clock.day_start_hour}:00`);
+  // Перелом суток — впереди и не дальше чем через сутки: это ближайшие 04:00.
+  const left = clock.day_ends_at ? (Date.parse(clock.day_ends_at) - Date.now()) / 3600e3 : null;
+  check('перелом суток — ближайший, а не вчерашний', left !== null && left > 0 && left <= 24,
+    left === null ? 'момента нет' : `через ${left.toFixed(1)} ч`);
+
   // Индикаторы судят дни по съеденному. Сегодняшний день ещё пуст — «съедено
   // ноль» прочитается как «планка соблюдена», и куратор увидит зелёный там, где
   // не произошло ничего.
@@ -496,7 +507,12 @@ const curServer = await serveWithProxy({
     `push_base_url = "${o}/api/push"`, `app_origin = "${o}"`,
   ].join('\n'),
 });
-const cctx = await b.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+// Куратор намеренно СИДИТ В ДРУГОМ ПОЯСЕ: в контейнере всё UTC, и на одинаковых
+// часах перевод времени проверить нельзя — он сходится сам собой. Нью-Йорк
+// отстаёт, и «04:00 у человека» обязано превратиться в другое число у куратора.
+const CURATOR_TZ = 'America/New_York';
+const cctx = await b.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block',
+  timezoneId: CURATOR_TZ });
 // Кураторское приложение работает только установленным: во вкладке оно
 // показывает экран «поставьте на домашний экран» и дальше не идёт. Проверке
 // нужен не этот заслон, а то, что за ним, — представляемся установленным ровно
@@ -552,6 +568,18 @@ if (row && got) {
       indicators: [...root.querySelectorAll('[data-testid="indicator-row"]')].map((e) => e.innerText),
     };
   });
+
+  const dayLine = await cpage.evaluate(() =>
+    document.querySelector('[data-testid="client-day-clock"]')?.innerText ?? '');
+  check('на экране куратора сказано, когда у клиента кончаются сутки',
+    /Сутки клиента заканчиваются в 04:00 по его времени/.test(dayLine) && /у вас/.test(dayLine),
+    dayLine || 'строки нет');
+  // Час у куратора — ЕГО собственный. Совпал бы с 04:00 — значит перевода нет и
+  // куратор в чужом поясе прочтёт неправду.
+  const mineHour = dayLine.match(/— (\d{2}):(\d{2}) у вас/);
+  check('время переведено в пояс куратора, а не показано чужое',
+    !!mineHour && mineHour[1] !== '04',
+    mineHour ? `${mineHour[0]} при 04:00 у человека (куратор в ${CURATOR_TZ})` : 'часа нет');
 
   check('период на экране — тот же, что в отчёте',
     seen.text.includes(rep.period.from) && seen.text.includes(rep.period.to),

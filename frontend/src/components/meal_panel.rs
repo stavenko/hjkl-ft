@@ -25,8 +25,14 @@ pub fn MealPanel(
     accent: String,
     /// Meal key stored in `meal_label` and passed to the add flow.
     meal_key: String,
-    /// Whether adding is allowed (only the current day). Off → header is a label.
+    /// Whether adding is allowed (day inside the edit window). Off → header is a label.
     can_add: bool,
+    /// День, в который кладёт «+». `None` — сегодня; иначе едет в ссылку, и
+    /// добавление попадает в выбранный день, а не в текущий.
+    ///
+    /// Обычный `Option`, а не `#[prop(optional)]`: тот разворачивает значение на
+    /// месте вызова и требует `String`, а здесь день именно может отсутствовать.
+    on_date: Option<String>,
     /// No rows → render the header (+ «+») only.
     is_empty: bool,
     /// Aggregate calories for the meal (collapsed summary).
@@ -79,9 +85,11 @@ pub fn MealPanel(
     let go_add = {
         let navigate = navigate.clone();
         let meal_key = meal_key.clone();
+        let on_date = on_date.clone();
         move || {
             if can_add {
-                navigate(&format!("/diary/add?meal={meal_key}"), Default::default());
+                let day = on_date.as_deref().map(|d| format!("&date={d}")).unwrap_or_default();
+                navigate(&format!("/diary/add?meal={meal_key}{day}"), Default::default());
             }
         }
     };
@@ -90,6 +98,7 @@ pub fn MealPanel(
         <div style=container_style>
             // Header — tap = add to this meal (iOS-safe <button>). Disabled = label.
             <button
+                attr:data-testid="meal-add"
                 class="button is-ghost"
                 style=header_style
                 disabled=!can_add

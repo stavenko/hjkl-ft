@@ -201,7 +201,7 @@ fn meal_panels_demo() -> impl IntoView {
         <div style=format!("{DEMO} flex-direction: column; align-items: stretch; gap: 0; padding: 12px; pointer-events: none;")>
             {meals.into_iter().map(|(name_key, key, accent)| view! {
                 <MealPanel title=t(name_key).to_string() accent=accent.to_string()
-                    meal_key=key.to_string() can_add=true is_empty=true
+                    meal_key=key.to_string() can_add=true is_empty=true on_date=None
                     kcal=0.0 protein=0.0 fat=0.0 carbs=0.0>
                     {Vec::<View>::new()}
                 </MealPanel>

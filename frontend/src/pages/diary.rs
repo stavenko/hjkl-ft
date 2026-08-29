@@ -265,6 +265,11 @@ pub fn DiaryPage() -> impl IntoView {
         date.get() == today
     };
 
+    /// Открыт ли выбранный день для правки. Неделя назад — тот же дневник, что и
+    /// сегодняшний: те же панели с «+», то же меню строки. Дальше день прожит и
+    /// заморожен, и там остаётся только «повторить сегодня».
+    let editable = move || local::is_editable_day(&date.get());
+
 
     let nutrient_sum = move |nutrient: &str, es: &[DiaryEntry], fs: &[Food]| -> f64 {
         es.iter().map(|e| {
@@ -525,7 +530,7 @@ pub fn DiaryPage() -> impl IntoView {
                 // «+»), which would otherwise flash before the entries arrive.
                 // Sticky caches make this instant on any later navigation.
                 ().into_view()
-            } else if !is_today() && entries().is_empty() {
+            } else if !editable() && entries().is_empty() {
                 // Past day with no entries: a short message (no panels, no add). Today
                 // always falls through to the panel view below, which renders the three
                 // empty meal panels (each with its «+»).
@@ -621,7 +626,7 @@ pub fn DiaryPage() -> impl IntoView {
                                         // Right side
                                         <div style="flex-shrink: 0; margin-left: 1rem; display: flex; align-items: center; gap: 0.75rem;">
                                             {move || {
-                                                if is_today() {
+                                                if editable() {
                                                     let eid = entry_id.clone();
                                                     let eid_t = entry_id.clone();
                                                     let eid_s = entry_id.clone();
@@ -630,6 +635,18 @@ pub fn DiaryPage() -> impl IntoView {
                                                     let eid_del = entry_id.clone();
                                                     let fid_e = fid3.clone();
                                                     let fid_ed = fid3.clone();
+                                                    // «Повторить сегодня» — то же действие, что было на
+                                                    // прошлых днях отдельной кнопкой-стрелкой. Теперь оно
+                                                    // просто пункт того же меню: кнопка вызова у всех дней
+                                                    // одна и та же.
+                                                    let fid_rep = fid3.clone();
+                                                    let meal_rep = meal_key.clone();
+                                                    let past_day = !is_today();
+                                                    // `Copy`-замыкание: разметка строки перерисовывается,
+                                                    // и `move ||` с захваченной строкой стал бы `FnOnce`.
+                                                    let fid_dup = store_value(fid3.clone());
+                                                    let already_today =
+                                                        move || today_entries().iter().any(|e| e.food_id == fid_dup.get_value());
                                                     view! {
                                                         <button
                                                             class="button is-ghost is-small has-text-link"
@@ -674,6 +691,32 @@ pub fn DiaryPage() -> impl IntoView {
                                                                             move |_| { dup_target.set(Some(id.clone())); menu_open.set(None); }
                                                                         }
                                                                     >{move || t("diary.duplicate")}</button>
+                                                                    {past_day.then(|| view! {
+                                                                        <button
+                                                                            attr:data-testid="diary-menu-repeat"
+                                                                            class="button is-ghost is-small is-fullwidth"
+                                                                            style="justify-content: flex-start; text-decoration: none;"
+                                                                            disabled=move || already_today()
+                                                                            on:click={
+                                                                                let fid = fid_rep.clone();
+                                                                                let mk = meal_rep.clone();
+                                                                                move |_| {
+                                                                                    let fid = fid.clone();
+                                                                                    let mk = mk.clone();
+                                                                                    menu_open.set(None);
+                                                                                    spawn_local(async move {
+                                                                                        if let Some(food) = local::list_foods().await.into_iter().find(|f| f.id == fid) {
+                                                                                            let _ = local::save_food_to_diary(
+                                                                                                &food, g, w, food.is_restaurant, mk, Some(local::today()),
+                                                                                            ).await;
+                                                                                            invalidate();
+                                                                                            sync::push_background();
+                                                                                        }
+                                                                                    });
+                                                                                }
+                                                                            }
+                                                                        >{move || t("diary.repeat_today")}</button>
+                                                                    })}
                                                                     <button
                                                                         attr:data-testid="diary-menu-edit"
                                                                         class="button is-ghost is-small is-fullwidth"
@@ -708,35 +751,44 @@ pub fn DiaryPage() -> impl IntoView {
                                                     let fid_r = fid4.clone();
                                                     // Per-render clone so the repeat on:click stays `Fn`.
                                                     let meal_key = meal_key.clone();
+                                                    // `Copy`-замыкание: см. такое же выше, в открытом дне.
+                                                    let fid_copied = store_value(fid_c);
                                                     let already_copied = move || {
-                                                        today_entries().iter().any(|e| e.food_id == fid_c)
+                                                        today_entries().iter().any(|e| e.food_id == fid_copied.get_value())
                                                     };
                                                     view! {
                                                         <span class="is-size-7 has-text-grey">{move || format!("{:.0}{}", g, t("common.unit.g"))}</span>
                                                         <div style="position: relative;">
+                                                            // Кнопка вызова меню — ТА ЖЕ, что у сегодняшнего дня.
+                                                            // Раньше здесь была стрелка-повтор, и строка прошлого
+                                                            // дня выглядела другим элементом интерфейса, хотя
+                                                            // делает то же: открывает меню действий. Отличается
+                                                            // теперь только список внутри.
                                                             <button
-                                                                class="button is-ghost"
+                                                                attr:data-testid="diary-row-menu"
+                                                                class="button is-ghost has-text-grey-light"
                                                                 style="height: 2.5rem; width: 2.5rem; padding: 0; text-decoration: none;"
-                                                                disabled=move || already_copied()
                                                                 on:click=move |_| {
+                                                                    haptic(15);
                                                                     menu_open.update(|m| {
                                                                         if m.as_deref() == Some(&eid) { *m = None; }
                                                                         else { *m = Some(eid.clone()); }
                                                                     });
                                                                 }
                                                             >
-                                                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                                    <polyline points="17 1 21 5 17 9"/>
-                                                                    <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
-                                                                    <polyline points="7 23 3 19 7 15"/>
-                                                                    <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                                                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                                                    <circle cx="10" cy="4" r="1.6"/>
+                                                                    <circle cx="10" cy="10" r="1.6"/>
+                                                                    <circle cx="10" cy="16" r="1.6"/>
                                                                 </svg>
                                                             </button>
                                                             <Show when=move || menu_open.get().as_deref() == Some(&eid2)>
                                                                 <div style="position: absolute; right: 0; top: 100%; z-index: 10; background: var(--bulma-scheme-main); border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); min-width: 10rem; padding: 0.25rem 0;">
                                                                     <button
+                                                                        attr:data-testid="diary-menu-repeat"
                                                                         class="button is-ghost is-small is-fullwidth"
                                                                         style="justify-content: flex-start; text-decoration: none;"
+                                                                        disabled=move || already_copied()
                                                                         on:click={
                                                                             let fid = fid_r.clone();
                                                                             let mk = meal_key.clone();
@@ -747,7 +799,9 @@ pub fn DiaryPage() -> impl IntoView {
                                                                             menu_open.set(None);
                                                                             spawn_local(async move {
                                                                                 if let Some(food) = local::list_foods().await.into_iter().find(|f| f.id == fid) {
-                                                                                    let _ = local::save_food_to_diary(&food, g, w, food.is_restaurant, mk).await;
+                                                                                    let _ = local::save_food_to_diary(
+                                                                                        &food, g, w, food.is_restaurant, mk, Some(local::today()),
+                                                                                    ).await;
                                                                                     invalidate();
                                                                                     sync::push_background();
                                                                                 }
@@ -774,7 +828,7 @@ pub fn DiaryPage() -> impl IntoView {
                           use crate::components::meal_panel::MealPanel;
                           let fs = foods();
                           let es = entries();
-                          let today = is_today();
+                          let today = editable();
                           MAIN_MEALS.iter().filter_map(|meal| {
                               let meal_entries: Vec<DiaryEntry> =
                                   es.iter().filter(|e| meal_key_for(e) == meal.key).cloned().collect();
@@ -794,6 +848,7 @@ pub fn DiaryPage() -> impl IntoView {
                               Some(view! {
                                   <MealPanel title=title accent=accent meal_key=meal.key.to_string()
                                       can_add=today is_empty=is_empty
+                                      on_date=(!is_today()).then(|| date.get())
                                       kcal=kcal protein=protein fat=fat carbs=carbs>
                                       {rows}
                                   </MealPanel>
@@ -868,7 +923,7 @@ pub fn DiaryPage() -> impl IntoView {
                                     let eid = eid.clone();
                                     dup_target.set(None);
                                     spawn_local(async move {
-                                        local::duplicate_diary_entry(&eid, Some(key.to_string())).await;
+                                        local::duplicate_diary_entry(&eid, Some(key.to_string()), None).await;
                                         invalidate();
                                         sync::push_background();
                                     });

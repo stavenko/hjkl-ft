@@ -23,6 +23,11 @@ pub fn DiaryAddPage() -> impl IntoView {
     // Stored verbatim on the new entry's `meal_label`. Absent → unlabelled.
     let meal_label = use_query_map().with_untracked(|q| q.get("meal").cloned());
 
+    // День, в который кладём (query `?date=YYYY-MM-DD`). Пусто — сегодня. Открыт
+    // для правки он или нет, решает не этот экран: сюда попадают только из
+    // открытого дня, а `save_food_to_diary` кладёт туда, куда сказано.
+    let on_date = use_query_map().with_untracked(|q| q.get("date").cloned());
+
     // Version counter: bump after a draft is created → resources re-read.
     let version = create_rw_signal(0u32);
 
@@ -91,9 +96,11 @@ pub fn DiaryAddPage() -> impl IntoView {
         Callback::new(move |(food, grams, waste, restaurant): (Food, f64, f64, bool)| {
             let navigate = navigate.clone();
             let meal_label = meal_label.clone();
+            let on_date = on_date.clone();
             spawn_local(async move {
                 let _entry =
-                    local::save_food_to_diary(&food, grams, waste, restaurant, meal_label).await;
+                    local::save_food_to_diary(&food, grams, waste, restaurant, meal_label, on_date)
+                        .await;
                 sync::push_background();
                 navigate("/diary", Default::default());
             });

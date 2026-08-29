@@ -12,7 +12,7 @@
 use leptos::*;
 
 use crate::services::i18n::t;
-use crate::services::{curator, support_chat};
+use crate::services::{curator, curator_share, support_chat};
 
 /// Сколько дней предлагаем отправить, когда запроса нет. Свой выбор человека —
 /// куратор срок не называл.
@@ -27,10 +27,19 @@ const DEFAULT_DAYS: u32 = 1;
 /// Когда прошлого отчёта нет, «только новое» не показывается вовсе: отсчитывать
 /// не от чего, и предлагать выбор, у которого один осмысленный ответ, — значит
 /// заставлять человека думать впустую.
+///
+/// По той же причине его нет и когда отсчитывать не от чего иначе: прошлый отчёт
+/// уже дошёл до вчера, а сегодняшний день не едет — значит нового нет ни одного
+/// дня. Раньше кнопка в этом случае показывалась и отправляла ПУСТОЙ отчёт с
+/// вывернутым периодом («с завтра по вчера»), затирая у куратора прошлый —
+/// содержательный.
 #[component]
 fn SendChoice(
     status: RwSignal<support_chat::ReportStatus>,
     send: impl Fn(datashare::report::Scope) + Copy + 'static,
+    /// Закрыть, ничего не отправив. Открыть и передумать человек вправе, а
+    /// шторка накрывает экран целиком: без этого выхода из неё нет вовсе.
+    on_close: Callback<()>,
 ) -> impl IntoView {
     use datashare::report::Scope;
     // Карточка поднята НАД плавающей нижней навигацией, а не положена под неё.
@@ -45,10 +54,13 @@ fn SendChoice(
                 background: var(--bulma-scheme-main); border-radius: 18px; \
                 box-shadow: 0 4px 24px rgba(0,0,0,0.2); padding: 20px;";
     view! {
-        <div style=sheet attr:data-testid="report-choice">
+        <div style=sheet attr:data-testid="report-choice"
+            on:click=move |_| on_close.call(())>
             <div style=card on:click=|ev| ev.stop_propagation()>
                 <p class="is-size-6 has-text-weight-semibold">{move || t("curator.report.what")}</p>
-                {move || status.get().last_report_through.map(|through| view! {
+                {move || status.get().last_report_through
+                    .filter(|through| through.as_str() < curator_share::report_through().as_str())
+                    .map(|through| view! {
                     <button class="button is-link is-fullwidth" style="margin-top: 16px;"
                         attr:data-testid="report-send-new"
                         on:click=move |_| send(Scope::New)>
@@ -66,12 +78,17 @@ fn SendChoice(
                 <p class="is-size-7 has-text-grey" style="margin-top: 6px;">
                     {move || t("curator.report.through_hint")}
                 </p>
+                <button class="button is-ghost is-fullwidth" style="margin-top: 12px;"
+                    attr:data-testid="report-send-cancel"
+                    on:click=move |_| on_close.call(())>
+                    {move || t("common.cancel")}
+                </button>
             </div>
         </div>
     }
 }
 
-/// Панель виджета: имя куратора, состояние, отправка и отвязка./// Панель виджета: имя куратора, состояние, отправка и отвязка.
+/// Панель виджета: имя куратора, состояние, отправка и отвязка.
 #[component]
 pub fn ReportPanel(
     /// Закрыть панель (после отвязки смотреть в ней больше не на что).
@@ -181,7 +198,8 @@ pub fn ReportPanel(
                 {move || error.get().map(|e| view! {
                     <p class="is-size-7 has-text-danger" style="margin-top: 10px;">{e}</p>
                 })}
-                {move || choosing.get().then(|| view! { <SendChoice status=status send=send /> })}
+                {move || choosing.get().then(|| view! { <SendChoice status=status send=send
+                    on_close=Callback::new(move |_| choosing.set(false)) /> })}
             </div>
 
             <div style=card>

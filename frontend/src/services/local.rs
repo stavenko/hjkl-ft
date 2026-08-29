@@ -12,17 +12,30 @@ fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
-/// Hour (local) at which a new logical/diary day begins. Entries logged BEFORE
-/// this hour belong to the PREVIOUS day, so a 01:00 night snack lands on the day
-/// it really belongs to instead of opening a fresh calendar day (which used to
-/// swallow the following morning's breakfast into "ночной перекус"). The diary,
-/// its date navigation and daily aggregations all pivot on this.
-pub const DAY_START_HOUR: i64 = 4;
+/// Сколько дней назад человек вправе править дневник, считая с сегодняшнего.
+///
+/// Неделя. Дальше день остаётся прожитым: его индикаторы заморожены, и переписать
+/// прошлое задним числом уже нельзя — иначе «планка того дня» перестала бы быть
+/// неизменной величиной, на которой держится вся история.
+pub const EDIT_WINDOW_DAYS: i64 = 7;
 
-/// The current logical day: the calendar date shifted back by [`DAY_START_HOUR`],
-/// so the day flips at 04:00 local rather than at midnight.
+/// Открыт ли день для правки: сегодня или один из шести предыдущих.
+pub fn is_editable_day(date: &str) -> bool {
+    let Ok(d) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") else {
+        return false;
+    };
+    let today = today_date();
+    d <= today && (today - d).num_days() < EDIT_WINDOW_DAYS
+}
+
+/// Сегодняшний день. Ровно календарный: сутки начинаются в полночь.
+///
+/// Было 04:00 — и не ради ночных перекусов, а ради запрета: вчерашний день
+/// закрывался для правки, и час нужен был, чтобы засидевшийся до часу ночи успел
+/// дописать съеденное. Теперь дневник открыт неделю назад, дописать можно прямо в
+/// нужный день, и сдвигать за это сутки всем остальным незачем.
 pub fn today_date() -> chrono::NaiveDate {
-    (chrono::Local::now() - chrono::Duration::hours(DAY_START_HOUR)).date_naive()
+    chrono::Local::now().date_naive()
 }
 
 /// The current logical day as "YYYY-MM-DD" (see [`today_date`]).
@@ -731,8 +744,8 @@ pub async fn protein_grams_on(date: &str) -> f64 {
     }).sum()
 }
 
-/// Logical "yesterday" (today - 1 day) as "YYYY-MM-DD", pivoting on the 04:00
-/// day boundary like [`today`].
+/// Вчера («сегодня» минус день) как "YYYY-MM-DD" — по тому же календарю, что и
+/// [`today`].
 pub fn yesterday() -> String {
     (today_date() - chrono::Duration::days(1))
         .format("%Y-%m-%d")
@@ -783,13 +796,18 @@ pub async fn save_food_to_diary(
     // Explicit meal this entry belongs to ("breakfast"/"lunch"/"dinner"), from the
     // panel whose «+» was tapped. `None` leaves it unlabelled (derived by time).
     meal_label: Option<String>,
+    // День, в который кладём. `None` — сегодня. Прошлый день человек заполняет по
+    // памяти, и часа он не помнит: время у такой записи не ставится вовсе, а к
+    // приёму пищи её относит явная пометка панели.
+    on_date: Option<String>,
 ) -> DiaryEntry {
     let food = food_with_restaurant_flag(food, is_restaurant).await;
+    let past = on_date.as_deref().is_some_and(|d| d != today());
     let entry = DiaryEntry {
         id: new_id(),
         food_id: food.id.clone(),
-        date: today(),
-        time: Some(time_now()),
+        date: on_date.unwrap_or_else(today),
+        time: (!past).then(time_now),
         grams,
         waste_grams,
         meal_label,
@@ -798,6 +816,11 @@ pub async fn save_food_to_diary(
         updated_at: now(),
     };
     db::put("diary", &entry).await;
+    // Прошлый день уже подсчитан и заморожен — его итоги надо пересудить, иначе
+    // шкалы покажут вчерашнее число.
+    if past {
+        crate::services::indicators::invalidate_day(&entry.date).await;
+    }
     // Classify this food's categories in the background (snack / liquid calories /
     // vegetable-fruit) as soon as it's logged.
     crate::services::classify::enqueue(food.id.clone());
@@ -887,8 +910,8 @@ pub async fn remove_food_diary(entry_id: &str) -> Result<(), String> {
     let entry: DiaryEntry = db::get("diary", entry_id)
         .await
         .ok_or_else(|| "entry not found".to_string())?;
-    if entry.date != today() {
-        return Err("can only delete today's entries".to_string());
+    if !is_editable_day(&entry.date) {
+        return Err("день закрыт для правки".to_string());
     }
     record_deletion("diary", entry_id).await;
     db::delete("diary", entry_id).await;
@@ -923,13 +946,25 @@ pub async fn delete_diary_data(cutoff: Option<&str>) {
 
 /// Duplicate a diary entry as a NEW entry today with a fresh time (food and
 /// grams/waste copied). Used by the diary-row long-press "Duplicate" action.
-pub async fn duplicate_diary_entry(entry_id: &str, meal_label: Option<String>) -> Option<DiaryEntry> {
+/// Копия записи. `on_date` — куда класть; `None` значит В СВОЙ ЖЕ день.
+///
+/// Раньше копия всегда падала в сегодня — другого случая и не было: дублировать
+/// можно было только сегодняшнюю запись. Теперь дневник открыт неделю, и «ещё
+/// одна такая же» во вторник обязана лечь во вторник. Копия в сегодня осталась
+/// отдельным действием — «повторить сегодня», с явной датой.
+pub async fn duplicate_diary_entry(
+    entry_id: &str,
+    meal_label: Option<String>,
+    on_date: Option<String>,
+) -> Option<DiaryEntry> {
     let src: DiaryEntry = db::get("diary", entry_id).await?;
+    let date = on_date.unwrap_or_else(|| src.date.clone());
+    let past = date != today();
     let entry = DiaryEntry {
         id: new_id(),
         food_id: src.food_id.clone(),
-        date: today(),
-        time: Some(time_now()),
+        date,
+        time: (!past).then(time_now),
         grams: src.grams,
         waste_grams: src.waste_grams,
         // Target meal chosen in the duplicate dialog; falls back to the source's.
@@ -939,6 +974,9 @@ pub async fn duplicate_diary_entry(entry_id: &str, meal_label: Option<String>) -
         updated_at: now(),
     };
     db::put("diary", &entry).await;
+    if past {
+        crate::services::indicators::invalidate_day(&entry.date).await;
+    }
     crate::services::classify::enqueue(entry.food_id.clone());
     Some(entry)
 }

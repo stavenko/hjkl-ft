@@ -68,6 +68,7 @@ mod m020_reask_calcium_again;
 mod m021_reask_veg_fruit_again;
 mod m022_reask_heme_red_meat;
 mod m023_reask_fat_profile;
+mod m024_reask_veg_fruit_roots;
 
 #[cfg(test)]
 mod tests;
@@ -209,6 +210,11 @@ const ALL: &[Migration] = &[
         version: m023_reask_fat_profile::VERSION,
         description: m023_reask_fat_profile::DESCRIPTION,
         script: || Box::pin(m023_reask_fat_profile::script()),
+    },
+    Migration {
+        version: m024_reask_veg_fruit_roots::VERSION,
+        description: m024_reask_veg_fruit_roots::DESCRIPTION,
+        script: || Box::pin(m024_reask_veg_fruit_roots::script()),
     },
 ];
 

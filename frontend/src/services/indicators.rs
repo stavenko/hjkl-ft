@@ -34,7 +34,6 @@ pub enum IndicatorState {
 }
 
 // ── Targets (WHO / user-set; adjustable) ─────────────────────────────────────
-const FIBER_PER_DAY_G: f64 = 25.0; // WHO ≥25 g/day
 const CALCIUM_PER_DAY_MG: f64 = 1000.0; // user: 1 g/day for everyone
 // Омеги-3 здесь БОЛЬШЕ НЕТ. Она собиралась общим проходом как обычный нутриент в
 // миллиграммах на 100 г — то есть «назови число» без таблицы категорий, — и одна
@@ -160,25 +159,6 @@ pub async fn enough_history() -> bool {
     // entry (with duplicates), so 7 items in a single day must NOT pass.
     let days: HashSet<String> = local::list_diary_dates().await.into_iter().collect();
     days.len() >= 7
-}
-
-/// Compute all seven indicator states, keyed the same as the widget icons.
-pub async fn compute() -> Vec<(&'static str, IndicatorState)> {
-    let today = crate::services::local::today_date();
-    // 70-day window covers the rolling week + up to 8 complete Mon–Sun weeks.
-    let window: Vec<NaiveDate> = (0..70).map(|i| today - Duration::days(i)).collect();
-    // Per-metric per-date value maps.
-    let veg = gather_veg(&window).await;
-    let cal = gather_nutrient(&window, N_CALCIUM).await;
-    let fib = gather_nutrient(&window, N_FIBER).await;
-
-    let last7: Vec<NaiveDate> = window.iter().take(7).copied().collect();
-
-    vec![
-        ("calcium", daily_nutrient(&cal, &last7, CALCIUM_PER_DAY_MG)),
-        ("veg_fruit", daily_classifier(&veg, &last7, veg_fruit_per_day_g())),
-        ("fiber", daily_nutrient(&fib, &last7, FIBER_PER_DAY_G)),
-    ]
 }
 
 // ── Progressive disclosure ───────────────────────────────────────────────────
@@ -915,7 +895,6 @@ async fn target_for(key: &str) -> f64 {
         "steps" => crate::services::profile::get_steps_planka().unwrap_or(0.0),
         "calories" => local::calorie_goal_amount().await.unwrap_or(0.0),
         "calcium" => CALCIUM_PER_DAY_MG,
-        "fiber" => FIBER_PER_DAY_G,
         _ => 0.0,
     }
 }
@@ -1034,12 +1013,11 @@ pub async fn calorie_adherence_state() -> IndicatorState {
 }
 
 /// The full indicator board for the curator food-share. It MUST match the colours
-/// the user sees on their own widget, so the DAILY indicators are computed with the
-/// exact same `indicator_state` the widget uses — 7 COMPLETED days, TODAY EXCLUDED.
-/// (`compute()`'s window includes today, an in-progress day that hasn't met its
-/// target yet, which wrongly showed veg-fruit / calcium as orange in the admin
-/// while the user's widget — excluding today — showed green.) The three WEEKLY
-/// indicators have no per-day `indicator_state`, so they come from `compute()`.
+/// the user sees on their own widget, so every indicator goes through the exact
+/// same `indicator_state` the widget uses — 7 COMPLETED days, TODAY EXCLUDED.
+/// Including today, an in-progress day that hasn't met its target yet, once showed
+/// veg-fruit / calcium as orange in the admin while the user's widget — excluding
+/// today — showed green.
 pub async fn share_states() -> Vec<(&'static str, IndicatorState)> {
     let mut out = Vec::new();
     // Calorie-planka adherence (also last 7 COMPLETED days).
@@ -1306,77 +1284,7 @@ pub async fn daily_gauges() -> Vec<DailyGauge> {
     out
 }
 
-/// Daily state for a CLASSIFIER metric (data always available → never Unknown).
-fn daily_classifier(values: &HashMap<String, f64>, last7: &[NaiveDate], target: f64) -> IndicatorState {
-    let misses = last7.iter()
-        .filter(|d| *values.get(&fmt(**d)).unwrap_or(&0.0) < target)
-        .count() as u32;
-    daily_state(misses)
-}
 
-/// Daily state for a NUTRIENT metric: Unknown when there's no data in the window.
-fn daily_nutrient(values: &HashMap<String, f64>, last7: &[NaiveDate], target: f64) -> IndicatorState {
-    let week_total: f64 = last7.iter().map(|d| values.get(&fmt(*d)).copied().unwrap_or(0.0)).sum();
-    if week_total == 0.0 {
-        return IndicatorState::Unknown;
-    }
-    let misses = last7.iter()
-        .filter(|d| *values.get(&fmt(**d)).unwrap_or(&0.0) < target)
-        .count() as u32;
-    daily_state(misses)
-}
-
-/// Weekly state. `is_limit` = the goal is an upper bound (met = under it).
-/// `is_nutrient` = Unknown when there's no data at all in the window.
-fn weekly(
-    values: &HashMap<String, f64>,
-    diary_days: &HashSet<String>,
-    today: NaiveDate,
-    target: f64,
-    is_limit: bool,
-    is_nutrient: bool,
-) -> IndicatorState {
-    let val = |d: NaiveDate| values.get(&fmt(d)).copied().unwrap_or(0.0);
-    let met = |sum: f64| if is_limit { sum <= target } else { sum >= target };
-
-    // Only COMPLETED Mon–Sun weeks, the most recent `WEEKLY_WINDOW`, and only those
-    // with any logging. The week in progress is NOT judged — see `weekly_state`.
-    let this_monday = today - Duration::days(today.weekday().num_days_from_monday() as i64);
-    let mut history_met = Vec::new();
-    for k in (1..=WEEKLY_WINDOW as i64).rev() {
-        let mon = this_monday - Duration::days(7 * k);
-        let dates: Vec<NaiveDate> = (0..7).map(|j| mon + Duration::days(j)).collect();
-        if !dates.iter().any(|d| diary_days.contains(&fmt(*d))) {
-            continue; // skip weeks with no logging
-        }
-        let sum: f64 = dates.iter().map(|d| val(*d)).sum();
-        history_met.push(met(sum));
-    }
-
-    if is_nutrient && values.values().sum::<f64>() == 0.0 {
-        // No data for this nutrient anywhere in the window yet.
-        return IndicatorState::Unknown;
-    }
-
-    weekly_state(&history_met)
-}
-
-async fn gather_veg(window: &[NaiveDate]) -> HashMap<String, f64> {
-    let mut m = HashMap::new();
-    for d in window {
-        let s = fmt(*d);
-        m.insert(s.clone(), local::veg_fruit_grams_on(&s).await);
-    }
-    m
-}
-async fn gather_nutrient(window: &[NaiveDate], key: &str) -> HashMap<String, f64> {
-    let mut m = HashMap::new();
-    for d in window {
-        let s = fmt(*d);
-        m.insert(s.clone(), local::nutrient_grams_on(&s, key).await);
-    }
-    m
-}
 
 #[cfg(test)]
 mod tests {

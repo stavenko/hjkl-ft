@@ -1674,7 +1674,7 @@ const S9: &[Frame] = &[
     // обойти кэш: у сервис-воркера картинки историй живут по имени.
     Frame {
         bg: Bg::Dark,
-        media: Media::CoverWhole("fiber-bloating-v2.jpg"),
+        media: Media::CoverWhole("fiber-bloating-v3.jpg"),
         accent: GREEN,
         kicker: Loc { en: "Fibre", ru: "Клетчатка" },
         title: Loc { en: "Bloating: how to avoid it", ru: "Вздутие: как избежать" },

@@ -3,7 +3,7 @@
 // хеш в имени, а /story-img/*.gif, шрифты и иконки живут по одному и тому же URL.
 // Картинки историй пересняли — а на устройствах остались прежние, потому что имя
 // кэша не менялось с ft-v39.
-var CACHE_NAME = 'ft-v41';
+var CACHE_NAME = 'ft-v42';
 // Separate, long-lived cache holding the notification-receipt marker (the ntf code
 // of a received push). Kept across SW activations (excluded from the cleanup below)
 // so an app launched AFTER the push still consumes it. NOT usable as a live channel:

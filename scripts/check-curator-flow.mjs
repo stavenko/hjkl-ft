@@ -476,7 +476,7 @@ if (got) {
   // этого блока он не отличит полные сутки от заполняемых.
   const clock = rep.clock ?? {};
   check('отчёт везёт часы человека',
-    clock.today === ymd(0) && clock.day_start_hour === 4 && !!clock.day_ends_at,
+    clock.today === ymd(0) && clock.day_start_hour === 0 && !!clock.day_ends_at,
     `${clock.tz ?? 'пояс не назван'}, сегодня ${clock.today}, сутки ломаются в ${clock.day_start_hour}:00`);
   // Перелом суток — впереди и не дальше чем через сутки: это ближайшие 04:00.
   const left = clock.day_ends_at ? (Date.parse(clock.day_ends_at) - Date.now()) / 3600e3 : null;
@@ -572,14 +572,14 @@ if (row && got) {
   const dayLine = await cpage.evaluate(() =>
     document.querySelector('[data-testid="client-day-clock"]')?.innerText ?? '');
   check('на экране куратора сказано, когда у клиента кончаются сутки',
-    /Сутки клиента заканчиваются в 04:00 по его времени/.test(dayLine) && /у вас/.test(dayLine),
+    /Сутки клиента заканчиваются в полночь по его времени/.test(dayLine) && /у вас/.test(dayLine),
     dayLine || 'строки нет');
   // Час у куратора — ЕГО собственный. Совпал бы с 04:00 — значит перевода нет и
   // куратор в чужом поясе прочтёт неправду.
-  const mineHour = dayLine.match(/— (\d{2}):(\d{2}) у вас/);
+  const mineHour = dayLine.match(/— в (\d{2}):(\d{2}) у вас/);
   check('время переведено в пояс куратора, а не показано чужое',
-    !!mineHour && mineHour[1] !== '04',
-    mineHour ? `${mineHour[0]} при 04:00 у человека (куратор в ${CURATOR_TZ})` : 'часа нет');
+    !!mineHour && mineHour[1] !== '00',
+    mineHour ? `${mineHour[0]} при полуночи у человека (куратор в ${CURATOR_TZ})` : 'часа нет');
 
   check('период на экране — тот же, что в отчёте',
     seen.text.includes(rep.period.from) && seen.text.includes(rep.period.to),

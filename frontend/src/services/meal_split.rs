@@ -119,9 +119,10 @@ const NEW_MEAL_SECS: i64 = 10800; // > 3h => possibly a new major meal
 /// time windows, with the munch-monitor fallback for times outside all
 /// windows.
 ///
-/// Windows (local). Aligned with the 04:00 logical day boundary
-/// (see `local::DAY_START_HOUR`): a day runs 04:00→03:59, so the earliest entry
-/// of a day is a morning one, and "night" only covers the late 22:00–03:59 tail.
+/// Windows (local). Окна остались прежними, хотя сутки теперь календарные: они
+/// описывают, КОГДА человек ест, а не где проходит граница дня. Ночная запись
+/// после полуночи по-прежнему «ночной перекус» — просто принадлежит она теперь
+/// наступившему дню, как и её календарная дата.
 ///   Breakfast 04:00–10:59
 ///   Lunch     11:00–15:59
 ///   Dinner    16:00–21:59

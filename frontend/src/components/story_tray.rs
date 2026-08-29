@@ -386,13 +386,49 @@ fn text_rich_bold(s: &str) -> View {
     out.collect_view().into_view()
 }
 
+/// Снимок в потоке кадра: занимает всё, что осталось от текста, и вписывается
+/// целиком. `align` — прижать к верху окна или центрировать; `up` — подъём на
+/// долю собственной высоты для кадров, где подсветка сидит низко.
+fn shot_in_flow(path: &'static str, align: &'static str, up: u8) -> View {
+    view! {
+        <div style=format!("flex: 1 1 auto; min-height: 0; display: flex; align-items: {align}; \
+                            justify-content: center; padding: 10px 12px 0; overflow: hidden;")>
+            <img src=format!("/story-img/{path}")
+                style=format!("max-width: 100%; max-height: 100%; border-radius: 18px; \
+                               box-shadow: 0 18px 50px rgba(0,0,0,0.5); transform: translateY(-{up}%);") />
+        </div>
+    }.into_view()
+}
+
 #[component]
 fn FrameView(frame: Frame) -> impl IntoView {
     // `~…~` inside any text renders as a bold gradient span INLINE (same size as
     // the surrounding text), and the title is skipped when empty — so a frame can
     // be just body copy with an emphasized phrase (the activity-week intro).
-    let container = "position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; \
-                     justify-content: flex-end; padding: 30px 28px 92px;";
+    // ПОЛНОЭКРАННОЕ ФОТО КЛАДЁТСЯ В ПОТОК, а не поверх текста.
+    //
+    // Раньше снимок и текст жили независимо: снимок — absolute сверху, текст —
+    // absolute снизу с отступом 92 px. На узком экране (или при системном
+    // увеличении шрифта) текст рос вверх и наезжал на фотографию, а снизу
+    // оставалась пустая полоса. Теперь это одна колонка: снимок, под ним текст в
+    // своём поле. Наехать некуда.
+    let full_bleed = matches!(frame.media, Media::Cover(_) | Media::CoverWhole(_));
+    let snapshot = matches!(
+        frame.media,
+        Media::Shot(_) | Media::ShotBand(_) | Media::ShotTop(_) | Media::ShotUp(_, _)
+    );
+    let container = if full_bleed {
+        // Под фотографией: текст занимает остаток экрана и стоит в его середине.
+        "flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; \
+         justify-content: center; padding: 20px 28px 32px; overflow: hidden;"
+    } else if snapshot {
+        // Под снимком: текст занимает столько, сколько ему нужно, снимок сжимается.
+        "flex: 0 0 auto; display: flex; flex-direction: column; padding: 14px 28px 56px;"
+    } else {
+        // Кадры без медиа (график, эмодзи, панель бонусов) — прежняя раскладка.
+        "position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; \
+         justify-content: flex-end; padding: 30px 28px 92px;"
+    };
     let kicker_style = format!(
         "color: {}; font-weight: 700; font-size: 14px; letter-spacing: 0.05em; \
          text-transform: uppercase; margin-bottom: 10px;",
@@ -440,66 +476,23 @@ fn FrameView(frame: Frame) -> impl IntoView {
                 <img src="/story-img/weight-chart.svg" style="width: 340px; max-width: 88%; height: auto;" />
             </div>
         }.into_view(),
-        Media::Shot(p) => view! {
-            <div style="position: absolute; top: 2%; left: 0; right: 0; bottom: 34%; z-index: 1; \
-                        display: flex; align-items: center; justify-content: center; padding: 0 12px;">
-                <img src=format!("/story-img/{p}")
-                    style="max-width: 100%; max-height: 100%; border-radius: 18px; \
-                           box-shadow: 0 18px 50px rgba(0,0,0,0.5);" />
-            </div>
-        }.into_view(),
-        // Полоса: своё окно, поднятое над текстом. Нижняя граница 53 % — под ней
-        // начинается длинный текст этих кадров, и залезать туда нельзя; центр окна
-        // выходит на ~28 % высоты экрана, то есть примерно в середину свободного
-        // места, куда и попадают обе подсветки.
-        Media::ShotBand(p) => view! {
-            <div style="position: absolute; top: 3%; left: 0; right: 0; bottom: 53%; z-index: 1; \
-                        display: flex; align-items: center; justify-content: center; padding: 0 12px;">
-                <img src=format!("/story-img/{p}")
-                    style="max-width: 100%; max-height: 100%; border-radius: 14px; \
-                           box-shadow: 0 18px 50px rgba(0,0,0,0.5);" />
-            </div>
-        }.into_view(),
-        // Same card, panned up by `up`% of the image height so a low-sitting
-        // highlight rises to the run's shared focal point. Its own (lower) box —
-        // NOT the raised Shot box — keeps the three widget frames aligned to each
-        // other with the card fully visible. `overflow: hidden` clips the raised
-        // edge cleanly at the box instead of over the progress bars.
-        Media::ShotUp(p, up) => view! {
-            <div style="position: absolute; top: 10%; left: 0; right: 0; bottom: 34%; z-index: 1; \
-                        display: flex; align-items: center; justify-content: center; padding: 0 28px; \
-                        overflow: hidden;">
-                <img src=format!("/story-img/{p}")
-                    style=format!("max-width: 100%; max-height: 100%; border-radius: 18px; \
-                           box-shadow: 0 18px 50px rgba(0,0,0,0.5); transform: translateY(-{up}%);") />
-            </div>
-        }.into_view(),
-        // Снимок, ПРИЖАТЫЙ К ВЕРХУ кадра. `Shot` ставит картинку по центру своей
-        // области, и под длинным текстом она съезжает вниз, к самой подписи. Здесь
-        // картинка идёт вверх, оставляя воздух между собой и текстом; ничего не
-        // обрезается — окно только меняет выравнивание.
-        Media::ShotTop(p) => view! {
-            <div style="position: absolute; top: 7%; left: 0; right: 0; bottom: 34%; z-index: 1; \
-                        display: flex; align-items: flex-start; justify-content: center; padding: 0 12px;">
-                <img src=format!("/story-img/{p}")
-                    style="max-width: 100%; max-height: 100%; border-radius: 18px; \
-                           box-shadow: 0 18px 50px rgba(0,0,0,0.5);" />
-            </div>
-        }.into_view(),
-        // Full-bleed topic photo: anchored to the top, no rounded corners, scaled
-        // slightly past the screen edges. Its reading gradient (below) starts at the
-        // kicker line so the copy stays legible over the lower part of the image.
-        Media::Cover(p) => view! {
-            <img src=format!("/story-img/{p}")
-                style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 0; \
-                       width: 145%; max-width: none; height: auto;" />
-        }.into_view(),
-        // Снимок целиком: ширина ровно по экрану, ничего не срезано.
-        Media::CoverWhole(p) => view! {
-            <img src=format!("/story-img/{p}")
-                style="position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 0; \
-                       width: 100%; max-width: none; height: auto;" />
-        }.into_view(),
+        // СНИМКИ ЖИВУТ В ПОТОКЕ, над текстом, и отдают ему место.
+        //
+        // Раньше у каждого вида было своё окно в процентах высоты (`top: 3%;
+        // bottom: 53%`), а текст — своё, absolute снизу. Окна пересекались, как
+        // только текст становился длиннее или шрифт крупнее: снимок налезал на
+        // копию. Теперь снимок занимает ТО, ЧТО ОСТАЛОСЬ от текста, и сжимается
+        // сам, а не наезжает.
+        Media::Shot(p) => shot_in_flow(p, "center", 0),
+        Media::ShotBand(p) => shot_in_flow(p, "center", 0),
+        Media::ShotTop(p) => shot_in_flow(p, "flex-start", 0),
+        // Тот же снимок, поднятый на `up`% своей высоты: у этих кадров подсветка
+        // сидит низко, и без подъёма она уходит под нижний край окна.
+        Media::ShotUp(p, up) => shot_in_flow(p, "center", up),
+        // Полноэкранные фото рисует ПОТОКОВАЯ раскладка (см. ниже): текст обязан
+        // жить под снимком, а не поверх него, иначе на узком экране он наезжает
+        // на картинку, оставляя пустоту снизу.
+        Media::Cover(_) | Media::CoverWhole(_) => ().into_view(),
         Media::Emoji(e) => view! {
             <div style="position: absolute; top: 15%; left: 0; right: 0; z-index: 1; \
                         display: flex; justify-content: center; font-size: 120px; line-height: 1;">
@@ -550,6 +543,43 @@ fn FrameView(frame: Frame) -> impl IntoView {
         )
     };
 
+    // Полноэкранное фото: одна колонка — снимок, под ним текст. `Cover` шире
+    // экрана на 145 %, поэтому едет влево на половину лишнего; `CoverWhole` идёт
+    // ровно по ширине. Шторки здесь нет: текст лежит на фоне кадра, а не на фото.
+    if let Media::Cover(p) | Media::CoverWhole(p) = frame.media {
+        let (w, ml) = match frame.media {
+            Media::Cover(_) => ("145%", "-22.5%"),
+            _ => ("100%", "0"),
+        };
+        return view! {
+            <div style="position: absolute; inset: 0;">
+                {bg}
+                <div style="position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column;">
+                    <div style="flex: 0 0 auto; overflow: hidden;">
+                        <img src=format!("/story-img/{p}")
+                            style=format!("display: block; width: {w}; max-width: none; height: auto; \
+                                           margin-left: {ml};") />
+                    </div>
+                    {content}
+                </div>
+            </div>
+        }.into_view();
+    }
+
+    // Снимок приложения: та же колонка, но место делится наоборот — текст берёт
+    // сколько нужно, снимок ужимается в остаток.
+    if snapshot {
+        return view! {
+            <div style="position: absolute; inset: 0;">
+                {bg}
+                <div style="position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column;">
+                    {media}
+                    {content}
+                </div>
+            </div>
+        }.into_view();
+    }
+
     view! {
         <div style="position: absolute; inset: 0;">
             {bg}
@@ -558,7 +588,7 @@ fn FrameView(frame: Frame) -> impl IntoView {
             <div style=scrim />
             {content}
         </div>
-    }
+    }.into_view()
 }
 
 #[cfg(test)]

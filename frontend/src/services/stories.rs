@@ -1606,8 +1606,8 @@ const S9: &[Frame] = &[
         kicker: Loc { en: "Fibre", ru: "Клетчатка" },
         title: Loc { en: "What kinds of fibre there are", ru: "Какая бывает клетчатка" },
         body: Loc {
-            en: "Fibre splits into soluble (pectin, beta-glucans, inulin, gums) and insoluble                  (cellulose, hemicellulose, lignin). The first forms a gel: it slows glucose                  absorption and lowers LDL. The second adds bulk and speeds up transit. In real                  food they always come together — there is no need to count them separately,                  what matters is the overall set of sources.",
-            ru: "Клетчатка делится на растворимую (пектин, бета-глюканы, инулин, камеди) и                  нерастворимую (целлюлоза, гемицеллюлоза, лигнин). Первая образует гель:                  замедляет всасывание глюкозы и снижает ЛПНП. Вторая даёт объём и ускоряет                  транзит. В реальной еде они всегда идут вместе — считать их отдельно не нужно,                  важен суммарный набор источников.",
+            en: "Fibre is either soluble or insoluble. The first forms a gel: it slows glucose                  absorption and lowers cholesterol. The second adds bulk and speeds up transit.                  In real food they always come together.",
+            ru: "Клетчатка бывает растворимой и нерастворимой. Первая образует гель: замедляет                  всасывание глюкозы и снижает холестерин. Вторая даёт объём и ускоряет транзит.                  В реальной еде они всегда идут вместе.",
         },
     },
     // 3 — овощи. В кадре и плотные (брокколи, морковь, горошек), и водянистые
@@ -1674,8 +1674,8 @@ const S9: &[Frame] = &[
         kicker: Loc { en: "Fibre", ru: "Клетчатка" },
         title: Loc { en: "Bloating: how to avoid it", ru: "Вздутие: как избежать" },
         body: Loc {
-            en: "The cause is oligosaccharides fermented by the microbiota; this is neither                  damage nor an intolerance, and the microbiota adapts within 2–4 weeks. Build up                  gradually, soak and pour the water away, rinse tinned ones, cook until soft,                  start with red lentils and mung beans. A small daily portion is tolerated better                  than a large one once a week.",
-            ru: "Причина — олигосахариды, которые ферментируются микробиотой; это не повреждение                  и не непереносимость, микробиота адаптируется за 2–4 недели. Наращивать                  постепенно, замачивать и сливать воду, консервированные промывать, разваривать                  до мягкости, начинать с красной чечевицы и маша. Ежедневная небольшая порция                  переносится лучше, чем большая раз в неделю.",
+            en: "The cause is oligosaccharides: the microbiota ferments them and gets used to                  them within 2–4 weeks. Build portions up gradually; soak pulses, pour the water                  away and cook them soft. A little every day is tolerated better than a lot once                  a week.",
+            ru: "Причина — олигосахариды: микробиота их ферментирует и привыкает за 2–4 недели.                  Наращивайте порции постепенно, бобовые замачивайте, сливайте воду и                  разваривайте до мягкости. Понемногу каждый день переносится легче, чем много                  раз в неделю.",
         },
     },
     // 8 — крупы. Снимок ПОВЁРНУТ на 90°: исходник портретный, но снят сверху, и

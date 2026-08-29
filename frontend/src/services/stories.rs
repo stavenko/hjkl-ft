@@ -1687,8 +1687,8 @@ const S9: &[Frame] = &[
         kicker: Loc { en: "Fibre", ru: "Клетчатка" },
         title: Loc { en: "Grains", ru: "Крупы" },
         body: Loc {
-            en: "The difference between a whole and a refined grain is almost entirely the fibre:                  milling removes the bran and the germ. Oats, pearl barley, buckwheat, bulgur and                  whole wheat give 3–6 g per 100 g cooked. Oats and barley have something of their                  own — beta-glucans: about 3 g a day measurably lowers LDL.",
-            ru: "Разница между цельной и рафинированной крупой — почти вся в клетчатке: при                  шлифовке удаляются отруби и зародыш. Овёс, перловка, гречка, булгур,                  цельнозерновая пшеница дают 3–6 г на 100 г готовых. Отдельно у овса и ячменя —                  бета-глюканы: около 3 г в день измеримо снижают ЛПНП.",
+            en: "Whole grain differs from refined almost entirely in fibre: milling removes the                  bran and the germ. Oats, pearl barley, buckwheat, bulgur and whole wheat give                  3–6 g per 100 g cooked.",
+            ru: "Цельная крупа отличается от шлифованной почти только клетчаткой: при обработке                  снимают отруби и зародыш. Овёс, перловка, гречка, булгур, цельнозерновая                  пшеница дают 3–6 г на 100 г готовых.",
         },
     },
     // 9 — картошка и рис. КОЛЛАЖ из двух половин: слева картошка, справа рис — два
@@ -1700,8 +1700,8 @@ const S9: &[Frame] = &[
         kicker: Loc { en: "Fibre", ru: "Клетчатка" },
         title: Loc { en: "Potatoes and rice", ru: "Картошка и рис" },
         body: Loc {
-            en: "These are starchy sides, not sources of fibre: white rice ≈0.4 g, potatoes                  ≈1.5–2 g per 100 g. They do not replace vegetables on the plate, though they                  often take their place. Cooling after boiling forms resistant starch — it                  ferments in a similar way, but that does not make up the fibre itself.",
-            ru: "Это крахмалистые гарниры, а не источники клетчатки: белый рис ≈0,4 г, картофель                  ≈1,5–2 г на 100 г. Они не заменяют овощи в тарелке, хотя часто занимают их                  место. Охлаждение после варки образует резистентный крахмал — он ферментируется                  похожим образом, но объёмы клетчатки это не компенсирует.",
+            en: "White rice gives ≈0.4 g and potatoes ≈1.5–2 g per 100 g. They often take the                  place of vegetables on the plate, but they do not replace them.",
+            ru: "Белый рис даёт ≈0,4 г, картофель ≈1,5–2 г на 100 г. Они часто занимают в тарелке                  место овощей, но не заменяют их.",
         },
     },
     // 10 — кожура. Печёная картошка в мундире: тот самый случай, когда кожуру не

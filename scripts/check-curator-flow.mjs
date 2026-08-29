@@ -179,7 +179,12 @@ async function boot(browser, server, prefix) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
   const page = await ctx.newPage();
   const panics = [];
-  page.on('pageerror', (e) => panics.push(e.message));
+  // Проверка сама перезагружает страницу — иногда посреди докачки wasm. Браузер
+  // сообщает об этом ошибкой загрузки, и она про НАШУ навигацию, а не про
+  // приложение: настоящая поломка сборки выглядит иначе и на перезагрузку не
+  // проходит. Всё остальное копим как есть.
+  const ownNavigation = (m) => /compilation aborted.*(aborted|cancel)/i.test(m);
+  page.on('pageerror', (e) => { if (!ownNavigation(e.message)) panics.push(e.message); });
   page.on('console', (m) => { if (/panicked at/.test(m.text())) panics.push(m.text().slice(0, 200)); });
 
   await page.goto(server.url, { waitUntil: 'domcontentloaded' });
@@ -204,22 +209,83 @@ async function boot(browser, server, prefix) {
     if (ok) break;
     await page.waitForTimeout(500);
   }
-  await page.evaluate(seed, {
+  const sow = () => page.evaluate(seed, {
     uid, OLD_CAL, OLD_STEPS,
     ymd0: Array.from({ length: 35 }, (_, i) => ymd(i)),
     iso0: Array.from({ length: 35 }, (_, i) => iso(i)),
   });
+  await sow();
+  // Посев может не пережить первую синхронизацию: усыновление устройства чистит
+  // локальные хранилища и берёт всё с сервера, а у свежего человека там пусто.
+  // Гонку с ним не выиграть — можно только присмотреть за посеянным и посеять
+  // снова, если его смыло. Иначе проверка падает на «планок нет», рассказывая о
+  // поломке, которой не было.
+  //
+  // Без перезагрузки: она запустила бы недельный цикл ЗДЕСЬ, до привязки
+  // куратора, и третья часть проверяла бы уже сдвинутые якоря.
+  for (let i = 0; i < 8; i++) {
+    await page.waitForTimeout(1000);
+    const st = await page.evaluate(readState).catch(() => ({}));
+    if (st.steps === undefined || st.calories === undefined) await sow();
+  }
   return { ctx, page, panics, uid };
 }
 
+/// Вернуть планки к посеянному состоянию: планка стоит десять дней, цикл ещё не
+/// считал, писем нет.
+///
+/// Нужно ровно один раз — после привязки. До неё приложение вправе считать само,
+/// и иногда успевает: посев ложится в живую базу, приложение это видит и честно
+/// отрабатывает недельный цикл. Гонку с ним не выиграть, но её и не надо
+/// выигрывать — посылку третьей части можно просто восстановить, когда куратор
+/// уже на месте.
+const resetPlankas = async (page, { OLD_CAL, OLD_STEPS, day, iso }) => {
+  await page.evaluate(async (arg) => {
+    const uid = localStorage.getItem('user_id');
+    const db = await new Promise((r) => { const q = indexedDB.open(`hjkl-ft-${uid}`); q.onsuccess = () => r(q.result); });
+    const rows = await new Promise((res) => {
+      const rq = db.transaction(['planka_history'], 'readonly').objectStore('planka_history').getAll();
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
+    });
+    await new Promise((res, rej) => {
+      const tx = db.transaction(['planka_history', 'app_flags'], 'readwrite');
+      const hist = tx.objectStore('planka_history');
+      for (const r of rows) hist.delete(r.id);
+      hist.put({ id: `calories:${arg.day}`, kind: 'calories', date: arg.day, amount: arg.OLD_CAL,
+        created_at: arg.iso, updated_at: arg.iso });
+      hist.put({ id: `steps:${arg.day}`, kind: 'steps', date: arg.day, amount: arg.OLD_STEPS,
+        created_at: arg.iso, updated_at: arg.iso });
+      const flags = tx.objectStore('app_flags');
+      flags.put({ key: 'planka_weekly_anchor', value: arg.day });
+      flags.put({ key: 'steps_planka_weekly_anchor', value: arg.day });
+      flags.put({ key: 'letters_v1', value: '[]' });
+      tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+    });
+    db.close();
+  }, { OLD_CAL, OLD_STEPS, day, iso });
+};
+
 /// Дать приложению узнать адресата, потом перезапустить: пересчёт судит по
 /// полному знанию, а не по гонке с первым опросом.
-async function settleAndRun(page) {
+async function settleAndRun(page, expectRun = true) {
   await page.reload({ waitUntil: 'domcontentloaded' });
   const peer = await waitFor(page, 30, async () => (await page.evaluate(readState)).peer);
   if (!peer) throw new Error('сервер так и не назвал адресата — опрос не дошёл?');
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(18000);
+  if (expectRun) {
+    // Ждём СОБЫТИЯ, а не времени. Фиксированной паузы иногда не хватало, и
+    // проверка падала на том, что цикл ещё не добежал, — то есть врала о
+    // поломке. Якорь встаёт ровно тогда, когда цикл отработал.
+    await waitFor(page, 45, async () =>
+      (await page.evaluate(readState)).calAnchor === ymd(0) ? true : null);
+    // Белок и шаги идут следом за калориями — короткий добор, а не пауза.
+    await waitFor(page, 15, async () =>
+      (await page.evaluate(readState)).stepAnchor === ymd(0) ? true : null);
+    await page.waitForTimeout(2000);
+  } else {
+    // Здесь проверяется, что НЕ произошло ничего, — ждать нечего, кроме времени.
+    await page.waitForTimeout(18000);
+  }
   return peer;
 }
 
@@ -286,7 +352,8 @@ check('сервер видит привязку', r.json?.clients?.some((c) => c
 // ── 3. С куратором приложение планки не трогает ─────────────────────────────
 section('3. с куратором: приложение планки НЕ ТРОГАЕТ');
 await bound.page.goto(server.url, { waitUntil: 'domcontentloaded' });
-const boundPeer = await settleAndRun(bound.page);
+await resetPlankas(bound.page, { OLD_CAL, OLD_STEPS, day: ymd(10), iso: iso(10) });
+const boundPeer = await settleAndRun(bound.page, false);
 const s = await bound.page.evaluate(readState);
 console.log(`   адресат ${boundPeer}; калории ${OLD_CAL}→${s.calories}, шаги ${OLD_STEPS}→${s.steps}`);
 check('адресат — куратор', boundPeer.startsWith('curator:'), boundPeer);
@@ -415,6 +482,7 @@ if (got) {
   check('история планок доехала', (rep.plankas?.calories ?? []).some((p) => p.amount === NEW_CAL),
     JSON.stringify(rep.plankas?.calories ?? []));
 }
+let curatorCalc = null;
 section('4г. кураторское приложение показывает ТО ЖЕ, что у человека');
 // Отчёт, доехавший до воркера, — ещё не отчёт, увиденный куратором. Кураторский
 // экран показывает не payload как есть: он пересчитывает его заново — цвета
@@ -503,10 +571,131 @@ if (row && got) {
     calRow ? calRow.replace(/\n/g, ' ') : 'строки калорий нет');
   check('история планок на экране — с кураторским числом',
     seen.text.includes(String(NEW_CAL)), `${NEW_CAL} в тексте`);
+  // «Рассчитать» — единственное место, где куратор ВИДИТ наше правило: кнопка
+  // считает планку тем же крейтом, что и недельный цикл приложения, но по
+  // данным ОТЧЁТА. Если в отчёт не доехало поле, нужное правилу, число молча
+  // разойдётся с тем, к чему пришло бы приложение само. Сверяется это в части 6,
+  // где цикл считает то же самое у человека.
+  const calRowIdx = seen.indicators.findIndex((t) => /Калори/i.test(t));
+  if (calRowIdx >= 0) {
+    await cpage.evaluate((i) => {
+      document.querySelectorAll('[data-testid="indicator-row"]')[i]
+        .querySelector('[data-testid="indicator-edit"]').click();
+    }, calRowIdx);
+    const editor = await cpage.waitForSelector('[data-testid="planka-editor"]', { timeout: 15000 })
+      .then(() => true).catch(() => false);
+    check('редактор планки открылся', editor);
+    if (editor) {
+      const hasCalc = await cpage.$('[data-testid="planka-calc"]');
+      check('«Рассчитать» предложено по калориям', !!hasCalc,
+        hasCalc ? '' : 'кнопки нет — правилу не хватило данных отчёта');
+      if (hasCalc) {
+        await hasCalc.click();
+        curatorCalc = await cpage.$eval('[data-testid="planka-value"]', (e) => e.value);
+        check('расчёт дал число', /^\d+(\.\d+)?$/.test(curatorCalc), curatorCalc);
+      }
+      // Закрываем, ничего не отправляя: планку тут ставит не проверка.
+      await cpage.click('[data-testid="planka-editor"]', { position: { x: 5, y: 5 } });
+    }
+  }
   check('кураторское приложение без паник', cpanics.length === 0, cpanics[0] ?? 'паник нет');
 }
 await cctx.close();
 curServer.close();
+
+section('4д. «только новое» — от границы прошлого отчёта, а не с начала');
+// Первый отчёт ушёл «за всё» и покрыл всё по вчерашний день. От чего
+// отсчитывается ВТОРОЙ — до сих пор не проверял никто.
+const openChoice = async () => {
+  await bound.page.reload({ waitUntil: 'domcontentloaded' });
+  const w = await bound.page.waitForSelector('[data-testid="dash-report-widget"]', { timeout: 25000 })
+    .then((h) => h).catch(() => null);
+  if (!w) return null;
+  await w.click();
+  await bound.page.waitForSelector('[data-testid="report-panel"]', { timeout: 15000 });
+  await bound.page.click('[data-testid="report-send"]');
+  await bound.page.waitForSelector('[data-testid="report-choice"]', { timeout: 10000 });
+  return await bound.page.evaluate(() => ({
+    new: !!document.querySelector('[data-testid="report-send-new"]'),
+    all: !!document.querySelector('[data-testid="report-send-all"]'),
+    text: document.querySelector('[data-testid="report-choice"]')?.innerText ?? '',
+  }));
+};
+const sendAndCatch = async (testid) => {
+  const before = JSON.stringify(got?.report ?? '');
+  await bound.page.click(`[data-testid="${testid}"]`);
+  await bound.page.waitForSelector('[data-testid="report-sent"]', { timeout: 25000 }).catch(() => {});
+  const fresh = await waitFor(bound.page, 20, async () => {
+    const rep = await api(curator, 'GET', `/curator/clients/${clientId}/report`);
+    return rep.json?.report && JSON.stringify(rep.json.report) !== before ? rep.json : null;
+  });
+  return fresh ? JSON.parse(fresh.report).report : null;
+};
+
+// (а) Нового нет: прошлый отчёт дошёл до вчера, а сегодняшний день не едет.
+// Кнопки «только новое» быть не должно — иначе уходит ПУСТОЙ отчёт с вывернутым
+// периодом «с завтра по вчера», и он затирает у куратора прошлый, содержательный.
+r = await api(curator, 'POST', `/curator/clients/${clientId}/request`, { client_id: uuid(), scope: 'new' });
+check('запрос «только новое» принят', r.status === 200, `${r.status} ${r.text ?? ''}`);
+const nothingNew = await openChoice();
+check('нового нет — «только новое» не предлагается', nothingNew && !nothingNew.new && nothingNew.all,
+  nothingNew ? nothingNew.text.replace(/\n/g, ' | ') : 'шторка не открылась');
+// Передумать человек вправе: шторка накрывает экран целиком, и выход из неё
+// обязан быть.
+await bound.page.click('[data-testid="report-send-cancel"]');
+const closed = await bound.page.waitForSelector('[data-testid="report-choice"]', { state: 'detached', timeout: 5000 })
+  .then(() => true).catch(() => false);
+check('шторку можно закрыть, ничего не отправив', closed);
+
+// (б) Прошлый отчёт был давно. Отматываем его границу на пять дней назад — то же
+// самое состояние, что у человека, отчитавшегося в прошлые выходные.
+const rewound = await bound.page.evaluate(async ({ through }) => {
+  const uid = localStorage.getItem('user_id');
+  const db = await new Promise((res, rej) => {
+    const q = indexedDB.open(`hjkl-ft-${uid}`);
+    q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+  });
+  const rows = await new Promise((res) => {
+    const rq = db.transaction(['support_msgs'], 'readonly').objectStore('support_msgs').getAll();
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
+  });
+  const rep = rows.filter((m) => m.kind === 'data_share' && m.sender === 'user').pop();
+  if (!rep) { db.close(); return null; }
+  const payload = JSON.parse(rep.payload);
+  payload.report.period.to = through;
+  rep.payload = JSON.stringify(payload);
+  await new Promise((res, rej) => {
+    const tx = db.transaction(['support_msgs'], 'readwrite');
+    tx.objectStore('support_msgs').put(rep);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+  db.close();
+  return rep.id;
+}, { through: ymd(5) });
+check('граница прошлого отчёта отмотана на пять дней назад', !!rewound, rewound ?? 'отчёта в базе нет');
+
+const choice = await openChoice();
+check('теперь предложены ОБА варианта', choice && choice.new && choice.all,
+  choice ? choice.text.replace(/\n/g, ' | ') : 'шторка не открылась');
+check('подсказка называет дату прошлого отчёта', (choice?.text ?? '').includes(ymd(5)), ymd(5));
+
+const fresh = await sendAndCatch('report-send-new');
+check('отчёт «только новое» доехал', !!fresh, fresh ? '' : 'слот не обновился');
+if (fresh) {
+  console.log(`   период: ${fresh.period.from} … ${fresh.period.to}`);
+  // Со СЛЕДУЮЩЕГО дня за границей: день, уже уехавший в прошлом отчёте, второй
+  // раз не едет.
+  check('начало — следующий день за границей прошлого отчёта', fresh.period.from === ymd(4),
+    `${fresh.period.from} (ожидали ${ymd(4)})`);
+  check('конец — вчера', fresh.period.to === ymd(1), fresh.period.to);
+  const days = fresh.weight.series.map((w) => w.date);
+  check('в отчёте только новые дни, старых нет',
+    days.length > 0 && days.every((d) => d >= ymd(4) && d <= ymd(1)),
+    days.join(', ') || 'ряд пуст');
+  check('шаги — тоже только новые дни',
+    fresh.steps.series.every((x) => x.date >= ymd(4) && x.date <= ymd(1)),
+    fresh.steps.series.map((x) => x.date).join(', ') || 'ряд пуст');
+}
 
 section('5. отвязка возвращает наши правила');
 // Сперва куратор ставит ПОСТОЯННУЮ планку: на ней и видно, что при отвязке
@@ -578,7 +767,11 @@ await bound.page.evaluate(async (back) => {
   db.close();
 }, ymd(10));
 await bound.page.reload({ waitUntil: 'domcontentloaded' });
-await bound.page.waitForTimeout(18000);
+await waitFor(bound.page, 45, async () =>
+  (await bound.page.evaluate(readState)).calAnchor === ymd(0) ? true : null);
+await waitFor(bound.page, 15, async () =>
+  (await bound.page.evaluate(readState)).stepAnchor === ymd(0) ? true : null);
+await bound.page.waitForTimeout(2000);
 const back = await bound.page.evaluate(readState);
 console.log(`   калории ${NEW_CAL}→${back.calories}, шаги ${back.steps}; якорь ${back.calAnchor}`);
 check('калорийный цикл снова работает', back.calAnchor === ymd(0), back.calAnchor);
@@ -586,6 +779,12 @@ check('шаговый цикл снова работает', back.stepAnchor ===
 check('письмо о недельной планке снова приходит',
   back.letters.some((i) => i.startsWith('planka-')), back.letters.join(', '));
 // Кураторское число — отправная точка, а не помеха: цикл считает ОТ него.
+// Куратор нажал «Рассчитать» на том же отчёте — и число обязано совпасть с тем,
+// к чему цикл пришёл сам: правило одно, крейт один, а данные к нему пришли двумя
+// разными путями — из базы человека и из отчёта.
+check('«Рассчитать» у куратора дало то же число, что и цикл',
+  curatorCalc !== null && Math.abs(Number(curatorCalc) - Number(back.calories)) < 0.5,
+  `куратор ${curatorCalc}, цикл ${back.calories}`);
 check('цикл оттолкнулся от кураторского числа', back.calorieDays.includes(ymd(0)),
   back.calorieDays.join(', '));
 await bound.ctx.close();

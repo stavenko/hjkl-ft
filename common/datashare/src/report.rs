@@ -39,6 +39,30 @@ pub struct Body {
     pub sex: Option<String>,
 }
 
+/// Часы человека: где он во времени и когда у него кончаются сутки.
+///
+/// Отчёт весь состоит из ДАТ, а у куратора своя дата и свой пояс. Без этого
+/// блока он не может ответить на простой вопрос: полные ли сутки ему прислали.
+/// Старые отчёты его не везут — тогда строка просто не рисуется, выдумывать
+/// чужое время нельзя.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Clock {
+    #[serde(default)]
+    pub tz: Option<String>,
+    #[serde(default)]
+    pub offset_minutes: Option<i32>,
+    /// Час, в который у человека начинается новый день. У нас это 04:00, а не
+    /// полночь: ночной перекус принадлежит прошедшему дню.
+    #[serde(default)]
+    pub day_start_hour: Option<u32>,
+    #[serde(default)]
+    pub today: Option<String>,
+    /// Мгновение перелома суток в UTC. Именно мгновение, а не подпись: только
+    /// его куратор может честно перевести в своё время.
+    #[serde(default)]
+    pub day_ends_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct WeightRow {
     pub date: String,
@@ -179,6 +203,10 @@ pub struct Report {
     /// нулём нельзя.
     #[serde(default)]
     pub avg_kcal_7d: Option<f64>,
+    /// Часы человека. Старые отчёты его не везут — тогда `Default`, и строка про
+    /// сутки не рисуется.
+    #[serde(default)]
+    pub clock: Clock,
 }
 
 /// Что именно просят прислать.
@@ -311,6 +339,41 @@ fn series_strip(points: &[Point]) -> View {
     view! { <div style="display: flex; gap: 3px; margin-top: 8px;">{cells}</div> }.into_view()
 }
 
+/// «Сутки клиента закончатся в 04:00 по его времени — 02:00 у вас, через 9 ч».
+///
+/// Куратор судит по датам, которых сам не считает: они пришли из другого пояса,
+/// и день там кончается не в полночь, а в четыре утра. Поэтому здесь три вещи
+/// сразу — час перелома у него, тот же момент в СВОЁМ времени и сколько до него
+/// осталось. Без последнего куратор не отличит «сутки уже полные» от «человек их
+/// ещё заполняет», а решает он именно по этому.
+///
+/// Ничего не выдумывается: нет блока часов — нет и строки.
+fn day_boundary_line(clock: &Clock) -> Option<String> {
+    let iso = clock.day_ends_at.as_deref()?;
+    let ends = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(iso));
+    let ms = ends.get_time();
+    if ms.is_nan() {
+        return None;
+    }
+    // Часы у куратора — местные: `Date` их и отдаёт в поясе смотрящего.
+    let mine = format!("{:02}:{:02}", ends.get_hours(), ends.get_minutes());
+    let theirs = clock.day_start_hour.map(|h| format!("{h:02}:00"));
+    let left = ms - js_sys::Date::now();
+    let mins = (left / 60_000.0).round() as i64;
+    let when = if mins <= 0 {
+        "сутки уже закрыты".to_string()
+    } else if mins < 60 {
+        format!("через {mins} мин")
+    } else {
+        format!("через {} ч", (mins as f64 / 60.0).round() as i64)
+    };
+    let where_ = clock.tz.as_deref().map(|t| format!(", {t}")).unwrap_or_default();
+    Some(match theirs {
+        Some(t) => format!("Сутки клиента заканчиваются в {t} по его времени{where_} — {mine} у вас, {when}"),
+        None => format!("Сутки клиента заканчиваются в {mine} у вас, {when}"),
+    })
+}
+
 /// Строка индикатора: название, цвет, действующая планка и кнопка правки.
 ///
 /// `on_edit` получает ключ индикатора — правку рисует само приложение, потому что
@@ -392,9 +455,15 @@ pub fn render(report: &Report, on_edit: Callback<String>) -> View {
         .collect();
 
     let period = format!("{} — {}", report.period.from, report.period.to);
+    let day_line = day_boundary_line(&report.clock);
     view! {
         <div attr:data-testid="client-report">
             <p class="row__meta" style="margin-bottom: 10px;">{period}</p>
+            {day_line.map(|t| view! {
+                <p class="row__meta" style="margin-bottom: 10px;" attr:data-testid="client-day-clock">
+                    {t}
+                </p>
+            })}
 
             {(!weight_points.is_empty()).then(|| view! {
                 <div class="card" style="margin-bottom: 12px;">

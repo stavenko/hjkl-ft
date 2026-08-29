@@ -62,6 +62,48 @@ impl Dataset {
     }
 }
 
+/// Часы ЧЕЛОВЕКА: где он живёт во времени и когда у него кончаются сутки.
+///
+/// Всё в отчёте — даты, а не мгновения: «вчера», «за 25 августа», «сегодняшний
+/// день не едет». У куратора своя дата и свой пояс, и без этого блока он не
+/// может ответить на простой вопрос — прислали ему уже полные сутки или человек
+/// ещё их заполняет.
+///
+/// Сутки у нас кончаются не в полночь, а в `DAY_START_HOUR` (04:00): ночной
+/// перекус принадлежит прошедшему дню, а не наступившему. Угадать это куратор не
+/// может даже зная пояс, поэтому час и мгновение перелома едут явно.
+///
+/// `day_ends_at` — момент в UTC, а не подпись: только его куратор может честно
+/// перевести в СВОЁ время и сказать «через два часа».
+fn build_clock() -> Value {
+    use chrono::Duration;
+    let today = local::today_date();
+    let now_local = chrono::Local::now().naive_local();
+    // Перелом суток считаем разницей наивных времён, а не разрешением местной
+    // даты: в переходную ночь перевода часов такое разрешение неоднозначно, а
+    // разница — нет, и следующий отчёт её всё равно уточнит.
+    let flip = (today + Duration::days(1))
+        .and_hms_opt(local::DAY_START_HOUR as u32, 0, 0)
+        .expect("04:00 — существующее время");
+    let ends_at = chrono::Utc::now() + (flip - now_local);
+    json!({
+        "tz": tz_name(),
+        "offset_minutes": chrono::Local::now().offset().local_minus_utc() / 60,
+        "day_start_hour": local::DAY_START_HOUR,
+        "today": today.format("%Y-%m-%d").to_string(),
+        "day_ends_at": ends_at.to_rfc3339(),
+    })
+}
+
+/// Имя пояса так, как его знает сам браузер («Europe/Moscow»). Без него остаётся
+/// сдвиг в минутах — он и так едет рядом.
+fn tz_name() -> Option<String> {
+    let fmt = js_sys::Intl::DateTimeFormat::new(&js_sys::Array::new(), &js_sys::Object::new());
+    js_sys::Reflect::get(&fmt.resolved_options(), &wasm_bindgen::JsValue::from_str("timeZone"))
+        .ok()
+        .and_then(|v| v.as_string())
+}
+
 // ── Per-dataset builders (real stores only) ──
 
 async fn build_body() -> Value {
@@ -488,6 +530,7 @@ pub async fn build_report(from: Option<String>, to: String) -> Value {
         // хранилища границы нет и не нужно.
         "period": { "from": from, "to": to, "days": days },
         "generated_at": chrono::Local::now().to_rfc3339(),
+        "clock": build_clock(),
         "body": build_body().await,
         "weight": {
             "series": weight_series,

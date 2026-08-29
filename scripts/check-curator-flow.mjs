@@ -506,7 +506,13 @@ await cctx.addInitScript(() => {
 });
 const cpage = await cctx.newPage();
 const cpanics = [];
-cpage.on('pageerror', (e) => cpanics.push(e.message));
+// Со стеком: ошибка в кураторском приложении показалась однажды и больше не
+// повторилась, а по одному сообщению не отличить сбой приложения от заминки
+// самого браузера при клике. Стек ответит на это сразу, а не через прогон.
+cpage.on('pageerror', (e) => {
+  cpanics.push(e.message);
+  console.log('[куратор, ошибка страницы]', (e.stack ?? e.message).slice(0, 400));
+});
 cpage.on('console', (m) => { if (/panicked at/.test(m.text())) cpanics.push(m.text().slice(0, 200)); });
 // Вход тем же способом, что и у человека: паскей проверяет личность, а проверке
 // нужна не она, а всё, что происходит после входа.
@@ -600,8 +606,6 @@ if (row && got) {
   }
   check('кураторское приложение без паник', cpanics.length === 0, cpanics[0] ?? 'паник нет');
 }
-await cctx.close();
-curServer.close();
 
 section('4д. «только новое» — от границы прошлого отчёта, а не с начала');
 // Первый отчёт ушёл «за всё» и покрыл всё по вчерашний день. От чего
@@ -696,6 +700,66 @@ if (fresh) {
     fresh.steps.series.every((x) => x.date >= ymd(4) && x.date <= ymd(1)),
     fresh.steps.series.map((x) => x.date).join(', ') || 'ряд пуст');
 }
+
+section('4е. чат в обе стороны: человек ↔ куратор');
+// Переписка — единственный канал, где стороны говорят СВОИМИ словами, а не
+// директивами. В сквозной проверке он до сих пор не проверялся ни разу: ездили
+// планки, запросы и отчёты, а простой текст — нет.
+const fromPerson = `от человека ${uuid().slice(0, 8)}`;
+const fromCurator = `от куратора ${uuid().slice(0, 8)}`;
+await bound.page.goto(`${server.url}/chat`, { waitUntil: 'domcontentloaded' });
+const composer = await bound.page.waitForSelector('[data-testid="chat-input"]', { timeout: 25000 })
+  .then((h) => h).catch(() => null);
+check('чат человека открылся', !!composer);
+if (composer) {
+  await composer.fill(fromPerson);
+  await bound.page.click('[data-testid="chat-send"]');
+  const inThread = await waitFor(bound.page, 20, async () =>
+    (await bound.page.evaluate(() =>
+      document.querySelector('[data-testid="chat-messages"]')?.innerText ?? '')).includes(fromPerson) || null);
+  check('сообщение видно в своей переписке', !!inThread);
+}
+
+// Куратор открывает ту же переписку у себя.
+await cpage.goto(curServer.url, { waitUntil: 'domcontentloaded' });
+const crow = await cpage.waitForSelector('[data-testid="client-row"]', { timeout: 30000 })
+  .then((h) => h).catch(() => null);
+if (crow) {
+  await crow.click();
+  await cpage.waitForSelector('[data-testid="client-chat"]', { timeout: 20000 });
+  await cpage.click('[data-testid="client-chat"]');
+}
+const seenByCurator = await cpage.waitForSelector('[data-testid="curator-chat"]', { timeout: 20000 })
+  .then(() => waitFor(cpage, 25, async () =>
+    (await cpage.evaluate(() =>
+      document.querySelector('[data-testid="curator-chat"]')?.innerText ?? '')).includes(fromPerson) || null))
+  .catch(() => null);
+check('куратор прочитал сообщение человека', !!seenByCurator,
+  seenByCurator ? fromPerson : 'в переписке куратора его нет');
+
+// И отвечает.
+const cinput = await cpage.$('[data-testid="chat-input"]');
+check('у куратора есть поле ответа', !!cinput);
+if (cinput) {
+  await cinput.fill(fromCurator);
+  await cpage.click('[data-testid="chat-send"]');
+  const backToCurator = await waitFor(cpage, 20, async () =>
+    (await cpage.evaluate(() =>
+      document.querySelector('[data-testid="curator-chat"]')?.innerText ?? '')).includes(fromCurator) || null);
+  check('ответ виден у куратора', !!backToCurator);
+}
+
+// Человек получает ответ — тем же опросом, каким получал директивы.
+await bound.page.goto(`${server.url}/chat`, { waitUntil: 'domcontentloaded' });
+const gotReply = await waitFor(bound.page, 30, async () =>
+  (await bound.page.evaluate(() =>
+    document.querySelector('[data-testid="chat-messages"]')?.innerText ?? '')).includes(fromCurator) || null);
+check('ответ куратора доехал до человека', !!gotReply,
+  gotReply ? fromCurator : 'в переписке человека его нет');
+check('кураторское приложение без паник (чат)', cpanics.length === 0, cpanics[0] ?? 'паник нет');
+
+await cctx.close();
+curServer.close();
 
 section('5. отвязка возвращает наши правила');
 // Сперва куратор ставит ПОСТОЯННУЮ планку: на ней и видно, что при отвязке

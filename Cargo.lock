@@ -1218,6 +1218,7 @@ dependencies = [
  "plankas",
  "serde",
  "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]

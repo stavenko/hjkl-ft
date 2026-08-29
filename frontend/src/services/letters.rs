@@ -216,26 +216,30 @@ async fn recompute_calorie_planka(force: bool) {
         return;
     }
 
-    // No planka yet → nothing to recompute (the week-2 gate hasn't fired).
-    let goals = local::list_goals().await;
-    let Some(goal) = goals.iter().find(|g| {
-        g.nutrient == "Calories"
-            && g.direction == api_types::GoalDirection::AtMost
-            && g.amount > 0.0
-    }) else {
+    // Планки ещё нет → пересчитывать нечего (гейт второй недели не сработал).
+    //
+    // Судим по ДЕЙСТВУЮЩЕЙ планке — по истории, а не по записи в `goals`. Разница
+    // не умозрительная: кураторская директива пишет только историю, и у человека,
+    // которого куратор ведёт с самого начала, записи в `goals` нет вовсе — планку
+    // от нас он не получал ни разу. По старому условию такой человек после
+    // отвязки оставался бы с последним кураторским числом НАВСЕГДА: пересчёт
+    // молча выходил бы здесь, и сказано об этом было бы только в консоли.
+    let Some(previous) = local::calorie_goal_amount().await else {
         leptos::logging::log!("планка калорий: пересчёта нет — планка ещё не поставлена");
         return;
     };
 
     let today = chrono::Local::now().date_naive();
-    // Anchor: last recompute, else the planka's creation date (first cycle = +7d).
+    // Якорь: последний пересчёт, иначе день, когда планка появилась впервые
+    // (первый цикл = +7 дней). Первый день берётся из истории — по той же
+    // причине, что и само число: у кураторского человека `goals` пуст.
+    let first_planka_day = local::planka_history(local::PLANKA_CALORIES)
+        .await
+        .first()
+        .and_then(|e| chrono::NaiveDate::parse_from_str(&e.date, "%Y-%m-%d").ok());
     let anchor = app_flags::get(PLANKA_ANCHOR_KEY)
         .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
-        .or_else(|| {
-            goal.created_at
-                .get(0..10)
-                .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-        })
+        .or(first_planka_day)
         .unwrap_or(today);
 
     let waited = (today - anchor).num_days();
@@ -274,7 +278,6 @@ async fn recompute_calorie_planka(force: bool) {
     // Отталкиваемся от ДЕЙСТВУЮЩЕЙ планки, а не от записи в goals: планка живёт в
     // истории, и следующий шаг обязан идти от того числа, что действует сейчас, —
     // хоть от нашего прошлого, хоть от кураторского, оставшегося после отвязки.
-    let previous = local::calorie_goal_amount().await.unwrap_or(goal.amount);
     let entries = local::list_weight_entries().await;
     let weight_kg = entries
         .iter()

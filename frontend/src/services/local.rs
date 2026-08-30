@@ -257,6 +257,20 @@ pub async fn calorie_goal_amount() -> Option<f64> {
     crate::services::plankas::current(crate::services::plankas::Kind::Calories)
 }
 
+/// Планка калорий из СТАРОЙ записи в `goals` — до появления истории планок она
+/// жила только там. Читается один раз при гидратации кэша: см. `plankas::hydrate`.
+pub async fn legacy_calorie_goal() -> Option<f64> {
+    list_goals()
+        .await
+        .into_iter()
+        .find(|g| {
+            g.nutrient == "Calories"
+                && g.direction == GoalDirection::AtMost
+                && g.amount > 0.0
+        })
+        .map(|g| g.amount)
+}
+
 
 // ── История планок ───────────────────────────────────────────────────────────
 //

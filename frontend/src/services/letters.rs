@@ -218,25 +218,38 @@ async fn recompute_calorie_planka(force: bool) {
 
     // Планки ещё нет → пересчитывать нечего (гейт второй недели не сработал).
     //
-    // Судим по ДЕЙСТВУЮЩЕЙ планке — по истории, а не по записи в `goals`. Разница
-    // не умозрительная: кураторская директива пишет только историю, и у человека,
-    // которого куратор ведёт с самого начала, записи в `goals` нет вовсе — планку
-    // от нас он не получал ни разу. По старому условию такой человек после
-    // отвязки оставался бы с последним кураторским числом НАВСЕГДА: пересчёт
-    // молча выходил бы здесь, и сказано об этом было бы только в консоли.
-    let Some(previous) = local::calorie_goal_amount().await else {
+    // Источников ДВА, и спрашивать надо оба. Планка живёт в истории, но записи в
+    // `goals` она при этом не отменила: та по-прежнему заводится каждым нашим
+    // пересчётом и есть у всех, кто получил планку до появления истории.
+    //
+    // Односторонние условия ломаются оба, зеркально. Только по `goals` — и
+    // человек, которого куратор ведёт с самого начала, после отвязки остаётся с
+    // кураторским числом навсегда: у него `goals` пуст, директива пишет лишь
+    // историю. Только по истории — и человек с давней планкой и пустой историей
+    // перестаёт пересчитываться совсем.
+    let goals = local::list_goals().await;
+    let goal = goals.iter().find(|g| {
+        g.nutrient == "Calories"
+            && g.direction == api_types::GoalDirection::AtMost
+            && g.amount > 0.0
+    });
+    let Some(previous) = local::calorie_goal_amount().await.or(goal.map(|g| g.amount)) else {
         leptos::logging::log!("планка калорий: пересчёта нет — планка ещё не поставлена");
         return;
     };
 
     let today = chrono::Local::now().date_naive();
     // Якорь: последний пересчёт, иначе день, когда планка появилась впервые
-    // (первый цикл = +7 дней). Первый день берётся из истории — по той же
-    // причине, что и само число: у кураторского человека `goals` пуст.
+    // (первый цикл = +7 дней). Первый день ищется в обоих источниках — по той же
+    // причине, по какой в обоих ищется число.
     let first_planka_day = local::planka_history(local::PLANKA_CALORIES)
         .await
         .first()
-        .and_then(|e| chrono::NaiveDate::parse_from_str(&e.date, "%Y-%m-%d").ok());
+        .and_then(|e| chrono::NaiveDate::parse_from_str(&e.date, "%Y-%m-%d").ok())
+        .or_else(|| {
+            goal.and_then(|g| g.created_at.get(0..10))
+                .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        });
     let anchor = app_flags::get(PLANKA_ANCHOR_KEY)
         .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
         .or(first_planka_day)

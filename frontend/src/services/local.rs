@@ -1937,11 +1937,16 @@ pub async fn change_recipe_weight(recipe_id: &str, new_total_grams: f64) -> Opti
 /// Строки старого хранилища целей. ЧИТАЕТ ТОЛЬКО МИГРАЦИЯ: планка живёт в
 /// истории, а `goals` осталось коробкой с прошлым, из которой её достают
 /// последний раз (см. `migrations::m025_planka_from_goals`).
+///
+/// TODO: УДАЛИТЬ вместе с объявлением store в `db.rs` — там же сказано, когда
+/// это станет безопасно.
 pub(crate) async fn legacy_goals() -> Vec<Goal> {
     db::list_all("goals").await
 }
 
 /// Калорийная цель из старого хранилища — вход миграции m025.
+///
+/// TODO: УДАЛИТЬ вместе с объявлением store в `db.rs`.
 pub async fn legacy_calorie_goal_row() -> Option<Goal> {
     legacy_goals()
         .await

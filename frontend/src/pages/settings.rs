@@ -10,9 +10,6 @@ const IOS_CARD: &str = "background: var(--bulma-scheme-main); border-radius: 12p
 const IOS_SECTION_LABEL: &str = "text-transform: uppercase; letter-spacing: 0.02em; padding: 24px 0 8px 16px; margin: 0;";
 const IOS_SEPARATOR: &str = "border-bottom: 0.5px solid var(--bulma-border-weak); margin-left: 16px;";
 
-// TODO: Показывать цели после того, как пользователь освоится с программой и
-// выполнит некоторые задания из «Истории».
-
 // TODO: Панель диагностических логов (notif/deep-link). Скрыта до тех пор, пока
 // снова не понадобится для отладки — вернуть в true, чтобы показать.
 const SHOW_DIAG_LOG: bool = false;

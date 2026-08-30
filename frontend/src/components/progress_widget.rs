@@ -705,8 +705,19 @@ pub fn ProgressWidget() -> impl IntoView {
     );
 
     // The planka, once set, flips the widget to its "done" state.
+    //
+    // Слушаем сигнал ПЛАНОК, а не версию `goals`. Планка живёт в истории и
+    // читается из синхронного кэша, а запись в `goals` — зеркало, и обновляется
+    // оно РАНЬШЕ кэша: `set_calorie_goal` сперва пишет цель, потом историю.
+    // Подписка на `goals` поэтому перечитывала планку до того, как та появилась,
+    // и виджет застревал в состоянии «планки ещё нет» до следующего запуска —
+    // ровно в тот момент, когда приложение впервые её и посчитало.
     let goals_ver = db::version("goals");
-    let planka = create_resource(move || goals_ver.get(), |_| async { local::calorie_goal_amount().await });
+    let plankas_ver = crate::services::plankas::version_signal();
+    let planka = create_resource(
+        move || (goals_ver.get(), plankas_ver.get()),
+        |_| async { local::calorie_goal_amount().await },
+    );
 
     // Calories eaten TODAY (for the done-state gauge). Refreshes on diary edits.
     let today_kcal = create_resource(

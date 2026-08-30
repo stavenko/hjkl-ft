@@ -18,10 +18,12 @@ pub fn StoryTray() -> impl IntoView {
     // `StoryViewerHost`, mounted once high in the tree.
     let open = stories::open_signal();
 
-    // The weekly calorie planka gates the second-week story. Re-loads when the
-    // `goals` store changes (the planka is a Calories/AtMost goal).
+    // The weekly calorie planka gates the second-week story. Планка живёт в
+    // истории, поэтому слушаем сигнал планок; версия `goals` осталась как
+    // зеркало — см. `progress_widget`.
     let goals_ver = db::version("goals");
-    let planka = create_resource(move || goals_ver.get(), |_| async {
+    let plankas_ver = crate::services::plankas::version_signal();
+    let planka = create_resource(move || (goals_ver.get(), plankas_ver.get()), |_| async {
         local::calorie_goal_amount().await
     });
 

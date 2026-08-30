@@ -669,6 +669,8 @@ pub fn DashboardPage() -> impl IntoView {
     let diary_ver = db::version("diary");
     let foods_ver = db::version("foods");
     let goals_ver = db::version("goals");
+    // Сигнал планок — там живут действующие числа; см. `progress_widget`.
+    let plankas_ver = crate::services::plankas::version_signal();
     let detail_res = create_local_resource(
         move || {
             (
@@ -677,9 +679,10 @@ pub fn DashboardPage() -> impl IntoView {
                 foods_ver.get(),
                 weight_ver.get(),
                 goals_ver.get(),
+                plankas_ver.get(),
             )
         },
-        |(open, _, _, _, _)| async move {
+        |(open, _, _, _, _, _)| async move {
             if !open {
                 return None;
             }

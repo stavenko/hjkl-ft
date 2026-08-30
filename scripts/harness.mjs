@@ -305,6 +305,31 @@ export async function openSeeded(browser, opts = {}) {
   if (opts.seed) await opts.seed(page, uid);
   else if (opts.plan) await seedInPage(page, uid, opts.plan);
 
+  // Устройство УЖЕ спрашивало сервер, кто ведёт этого человека, и услышало
+  // «никто» (`admin`).
+  //
+  // Без этого недельный пересчёт планок не запускается вовсе: он ждёт ответа,
+  // потому что двигать планку человеку, которого ведёт куратор, нельзя. Токен у
+  // стенда ненастоящий, опрос не проходит, и ответа не будет никогда — а
+  // проверки при этом про пересчёт, а не про опрос. Флаг устройственный: ровно
+  // то, что лежало бы у настоящего человека без куратора после первого запуска.
+  //
+  // `opts.peer` — для проверок, которым нужен обратный случай.
+  await page.evaluate(async ({ uid, peer }) => {
+    const db = await new Promise((res, rej) => {
+      const r = indexedDB.open(`hjkl-ft-${uid}`);
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    if (db.objectStoreNames.contains("app_flags")) {
+      await new Promise((res) => {
+        const tx = db.transaction(["app_flags"], "readwrite");
+        tx.objectStore("app_flags").put({ key: "support_current_peer", value: peer });
+        tx.oncomplete = () => res(); tx.onerror = () => res();
+      });
+    }
+    db.close();
+  }, { uid, peer: opts.peer ?? "admin" });
+
   await page.goto(`${baseUrl}${landing}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#splash", { state: "detached", timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(500); // let reactive effects (DB reads) settle

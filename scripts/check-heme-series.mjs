@@ -5,7 +5,7 @@
 // подписей (−8…−1, четыре без столбика), а гем — четыре. Разъезд заметен глазом и
 // читается как «у гема другая неделя», хотя границы недель у них общие.
 import { chromium } from "playwright";
-import { openSeeded, DEFAULT_URL } from "./harness.mjs";
+import { openSeeded, tapWidget, DEFAULT_URL } from "./harness.mjs";
 
 const BASE = process.env.FE || DEFAULT_URL;
 // Дневник ведётся четыре недели — вдвое меньше окна в восемь недель. Ровно тот
@@ -83,11 +83,8 @@ const { context, page } = await openSeeded(b, {
 await page.reload({ waitUntil: "domcontentloaded" });
 await page.waitForTimeout(5000);
 
-// Развёрнутый вид открывается тапом по виджету планки. Ждём, пока уйдёт заслонка
-// проверки подписки: её спиннер перехватывает клик.
-// Событие шлём напрямую: поверх дашборда висит заслонка проверки подписки, её
-// спиннер перехватывает настоящий клик, а проверяем мы не заслонку.
-await page.locator('[data-testid="progress-widget"]').dispatchEvent("pointerup");
+// Развёрнутый вид открывается ТАПОМ по виджету планки — см. `tapWidget`.
+await tapWidget(page, '[data-testid="progress-widget"]');
 await page.waitForTimeout(4000);
 
 // Подписи недель внутри панели индикатора: ищем панель по её заголовку и считаем

@@ -5,7 +5,7 @@
 // в нечётные хорошо (оливковое масло и рыба). Так на одном снимке видны обе
 // стороны — красные столбики вниз и зелёные вверх.
 import { chromium } from "playwright";
-import { openSeeded, DEFAULT_URL } from "./harness.mjs";
+import { openSeeded, tapWidget, DEFAULT_URL } from "./harness.mjs";
 
 const BASE = process.env.FE || DEFAULT_URL;
 const OUT = process.env.SHOT || "/tmp/balance-panel.png";
@@ -94,7 +94,7 @@ const { context, page } = await openSeeded(b, {
 });
 await page.reload({ waitUntil: "domcontentloaded" });
 await page.waitForTimeout(6000);
-await page.locator('[data-testid="progress-widget"]').dispatchEvent("pointerup");
+await tapWidget(page, '[data-testid="progress-widget"]');
 await page.waitForTimeout(6000);
 
 const panel = page.locator('[data-ind-panel="fat_ratio"]');

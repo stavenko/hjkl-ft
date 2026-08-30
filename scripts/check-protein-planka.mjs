@@ -19,7 +19,7 @@
 // день судится по истории, и разъехаться они не должны. База сеется версией 8,
 // чтобы прогналась миграция 9, которая и пишет новое значение.
 import { chromium } from "playwright";
-import { openSeeded, DEFAULT_URL } from "./harness.mjs";
+import { openSeeded, tapWidget, DEFAULT_URL } from "./harness.mjs";
 
 const BASE = process.env.FE || DEFAULT_URL;
 
@@ -148,7 +148,7 @@ for (const c of CASES) {
 
   // Пояснение «?» обязано назвать ту же цифру и ту ветвь, по которой она вышла:
   // иначе человек видит планку, которую нечем объяснить.
-  await page.locator('[data-testid="progress-widget"]').dispatchEvent("pointerup");
+  await tapWidget(page, '[data-testid="progress-widget"]');
   await page.waitForTimeout(3000);
   await page.locator('[data-ind-panel="protein"] button[aria-label="?"]').click();
   await page.waitForTimeout(500);

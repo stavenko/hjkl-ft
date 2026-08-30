@@ -5,7 +5,7 @@
 // Проверка обходит панели индикаторов в развёрнутом виде, открывает у каждой «?» и
 // требует, чтобы текст был содержательным и НЕ повторял чужой.
 import { chromium } from "playwright";
-import { openSeeded, DEFAULT_URL } from "./harness.mjs";
+import { openSeeded, tapWidget, DEFAULT_URL } from "./harness.mjs";
 
 const BASE = process.env.FE || DEFAULT_URL;
 
@@ -99,7 +99,7 @@ const { context, page } = await openSeeded(b, {
 });
 await page.reload({ waitUntil: "domcontentloaded" });
 await page.waitForTimeout(6000);
-await page.locator('[data-testid="progress-widget"]').dispatchEvent("pointerup");
+await tapWidget(page, '[data-testid="progress-widget"]');
 await page.waitForTimeout(5000);
 
 // Берём ИМЕННО панели индикаторов: у шкал «?» тоже есть, но там текст без абзаца

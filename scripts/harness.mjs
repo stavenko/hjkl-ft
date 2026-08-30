@@ -341,3 +341,25 @@ function hash(s) {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return h;
 }
+
+/// Тап по виджету дашборда, который открывается ЖЕСТОМ, а не кликом.
+///
+/// Виджет планки ловит не `click`, а пару `pointerdown` + `pointerup` на одном
+/// месте (см. `dashboard.rs`, `TAP_SLOP`): палец не должен уехать, иначе это была
+/// прокрутка. Одного `pointerup` мало — без нажатия обработчик выходит сразу, и
+/// подробности не открываются: именно на этом годами молча стояли проверки,
+/// написанные до появления жеста.
+///
+/// События шлём НАПРЯМУЮ элементу, а не мышью: поверх дашборда висит заслонка
+/// проверки подписки, её спиннер перехватывает настоящий указатель, а проверяем
+/// мы не заслонку.
+export async function tapWidget(page, selector) {
+  const el = page.locator(selector).first();
+  await el.waitFor({ state: "attached", timeout: 15000 });
+  const box = await el.boundingBox();
+  const at = box
+    ? { clientX: Math.round(box.x + box.width / 2), clientY: Math.round(box.y + box.height / 2) }
+    : { clientX: 0, clientY: 0 };
+  await el.dispatchEvent("pointerdown", at);
+  await el.dispatchEvent("pointerup", at);
+}

@@ -5,7 +5,6 @@ pub mod curator_invite;
 pub mod diary;
 pub mod diary_add;
 pub mod foods;
-pub mod goals;
 pub mod onboard;
 pub mod onboard_tg;
 pub mod pair_page;

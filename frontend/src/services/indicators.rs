@@ -313,7 +313,9 @@ pub async fn open_calcium_week() {
     if calcium_unlocked() {
         return;
     }
-    local::set_calcium_goal(CALCIUM_PER_DAY_MG).await;
+    // Цель по кальцию больше не заводится: она нужна была лишь как список для
+    // ручного лукапа, а тот теперь спрашивает только КБЖУ. Кальций у продуктов
+    // собирает фоновый проход своим списком.
     let today = crate::services::local::today_date();
     crate::services::app_flags::set(CALCIUM_GATE_OPEN_KEY, &fmt(today));
     crate::services::app_flags::set_bool(CALCIUM_UNLOCKED_KEY, true);

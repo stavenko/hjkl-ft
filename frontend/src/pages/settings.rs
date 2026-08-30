@@ -12,7 +12,6 @@ const IOS_SEPARATOR: &str = "border-bottom: 0.5px solid var(--bulma-border-weak)
 
 // TODO: Показывать цели после того, как пользователь освоится с программой и
 // выполнит некоторые задания из «Истории».
-const SHOW_GOALS: bool = false;
 
 // TODO: Панель диагностических логов (notif/deep-link). Скрыта до тех пор, пока
 // снова не понадобится для отладки — вернуть в true, чтобы показать.
@@ -109,27 +108,6 @@ pub fn SettingsPage() -> impl IntoView {
     view! {
         <div style=IOS_BG>
             <h1 class="is-size-1 has-text-weight-bold" style="margin: 0 0 8px 0;">{move || t("settings.title")}</h1>
-
-            // ---- Goals row ----
-            {SHOW_GOALS.then(|| {
-                let nav = navigate.clone();
-                view! {
-                    <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.goals")}</p>
-                    <div style=IOS_CARD>
-                        <button
-                            attr:data-testid="settings-btn-goals"
-                            style="appearance: none; -webkit-appearance: none; width: 100%; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border: none; background: none; font: inherit; text-align: left;"
-                            on:click=move |_| {
-                                let nav = nav.clone();
-                                nav("/settings/goals", Default::default());
-                            }
-                        >
-                            <span class="is-size-6">{move || t("settings.goals")}</span>
-                            <span style="color: var(--bulma-text-weak); font-size: 18px;">"›"</span>
-                        </button>
-                    </div>
-                }
-            })}
 
             // ---- Language section ----
             <p class="is-size-7 has-text-grey-light" style=IOS_SECTION_LABEL>{move || t("settings.language")}</p>

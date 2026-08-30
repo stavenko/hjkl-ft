@@ -1962,15 +1962,6 @@ pub struct StepPoint {
     pub steps: u32,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct GoalProgress {
-    pub nutrient: String,
-    pub direction: String,
-    pub target: f64,
-    pub unit: String,
-    pub days_met: u32,
-    pub days_logged: u32,
-}
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ReadProgressOutput {
@@ -1979,7 +1970,6 @@ pub struct ReadProgressOutput {
     pub weight: Vec<WeightPoint>,
     pub steps_avg: Option<u32>,
     pub steps: Vec<StepPoint>,
-    pub goals: Vec<GoalProgress>,
 }
 
 /// One logged day's totals, pre-computed in the snapshot so the tool's `call`
@@ -2006,7 +1996,6 @@ pub struct ProgressSnapshot {
     weight: Vec<WeightPoint>,    // ascending by date
     steps: Vec<StepPoint>,       // ascending by date
     days: Vec<DayTotals>,        // ascending by date, only days with entries
-    goals: Vec<GoalSpec>,        // current daily goals
 }
 
 /// Maximum window we pre-load; the tool slices to the requested `days`.
@@ -2029,24 +2018,6 @@ pub async fn build_progress_snapshot() -> ProgressSnapshot {
         .collect();
     steps.sort_by(|a, b| a.date.cmp(&b.date));
 
-    let goals: Vec<GoalSpec> = local::list_goals()
-        .await
-        .into_iter()
-        .filter(|g| g.period == GoalPeriod::Day && g.amount > 0.0)
-        .map(|g| GoalSpec {
-            nutrient: g.nutrient,
-            direction: g.direction,
-            amount: g.amount,
-            unit: match g.unit {
-                GoalUnit::Kcal => "kcal",
-                GoalUnit::G => "g",
-                GoalUnit::Mg => "mg",
-                GoalUnit::Mcg => "mcg",
-                GoalUnit::Steps => "steps",
-            }
-            .to_string(),
-        })
-        .collect();
 
     // Per-day nutrient totals over the window (only days that have diary entries).
     let today = chrono::Local::now().date_naive();
@@ -2077,7 +2048,7 @@ pub async fn build_progress_snapshot() -> ProgressSnapshot {
         .collect();
     days.sort_by(|a, b| a.date.cmp(&b.date));
 
-    ProgressSnapshot { weight, steps, days, goals }
+    ProgressSnapshot { weight, steps, days }
 }
 
 pub struct ReadProgress {
@@ -2136,48 +2107,12 @@ impl arti_pipes::tool::Tool for ReadProgress {
 
         let in_window: Vec<&DayTotals> =
             self.snapshot.days.iter().filter(|d| d.date >= cutoff).collect();
-        let goals: Vec<GoalProgress> = self
-            .snapshot
-            .goals
-            .iter()
-            .map(|g| {
-                let mut days_met = 0u32;
-                let mut days_logged = 0u32;
-                for d in &in_window {
-                    let val = d.values.get(&g.nutrient).copied().unwrap_or(0.0);
-                    // A day "counts" toward a goal only if anything was logged.
-                    if d.values.values().any(|v| *v > 0.0) {
-                        days_logged += 1;
-                        let met = match g.direction {
-                            GoalDirection::AtLeast => val >= g.amount,
-                            GoalDirection::AtMost => val <= g.amount,
-                        };
-                        if met {
-                            days_met += 1;
-                        }
-                    }
-                }
-                GoalProgress {
-                    nutrient: g.nutrient.clone(),
-                    direction: match g.direction {
-                        GoalDirection::AtLeast => "at_least".into(),
-                        GoalDirection::AtMost => "at_most".into(),
-                    },
-                    target: g.amount,
-                    unit: g.unit.clone(),
-                    days_met,
-                    days_logged,
-                }
-            })
-            .collect();
-
         Ok(ReadProgressOutput {
             period_days: days,
             weight_change_kg,
             weight,
             steps_avg,
             steps,
-            goals,
         })
     }
 }

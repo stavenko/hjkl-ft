@@ -34,6 +34,35 @@ export const DEV_WORKERS = {
   bug: 'https://bug-report-worker-dev.vg-stavenko.workers.dev',
 };
 
+/// Переписать в конфигурации адреса воркеров на свой прокси, не трогая остальное.
+///
+/// Ключи названы поимённо, а не по маске `*_base_url`: подставить свой адрес можно
+/// только тому, кого этот сервер и правда проксирует (см. `DEV_WORKERS`).
+const CONFIG_WORKER_KEYS = {
+  auth_base_url: 'auth',
+  push_base_url: 'push',
+  ai_base_url: 'ai',
+  payment_base_url: 'payment',
+  ocr_queue_base_url: 'ocr',
+  sync_base_url: 'sync',
+  bug_report_base_url: 'bug',
+  support_base_url: 'support',
+};
+
+export function rewriteWorkerUrls(toml, origin) {
+  return toml
+    .split('\n')
+    .map((line) => {
+      const m = /^([a-z_]+)\s*=/.exec(line);
+      if (!m) return line;
+      if (CONFIG_WORKER_KEYS[m[1]]) return `${m[1]} = "${origin}/api/${CONFIG_WORKER_KEYS[m[1]]}"`;
+      if (m[1] === 'app_origin') return `app_origin = "${origin}"`;
+      if (m[1] === 'api_base_url') return 'api_base_url = ""';
+      return line;
+    })
+    .join('\n');
+}
+
 /// Поднять сервер над `root` (каталог dist) — или над ВЫКАЧЕННЫМ приложением.
 ///
 /// `configFor(origin)` — содержимое `config/frontend.toml`, которое увидит
@@ -94,9 +123,22 @@ export async function serveWithProxy({ root, port = 0, configFor, upstream }) {
       }
     }
 
-    if (path === '/config/frontend.toml' && configFor) {
+    if (path === '/config/frontend.toml' && (configFor || upstream)) {
+      const origin = `http://127.0.0.1:${srv.address().port}`;
+      // По ВЫКАЧЕННОМУ приложению конфигурация берётся ЕГО ЖЕ, и переписываются в
+      // ней только адреса воркеров. В ней лежит не один десяток настроек — модели
+      // опознания, ссылка на бота оплаты, — и собранная здесь с нуля она молча
+      // теряет их: приложение остаётся без ссылки, а проверка видит пустой href и
+      // не понимает, почему.
+      if (upstream) {
+        try {
+          const toml = await (await fetch(upstream + '/config/frontend.toml')).text();
+          res.writeHead(200, { 'Content-Type': 'text/plain' });
+          return res.end(rewriteWorkerUrls(toml, origin));
+        } catch { /* не дотянулись — отдаём собранную вручную */ }
+      }
       res.writeHead(200, { 'Content-Type': 'text/plain' });
-      return res.end(configFor(`http://127.0.0.1:${srv.address().port}`));
+      return res.end(configFor(origin));
     }
 
     // Статика с выкаченного приложения — когда проверяем именно выкладку.

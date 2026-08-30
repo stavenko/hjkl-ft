@@ -38,9 +38,6 @@ const seed = async (page, uid) => {
     ];
     const profile = [{ key: "profile", sex: "male", height_cm: 180, birth_year: 1985,
       goal: "lose", steps_planka: OLD_PLANKA, created_at: nowIso, updated_at: nowIso }];
-    // Без калорийной планки виджет не рисует строку индикаторов вовсе.
-    const goals = [{ id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
-      amount: 2600, unit: "Kcal", period: "Day", created_at: nowIso, updated_at: nowIso }];
     // Шестнадцать завершённых дней (окно заморозки — 14), каждый ВЫШЕ старой планки,
     // но НИЖЕ будущей (11800): ровно случай «выполнил тогда, не выполнил бы сейчас».
     const step_entries = [];
@@ -48,11 +45,17 @@ const seed = async (page, uid) => {
       step_entries.push({ id: "s" + i, date: ymd(i), steps: WALKED,
         created_at: nowIso, updated_at: nowIso });
     }
-    // Планка живёт в ИСТОРИИ — она и есть цель. Без неё приложение считает,
-    // что планки нет вовсе, и не показывает ни одного индикатора.
-    const planka_history = [{ id: `calories:${ymd(30)}`, kind: "calories",
-      date: ymd(30), amount: 2600, created_at: nowIso, updated_at: nowIso }];
-    for (const [store, rows] of Object.entries({ app_flags, profile, goals, planka_history, step_entries })) {
+    // Планка живёт в ИСТОРИИ — она и есть цель. Без калорийной виджет не рисует
+    // строку индикаторов вовсе; без ШАГОВОЙ дни судятся по правилу «планки тогда
+    // не было» — их планкой становится собственный результат, и заморозку по
+    // старой планке проверять не на чем.
+    const planka_history = [
+      { id: `calories:${ymd(30)}`, kind: "calories",
+        date: ymd(30), amount: 2600, created_at: nowIso, updated_at: nowIso },
+      { id: `steps:${ymd(30)}`, kind: "steps",
+        date: ymd(30), amount: OLD_PLANKA, created_at: nowIso, updated_at: nowIso },
+    ];
+    for (const [store, rows] of Object.entries({ app_flags, profile, planka_history, step_entries })) {
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");
         for (const r of rows) tx.objectStore(store).put(r);

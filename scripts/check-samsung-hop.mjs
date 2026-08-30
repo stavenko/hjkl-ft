@@ -62,7 +62,7 @@ check("samsung: путь /onboard сохраняется", intent2.includes("/on
 // управление не дойдёт — тогда тот же экран обязано показать само приложение.
 // Чтобы это проверить, страницу забираем как Chrome (иначе воркер перехватит), а
 // приложению подсовываем Samsung в navigator.userAgent.
-import { chromium } from "/Users/vasilijstavenko/projects/hjkl-ft/scripts/node_modules/playwright/index.mjs";
+import { chromium } from "playwright";
 
 const b = await chromium.launch({ headless: true });
 const context = await b.newContext({

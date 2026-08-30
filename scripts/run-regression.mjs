@@ -164,7 +164,7 @@ server.close();
 
 const bad = results.filter((r) => r.code !== 0);
 say(`\n── итог ──\nпрошло ${results.length - bad.length} из ${results.length}`);
-for (const [f, why] of skipped.map((f) => [f, SKIP.get(f)])) say(`  пропущено ${f} — ${why}`);
+for (const { file } of skipped) say(`  пропущено ${file} — ${SKIP.get(file)}`);
 for (const r of bad) {
   say(`\n── ${r.where === 'e2e' ? 'e2e/' : ''}${r.file} ${r.signal ? '(убита по времени)' : `(код ${r.code})`} ──`);
   say(r.out.split('\n').filter((l) => /❌|FAIL|Error|error/i.test(l)).slice(0, 12).join('\n')

@@ -56,7 +56,14 @@ function seeder({ planka, misses, gateDaysAgo, anchorDaysAgo, noStepDays }) {
           step_entries.push({ id: `seed-s-${i}`, date: ymd(i), steps: Math.round(value), created_at: nowIso, updated_at: nowIso });
         }
 
-        const records = { app_flags, profile, ind_steps, step_entries };
+        // Планка живёт в ИСТОРИИ. Без записи день судится по правилу «планки тогда
+        // не было»: его планкой становится собственный результат — и день БЕЗ
+        // шагов оказывается не промахом, а выполненным нулём. Ровно на этом
+        // держится случай «ни одной записи»: неделя обязана быть красной.
+        const planka_history = [{ id: `steps:${ymd(30)}`, kind: "steps",
+          date: ymd(30), amount: planka, created_at: nowIso, updated_at: nowIso }];
+
+        const records = { app_flags, profile, planka_history, ind_steps, step_entries };
         const available = Array.from(db.objectStoreNames);
         for (const [store, rows] of Object.entries(records)) {
           if (!rows.length) continue;

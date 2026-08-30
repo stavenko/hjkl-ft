@@ -105,7 +105,7 @@ await page.evaluate(({ uid, token }) => {
 }, { uid, token });
 await page.goto(FE, { waitUntil: "domcontentloaded" });
 
-const NEED = ["app_flags", "profile", "goals", "foods", "diary"];
+const NEED = ["app_flags", "profile", "planka_history", "foods", "diary"];
 let ready = false;
 for (let i = 0; i < 60 && !ready; i++) {
   ready = await page.evaluate(async ({ uid, NEED }) => {

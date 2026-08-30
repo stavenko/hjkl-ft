@@ -18,7 +18,7 @@
 // именно его. Подробнее — `docs/testing.md`.
 
 import { spawn } from 'node:child_process';
-import { appendFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { serveWithProxy } from './lib/devserver.mjs';
 
 const DIST = process.env.FE_DIST ?? new URL('../frontend/dist', import.meta.url).pathname;
@@ -60,6 +60,7 @@ const SKIP = new Map([
   ['check-vision-direct.mjs', 'ходит в ИИ-воркер'],
   ['check-usage-by-model.mjs', 'читает статистику ИИ-воркера'],
   ['check-full-pass.mjs', 'ходит в ИИ-воркер по всему списку еды'],
+  ['check-telemetry.mjs', 'e2e: читает аналитику по ключам из ../.env'],
   // Не приложение худеющего: другое происхождение, наш сервер им не подставить.
   ['check-admin-thread-card.mjs', 'проверяет АДМИНКУ'],
   ['check-admin-wipe-ui.mjs', 'проверяет АДМИНКУ'],
@@ -82,12 +83,31 @@ const SKIP = new Map([
 // здесь, а что приехало с той стороны. Гонять по main весь набор ради этого —
 // впустую занятый час.
 const only = (process.env.ONLY ?? '').split(',').map((x) => x.trim()).filter(Boolean);
-const all = readdirSync(new URL('.', import.meta.url).pathname)
+// Проверок ДВА КАТАЛОГА, и второй до сих пор не гонялся вовсе: `e2e/` — своя
+// сборка, свои соглашения (адрес в `BASE`, запуск из своего каталога, модули
+// оттуда же). Здесь они сведены в один список: у каждой записи сказано, откуда
+// она и как её звать.
+const scriptsDir = new URL('.', import.meta.url).pathname;
+const e2eDir = new URL('../e2e/', import.meta.url).pathname;
+const pick = (dir, where) => readdirSync(dir)
   .filter((f) => f.startsWith('check-') && f.endsWith('.mjs'))
-  .filter((f) => (only.length ? only.includes(f) : f.includes(filter)))
-  .sort();
-const run = all.filter((f) => !SKIP.has(f));
-const skipped = all.filter((f) => SKIP.has(f));
+  .map((f) => ({ file: f, where }));
+const all = [...pick(scriptsDir, 'scripts'), ...pick(e2eDir, 'e2e')]
+  .filter(({ file }) => (only.length ? only.includes(file) : file.includes(filter)))
+  .sort((a, b) => a.file.localeCompare(b.file));
+const run = all.filter(({ file }) => !SKIP.has(file));
+const skipped = all.filter(({ file }) => SKIP.has(file));
+
+// У `e2e/` своя `package.json`, поэтому node ищет модули в `e2e/node_modules` —
+// а ставить второй playwright ради этого незачем. Одна ссылка на уже
+// установленный, и каталог оживает. Идемпотентно: есть — не трогаем.
+if (!existsSync(e2eDir + 'node_modules')) {
+  try {
+    symlinkSync('../scripts/node_modules', e2eDir + 'node_modules', 'dir');
+  } catch (e) {
+    console.log(`не удалось связать e2e/node_modules: ${e.message}`);
+  }
+}
 
 const server = await serveWithProxy({
   root: DIST,
@@ -104,15 +124,20 @@ say(`лог: ${LOG}`);
 say(`${DEV ? `выкаченное приложение (${DEV})` : `локальная сборка (${DIST})`} на ${server.url}`);
 say(`проверок: ${run.length}, пропущено: ${skipped.length}\n`);
 
-const one = (file) => new Promise((resolve) => {
+const one = ({ file, where }) => new Promise((resolve) => {
   const started = Date.now();
-  const p = spawn('node', [`scripts/${file}`], {
+  // `e2e/` запускается ИЗ СВОЕГО каталога: его проверки зовут соседние скрипты
+  // относительным путём (`../frontend/scripts/...`), и из корня он бьёт мимо.
+  // Адрес приложения там называется `BASE`, а не `FE`.
+  const p = spawn('node', [file], {
+    cwd: where === 'e2e' ? e2eDir : undefined,
     env: {
       ...process.env,
       FE: server.url,
+      BASE: server.url,
       // Накопленные проверки зовут `chromium.launch()` без пути к браузеру —
       // подставляем установленный, не трогая сами проверки.
-      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ./scripts/lib/pin-browser.mjs`.trim(),
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${scriptsDir}lib/pin-browser.mjs`.trim(),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -122,16 +147,17 @@ const one = (file) => new Promise((resolve) => {
   const kill = setTimeout(() => p.kill('SIGKILL'), TIMEOUT_MS);
   p.on('close', (code, signal) => {
     clearTimeout(kill);
-    resolve({ file, code, signal, secs: Math.round((Date.now() - started) / 1000), out });
+    resolve({ file, where, code, signal, secs: Math.round((Date.now() - started) / 1000), out });
   });
 });
 
 const results = [];
-for (const file of run) {
-  const r = await one(file);
-  appendFileSync(LOG, `\n═══ ${file} ═══\n${r.out}\n`);
+for (const item of run) {
+  const r = await one(item);
+  const name = item.where === 'e2e' ? `e2e/${r.file}` : r.file;
+  appendFileSync(LOG, `\n═══ ${name} ═══\n${r.out}\n`);
   const mark = r.signal ? 'ВЫШЛО ВРЕМЯ' : r.code === 0 ? 'OK  ' : 'FAIL';
-  say(`${mark} ${file} (${r.secs} с)`);
+  say(`${mark} ${name} (${r.secs} с)`);
   results.push(r);
 }
 server.close();
@@ -140,7 +166,7 @@ const bad = results.filter((r) => r.code !== 0);
 say(`\n── итог ──\nпрошло ${results.length - bad.length} из ${results.length}`);
 for (const [f, why] of skipped.map((f) => [f, SKIP.get(f)])) say(`  пропущено ${f} — ${why}`);
 for (const r of bad) {
-  say(`\n── ${r.file} ${r.signal ? '(убита по времени)' : `(код ${r.code})`} ──`);
+  say(`\n── ${r.where === 'e2e' ? 'e2e/' : ''}${r.file} ${r.signal ? '(убита по времени)' : `(код ${r.code})`} ──`);
   say(r.out.split('\n').filter((l) => /❌|FAIL|Error|error/i.test(l)).slice(0, 12).join('\n')
     || r.out.slice(-800));
 }

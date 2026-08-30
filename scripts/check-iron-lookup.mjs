@@ -77,7 +77,7 @@ await page.evaluate(({ uid, token }) => {
 await page.goto(FE, { waitUntil: "domcontentloaded" });
 // Ждём, пока приложение СОЗДАСТ per-user базу со ВСЕМИ нужными сторами. Открыть
 // её раньше — значит поймать промежуточную версию схемы и упасть на транзакции.
-const NEED = ["app_flags", "profile", "goals", "foods", "diary"];
+const NEED = ["app_flags", "profile", "planka_history", "foods", "diary"];
 let ready = false;
 for (let i = 0; i < 60 && !ready; i++) {
   ready = await page.evaluate(async ({ uid, NEED }) => {

@@ -50,9 +50,15 @@ pub fn daily_target_effective_g() -> f64 {
 ///
 /// Кураторская планка сюда не выводится: она названа числом, а не правилом, и
 /// действует как есть — выводить её из чужой калорийности нечего.
+///
+/// Спрашивается именно ЗАПИСАННОЕ (`recorded`), а не действующее (`current`):
+/// второе возвращает ещё и наше правило по умолчанию, а оно считается от
+/// СЕГОДНЯШНЕЙ калорийной планки. С ним ранний выход срабатывал всегда, и
+/// прошлые недели краснели от поднятой сегодня планки — ровно то, против чего
+/// эта функция и написана.
 async fn weekly_target_on(week_start: NaiveDate) -> f64 {
     use crate::services::plankas;
-    if let Some(set) = plankas::current(plankas::Kind::Fiber) {
+    if let Some(set) = plankas::recorded(plankas::Kind::Fiber) {
         return set * 7.0;
     }
     let day = week_start.format("%Y-%m-%d").to_string();

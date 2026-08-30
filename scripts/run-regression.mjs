@@ -10,6 +10,12 @@
 //   node scripts/run-regression.mjs              — по локальной сборке
 //   DEV=1 node scripts/run-regression.mjs        — по выкаченному приложению
 //   node scripts/run-regression.mjs check-fiber  — только совпавшие по имени
+//   JOBS=1 node scripts/run-regression.mjs       — по одной, как раньше
+//   FAILED=regression-dev-….log node scripts/run-regression.mjs  — только упавшее
+//
+// По умолчанию проверки идут ЧЕТВЁРКАМИ: полный прогон занимает минуты, а не полчаса.
+// Отдельная проверка — самый быстрый способ проверить починку: `run-regression.mjs
+// iron-week` поднимает сервер и гоняет одну.
 //
 // Проверка считается пройденной по КОДУ ВОЗВРАТА: так они и написаны.
 //
@@ -18,12 +24,15 @@
 // именно его. Подробнее — `docs/testing.md`.
 
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { serveWithProxy } from './lib/devserver.mjs';
 
 const DIST = process.env.FE_DIST ?? new URL('../frontend/dist', import.meta.url).pathname;
 const DEV = process.env.DEV ? (process.env.DEV_URL ?? 'https://renorma-fit-dev.pages.dev') : null;
-const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 240_000);
+const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 300_000);
+/// Сколько проверок идёт одновременно. Четыре — по числу ядер; браузеры почти всё
+/// время ждут, поэтому упираемся не в процессор.
+const JOBS = Math.max(1, Number(process.env.JOBS ?? 4));
 const filter = process.argv[2] ?? '';
 
 // Полный лог пишется САМ, а не зависит от того, как вызвали команду: вывод у
@@ -105,7 +114,18 @@ const SKIP = new Map([
 // СБОРКЕ main те проверки, что упали в ветке, и по разнице понять, что сломано
 // здесь, а что приехало с той стороны. Гонять по main весь набор ради этого —
 // впустую занятый час.
+//
+// `FAILED=<лог>` — то же самое, но список берётся из прошлого прогона: перегнать
+// только упавшее. Это главный способ итерации — починил, перегнал десяток, а не
+// полсотни.
 const only = (process.env.ONLY ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+if (process.env.FAILED) {
+  const log = readFileSync(process.env.FAILED, 'utf8');
+  for (const m of log.matchAll(/^(?:FAIL|ВЫШЛО ВРЕМЯ) +(?:e2e\/)?(\S+\.mjs)/gm)) {
+    if (!only.includes(m[1])) only.push(m[1]);
+  }
+  console.log(`из ${process.env.FAILED}: перегоняем ${only.length}`);
+}
 // Проверок ДВА КАТАЛОГА, и второй до сих пор не гонялся вовсе: `e2e/` — своя
 // сборка, свои соглашения (адрес в `BASE`, запуск из своего каталога, модули
 // оттуда же). Здесь они сведены в один список: у каждой записи сказано, откуда
@@ -177,15 +197,34 @@ const one = ({ file, where }) => new Promise((resolve) => {
   });
 });
 
+// Проверки идут ПАЧКАМИ по `JOBS`. По одной прогон занимал полчаса при том, что
+// почти всё это время браузеры СТОЯТ: в проверках десятки `waitForTimeout` —
+// ожидание бутстрапа, синка, фоновых проходов, — а не работа процессора.
+//
+// Мешать друг другу им нечем: у каждой свой браузер, своя база (имя от случайного
+// `uid`) и свой пользователь на dev-воркерах; сервер здесь один, но он только
+// раздаёт статику и проксирует.
+//
+// Больше ядер брать смысла нет, а меньше — тоже: одна проверка идёт до трёх минут,
+// и она же становится дном прогона. `JOBS=1` возвращает прежний порядок по одной —
+// пригодится, если понадобится ловить проверку, которая не терпит соседей.
 const results = [];
-for (const item of run) {
-  const r = await one(item);
-  const name = item.where === 'e2e' ? `e2e/${r.file}` : r.file;
-  appendFileSync(LOG, `\n═══ ${name} ═══\n${r.out}\n`);
-  const mark = r.signal ? 'ВЫШЛО ВРЕМЯ' : r.code === 0 ? 'OK  ' : 'FAIL';
-  say(`${mark} ${name} (${r.secs} с)`);
-  results.push(r);
-}
+let next = 0;
+const worker = async () => {
+  while (next < run.length) {
+    const item = run[next++];
+    const r = await one(item);
+    const name = item.where === 'e2e' ? `e2e/${r.file}` : r.file;
+    appendFileSync(LOG, `\n═══ ${name} ═══\n${r.out}\n`);
+    const mark = r.signal ? 'ВЫШЛО ВРЕМЯ' : r.code === 0 ? 'OK  ' : 'FAIL';
+    results.push(r);
+    say(`${mark} ${name} (${r.secs} с)   [${results.length}/${run.length}]`);
+  }
+};
+await Promise.all(Array.from({ length: Math.min(JOBS, run.length) }, worker));
+// Порядок завершения случаен — итог печатается по именам, чтобы два прогона можно
+// было сравнить построчно.
+results.sort((a, b) => a.file.localeCompare(b.file));
 server.close();
 
 const bad = results.filter((r) => r.code !== 0);

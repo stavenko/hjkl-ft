@@ -42,7 +42,10 @@ const page = await ctx.newPage();
 
 // Сбой модели воспроизводим сами: подменяем ответ ai-воркера на ту самую пятисотку
 // с 4006. Так проверка не зависит от того, исчерпана квота прямо сейчас или нет.
-await page.route(/ai-worker.*\/chat\/completions/, (route) =>
+// Адрес воркера узнаётся и по имени, и по проксирующему пути `/api/ai/…`: общий
+// прогон подставляет свой сервер, и по имени воркера запрос там не опознаётся.
+await page.route((u) => /\/chat\/completions/.test(String(u))
+    && /ai-worker|\/api\/ai\//.test(String(u)), (route) =>
   route.fulfill({
     status: 500,
     contentType: "application/json",

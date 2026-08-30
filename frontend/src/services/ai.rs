@@ -256,27 +256,11 @@ pub async fn lookup(
     input: &AiLookupInput,
     on_token: impl Fn(AiPhase) + Clone + 'static,
 ) -> Result<AiLookupOutput, String> {
-    let custom_part = if input.custom_nutrients.is_empty() {
-        String::new()
-    } else {
-        let keys: Vec<String> = input
-            .custom_nutrients
-            .iter()
-            .map(|s| format!("\"{}\"", s.key))
-            .collect();
-        let descriptions: Vec<String> = input
-            .custom_nutrients
-            .iter()
-            .map(|s| format!("{} = {}", s.key, s.name))
-            .collect();
-        format!(
-            "\n\nAlso provide values for these custom nutrients in custom_nutrients map. \
-             Use ONLY these strings as keys: {}. \
-             Reference: {}.",
-            keys.join(", "),
-            descriptions.join(", "),
-        )
-    };
+    // Ручной запрос спрашивает ТОЛЬКО КБЖУ. Остальные нутриенты — кальций и
+    // прочее — собирает фоновый проход (`services::enrich`) своим списком, по
+    // одному продукту за раз. Два списка на один вопрос расходились молча, а
+    // человека, нажавшего «распознать», лишние нутриенты только замедляли.
+    let custom_part = String::new();
 
     let lang = match crate::services::i18n::get_lang() {
         crate::services::i18n::Lang::Ru => "Russian",
@@ -290,26 +274,14 @@ pub async fn lookup(
         lookup_prompt_by_name(&input.name, &custom_part, lang)
     };
 
-    let key_to_name: BTreeMap<String, String> = input
-        .custom_nutrients
-        .iter()
-        .map(|s| (s.key.clone(), s.name.clone()))
-        .collect();
-
     // The schema-injected JSON mode reliably keeps the model in JSON (without it it
     // often replies in Markdown). No numeric example in the prompt on purpose:
     // concrete sample values anchored the model (it kept returning cooked-rice
     // 155 kcal for «рис»); the schema carries the shape.
     let response: NutritionResponse = generate(prompt, on_token).await?;
 
-    let nutrients: BTreeMap<String, AiNutrientDetail> = response
-        .custom_nutrients
-        .into_iter()
-        .filter_map(|(ai_key, v)| {
-            let display_name = key_to_name.get(&ai_key)?;
-            Some((display_name.clone(), v.into_api()))
-        })
-        .collect();
+    // Модель может вернуть карту нутриентов и без просьбы — она нам не нужна.
+    let nutrients: BTreeMap<String, AiNutrientDetail> = BTreeMap::new();
 
     let product_name = response.product_name.trim();
     Ok(AiLookupOutput {
@@ -2884,7 +2856,8 @@ pub async fn summarize(prompt: &str) -> Result<String, String> {
 /// prompt has no {lang} slot — only a {custom} slot listing requested nutrient keys.
 /// Built with `.replace` (NOT `format!`) so the JSON braces in the literal aren't
 /// treated as format placeholders.
-fn label_prompt(custom_nutrients: &[NutrientSpec]) -> String {
+fn label_prompt() -> String {
+    let custom_nutrients: &[NutrientSpec] = &[];
     let keys = if custom_nutrients.is_empty() {
         "(none)".to_string()
     } else {
@@ -3059,7 +3032,7 @@ fn parse_food_items(raw: &str) -> Result<Vec<DetectedFood>, String> {
 pub async fn submit_vision(input: &AiVisionInput) -> Result<String, String> {
     let submit_body = serde_json::json!({
         "images": input.images,
-        "prompt": label_prompt(&input.custom_nutrients),
+        "prompt": label_prompt(),
     });
     let (status, text) = queue_request("POST", "/submit", Some(&submit_body)).await?;
     if status == 402 {
@@ -3173,11 +3146,6 @@ fn map_result(input: &AiVisionInput, r: QueueResult) -> AiLookupOutput {
     // Custom nutrients come back keyed by the requested key; remap to the
     // display name and wrap each scalar as an exact range.
     let mut nutrients = BTreeMap::new();
-    for spec in &input.custom_nutrients {
-        if let Some(val) = r.custom_nutrients.get(&spec.key).and_then(|v| v.as_f64()) {
-            nutrients.insert(spec.name.clone(), exact_range(val, &spec.unit_label));
-        }
-    }
     AiLookupOutput {
         name: r.product_name,
         kcal: exact_range(r.energy_kcal.unwrap_or(0.0), "kcal"),
@@ -3399,7 +3367,7 @@ pub async fn vision_direct(
     input: &AiVisionInput,
     on_progress: impl Fn(u8, u32, u32),
 ) -> Result<AiLookupOutput, String> {
-    let raw = vision_chat(&label_prompt(&input.custom_nutrients), &input.images, on_progress).await?;
+    let raw = vision_chat(&label_prompt(), &input.images, on_progress).await?;
     Ok(map_result(input, parse_label_result(&raw)?))
 }
 

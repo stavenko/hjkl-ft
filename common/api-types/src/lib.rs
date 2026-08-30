@@ -421,7 +421,6 @@ pub struct NutrientSpec {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AiLookupInput {
     pub name: String,
-    pub custom_nutrients: Vec<NutrientSpec>,
     /// True when the name came from a food PHOTO where the estimated grams are the
     /// COOKED / as-served portion on the plate. The nutrition lookup must then
     /// value the food in its cooked/ready-to-eat state (e.g. boiled pasta ~130
@@ -460,7 +459,6 @@ pub struct AiLookupOutput {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AiVisionInput {
     pub images: Vec<String>,
-    pub custom_nutrients: Vec<NutrientSpec>,
 }
 
 // AI Food-items (dish photo → list of foods). Uses the same on-prem Qwen2.5-VL

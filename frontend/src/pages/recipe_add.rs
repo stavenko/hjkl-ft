@@ -33,13 +33,6 @@ pub fn RecipeAddPage() -> impl IntoView {
     let foods = move || foods_res.get().unwrap_or_default();
     let goals = move || goals_res.get().unwrap_or_default();
 
-    let custom_nutrients = move || -> Vec<NutrientSpec> {
-        goals()
-            .into_iter()
-            .filter(|g| g.is_custom_nutrient())
-            .map(|g| NutrientSpec { key: g.key, unit_label: g.unit.label().to_string(), name: g.nutrient })
-            .collect()
-    };
 
     // Ingredients already in the recipe → shown as a disabled checkmark.
     let disabled_ids = Signal::derive(move || {
@@ -94,7 +87,6 @@ pub fn RecipeAddPage() -> impl IntoView {
                     foods=Signal::derive(foods)
                     disabled_ids=disabled_ids
                     goals=Signal::derive(goals)
-                    custom_nutrients=Signal::derive(custom_nutrients)
                     allow_waste=false
                     exclude_restaurant=true
                     on_pick=on_pick

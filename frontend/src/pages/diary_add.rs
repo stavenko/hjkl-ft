@@ -51,17 +51,6 @@ pub fn DiaryAddPage() -> impl IntoView {
     let goals = move || goals_res.get().unwrap_or_default();
     let _today_entries = move || today_entries_res.get().unwrap_or_default();
 
-    let custom_nutrients = move || -> Vec<NutrientSpec> {
-        goals()
-            .into_iter()
-            .filter(|g| g.is_custom_nutrient())
-            .map(|g| NutrientSpec {
-                key: g.key,
-                unit_label: g.unit.label().to_string(),
-                name: g.nutrient,
-            })
-            .collect()
-    };
 
     // No diary-wide blocking: a product may already be in today's diary and
     // still be addable. The picker blocks only what was added in THIS session.
@@ -170,7 +159,6 @@ pub fn DiaryAddPage() -> impl IntoView {
                     foods=Signal::derive(foods)
                     disabled_ids=disabled_ids
                     goals=Signal::derive(goals)
-                    custom_nutrients=Signal::derive(custom_nutrients)
                     allow_waste=true
                     exclude_restaurant=false
                     on_pick=on_pick

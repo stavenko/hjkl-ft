@@ -22,7 +22,6 @@ pub fn FoodPicker(
     /// Food ids that are already added — shown as a disabled checkmark.
     disabled_ids: Signal<Vec<String>>,
     goals: Signal<Vec<Goal>>,
-    custom_nutrients: Signal<Vec<NutrientSpec>>,
     /// Show the "didn't eat it whole" waste field and the "restaurant food"
     /// checkbox in the grams step (diary only).
     #[prop(default = false)]
@@ -239,7 +238,6 @@ pub fn FoodPicker(
         // field is freshly seeded from the current search query.
         {move || show_editor.get().then(|| view! {
             <FoodEditor
-                custom_nutrients=custom_nutrients
                 initial_name=search.get_untracked()
                 on_draft=Callback::new(move |(food, d_id): (Food, Option<String>)| {
                     pending_draft_id.set(d_id);

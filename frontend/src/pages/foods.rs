@@ -10,17 +10,10 @@ use api_types::NutrientSpec;
 pub fn FoodsPage() -> impl IntoView {
     let foods = create_rw_signal(Vec::<Food>::new());
     let show_modal = create_rw_signal(false);
-    let custom_nutrients = create_rw_signal(Vec::<NutrientSpec>::new());
 
     create_effect(move |_| {
         spawn_local(async move {
             foods.set(local::list_foods().await);
-            let specs: Vec<NutrientSpec> = local::list_goals().await
-                .into_iter()
-                .filter(|g| g.is_custom_nutrient())
-                .map(|g| NutrientSpec { key: g.key, unit_label: g.unit.label().to_string(), name: g.nutrient })
-                .collect();
-            custom_nutrients.set(specs);
         });
     });
 
@@ -113,7 +106,6 @@ pub fn FoodsPage() -> impl IntoView {
 
             <Show when=move || show_modal.get()>
                 <FoodModal
-                    custom_nutrients=custom_nutrients.into()
                     on_created=on_created
                     on_close=on_close
                 />

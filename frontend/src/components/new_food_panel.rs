@@ -8,7 +8,6 @@ use crate::services::i18n::t;
 
 #[component]
 pub fn NewFoodPanel(
-    custom_nutrients: Signal<Vec<NutrientSpec>>,
     goals: Signal<Vec<Goal>>,
     today_entries: Signal<Vec<DiaryEntry>>,
     on_select: Callback<Food>,
@@ -55,7 +54,6 @@ pub fn NewFoodPanel(
         <div style="min-height: 320px;">
             <Show when=move || accordion.get() == "form">
                 <FoodEditor
-                    custom_nutrients=custom_nutrients
                     on_draft=Callback::new(move |(food, _d_id): (Food, Option<String>)| {
                         on_select.call(food);
                     })

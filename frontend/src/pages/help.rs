@@ -231,7 +231,6 @@ fn picker_demo() -> impl IntoView {
                 foods=foods
                 disabled_ids=Signal::derive(Vec::<String>::new)
                 goals=Signal::derive(Vec::<Goal>::new)
-                custom_nutrients=Signal::derive(Vec::<NutrientSpec>::new)
                 on_pick=Callback::new(|_| {})
                 on_food_created=Callback::new(|_| {})
                 show_editor=create_rw_signal(false)
@@ -246,7 +245,6 @@ fn editor_demo(initial_name: &'static str, tab: u8) -> impl IntoView {
     view! {
         <div style=FRAME>
             <FoodEditor
-                custom_nutrients=Signal::derive(Vec::<NutrientSpec>::new)
                 on_draft=Callback::new(|_| {})
                 initial_name=initial_name
                 initial_tab=tab

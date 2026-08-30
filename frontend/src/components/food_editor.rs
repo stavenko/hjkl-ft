@@ -115,7 +115,6 @@ fn ai_icon() -> impl IntoView {
 
 #[component]
 pub fn FoodEditor(
-    custom_nutrients: Signal<Vec<NutrientSpec>>,
     on_draft: Callback<(Food, Option<String>)>,
     /// Pre-fill the name field (e.g. with the search query that led here, so the
     /// user doesn't have to type the name twice).
@@ -431,7 +430,6 @@ pub fn FoodEditor(
             }
             cb.forget();
         }
-        let nutrients_list = custom_nutrients.get_untracked();
         spawn_local(async move {
             let stop_timer = move || {
                 if let Some(id) = interval.get_untracked() {
@@ -478,7 +476,7 @@ pub fn FoodEditor(
             if use_vision {
                 // Vision is async: submit, then a 2-state machine — POLL the queue
                 // while `queued`, then SWITCH to the SSE STREAM while `processing`.
-                let input = AiVisionInput { images, custom_nutrients: nutrients_list };
+                let input = AiVisionInput { images };
 
                 // ПРЯМОЙ ПУТЬ: свой сервер молчит — картинка уходит в наш ai-worker
                 // одним запросом, без очереди и опроса статуса. Прогресс тот же
@@ -571,7 +569,7 @@ pub fn FoodEditor(
                         if phase.get_untracked() != 2 { phase.set(2); }
                     }
                 };
-                let input = AiLookupInput { name: n, custom_nutrients: nutrients_list, as_served: false };
+                let input = AiLookupInput { name: n, as_served: false };
                 let result = ai::lookup(&input, on_token).await;
                 match result {
                     Ok(output) => {
@@ -600,7 +598,6 @@ pub fn FoodEditor(
         if images.is_empty() {
             return;
         }
-        let nutrients_list = custom_nutrients.get_untracked();
 
         fitems_loading.set(true);
         fitems_error.set(None);
@@ -747,7 +744,6 @@ pub fn FoodEditor(
             // Each task returns plain data; signals/rows are built afterwards.
             let tasks = items.into_iter().map(|det| {
                 let candidates = candidates.clone();
-                let nutrients_list = nutrients_list.clone();
                 async move {
                     let mut r = Resolved {
                         name: det.name.clone(),
@@ -778,7 +774,7 @@ pub fn FoodEditor(
                         // No confident match → look up per-100g КБЖУ by name.
                         // From a food PHOTO: `det.grams` is the cooked/as-served portion,
                         // so КБЖУ must be for the cooked food (not the raw/dry product).
-                        let input = AiLookupInput { name: det.name.clone(), custom_nutrients: nutrients_list, as_served: true };
+                        let input = AiLookupInput { name: det.name.clone(), as_served: true };
                         match ai::lookup(&input, |_| {}).await {
                             Ok(out) => {
                                 if let Some(n) = out.name { r.name = n; }

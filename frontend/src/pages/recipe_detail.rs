@@ -15,7 +15,6 @@ pub fn RecipeDetailPage() -> impl IntoView {
     let recipe_name = create_rw_signal(String::new());
 
     let goals = create_rw_signal(Vec::<Goal>::new());
-    let custom_nutrients = create_rw_signal(Vec::<api_types::NutrientSpec>::new());
     let show_finalize = create_rw_signal(false);
     let final_weight = create_rw_signal(String::new());
     // Finalize submitted with an empty/invalid weight → highlight the input + message.
@@ -37,11 +36,6 @@ pub fn RecipeDetailPage() -> impl IntoView {
             foods.set(local::list_foods().await);
             let all_goals = local::list_goals().await;
             goals.set(all_goals.clone());
-            let specs: Vec<api_types::NutrientSpec> = all_goals.into_iter()
-                .filter(|g| g.is_custom_nutrient())
-                .map(|g| api_types::NutrientSpec { key: g.key, unit_label: g.unit.label().to_string(), name: g.nutrient })
-                .collect();
-            custom_nutrients.set(specs);
         });
     });
 

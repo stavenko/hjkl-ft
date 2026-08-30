@@ -6,7 +6,6 @@ use super::food_editor::FoodEditor;
 
 #[component]
 pub fn FoodModal(
-    custom_nutrients: Signal<Vec<NutrientSpec>>,
     on_created: Callback<Food>,
     on_close: Callback<()>,
 ) -> impl IntoView {
@@ -20,7 +19,6 @@ pub fn FoodModal(
                 </header>
                 <section class="modal-card-body">
                     <FoodEditor
-                        custom_nutrients=custom_nutrients
                         on_draft=Callback::new(move |(food, _d_id): (Food, Option<String>)| {
                             on_created.call(food);
                         })

@@ -12,6 +12,10 @@
 //   node scripts/run-regression.mjs check-fiber  — только совпавшие по имени
 //
 // Проверка считается пройденной по КОДУ ВОЗВРАТА: так они и написаны.
+//
+// Полный вывод пишется в `regression-local.log` (или `-dev`). НЕ пропускайте
+// прогон через `| tail`: итог печатается перед подробностями, и хвост срежет
+// именно его. Подробнее — `docs/testing.md`.
 
 import { spawn } from 'node:child_process';
 import { appendFileSync, readdirSync, writeFileSync } from 'node:fs';

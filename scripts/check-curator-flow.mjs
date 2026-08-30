@@ -32,9 +32,11 @@
 // Браузер нужен там, где правило зависит от ЗАПУЩЕННОГО приложения.
 //
 // Запуск: node scripts/check-curator-flow.mjs
+//   DEV=1 — по ВЫКАЧЕННОМУ приложению, а не по локальному dist
 //   FE      — каталог собранного фронтенда (по умолчанию ../frontend/dist)
 //   CUR     — каталог собранного куратора (по умолчанию ../curator/dist)
 //   VERBOSE — печатать все запросы приложения к воркерам
+// Как гонять проверки и почему вывод сохраняют в файл — `docs/testing.md`.
 
 import { serveWithProxy, launchBrowser, isOwnNavigationError } from './lib/devserver.mjs';
 import { createPaidUser, mintToken } from './lib/devuser.mjs';

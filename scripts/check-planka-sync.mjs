@@ -17,7 +17,9 @@
 //      больше нет.
 //
 // Запуск: node scripts/check-planka-sync.mjs
+//   DEV=1 — по ВЫКАЧЕННОМУ приложению, а не по локальному dist
 //   FE — каталог собранного фронтенда (по умолчанию ../frontend/dist)
+// Как гонять проверки и почему вывод сохраняют в файл — `docs/testing.md`.
 
 import { serveWithProxy, launchBrowser, isOwnNavigationError } from './lib/devserver.mjs';
 import { createPaidUser, mintToken } from './lib/devuser.mjs';

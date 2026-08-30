@@ -17,6 +17,8 @@
 //   5. День старше недели остаётся прожитым: меню там только «повторить».
 //
 // Запуск: node scripts/check-diary-week.mjs
+//   DEV=1 — по ВЫКАЧЕННОМУ приложению, а не по локальному dist
+// Как гонять проверки и почему вывод сохраняют в файл — `docs/testing.md`.
 
 import { serveWithProxy, launchBrowser, isOwnNavigationError } from './lib/devserver.mjs';
 import { createPaidUser, mintToken } from './lib/devuser.mjs';

@@ -50,6 +50,7 @@ const SKIP = new Map([
   ['check-fresh-bind-unbind.mjs', 'поднимает свой сервер'],
   ['check-planka-sync.mjs', 'поднимает свой сервер, два устройства'],
   ['check-diary-week.mjs', 'поднимает свой сервер'],
+  ['check-planka-from-goals.mjs', 'поднимает свой сервер'],
   ['check-detections.mjs', 'ходит в ИИ-воркер: медленно и платно'],
   ['check-identity-cache.mjs', 'ходит в ИИ-воркер'],
   ['check-identity-fallback.mjs', 'ходит в ИИ-воркер'],

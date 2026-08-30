@@ -131,12 +131,15 @@ const planka = await page.evaluate(async (u) => {
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   });
   const all = await new Promise((res) => {
-    const rq = db.transaction(["goals"]).objectStore("goals").getAll();
+    const rq = db.transaction(["planka_history"]).objectStore("planka_history").getAll();
     rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
   });
   db.close();
-  // Калорийная цель опознаётся по `nutrient` (см. api_types::Goal).
-  return all.find((g) => g.nutrient === "Calories")?.amount ?? null;
+  // Планка живёт в ИСТОРИИ, и действующая — последняя запись по виду. Раньше
+  // читалась цель из `goals`; целей больше нет, планка и есть цель.
+  return all.filter((e) => e.kind === "calories")
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .at(-1)?.amount ?? null;
 }, uid);
 
 const t = letter.body;

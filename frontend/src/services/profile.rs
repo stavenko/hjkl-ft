@@ -130,6 +130,12 @@ pub fn get_steps_planka() -> Option<f64> {
     crate::services::plankas::current(crate::services::plankas::Kind::Steps)
 }
 
+/// Планка шагов из СТАРОГО места — поля в профиле. До появления истории она жила
+/// только там. Читается один раз при гидратации кэша: см. `plankas::hydrate`.
+pub fn legacy_steps_planka() -> Option<f64> {
+    CACHE.with(|c| c.borrow().as_ref().and_then(|r| r.steps_planka).filter(|v| *v > 0.0))
+}
+
 /// Записать планку шагов. Непозитивное значение её снимает.
 ///
 /// Пишет в ДВА места, и это не дублирование источника: истина — история, а поле в

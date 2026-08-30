@@ -28,8 +28,14 @@ const filter = process.argv[2] ?? '';
 
 // Полный лог пишется САМ, а не зависит от того, как вызвали команду: вывод у
 // прогона длинный, итог печатается перед подробностями, и любой `| tail` его
-// срезает. На этом я уже один раз потерял результат часового прогона.
-const LOG = process.env.LOG ?? `regression-${DEV ? 'dev' : 'local'}.log`;
+// срезает.
+//
+// Имя со ВРЕМЕНЕМ, а не одно на все прогоны. С постоянным именем чужой (или свой
+// прошлый) лог выглядит как результат текущего прогона: пока идёт сборка, в файле
+// лежит вчерашний итог, и его успеваешь принять за сегодняшний. Метка времени
+// снимает вопрос совсем — а `LOG=` остаётся, когда имя нужно назвать самому.
+const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+const LOG = process.env.LOG ?? `regression-${DEV ? 'dev' : 'local'}-${stamp}.log`;
 writeFileSync(LOG, '');
 const say = (line = '') => {
   console.log(line);
@@ -93,6 +99,7 @@ const server = await serveWithProxy({
     `landing_url = "https://renorma.app"`, `app_origin = "${o}"`,
   ].join('\n'),
 });
+say(`лог: ${LOG}`);
 say(`${DEV ? `выкаченное приложение (${DEV})` : `локальная сборка (${DIST})`} на ${server.url}`);
 say(`проверок: ${run.length}, пропущено: ${skipped.length}\n`);
 

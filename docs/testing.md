@@ -15,9 +15,13 @@
 Прогон регрессии пишет лог сам:
 
 ```
-node scripts/run-regression.mjs          # → regression-local.log
-DEV=1 node scripts/run-regression.mjs    # → regression-dev.log
+node scripts/run-regression.mjs          # → regression-local-20260830-142530.log
+DEV=1 node scripts/run-regression.mjs    # → regression-dev-…log
 ```
+
+Имя лога — со временем запуска, и печатается первой строкой. Постоянное имя
+подводит: пока идёт сборка, в файле лежит ПРОШЛЫЙ итог, и его легко принять за
+сегодняшний. Своё имя задаётся через `LOG=`.
 
 В логе — полный вывод КАЖДОЙ проверки, не только упавшей. На экран идёт короткая
 сводка. Отдельную проверку перенаправляйте руками:
@@ -30,8 +34,8 @@ node scripts/check-curator-flow.mjs > /tmp/curator.log 2>&1; echo "код $?"
 строк, и открывать его весь — это просто время и деньги, потраченные на прокрутку.
 
 ```
-grep -E "^(OK|FAIL)" regression-local.log   # сводка
-sed -n '/═══ check-fiber-week/,/═══/p' regression-local.log   # одна проверка
+grep -E "^(OK|FAIL)" regression-local-*.log   # сводка
+sed -n '/═══ check-fiber-week/,/═══/p' regression-local-*.log   # одна проверка
 ```
 
 Это же относится к долгим прогонам вообще: запускайте в фоне с перенаправлением в

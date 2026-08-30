@@ -159,9 +159,20 @@ for (let i = 0; i < 40; i++) {
   // У калорий и шагов есть заморозка последних двух недель, поэтому их дни
   // возвращаются в кэш сами. У белка её нет — его дни считаются по мере
   // отрисовки, и требовать от него полную неделю здесь нечестно.
-  const ready = ["ind_calories", "ind_steps"]
-    .every((s) => eatenDays(state.out[s] ?? []).length >= KCAL.length);
-  if (state.ver === "15" && ready) break;
+  if (Number(state.ver) >= 15
+      && eatenDays(state.out.ind_steps ?? []).length >= KCAL.length) break;
+}
+
+// ПЕРЕЗАПУСК. Миграция снимает вердикты и на этом заканчивается: «пересчитаются
+// при ближайшем открытии приложения» — так она и написана. Заморозка калорий на
+// этом запуске уже прошла (миграции идут своим чередом, рядом), и снятые ею дни
+// возвращаются только со следующим открытием. Человек это видит именно так:
+// открыл — дни расчистились, открыл снова — они посчитаны заново.
+await page.reload({ waitUntil: "domcontentloaded" });
+for (let i = 0; i < 30; i++) {
+  await page.waitForTimeout(2000);
+  state = await read();
+  if (eatenDays(state.out.ind_calories ?? []).length >= KCAL.length) break;
 }
 
 console.log(`\nверсия базы ${state.ver}`);
@@ -180,7 +191,9 @@ for (const [store, label] of MOVING) {
 }
 console.log("");
 
-check("миграции прогнались", state.ver === "15", `версия ${state.ver}`);
+// Миграций с тех пор прибавилось, и база уезжает дальше 15-й. Важно, что нужные
+// ПРОГНАЛИСЬ, а не что на них всё кончилось.
+check("миграции прогнались", Number(state.ver) >= 15, `версия ${state.ver}`);
 for (const [store, label, planka] of MOVING) {
   const rows = eatenDays(state.out[store] ?? []);
   // Полную неделю обратно в кэш возвращает заморозка, а она есть только у калорий

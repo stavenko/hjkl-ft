@@ -5,9 +5,13 @@
 // индикатор КРАСНЫЙ — потому что цикл безусловно брал восемь недель, и четыре
 // несуществующие считались незакрытыми, то есть ровно половиной окна.
 //
+// Вердикт выносит ОБЩЕЕ недельное правило: смотрит на две последние завершённые
+// недели — последняя закрыта, значит зелёный; промах повторился — красный. Поэтому
+// второй случай про ПОСЛЕДНИЕ недели, а не про долю окна.
+//
 // Два случая на двух аккаунтах:
-//   A. четыре недели, все закрыты            → зелёный
-//   B. четыре недели, две закрыты (половина) → красный
+//   A. четыре недели, все закрыты              → зелёный
+//   B. четыре недели, две ПОСЛЕДНИЕ не закрыты → красный
 import { chromium } from "playwright";
 import { openSeeded, DEFAULT_URL } from "./harness.mjs";
 
@@ -16,9 +20,10 @@ const BASE = process.env.FE || DEFAULT_URL;
 let fail = 0;
 const check = (n, ok, extra = "") => { console.log(`${ok ? "OK " : "FAIL"} ${n}${extra ? " — " + extra : ""}`); if (!ok) fail++; };
 
-// closedWeeks — сколько из четырёх недель набирают недельную норму железа.
-const makeSeed = (closedWeeks) => async (page, uid) => {
-  await page.evaluate(async ({ uid, closedWeeks }) => {
+// closedByWeek — какие из четырёх недель набирают недельную норму железа.
+// Первый элемент — САМАЯ СВЕЖАЯ неделя (дни 1–7 назад).
+const makeSeed = (closedByWeek) => async (page, uid) => {
+  await page.evaluate(async ({ uid, closedByWeek }) => {
     const db = await new Promise((res, rej) => {
       const q = indexedDB.open(`hjkl-ft-${uid}`);
       q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
@@ -64,7 +69,7 @@ const makeSeed = (closedWeeks) => async (page, uid) => {
     for (let i = 1; i <= 28; i++) {
       // Неделя 1 — самая свежая (дни 1–7), неделя 4 — самая старая (дни 22–28).
       const week = Math.ceil(i / 7);
-      const closed = week <= closedWeeks;
+      const closed = closedByWeek[week - 1];
       diary.push({ id: "d" + i, food_id: closed ? "liver" : "water", date: ymd(i), time: null,
         grams: 200, waste_grams: 0, meal_label: "lunch", deleted: false,
         created_at: nowIso, updated_at: nowIso });
@@ -77,17 +82,18 @@ const makeSeed = (closedWeeks) => async (page, uid) => {
       });
     }
     db.close();
-  }, { uid, closedWeeks });
+  }, { uid, closedByWeek });
 };
 
 const colorName = (c) => c.includes("31, 164, 99") ? "зелёный"
   : c.includes("232, 133, 13") ? "оранжевый"
   : c.includes("224, 48, 79") ? "красный" : `неизвестно (${c})`;
 
-const run = async (b, closedWeeks) => {
+const run = async (b, closedByWeek) => {
   const { context, page } = await openSeeded(b, {
     baseUrl: BASE, context: { serviceWorkers: "block" },
-    uid: `ironhist-${closedWeeks}-${Math.floor(Math.random() * 1e6)}`, seed: makeSeed(closedWeeks),
+    uid: `ironhist-${closedByWeek.filter(Boolean).length}-${Math.floor(Math.random() * 1e6)}`,
+    seed: makeSeed(closedByWeek),
   });
   await page.waitForTimeout(9000);
   const c = await page.locator('[data-ind="Железо"] > div')
@@ -98,13 +104,13 @@ const run = async (b, closedWeeks) => {
 
 const b = await chromium.launch({ headless: true });
 
-const all4 = await run(b, 4);
+const all4 = await run(b, [true, true, true, true]);
 console.log(`четыре недели, все закрыты → ${all4}`);
 check("все доступные недели закрыты — зелёный", all4 === "зелёный", all4);
 
-const half = await run(b, 2);
-console.log(`четыре недели, закрыты две → ${half}`);
-check("половина доступных недель не закрыта — красный", half === "красный", half);
+const missed = await run(b, [false, false, true, true]);
+console.log(`четыре недели, две последние не закрыты → ${missed}`);
+check("две последние недели не закрыты — красный", missed === "красный", missed);
 
 console.log(fail === 0 ? "\n=== ALL OK ===" : `\n=== FAILURES: ${fail} ===`);
 await b.close();

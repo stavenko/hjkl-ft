@@ -51,9 +51,10 @@ const seed = async (page, uid) => {
     ]);
     await put("profile", [{ key: "profile", sex: "male", height_cm: 180, birth_year: 1985,
       goal: "lose", steps_planka: 9000, created_at: nowIso, updated_at: nowIso }]);
-    await put("goals", [{ id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
-      amount: PLANKA, unit: "Kcal", period: "Day", created_at: ymd(30) + "T09:00:00Z",
-      updated_at: nowIso }]);
+    // Планка живёт в ИСТОРИИ — это и есть цель. Раньше здесь сеялась строка в
+    // `goals`; целей больше нет.
+    await put("planka_history", [{ id: `calories:${ymd(30)}`, kind: "calories", date: ymd(30),
+      amount: PLANKA, created_at: ymd(30) + "T09:00:00Z", updated_at: nowIso }]);
     await put("foods", [{ id: "f", name: "Еда", kcal: EATEN, protein: 20, fat: 10, carbs: 40,
       nutrients: {}, package_weight: null, is_recipe: false, recipe_id: null, archived: false,
       is_restaurant: false, is_veg_fruit: false, is_heme: false, is_milk_globule: false,
@@ -88,12 +89,12 @@ const read = () => page.evaluate(async (u) => {
     const r = indexedDB.open(`hjkl-ft-${u}`);
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   });
-  if (!db.objectStoreNames.contains("goals") || !db.objectStoreNames.contains("app_flags")) {
+  if (!db.objectStoreNames.contains("planka_history") || !db.objectStoreNames.contains("app_flags")) {
     db.close();
     return { planka: null, letters: [] };
   }
-  const goals = await new Promise((res) => {
-    const rq = db.transaction(["goals"]).objectStore("goals").getAll();
+  const hist = await new Promise((res) => {
+    const rq = db.transaction(["planka_history"]).objectStore("planka_history").getAll();
     rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
   });
   const flags = await new Promise((res) => {
@@ -103,7 +104,8 @@ const read = () => page.evaluate(async (u) => {
   db.close();
   let letters = [];
   try { letters = JSON.parse(flags); } catch {}
-  const g = goals.find((x) => x.nutrient === "Calories");
+  const g = hist.filter((x) => x.kind === "calories")
+    .sort((a, b) => a.date.localeCompare(b.date)).at(-1);
   return { planka: g ? g.amount : null, letters: letters.map((l) => l.body) };
 }, uid);
 

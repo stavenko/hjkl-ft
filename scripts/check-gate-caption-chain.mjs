@@ -39,8 +39,9 @@ const seed = async (page, uid) => {
     const profile = [{ key: "profile", sex: "male", height_cm: 180,
       birth_year: new Date().getFullYear() - 40, goal: "lose", steps_planka: 11800,
       created_at: nowIso, updated_at: nowIso }];
-    const goals = [{ id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
-      amount: 2600, unit: "Kcal", period: "Day", created_at: nowIso, updated_at: nowIso }];
+    // Планка — запись в истории; целей больше нет.
+    const planka_history = [{ id: "calories:" + ymd(30), kind: "calories", date: ymd(30),
+      amount: 2600, created_at: nowIso, updated_at: nowIso }];
     const foods = [{ id: "f1", name: "Гречка", kcal: 300, protein: 10, fat: 3, carbs: 60,
       nutrients: { "Кальций": 20, "Клетчатка": 3, "Омега-3": 100 }, package_weight: null,
       is_recipe: false, recipe_id: null, archived: false, is_restaurant: false, is_snack: false,
@@ -55,7 +56,7 @@ const seed = async (page, uid) => {
       step_entries.push({ id: "s" + i, date: ymd(i), steps: 6000,
         created_at: nowIso, updated_at: nowIso });
     }
-    for (const [store, rows] of Object.entries({ app_flags, profile, goals, foods, diary, step_entries })) {
+    for (const [store, rows] of Object.entries({ app_flags, profile, planka_history, foods, diary, step_entries })) {
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");
         for (const r of rows) tx.objectStore(store).put(r);

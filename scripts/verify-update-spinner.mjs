@@ -3,7 +3,9 @@
 // available by faking a newer /version.json, then click and read the button state
 // synchronously (Leptos updates the DOM in the click handler, before reload()).
 import { chromium } from "playwright";
-const FE = process.argv[2] || "https://renorma-fit-dev.pages.dev";
+// Адрес — как у всех проверок: `FE=`. Аргументом он тоже принимается, но общий
+// прогон передаёт переменной.
+const FE = process.argv[2] || process.env.FE || "https://renorma-fit-dev.pages.dev";
 const PAY = "https://payment-worker-dev.vg-stavenko.workers.dev";
 const SECRET = "dev-secret-change-in-production";
 const b64url = (b) => Buffer.from(b).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");

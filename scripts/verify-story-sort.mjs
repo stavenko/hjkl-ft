@@ -2,7 +2,9 @@
 // becomes read after it's fully viewed and slides to the right, keeping natural
 // order within each group. Seed all stories visible, read week2 fully, check order.
 import { chromium } from "playwright";
-const FE = process.argv[2] || "https://renorma-fit-dev.pages.dev";
+// Адрес — как у всех проверок: `FE=`. Аргументом он тоже принимается, но общий
+// прогон передаёт переменной.
+const FE = process.argv[2] || process.env.FE || "https://renorma-fit-dev.pages.dev";
 
 const uid = "story-sort-" + Math.floor(Date.now() / 1000);
 const b = await chromium.launch({ headless: true });

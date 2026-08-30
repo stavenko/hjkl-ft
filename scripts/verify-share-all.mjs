@@ -3,7 +3,9 @@
 // payload, then render it in the admin modal.
 import { chromium } from "playwright";
 
-const FE = process.argv[2] || "https://renorma-fit-dev.pages.dev";
+// Адрес — как у всех проверок: `FE=`. Аргументом он тоже принимается, но общий
+// прогон передаёт переменной.
+const FE = process.argv[2] || process.env.FE || "https://renorma-fit-dev.pages.dev";
 const ADMIN = process.argv[3] || "https://renorma-admin-dev.pages.dev";
 const SUP = "https://support-worker-dev.vg-stavenko.workers.dev";
 const SECRET = "dev-secret-change-in-production";

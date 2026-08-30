@@ -61,9 +61,26 @@ const SKIP = new Map([
   ['check-usage-by-model.mjs', 'читает статистику ИИ-воркера'],
   ['check-full-pass.mjs', 'ходит в ИИ-воркер по всему списку еды'],
   ['check-telemetry.mjs', 'e2e: читает аналитику по ключам из ../.env'],
+  // Сверки со справочником: каждая гоняет по списку продуктов настоящую модель.
+  ['verify-calcium.mjs', 'ходит в ИИ-воркер по всему справочнику'],
+  ['verify-fat.mjs', 'ходит в ИИ-воркер по всему справочнику'],
+  ['verify-iron.mjs', 'ходит в ИИ-воркер по всему справочнику'],
+  ['verify-iron-row.mjs', 'ходит в ИИ-воркер по всему справочнику'],
+  ['verify-iron-absorption.mjs', 'ходит в ИИ-воркер по всему справочнику'],
+  ['verify-macros.mjs', 'ходит в ИИ-воркер по всему справочнику'],
+  // Кода возврата не ставит вовсе — по нему судить нельзя, а прогон судит по нему.
+  ['verify-form.mjs', 'ничего не утверждает: смотрит форму глазами'],
   // Не приложение худеющего: другое происхождение, наш сервер им не подставить.
   ['check-admin-thread-card.mjs', 'проверяет АДМИНКУ'],
   ['check-admin-wipe-ui.mjs', 'проверяет АДМИНКУ'],
+  ['verify-oldshare.mjs', 'проверяет АДМИНКУ'],
+  // Сквозные: половина сценария играется в АДМИНКЕ (экспертом), а она на другом
+  // происхождении — свой сервер ей не подставить.
+  ['verify-food-share-indicators.mjs', 'вторую половину играет АДМИНКА'],
+  ['verify-open-week-directive.mjs', 'вторую половину играет АДМИНКА'],
+  ['verify-planka-directive.mjs', 'вторую половину играет АДМИНКА'],
+  ['verify-share-all.mjs', 'вторую половину играет АДМИНКА'],
+  ['verify-share-parity.mjs', 'вторую половину играет АДМИНКА'],
   ['check-landing-consent.mjs', 'проверяет ЛЕНДИНГ'],
   ['check-miniapp-app-link.mjs', 'проверяет мини-приложение Telegram'],
   ['check-miniapp-access-button.mjs', 'проверяет мини-приложение Telegram'],
@@ -95,8 +112,11 @@ const only = (process.env.ONLY ?? '').split(',').map((x) => x.trim()).filter(Boo
 // она и как её звать.
 const scriptsDir = new URL('.', import.meta.url).pathname;
 const e2eDir = new URL('../e2e/', import.meta.url).pathname;
+// Берутся ОБА семейства: `check-` и `verify-`. Второе годами не гонялось вовсе, а
+// это такие же проверки — с утверждениями и кодом возврата, просто названные
+// иначе: они писались как разовые сверки поведения с эталоном и такими и остались.
 const pick = (dir, where) => readdirSync(dir)
-  .filter((f) => f.startsWith('check-') && f.endsWith('.mjs'))
+  .filter((f) => /^(check|verify)-/.test(f) && f.endsWith('.mjs'))
   .map((f) => ({ file: f, where }));
 const all = [...pick(scriptsDir, 'scripts'), ...pick(e2eDir, 'e2e')]
   .filter(({ file }) => (only.length ? only.includes(file) : file.includes(filter)))

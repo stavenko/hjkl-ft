@@ -102,7 +102,14 @@ export async function serveWithProxy({ root, port = 0, configFor, upstream }) {
     // Статика с выкаченного приложения — когда проверяем именно выкладку.
     if (upstream) {
       try {
-        const up = await fetch(upstream + path + u.search, { redirect: 'follow' });
+        // User-Agent ПЕРЕДАЁМ. Выкладка отвечает не одинаково: `_worker.js`
+        // смотрит на браузер и Mi Browser, например, получает свою страницу
+        // вместо приложения. Без этого заголовка воркер видит node, отдаёт
+        // обычный ответ, и проверки экранов по браузерам мерят не то.
+        const pass = ['user-agent', 'accept', 'accept-language'];
+        const headers = {};
+        for (const h of pass) if (req.headers[h]) headers[h] = req.headers[h];
+        const up = await fetch(upstream + path + u.search, { redirect: 'follow', headers });
         const buf = Buffer.from(await up.arrayBuffer());
         // Тип берём у источника: он же отдаёт wasm, шрифты и картинки.
         res.writeHead(up.ok ? 200 : up.status, {

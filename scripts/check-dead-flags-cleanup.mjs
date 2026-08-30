@@ -1,8 +1,8 @@
 // Поля снятых классификаторов уходят из базы, а данные собираются с первого дня.
 //
 // Проверяется два обещания:
-//   1. миграция 10 стирает у продуктов ключи is_snack / is_liquid_cal / is_egg /
-//      is_red_meat — они висели в форме и врали (у рыбы стояло «Красное мясо: да»);
+//   1. миграция 10 стирает у продуктов ключи снятых классификаторов —
+//      is_snack / is_liquid_cal: они висели в форме и врали;
 //   2. фоновый проход больше не ждёт открытия недель: продукт без профиля жира и
 //      без железа ставится в очередь СРАЗУ, при закрытых жирах и закрытом железе.
 //
@@ -43,7 +43,9 @@ const page = await ctx.newPage();
 const asked = [];
 page.on("request", (r) => {
   const u = r.url();
-  if (/ai-worker|ai\.renorma/.test(u)) asked.push(u);
+  // Общий прогон подставляет свой адрес и проксирует воркеров у себя — тогда
+  // запрос к модели виден как `/api/ai/...`, а не по имени воркера.
+  if (/ai-worker|ai\.renorma|\/api\/ai\//.test(u)) asked.push(u);
 });
 await page.goto(BASE, { waitUntil: "domcontentloaded" });
 await page.evaluate(({ uid, token }) => {
@@ -120,11 +122,17 @@ const stored = await page.evaluate(async (u) => {
 }, uid);
 
 check("миграция прогналась", Number(stored.ver) >= 10, String(stored.ver));
-for (const k of ["is_snack", "is_liquid_cal", "is_egg", "is_red_meat"]) {
+// «Яйца» и «Красное мясо» с тех пор ВЕРНУЛИСЬ: у обоих теперь своя неделя, и поля
+// снова живут в схеме. Мёртвыми остались только эти два.
+for (const k of ["is_snack", "is_liquid_cal"]) {
   check(`ключ ${k} стёрт`, stored.one && stored.one[k] === undefined, JSON.stringify(stored.one?.[k]));
 }
-check("живые поля на месте", stored.one?.is_heme === false && stored.one?.is_veg_fruit === false
-  && stored.one?.iron_mg === 0.5, JSON.stringify(stored.one));
+// Живое — это то, что миграция не трогала. Классификаторы сюда не годятся:
+// «переспросить» (миграции 22 и 24) нарочно обнуляют гем, красное мясо и
+// овощ/фрукт, чтобы фон опросил их заново починенным опознанием.
+check("живые поля на месте",
+  stored.one?.iron_mg === 0.5 && stored.one?.kcal === 180
+  && stored.one?.name === "Кижуч без головы", JSON.stringify(stored.one));
 check("профиль жира запрошен при ЗАКРЫТОЙ неделе жиров", asked.length > 0,
   `запросов к модели: ${asked.length}`);
 

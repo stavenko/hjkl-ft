@@ -139,8 +139,17 @@ export async function serveWithProxy({ root, port = 0, configFor, upstream }) {
           const toml = await (await fetch(upstream + '/config/frontend.toml')).text();
           res.writeHead(200, { 'Content-Type': 'text/plain' });
           return res.end(rewriteWorkerUrls(toml, origin));
-        } catch { /* не дотянулись — отдаём собранную вручную */ }
+        } catch { /* не дотянулись — пробуем сборку, потом собранную вручную */ }
       }
+      // По ЛОКАЛЬНОЙ сборке — её собственная конфигурация, из `dist`. Ровно по той
+      // же причине: собранная здесь вручную теряет всё, кроме адресов воркеров, а
+      // там ещё модели опознания — без них фоновый проход признаков не спрашивает
+      // ничего, и проверки видят «стало undefined» на ровном месте.
+      try {
+        const toml = await readFile(join(root, 'config', 'frontend.toml'), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        return res.end(rewriteWorkerUrls(toml, origin));
+      } catch { /* нет и её — отдаём собранную вручную */ }
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       return res.end(configFor(origin));
     }

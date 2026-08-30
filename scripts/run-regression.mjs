@@ -53,6 +53,21 @@ const SKIP = new Map([
   ['check-vision-direct.mjs', 'ходит в ИИ-воркер'],
   ['check-usage-by-model.mjs', 'читает статистику ИИ-воркера'],
   ['check-full-pass.mjs', 'ходит в ИИ-воркер по всему списку еды'],
+  // Не приложение худеющего: другое происхождение, наш сервер им не подставить.
+  ['check-admin-thread-card.mjs', 'проверяет АДМИНКУ'],
+  ['check-admin-wipe-ui.mjs', 'проверяет АДМИНКУ'],
+  ['check-landing-consent.mjs', 'проверяет ЛЕНДИНГ'],
+  ['check-miniapp-app-link.mjs', 'проверяет мини-приложение Telegram'],
+  ['check-miniapp-consent.mjs', 'проверяет мини-приложение Telegram'],
+  ['check-miniapp-dev-entry.mjs', 'проверяет мини-приложение Telegram'],
+  ['check-smoke-front.mjs', 'ходит на отдельный смоук-стенд fit-smoke'],
+  // Вшили адрес намертво — подставить свой нечем.
+  ['check-chat-input.mjs', 'вшит адрес конкретной старой выкладки'],
+  ['check-recipe-finalize.mjs', 'вшит адрес конкретной старой выкладки'],
+  ['check-syncv2.mjs', 'вшит живой адрес, и по нему же блокирует синк'],
+  ['check-syncv2-migration.mjs', 'вшит живой адрес'],
+  ['check-user-reset.mjs', 'вшит живой адрес'],
+  ['check-user-wipe.mjs', 'вшит живой адрес'],
 ]);
 
 const all = readdirSync(new URL('.', import.meta.url).pathname)

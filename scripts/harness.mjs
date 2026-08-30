@@ -243,6 +243,46 @@ export async function seedInPage(page, uid, plan) {
  *
  * Provide either `plan` (seeded via seedInPage) or a custom `seed(page, uid)`.
  */
+/// Перейти по адресу, переживая СОБСТВЕННУЮ навигацию приложения.
+///
+/// Приложение на старте решает, куда человеку: онбординг, оплата, дашборд — и
+/// уходит туда само. Если оно успевает раньше, чем `goto` доложил о загрузке,
+/// playwright роняет весь скрипт: «ERR_ABORTED» или «interrupted by another
+/// navigation». Это не поломка — это приложение делает свою работу, просто быстрее
+/// нас: чаще всего на ЛОКАЛЬНОЙ сборке, где файлы отдаются с диска.
+///
+/// Поэтому такой отказ — повод посмотреть, где мы оказались, а не падать.
+async function goto(page, url) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded" });
+      return;
+    } catch (e) {
+      const own = /ERR_ABORTED|interrupted by another navigation/.test(String(e));
+      if (!own || attempt === 2) throw e;
+      await page.waitForTimeout(500);
+    }
+  }
+}
+
+/// Выполнить в странице то, что от маршрута не зависит (localStorage, IndexedDB),
+/// пережив собственную навигацию приложения.
+///
+/// Приложение уходит на свой экран само, и контекст исполнения при этом гибнет:
+/// «Execution context was destroyed». Для чтения-записи хранилищ это безразлично —
+/// origin тот же, — поэтому просто повторяем.
+async function evalSafe(page, fn, arg) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await page.evaluate(fn, arg);
+    } catch (e) {
+      const own = /Execution context was destroyed|navigation/.test(String(e));
+      if (!own || attempt === 3) throw e;
+      await page.waitForTimeout(500);
+    }
+  }
+}
+
 export async function openSeeded(browser, opts = {}) {
   const baseUrl = (opts.baseUrl ?? DEFAULT_URL).replace(/\/$/, "");
   const uid = opts.uid ?? `harness-${Math.abs(hash(JSON.stringify(opts.plan ?? opts.landing ?? "")) )}`;
@@ -258,8 +298,9 @@ export async function openSeeded(browser, opts = {}) {
   });
   const page = await context.newPage();
 
-  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-  await page.evaluate(
+  await goto(page, baseUrl);
+  await evalSafe(
+    page,
     async ({ uid, sex }) => {
       const del = (n) =>
         new Promise((r) => {
@@ -279,7 +320,7 @@ export async function openSeeded(browser, opts = {}) {
     },
     { uid, sex },
   );
-  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await goto(page, baseUrl);
 
   let ready = false;
   for (let i = 0; i < 40 && !ready; i++) {
@@ -330,7 +371,7 @@ export async function openSeeded(browser, opts = {}) {
     db.close();
   }, { uid, peer: opts.peer ?? "admin" });
 
-  await page.goto(`${baseUrl}${landing}`, { waitUntil: "domcontentloaded" });
+  await goto(page, `${baseUrl}${landing}`);
   await page.waitForSelector("#splash", { state: "detached", timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(500); // let reactive effects (DB reads) settle
   return { context, page };

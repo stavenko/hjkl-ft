@@ -91,12 +91,14 @@ const state = await page.evaluate(async () => {
     const rq = db.transaction([s], "readonly").objectStore(s).getAll();
     rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
   });
-  const goals = await all("goals");
+  const hist = await all("planka_history");
   const flags = await all("app_flags");
   db.close();
   const f = (k) => flags.find((x) => x.key === k)?.value;
   return {
-    planka: goals.find((g) => g.nutrient === "Calories")?.amount,
+    // Действующая планка — последняя запись в истории по калориям.
+    planka: hist.filter((e) => e.kind === "calories")
+      .sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.amount,
     anchor: f("planka_weekly_anchor"),
     letters: f("letters_v1") || "[]",
   };

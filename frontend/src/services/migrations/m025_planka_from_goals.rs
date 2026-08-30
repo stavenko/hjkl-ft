@@ -31,5 +31,11 @@ pub async fn script() -> Result<(), String> {
     let today = local::today_date().format("%Y-%m-%d").to_string();
     let from = goal.created_at.get(0..10).unwrap_or(&today).to_string();
     local::seed_planka_at(local::PLANKA_CALORIES, &from, goal.amount).await;
+    // Белок — ДОЛЯ калорийной планки, и считается он от неё. Пересчёт белка
+    // (`m009`) идёт по номеру РАНЬШЕ этой миграции: на старом устройстве он
+    // отработал, когда калорийной планки в истории ещё не было, и оставил
+    // прежнее число. Поправляем здесь же, иначе оно простоит до ближайшего
+    // недельного пересчёта.
+    local::record_protein_planka().await;
     Ok(())
 }

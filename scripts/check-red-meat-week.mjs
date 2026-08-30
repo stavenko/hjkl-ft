@@ -56,9 +56,10 @@ const seed = async (page, uid) => {
       key: "profile", sex: "male", height_cm: 180, birth_year: 1985,
       goal: "lose", steps_planka: 9000, created_at: nowIso, updated_at: nowIso,
     }]);
-    await put("goals", [{
-      id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
-      amount: 2400, unit: "Kcal", period: "Day", created_at: nowIso, updated_at: nowIso,
+    // Планка — запись в истории; целей больше нет.
+    await put("planka_history", [{
+      id: `calories:${ymd(30)}`, kind: "calories", date: ymd(30),
+      amount: 2400, created_at: nowIso, updated_at: nowIso,
     }]);
 
     // Продукты: жирная рыба (закрывает омега-3), говядина и колбаса.

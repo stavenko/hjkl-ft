@@ -88,12 +88,7 @@ const seed = async (page, uid) => {
       created_at: nowIso, updated_at: nowIso,
     })));
 
-    // Планка выдана СЕГОДНЯ — и в целях, и в истории.
-    await put("goals", [{
-      id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
-      amount: PLANKA, unit: "Kcal", period: "Day",
-      created_at: nowIso, updated_at: nowIso,
-    }]);
+    // Планка выдана СЕГОДНЯ. Живёт она в истории — она и есть цель.
     // Все три движущиеся планки выданы СЕГОДНЯ и раньше не существовали.
     await put("planka_history", [
       { id: `calories:${ymd(0)}`, kind: "calories", date: ymd(0), amount: PLANKA,

@@ -64,16 +64,19 @@ const seed = (kcal) => async (page, uid) => {
     const profile = [{ key: "profile", sex: "female", height_cm: 180,
       birth_year: 1984, goal: "lose", steps_planka: 9000,
       created_at: nowIso, updated_at: nowIso }];
-    const goals = [{ id: "g-cal", nutrient: "Calories", key: "calories",
-      direction: "AtMost", amount: kcal, unit: "Kcal", period: "Day",
-      created_at: nowIso, updated_at: nowIso }];
+
     const weight_entries = [{ id: "w0", date: ymd(1), weight_kg: 64.5, no_water: true,
       no_food: true, no_wash: true, used_toilet: true, morning: true,
       created_at: nowIso, updated_at: nowIso }];
-    // Старая запись в истории — ровно та, что оставило прежнее правило (1,6 г/кг
-    // безжировой массы). Миграция обязана переписать её сегодняшним значением.
-    const planka_history = [{ id: "protein:" + ymd(30), kind: "protein", date: ymd(30),
-      amount: 74, created_at: nowIso, updated_at: nowIso }];
+    const planka_history = [
+      // Старая запись по белку — ровно та, что оставило прежнее правило (1,6 г/кг
+      // безжировой массы). Миграция обязана переписать её сегодняшним значением.
+      { id: "protein:" + ymd(30), kind: "protein", date: ymd(30),
+        amount: 74, created_at: nowIso, updated_at: nowIso },
+      // Калорийная планка. Живёт в истории — она и есть цель.
+      { id: "calories:" + ymd(30), kind: "calories", date: ymd(30),
+        amount: kcal, created_at: nowIso, updated_at: nowIso },
+    ];
     const foods = [{ id: "chicken", name: "Курица", kcal: 165, protein: 31, fat: 3.6,
       carbs: 0, nutrients: {}, package_weight: null, is_recipe: false, recipe_id: null,
       archived: false, is_restaurant: false, is_snack: false, is_liquid_cal: false,
@@ -85,7 +88,7 @@ const seed = (kcal) => async (page, uid) => {
       created_at: nowIso, updated_at: nowIso }];
     const avail = Array.from(db.objectStoreNames);
     for (const [store, rows] of Object.entries({
-      app_flags, profile, goals, weight_entries, planka_history, foods, diary })) {
+      app_flags, profile, weight_entries, planka_history, foods, diary })) {
       if (!avail.includes(store)) continue;
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");
@@ -231,11 +234,13 @@ for (const c of CASES) {
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
     });
     const all = await new Promise((res) => {
-      const rq = db.transaction(["goals"]).objectStore("goals").getAll();
+      const rq = db.transaction(["planka_history"]).objectStore("planka_history").getAll();
       rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
     });
     db.close();
-    return (all.find((g) => g.nutrient === "Calories") || {}).amount ?? null;
+    // Планка живёт в истории — она и есть цель.
+    return all.filter((e) => e.kind === "calories")
+      .sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.amount ?? null;
   }, uid);
   check("приложение выставило первую калорийную планку", kcal > 0, String(kcal));
 

@@ -648,9 +648,13 @@ section('4д. «только новое» — от границы прошлог
 // отсчитывается ВТОРОЙ — до сих пор не проверял никто.
 const openChoice = async () => {
   await bound.page.reload({ waitUntil: 'domcontentloaded' });
-  const w = await bound.page.waitForSelector('[data-testid="dash-report-widget"]', { timeout: 25000 })
-    .then((h) => h).catch(() => null);
-  if (!w) return null;
+  // Локатором, а не найденным заранее узлом: после перезагрузки дашборд
+  // дорисовывается, Leptos пересоздаёт виджет, и клик по добытому раньше узлу
+  // падает с «element is not attached to the DOM». Локатор ищет заново на каждой
+  // попытке.
+  const w = bound.page.locator('[data-testid="dash-report-widget"]');
+  const there = await w.waitFor({ timeout: 25000 }).then(() => true).catch(() => false);
+  if (!there) return null;
   await w.click();
   await bound.page.waitForSelector('[data-testid="report-panel"]', { timeout: 15000 });
   await bound.page.click('[data-testid="report-send"]');

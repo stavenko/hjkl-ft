@@ -70,9 +70,14 @@ const SKIP = new Map([
   ['check-user-wipe.mjs', 'вшит живой адрес'],
 ]);
 
+// `ONLY` — именной список через запятую. Нужен ровно для одного дела: прогнать по
+// СБОРКЕ main те проверки, что упали в ветке, и по разнице понять, что сломано
+// здесь, а что приехало с той стороны. Гонять по main весь набор ради этого —
+// впустую занятый час.
+const only = (process.env.ONLY ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 const all = readdirSync(new URL('.', import.meta.url).pathname)
   .filter((f) => f.startsWith('check-') && f.endsWith('.mjs'))
-  .filter((f) => f.includes(filter))
+  .filter((f) => (only.length ? only.includes(f) : f.includes(filter)))
   .sort();
 const run = all.filter((f) => !SKIP.has(f));
 const skipped = all.filter((f) => SKIP.has(f));

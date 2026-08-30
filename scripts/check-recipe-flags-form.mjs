@@ -84,11 +84,14 @@ await page.evaluate(async (u) => {
     foods: [
       // Профили ингредиентов обязаны быть: блюдо пересчитывается из состава на
       // запуске, и профиль, проставленный блюду в обход состава, будет затёрт.
+      // `is_milk_globule` у ингредиентов обязателен: жир, запертый в молочной
+      // глобуле, в баланс не идёт, и «не знаем, глобула ли это» делает баланс
+      // блюда НЕИЗВЕСТНЫМ целиком — вместо «улучшает/ухудшает» встаёт прочерк.
       food({ id: "beef", name: "Говядина", kcal: 250, protein: 26, fat: 10, carbs: 0,
-        is_veg_fruit: false, is_heme: true,
+        is_veg_fruit: false, is_heme: true, is_milk_globule: false,
         fat_profile: { sfa_pct: 40, mufa_pct: 45, pufa_pct: 5, epa_dha_pct: 0 } }),
       food({ id: "cabbage", name: "Капуста", kcal: 28, protein: 1.8, fat: 0.1, carbs: 5,
-        is_veg_fruit: true, is_heme: false,
+        is_veg_fruit: true, is_heme: false, is_milk_globule: false,
         fat_profile: { sfa_pct: 20, mufa_pct: 10, pufa_pct: 60, epa_dha_pct: 0 } }),
       food({ id: "stew", name: "Рагу из говядины", kcal: 160, protein: 16, fat: 20, carbs: 3,
         is_recipe: true, recipe_id: "r1" }),
@@ -127,7 +130,11 @@ await page.evaluate(async (u) => {
 // Правка открывается из меню строки дневника: кнопка «⋮» → «Изменить». Строка
 // выбирается по названию, меню — по опознавателю, чтобы проверка не цеплялась за
 // вёрстку.
-const openEditor = async (name, index) => {
+// `ready` — подпись строки, по которой видно, что блок ДОСЧИТАН: и состав блюда,
+// и кислоты продукта приезжают отдельными запросами к базе, и первые мгновения в
+// блоке стоят прочерки. Ждали фиксированные 2.5 с — иногда не хватало, и проверка
+// падала на пустом месте, будто данных нет вовсе.
+const openEditor = async (name, index, ready) => {
   await page.goto(`${BASE}/diary`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#splash", { state: "detached", timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(3000);
@@ -135,12 +142,15 @@ const openEditor = async (name, index) => {
   await page.locator('[data-testid="diary-row-menu"]').nth(index).click();
   await page.locator('[data-testid="diary-menu-edit"]').first().click();
   await page.waitForSelector('[data-testid="ai-found-block"]', { timeout: 15000 });
-  await page.waitForTimeout(2500);
+  await page.locator(`[data-derived="${ready}"]`)
+    .filter({ hasNotText: "—" }).first()
+    .waitFor({ timeout: 15000 })
+    .catch(() => {});
   return (await page.locator('[data-testid="ai-found-block"]').innerText()).replace(/\s+/g, " ");
 };
 
 // ── блюдо ───────────────────────────────────────────────────────────────────
-const dish = await openEditor("Рагу из говядины", 0);
+const dish = await openEditor("Рагу из говядины", 0, "Овощи и фрукты");
 console.log("блюдо:", dish);
 check("у блюда нет флагов «да/нет»", !/Красное мясо|Яйца|Низкокалорийный/.test(dish), dish.slice(0, 80));
 const derived = async (label) =>
@@ -156,7 +166,7 @@ await page.screenshot({ path: "/tmp/recipe-flags.png", fullPage: true });
 
 // ── сырой продукт ───────────────────────────────────────────────────────────
 await page.keyboard.press("Escape").catch(() => {});
-const raw = await openEditor("Кижуч", 1);
+const raw = await openEditor("Кижуч", 1, "Насыщенные (НЖК)");
 console.log("продукт:", raw);
 check("у продукта флаги на месте", /Источник гемового железа/.test(raw));
 // 8 г жира × 15 % = 1.20 г.

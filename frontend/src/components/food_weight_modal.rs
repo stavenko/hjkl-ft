@@ -7,7 +7,6 @@ use super::restaurant_field::RestaurantField;
 #[component]
 pub fn FoodWeightModal(
     food: Food,
-    goals: Signal<Vec<Goal>>,
     initial_grams: f64,
     #[prop(default = 0.0)]
     initial_waste: f64,
@@ -88,33 +87,22 @@ pub fn FoodWeightModal(
 
                     // Nutrient chips
                     <div class="tags mb-3">
+                        // КБЖУ, и только оно: остальные нутриенты собирает фон, и
+                        // человеку, взвешивающему порцию, они ничего не решают.
+                        // Раньше набор чипов зависел от того, какие цели у него
+                        // завелись, — у одного четыре, у другого две.
                         {move || {
-                            let gs = goals.get();
                             let factor = (current_val() - waste_val()).max(0.0) / 100.0;
                             let f = &food_for_nutrients;
-                            gs.iter()
-                                .filter(|g| g.period == GoalPeriod::Day)
-                                .map(|goal| {
-                                    let val = match goal.nutrient.as_str() {
-                                        "Calories" => f.kcal * factor * kcal_mult(),
-                                        "Protein" => f.protein * factor,
-                                        "Fat" => f.fat * factor,
-                                        "Carbs" => f.carbs * factor,
-                                        custom => f.nutrients.get(custom).copied().unwrap_or(0.0) * factor,
-                                    };
-                                    let unit = goal.unit.label();
-                                    let label = match goal.nutrient.as_str() {
-                                        "Calories" => "C",
-                                        "Protein" => "P",
-                                        "Fat" => "F",
-                                        "Carbs" => "Cb",
-                                        _ => &goal.nutrient,
-                                    };
-                                    view! {
-                                        <span class="tag is-small">
-                                            {format!("{label} {val:.0}{unit}")}
-                                        </span>
-                                    }
+                            [("C", f.kcal * factor * kcal_mult(), "kcal"),
+                             ("P", f.protein * factor, "g"),
+                             ("F", f.fat * factor, "g"),
+                             ("Cb", f.carbs * factor, "g")]
+                                .into_iter()
+                                .map(|(label, val, unit)| view! {
+                                    <span class="tag is-small">
+                                        {format!("{label} {val:.0}{unit}")}
+                                    </span>
                                 })
                                 .collect::<Vec<_>>()
                         }}

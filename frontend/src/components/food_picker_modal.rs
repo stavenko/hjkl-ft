@@ -15,7 +15,6 @@ pub fn FoodPickerModal(
     foods: Signal<Vec<Food>>,
     /// Food ids that are already added — shown as a disabled checkmark.
     disabled_ids: Signal<Vec<String>>,
-    goals: Signal<Vec<Goal>>,
     /// Show the "didn't eat it whole" waste field and the "restaurant food"
     /// checkbox in the grams modal (diary only).
     #[prop(default = false)]
@@ -54,7 +53,7 @@ pub fn FoodPickerModal(
                     <FoodPicker
                         foods=foods
                         disabled_ids=disabled_ids
-                        goals=goals
+
                         allow_waste=allow_waste
                         exclude_restaurant=exclude_restaurant
                         on_pick=on_pick

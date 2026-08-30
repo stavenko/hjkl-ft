@@ -8,7 +8,6 @@ use crate::services::i18n::t;
 
 #[component]
 pub fn NewFoodPanel(
-    goals: Signal<Vec<Goal>>,
     today_entries: Signal<Vec<DiaryEntry>>,
     on_select: Callback<Food>,
 ) -> impl IntoView {
@@ -76,7 +75,7 @@ pub fn NewFoodPanel(
                                 }
                             };
                             view! {
-                                <FoodListItem food=display_food goals=goals>
+                                <FoodListItem food=display_food>
                                     <button
                                         class="button is-success has-text-weight-bold"
                                         style="width: 2.75rem; height: 2.75rem; border-radius: 50%; border: none; font-size: 1.4rem; cursor: pointer;"

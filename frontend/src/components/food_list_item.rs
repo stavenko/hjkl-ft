@@ -11,7 +11,6 @@ pub const RESTAURANT_NAME_STYLE: &str =
 #[component]
 pub fn FoodListItem(
     food: Food,
-    goals: Signal<Vec<Goal>>,
     #[prop(optional)]
     grams: Option<f64>,
     #[prop(optional)]
@@ -30,7 +29,6 @@ pub fn FoodListItem(
                 <span class="is-size-6 has-text-weight-medium" style=name_style>{&food.name}</span>
                 <div style="display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem;">
                     {move || {
-                        let gs = goals.get();
                         let f = &food_c;
                         use crate::services::i18n;
                         let badge = |label: &str, val: f64, unit: &str| {
@@ -44,7 +42,6 @@ pub fn FoodListItem(
                         };
                         // КБЖУ only. Extra background nutrients (calcium, iron, …) are
                         // deliberately NOT shown as badges — see food_editor / enrich.
-                        let _ = &gs;
                         let badges: Vec<View> = vec![
                             badge(i18n::nutrient_badge("Calories"), f.effective_kcal() * factor, i18n::unit_label("kcal")),
                             badge(i18n::nutrient_badge("Protein"), f.protein * factor, i18n::unit_label("g")),

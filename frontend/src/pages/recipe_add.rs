@@ -86,7 +86,7 @@ pub fn RecipeAddPage() -> impl IntoView {
                 <FoodPicker
                     foods=Signal::derive(foods)
                     disabled_ids=disabled_ids
-                    goals=Signal::derive(goals)
+
                     allow_waste=false
                     exclude_restaurant=true
                     on_pick=on_pick

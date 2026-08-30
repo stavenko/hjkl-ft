@@ -21,7 +21,6 @@ pub fn FoodPicker(
     foods: Signal<Vec<Food>>,
     /// Food ids that are already added — shown as a disabled checkmark.
     disabled_ids: Signal<Vec<String>>,
-    goals: Signal<Vec<Goal>>,
     /// Show the "didn't eat it whole" waste field and the "restaurant food"
     /// checkbox in the grams step (diary only).
     #[prop(default = false)]
@@ -180,7 +179,7 @@ pub fn FoodPicker(
                                     let f = food.clone();
                                     let is_added = Signal::derive(move || disabled_ids.get().contains(&fid) || picked.get().contains(&fid));
                                     view! {
-                                        <FoodListItem food=food goals=goals icon=icon>
+                                        <FoodListItem food=food icon=icon>
                                             <button
                                                 attr:data-testid="diary-add-btn-pick-food"
                                                 class="button is-success has-text-weight-bold"

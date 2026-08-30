@@ -158,7 +158,7 @@ pub fn DiaryAddPage() -> impl IntoView {
                 <FoodPicker
                     foods=Signal::derive(foods)
                     disabled_ids=disabled_ids
-                    goals=Signal::derive(goals)
+
                     allow_waste=true
                     exclude_restaurant=false
                     on_pick=on_pick

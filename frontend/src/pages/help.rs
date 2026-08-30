@@ -175,7 +175,7 @@ fn grams_row_demo() -> impl IntoView {
     view! {
         <div style=format!("{DEMO} align-items: stretch; padding: 12px; pointer-events: none;")>
             <FoodListItem food=demo_food(t("help.demo.food1_name").to_string(), 92.0, 3.4, 0.6, 18.6)
-                goals=goals grams=150.0>
+ grams=150.0>
                 <span class="is-size-6 has-text-link has-text-weight-semibold">
                     {move || format!("150 {}", t("common.unit.g"))}
                 </span>
@@ -230,7 +230,6 @@ fn picker_demo() -> impl IntoView {
             <FoodPicker
                 foods=foods
                 disabled_ids=Signal::derive(Vec::<String>::new)
-                goals=Signal::derive(Vec::<Goal>::new)
                 on_pick=Callback::new(|_| {})
                 on_food_created=Callback::new(|_| {})
                 show_editor=create_rw_signal(false)
@@ -268,7 +267,7 @@ fn recipe_demo() -> impl IntoView {
     let goals = Signal::derive(Vec::<Goal>::new);
     let ingredient = |name_key: &'static str, kcal: f64, p: f64, f: f64, c: f64, grams: f64| {
         view! {
-            <FoodListItem food=demo_food(t(name_key).to_string(), kcal, p, f, c) goals=goals grams=grams>
+            <FoodListItem food=demo_food(t(name_key).to_string(), kcal, p, f, c) grams=grams>
                 <span class="is-size-7 has-text-grey">{format!("{:.0} {}", grams, t("common.unit.g"))}</span>
             </FoodListItem>
         }

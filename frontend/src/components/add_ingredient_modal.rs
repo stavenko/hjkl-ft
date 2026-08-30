@@ -6,7 +6,6 @@ use super::food_picker_modal::FoodPickerModal;
 #[component]
 pub fn AddIngredientModal(
     foods: Signal<Vec<Food>>,
-    goals: Signal<Vec<Goal>>,
     added_food_ids: RwSignal<Vec<String>>,
     on_add: Callback<(Food, f64)>,
     on_food_created: Callback<Food>,
@@ -19,7 +18,7 @@ pub fn AddIngredientModal(
             title="add_ingredient.title"
             foods=foods
             disabled_ids=disabled_ids
-            goals=goals
+
             exclude_restaurant=true
             on_pick=Callback::new(move |(food, grams, _waste, _restaurant): (Food, f64, f64, bool)| on_add.call((food, grams)))
             on_food_created=on_food_created

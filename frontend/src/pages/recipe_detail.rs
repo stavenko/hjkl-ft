@@ -13,8 +13,6 @@ pub fn RecipeDetailPage() -> impl IntoView {
     let recipe = create_rw_signal(None::<Recipe>);
     let foods = create_rw_signal(Vec::<Food>::new());
     let recipe_name = create_rw_signal(String::new());
-
-    let goals = create_rw_signal(Vec::<Goal>::new());
     let show_finalize = create_rw_signal(false);
     let final_weight = create_rw_signal(String::new());
     // Finalize submitted with an empty/invalid weight → highlight the input + message.
@@ -34,8 +32,6 @@ pub fn RecipeDetailPage() -> impl IntoView {
                 recipe.set(Some(r));
             }
             foods.set(local::list_foods().await);
-            let all_goals = local::list_goals().await;
-            goals.set(all_goals.clone());
         });
     });
 
@@ -169,7 +165,7 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                     let g = ing.grams;
                                     if let Some(food) = food {
                                         view! {
-                                            <FoodListItem food=food goals=goals.into() grams=g>
+                                            <FoodListItem food=food grams=g>
                                                 {if !is_finalized {
                                                     view! {
                                                         <button
@@ -228,16 +224,10 @@ pub fn RecipeDetailPage() -> impl IntoView {
                         {move || {
                             let r = recipe.get().unwrap();
                             let fs = foods.get();
-                            let gs = goals.get();
-                            // No goals/planks configured → nothing to show; skip the box entirely.
-                            if gs.is_empty() {
-                                return ().into_view();
-                            }
                             let mut total_kcal = 0.0_f64;
                             let mut total_protein = 0.0_f64;
                             let mut total_fat = 0.0_f64;
                             let mut total_carbs = 0.0_f64;
-                            let mut custom_totals = std::collections::BTreeMap::<String, f64>::new();
                             for ing in &r.ingredients {
                                 if let Some(f) = fs.iter().find(|f| f.id == ing.food_id) {
                                     let factor = ing.grams / 100.0;
@@ -245,22 +235,10 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                     total_protein += f.protein * factor;
                                     total_fat += f.fat * factor;
                                     total_carbs += f.carbs * factor;
-                                    for (k, v) in &f.nutrients {
-                                        // Железо не показываем: у него своя механика
-                                        // (services::iron), а старые значения могли
-                                        // остаться в карте от прежних сборок.
-                                        if crate::services::enrich::is_hidden_nutrient(k) {
-                                            continue;
-                                        }
-                                        *custom_totals.entry(k.clone()).or_default() += v * factor;
-                                    }
                                 }
                             }
                             let has_per100 = r.total_grams.filter(|g| *g > 0.0).is_some();
                             let scale = r.total_grams.filter(|g| *g > 0.0).map(|g| 100.0 / g).unwrap_or(0.0);
-                            let custom_goals: Vec<_> = gs.iter()
-                                .filter(|g| g.is_custom_nutrient())
-                                .collect();
                             let grid_style = if has_per100 {
                                 "display: grid; grid-template-columns: auto 1fr 1fr; gap: 0.15rem 1rem;"
                             } else {
@@ -282,20 +260,17 @@ pub fn RecipeDetailPage() -> impl IntoView {
                                             <span class="is-size-7 has-text-grey has-text-weight-semibold">{move || t("recipe.whole_dish")}</span>
                                             <span class="is-size-7 has-text-grey has-text-weight-semibold">{move || t("recipe.per_100g")}</span>
                                         })}
-                                        {gs.iter().map(|goal| {
-                                            let (val, raw_unit) = match goal.nutrient.as_str() {
-                                                "Calories" => (total_kcal, "kcal"),
-                                                "Protein" => (total_protein, "g"),
-                                                "Fat" => (total_fat, "g"),
-                                                "Carbs" => (total_carbs, "g"),
-                                                custom => (custom_totals.get(custom).copied().unwrap_or(0.0), goal.unit.label()),
-                                            };
+                                        // КБЖУ, и только оно. Раньше строки перебирались по
+                                        // списку целей, и таблица зависела от того, какие цели
+                                        // у человека завелись: у одного «Калории», у другого
+                                        // ещё и «Кальций». Остальные нутриенты собирает фон, и
+                                        // в карточке рецепта им места нет.
+                                        {[("Calories", total_kcal, "kcal"),
+                                          ("Protein", total_protein, "g"),
+                                          ("Fat", total_fat, "g"),
+                                          ("Carbs", total_carbs, "g")].into_iter().map(|(key, val, raw_unit)| {
                                             let unit = crate::services::i18n::unit_label(raw_unit);
-                                            let name = if matches!(goal.nutrient.as_str(), "Calories" | "Protein" | "Fat" | "Carbs") {
-                                                crate::services::i18n::nutrient_name(&goal.nutrient).to_string()
-                                            } else {
-                                                goal.nutrient.clone()
-                                            };
+                                            let name = crate::services::i18n::nutrient_name(key).to_string();
                                             view! {
                                                 <span class="is-size-7 has-text-grey">{name}</span>
                                                 <span class="is-size-7 has-text-weight-medium">{format!("{:.2} {}", val, unit)}</span>

@@ -24,14 +24,9 @@ pub fn RecipesPage() -> impl IntoView {
         move || version.get(),
         |_| async { local::list_foods().await },
     );
-    let goals_res = create_resource(
-        move || version.get(),
-        |_| async { local::list_goals().await },
-    );
 
     let recipes = move || recipes_res.get().unwrap_or_default();
     let foods = move || foods_res.get().unwrap_or_default();
-    let goals = move || goals_res.get().unwrap_or_default();
 
     let invalidate = move || version.update(|v| *v += 1);
 
@@ -80,7 +75,6 @@ pub fn RecipesPage() -> impl IntoView {
             <div>
                 {move || {
                     let fs = foods();
-                    let gs = goals();
                     filtered().into_iter().map(|recipe| {
                         let id = recipe.id.clone();
                         let id_nav = recipe.id.clone();
@@ -110,7 +104,7 @@ pub fn RecipesPage() -> impl IntoView {
                                 view! {
                                     <div on:click=move |_| { use_navigate()(&format!("/recipes/{nid}"), Default::default()); }
                                          style="cursor: pointer;">
-                                        <FoodListItem food=food goals=Signal::derive(goals)>
+                                        <FoodListItem food=food>
                                             {total.map(|g| view! {
                                                 <span class="is-size-7 has-text-grey" style="white-space: nowrap;">
                                                     {format!("{:.0}{}", g, t("common.unit.g"))}

@@ -182,10 +182,6 @@ pub fn DiaryPage() -> impl IntoView {
         move || version.get(),
         |_| async { local::list_foods().await },
     );
-    let goals_res = create_resource(
-        move || version.get(),
-        |_| async { local::list_goals().await },
-    );
     let entries_res = create_resource(
         move || (date.get(), version.get()),
         |(d, _)| async move { local::list_diary(&d).await },
@@ -222,7 +218,6 @@ pub fn DiaryPage() -> impl IntoView {
     let foods_data = move || sticky(&FOODS_CACHE, foods_res.get());
     let entries_data = move || sticky_keyed(&DIARY_CACHE, &date.get(), entries_res.get());
     let foods = move || foods_data().unwrap_or_default();
-    let goals = move || goals_res.get().unwrap_or_default();
     let entries = move || entries_data().unwrap_or_default();
     let today_entries = move || today_entries_res.get().unwrap_or_default();
     let week_entries = move || week_entries_res.get().unwrap_or_default();
@@ -357,168 +352,52 @@ pub fn DiaryPage() -> impl IntoView {
                 >"\u{2192}"</button>
             </div>
 
-            // Goals gauges
+            // Шкала дня: планка по калориям.
+            //
+            // Раньше здесь перебирался список целей, и что покажется человеку,
+            // зависело от того, какие цели у него завелись: калорийная — всегда,
+            // кальциевая — с открытия недели кальция, остальные — никогда, потому
+            // что экран целей был выключен. Планка — это и есть цель, и она одна.
             <div style="margin-bottom: 0.75rem;">
                 {move || {
                     let fs = foods();
                     let es = entries();
-                    let gs = goals();
-                    let we = week_entries();
-                    let sel_date = date.get();
-                    let dates = week_dates(&sel_date);
-                    let today_str = local::today();
-                    // The planka that applied on the selected day (past day → frozen).
-                    let cal_target = cal_planka_res.get().flatten();
-
-                    // Кальциевая цель — СИСТЕМНАЯ (её ставит неделя кальция ради
-                    // индикатора и ворот), а не то, что человек завёл сам. В шапке
-                    // дневника ей делать нечего: там нужна планка дня.
-                    gs.iter()
-                        .filter(|g| g.amount > 0.0)
-                        .filter(|g| g.nutrient != crate::services::indicators::N_CALCIUM)
-                        .map(|goal| {
-                        let name = if is_standard_nutrient(&goal.nutrient) {
-                            crate::services::i18n::nutrient_name(&goal.nutrient).to_string()
-                        } else {
-                            goal.nutrient.clone()
-                        };
-                        // For calories draw the SELECTED DAY's planka (not today's) so a
-                        // past day stays valid after the weekly recompute.
-                        let target = if goal.nutrient == "Calories" {
-                            cal_target.unwrap_or(goal.amount)
-                        } else {
-                            goal.amount
-                        };
-                        let unit = crate::services::i18n::unit_label(goal.unit.label());
-                        let is_at_least = goal.direction == GoalDirection::AtLeast;
-
-                        if goal.period == GoalPeriod::Day {
-                            // Day goal: single gauge bar
-                            let current = nutrient_sum(&goal.nutrient, &es, &fs);
-                            let pct = if target > 0.0 { ((current / target) * 100.0).min(100.0) } else { 0.0 };
-                            // КАЛОРИИ судятся КОРИДОРОМ ±50 ккал — тем же, по которому
-                            // их судит индикатор и полоса на дашборде: недобрал больше
-                            // — серый (день не закрыт), попал — зелёный, перебрал
-                            // больше — красный. Прежде здесь краснело любое превышение,
-                            // и 2957 при планке 2950 выглядели провалом в дневнике,
-                            // будучи попаданием на главной.
-                            let calorie_state = (goal.nutrient == "Calories")
-                                .then(|| crate::components::progress_widget::calorie_bar_state(current, target));
-                            let bar_color = match calorie_state {
-                                Some(crate::components::progress_widget::CalorieBar::Over) => "var(--bulma-danger)",
-                                Some(crate::components::progress_widget::CalorieBar::Hit) => "var(--bulma-success)",
-                                Some(crate::components::progress_widget::CalorieBar::Under) => "var(--bulma-text-weak)",
-                                None if is_at_least => {
-                                    if current >= target { "var(--bulma-success)" } else { "var(--bulma-text-weak)" }
-                                }
-                                None => {
-                                    if current > target { "var(--bulma-danger)" } else { "var(--bulma-success)" }
-                                }
-                            };
-                            let text_color = match calorie_state {
-                                Some(crate::components::progress_widget::CalorieBar::Over) => "has-text-danger",
-                                Some(crate::components::progress_widget::CalorieBar::Hit) => "has-text-success",
-                                Some(crate::components::progress_widget::CalorieBar::Under) => "",
-                                None if is_at_least => {
-                                    if current >= target { "has-text-success" } else { "" }
-                                }
-                                None => {
-                                    if current > target { "has-text-danger" } else { "" }
-                                }
-                            };
-                            view! {
-                                <div style="margin-bottom: 0.5rem;">
-                                    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.15rem;">
-                                        <span class="is-size-7 has-text-grey">{name.clone()}</span>
-                                        <span class=format!("is-size-7 has-text-weight-semibold {text_color}")>
-                                            {format!("{:.0}", current.abs())}
-                                            <span class="has-text-grey-light has-text-weight-normal">
-                                                {format!(" / {target:.0} {unit}")}
-                                            </span>
-                                        </span>
-                                    </div>
-                                    <div style="height: 6px; background: var(--bulma-border-weak); border-radius: 3px; overflow: hidden;">
-                                        <div style=format!(
-                                            "height: 100%; width: {pct:.0}%; background: {bar_color}; border-radius: 3px; transition: width 0.3s;"
-                                        )></div>
-                                    </div>
-                                </div>
-                            }.into_view()
-                        } else {
-                            // Week goal: cumulative fill spread across 7 bars
-                            // ratio = eaten / target, days_filled = ratio * 7
-                            // Full bars for completed days, partial for current fill day
-                            // Today marker shows expected linear pace
-                            let week_total: f64 = we.iter().map(|e| {
-                                let food = fs.iter().find(|f| f.id == e.food_id);
-                                food.map(|f| {
-                                    let factor = (e.grams - e.waste_grams).max(0.0) / 100.0;
-                                    match name.as_str() {
-                                        "Calories" => f.effective_kcal() * factor,
-                                        "Protein" => f.protein * factor,
-                                        "Fat" => f.fat * factor,
-                                        "Carbs" => f.carbs * factor,
-                                        custom => f.nutrients.get(custom).copied().unwrap_or(0.0) * factor,
-                                    }
-                                }).unwrap_or(0.0)
-                            }).sum();
-
-                            let ratio = if target > 0.0 { (week_total / target).min(1.0) } else { 0.0 };
-                            let days_filled = ratio * 7.0;
-                            let full_days = days_filled.floor() as usize;
-                            let partial = days_filled - days_filled.floor();
-
-                            // Today's expected position (day index 0-based from Monday)
-                            let today_index = {
-                                use chrono::Datelike;
-                                let today_d = local::today_date();
-                                today_d.weekday().num_days_from_monday() as usize
-                            };
-                            let expected_by_today = target * (today_index + 1) as f64 / 7.0;
-                            let on_track = if is_at_least { week_total >= expected_by_today } else { week_total <= expected_by_today };
-                            let bar_color = if on_track { "var(--bulma-success)" } else { "var(--bulma-danger)" };
-
-                            let bars: Vec<_> = dates.iter().enumerate().map(|(i, d)| {
-                                let fill_pct = if i < full_days {
-                                    100.0
-                                } else if i == full_days {
-                                    partial * 100.0
-                                } else {
-                                    0.0
-                                };
-                                let is_future = *d > today_str;
-                                let opacity = if is_future { "0.3" } else { "1" };
-                                view! {
-                                    <div style=format!("flex: 1; opacity: {opacity};")>
-                                        <div style="height: 6px; background: var(--bulma-border-weak); border-radius: 3px; overflow: hidden;">
-                                            <div style=format!(
-                                                "height: 100%; width: {fill_pct:.0}%; background: {bar_color}; border-radius: 3px; transition: width 0.3s;"
-                                            )></div>
-                                        </div>
-                                    </div>
-                                }
-                            }).collect();
-
-                            let text_color = if on_track { "" } else { "has-text-warning-dark" };
-
-                            view! {
-                                <div style="margin-bottom: 0.5rem;">
-                                    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.15rem;">
-                                        <span class="is-size-7 has-text-grey">{name.clone()}</span>
-                                        <span class=format!("is-size-7 has-text-weight-semibold {text_color}")>
-                                            {format!("{:.1}", week_total.abs())}
-                                            <span class="has-text-grey-light has-text-weight-normal">
-                                                {move || format!(" / {target:.1} {unit} {}", t("diary.per_week"))}
-                                            </span>
-                                        </span>
-                                    </div>
-                                    <div style="display: flex; gap: 2px;">
-                                        {bars}
-                                    </div>
-                                </div>
-                            }.into_view()
-                        }
-                    }).collect::<Vec<_>>()
+                    // Планка ВЫБРАННОГО дня: прошлый день судится своей, а не
+                    // сегодняшней — иначе недельный пересчёт перекрашивал бы прошлое.
+                    let Some(target) = cal_planka_res.get().flatten().filter(|t| *t > 0.0) else {
+                        return ().into_view();
+                    };
+                    let current = nutrient_sum("Calories", &es, &fs);
+                    let pct = ((current / target) * 100.0).min(100.0);
+                    // КАЛОРИИ судятся КОРИДОРОМ ±50 ккал — тем же, по которому их
+                    // судит индикатор и полоса на дашборде: недобрал больше — серый
+                    // (день не закрыт), попал — зелёный, перебрал больше — красный.
+                    use crate::components::progress_widget::{calorie_bar_state, CalorieBar};
+                    let (bar_color, text_color) = match calorie_bar_state(current, target) {
+                        CalorieBar::Over => ("var(--bulma-danger)", "has-text-danger"),
+                        CalorieBar::Hit => ("var(--bulma-success)", "has-text-success"),
+                        CalorieBar::Under => ("var(--bulma-text-weak)", ""),
+                    };
+                    let name = crate::services::i18n::nutrient_name("Calories").to_string();
+                    let unit = crate::services::i18n::unit_label("kcal");
+                    view! {
+                        <div style="margin-bottom: 0.5rem;">
+                            <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.15rem;">
+                                <span class="is-size-7 has-text-grey">{name}</span>
+                                <span class=format!("is-size-7 has-text-weight-semibold {text_color}")>
+                                    {format!("{:.0}", current.abs())}
+                                    <span class="has-text-grey-light has-text-weight-normal">
+                                        {format!(" / {target:.0} {unit}")}
+                                    </span>
+                                </span>
+                            </div>
+                            <div style="height: 6px; background: var(--bulma-border-weak); border-radius: 3px; overflow: hidden;">
+                                <div style=format!(
+                                    "height: 100%; width: {pct:.0}%; background: {bar_color}; border-radius: 3px; transition: width 0.3s;"
+                                )></div>
+                            </div>
+                        </div>
+                    }.into_view()
                 }}
             </div>
 
@@ -871,7 +750,6 @@ pub fn DiaryPage() -> impl IntoView {
                     view! {
                         <FoodWeightModal
                             food=food
-                            goals=Signal::derive(goals)
                             initial_grams=current_grams
                             initial_waste=current_waste
                             initial_restaurant=current_restaurant

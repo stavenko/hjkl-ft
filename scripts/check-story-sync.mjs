@@ -5,6 +5,16 @@
 import { chromium } from "playwright";
 const FE = process.env.FE || "https://renorma-fit-dev.pages.dev";
 const SYNC = "https://sync-worker-dev.vg-stavenko.workers.dev";
+// Синк перекрывается ПО ОБОИМ адресам: сам по себе приложение зовёт воркер по имени,
+// а в общем прогоне — через проксирующий сервер, как `/api/sync/…`. Перекрытый
+// наполовину синк доезжал, и состояние «до синка» проверять было не на чем.
+const syncRoutes = [`${SYNC}/**`, "**/api/sync/**"];
+const blockSync = async (ctx) => {
+  for (const p of syncRoutes) await ctx.route(p, (r) => r.abort());
+};
+const unblockSync = async (ctx) => {
+  for (const p of syncRoutes) await ctx.unroute(p);
+};
 const PAY = "https://payment-worker-dev.vg-stavenko.workers.dev";
 const SECRET = "dev-secret-change-in-production";
 
@@ -124,7 +134,7 @@ check("A: прогресс уехал в журнал", onServer);
 // (а с ним трей) рисовался сразу. Меряем ВТОРУЮ сессию: в ней бутстрап приносит
 // прогресс историй, и кольцо обязано обновиться без перезапуска.
 const ctxB = await b.newContext({ viewport: { width: 430, height: 920 }, serviceWorkers: "block" });
-await ctxB.route(`${SYNC}/**`, (r) => r.abort());
+await blockSync(ctxB);
 const B = await ctxB.newPage();
 B.on("console", (m) => { const t = m.text(); if (/panicked/.test(t)) console.log("[B]", t.slice(0, 200)); });
 await seed(B);
@@ -139,7 +149,7 @@ check("B: трей историй на экране до прихода синк
 check("B: до синка кольцо непросмотренное", (await hasArc(B, "welcome")) === true);
 check("B: до синка прогресса в базе нет", (await viewedFlag(B)) === null);
 // Сеть вернулась + приложение вышло на передний план → синк БЕЗ перезапуска.
-await ctxB.unroute(`${SYNC}/**`);
+await unblockSync(ctxB);
 await B.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
 let liveOk = false, flagArrived = false;
 for (let i = 0; i < 20 && !liveOk; i++) {
@@ -190,7 +200,7 @@ check("B: после перезапуска кольцо корректное", 
 // C стартует без профиля и с заблокированным синком → экран «Персона».
 // Синк приносит профиль → дашборд обязан открыться без перезапуска.
 const ctxC = await b.newContext({ viewport: { width: 430, height: 920 }, serviceWorkers: "block" });
-await ctxC.route(`${SYNC}/**`, (r) => r.abort());
+await blockSync(ctxC);
 const C = await ctxC.newPage();
 C.on("console", (m) => { const t = m.text(); if (/panicked/.test(t)) console.log("[C]", t.slice(0, 200)); });
 await seed(C);
@@ -198,7 +208,7 @@ await C.goto(FE, { waitUntil: "domcontentloaded" });
 await C.waitForTimeout(9000);
 const personaShown = (await C.locator("body").innerText()).includes("Год рождения");
 check("персона: до синка показан экран «Персона»", personaShown);
-await ctxC.unroute(`${SYNC}/**`);
+await unblockSync(ctxC);
 let dashC = false;
 for (let i = 0; i < 15 && !dashC; i++) {
   await C.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));

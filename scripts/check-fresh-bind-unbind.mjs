@@ -12,8 +12,9 @@
 //   4. Отвязка: постоянные планки возвращаются к нашим правилам, кураторская
 //      калорийная остаётся, письмо перечисляет всё двенадцать.
 //   5. ГЛАВНОЕ: недельный цикл после отвязки ЗАПУСКАЕТСЯ. Он судил о наличии
-//      планки по записи в `goals`, которой у такого человека нет вовсе, — и
-//      молча выходил, оставляя его с кураторским числом навсегда.
+//      планки по записи в `goals` — по зеркалу, которого у такого человека нет
+//      вовсе, — и молча выходил, оставляя его с кураторским числом навсегда.
+//      Целей с тех пор не стало совсем: планка живёт в истории, и она одна.
 //
 // Запуск: node scripts/check-fresh-bind-unbind.mjs
 //   DEV=1 — по ВЫКАЧЕННОМУ приложению, а не по локальному dist
@@ -60,7 +61,7 @@ const readState = async () => {
     const rq = db.transaction([s], 'readonly').objectStore(s).getAll();
     rq.onsuccess = () => res(rq.result); rq.onerror = () => res([]);
   });
-  const [hist, flags, goals] = [await all('planka_history'), await all('app_flags'), await all('goals')];
+  const [hist, flags] = [await all('planka_history'), await all('app_flags')];
   db.close();
   const kind = (k) => hist.filter((h) => h.kind === k).sort((a, b) => a.date.localeCompare(b.date));
   const f = (k) => flags.find((x) => x.key === k)?.value;
@@ -69,8 +70,6 @@ const readState = async () => {
     calorieDays: kind('calories').map((h) => h.date),
     fiber: kind('fiber').at(-1)?.amount,
     protein: kind('protein').at(-1)?.amount,
-    // Запись в `goals` — то самое, чего у такого человека нет.
-    goalRows: goals.filter((g) => g.nutrient === 'Calories').map((g) => g.amount),
     calAnchor: f('planka_weekly_anchor'),
     peer: f('support_current_peer') ?? null,
     letters: JSON.parse(f('letters_v1') || '[]').map((l) => l.id),
@@ -160,8 +159,6 @@ await page.waitForTimeout(8000);
 const start = await page.evaluate(readState);
 check('планки у человека нет ни одной — её и не было', start.calories === undefined,
   `калории ${start.calories}`);
-check('и записи в goals тоже нет — от нас он планку не получал',
-  start.goalRows.length === 0, JSON.stringify(start.goalRows));
 check('запуск без паник', panics.length === 0, panics[0] ?? 'паник нет');
 
 // ── 2. Куратор ведёт его ────────────────────────────────────────────────────
@@ -180,8 +177,6 @@ const led = await waitFor(page, 30, async () => {
 }) ?? await page.evaluate(readState);
 check('кураторская калорийная планка применилась', led.calories === CURATOR_CAL, `${led.calories}`);
 check('кураторская постоянная планка применилась', led.fiber === FIBER, `${led.fiber}`);
-check('запись в goals так и не появилась — директива пишет только историю',
-  led.goalRows.length === 0, JSON.stringify(led.goalRows));
 
 // ── 3. Три недели под куратором: человек худеет ─────────────────────────────
 section('3. три недели под куратором — минус несколько килограммов');
@@ -236,7 +231,7 @@ const unbound = freed.letters.find((i) => i.startsWith('curator-unbound-'));
 check('письмо об отвязке пришло', !!unbound, unbound ?? freed.letters.join(', '));
 
 // ── 5. Главное: цикл подхватывает человека ──────────────────────────────────
-section('5. недельный цикл ЗАПУСКАЕТСЯ у человека без записи в goals');
+section('5. недельный цикл ЗАПУСКАЕТСЯ у человека с одной лишь кураторской планкой');
 // Якорь на сегодня сдвинула сама отвязка — по нему о работе цикла судить нельзя.
 // Отматываем его на десять дней назад: это то же, что подождать неделю, только
 // без ожидания. Теперь двинуться он может лишь одним способом — циклом.
@@ -261,11 +256,6 @@ check('письмо о планке пришло', ran.letters.some((i) => i.sta
   ran.letters.join(', ') || 'писем нет');
 check('цикл оттолкнулся от КУРАТОРСКОГО числа', ran.calorieDays.includes(ymd(0)),
   `${CURATOR_CAL} → ${ran.calories}, дни ${ran.calorieDays.join(', ')}`);
-// Запись в `goals` появляется только теперь — её пишет наш пересчёт, а не
-// кураторская директива. До этого места её не было ни разу, и на ней-то цикл и
-// спотыкался.
-check('запись в goals завёл наш пересчёт', ran.goalRows.length === 1,
-  JSON.stringify(ran.goalRows));
 check('белок пересчитан вслед за калориями', ran.protein !== undefined, `${ran.protein}`);
 check('запуск без паник', panics.length === 0, panics[0] ?? 'паник нет');
 

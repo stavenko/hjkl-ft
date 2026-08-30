@@ -38,9 +38,16 @@ const seed = async (page, uid) => {
       is_egg: false, is_red_meat: false, iron_mg: 0.5, iron_absorption: 0.05,
       created_at: nowIso, updated_at: nowIso }];
     // Еда за каждый из последних десяти дней — «активность» для гейта пересчёта.
+    //
+    // Ест человек РОВНО ПО ПЛАНКЕ (2500 ккал при 100 ккал/100 г), и это условие
+    // задачи, а не мелочь. Планку двигает вес, но только если её ИСПОЛНЯЛИ:
+    // недоедающему её не поднимают, переедающему не опускают — иначе выходит
+    // петля, где чем хуже человеку, тем безумнее планка (см. `calorie_planka_weekly`).
+    // При недоедании и быстром похудении вес зовёт вверх, стопор держит на месте,
+    // и «пересчитаться» планке нечем.
     const diary = [];
     for (let i = 1; i <= 10; i++) {
-      diary.push({ id: "d" + i, food_id: "f1", date: ymd(i), time: null, grams: 2000,
+      diary.push({ id: "d" + i, food_id: "f1", date: ymd(i), time: null, grams: 2500,
         waste_grams: 0, meal_label: "lunch", deleted: false, created_at: nowIso, updated_at: nowIso });
     }
     // Вес падает ~1 кг в неделю — тренд, который двигает планку.

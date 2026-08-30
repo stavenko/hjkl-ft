@@ -37,14 +37,29 @@ const seed = async (page, uid) => {
       { key: "steps_planka_weekly_anchor", value: ymd(1) },
       { key: "ft_subscription", value: JSON.stringify({ plan: "monthly", end: Date.now() + 30 * 864e5,
           active: true, start: Date.now(), status: "paid", no_renew: false, provider: "lava" }) },
-      // Версия базы 0: миграция 1 (стирание кальция и железа) ОБЯЗАНА пройти.
-      { key: "db_schema_version", value: "0" },
+      // Версия базы 18: пройдут миграции, которые ТРОГАЮТ ПРОДУКТЫ (19 — кальций,
+      // 24 — овощ/фрукт) и дёргают за собой `invalidate_food`. Ради этого проверка
+      // и написана.
+      //
+      // Не 0: по дороге стоит миграция 15, которая сносит вердикты ЦЕЛИКОМ — один
+      // раз и намеренно, чтобы свести накопившиеся правила в одно состояние. С
+      // нулевой версии посеянная заморозка гибнет об неё, а не о то, что здесь
+      // проверяется.
+      { key: "db_schema_version", value: "18" },
     ];
     // Планка УЖЕ новая — как после вчерашнего пересчёта.
     const profile = [{ key: "profile", sex: "male", height_cm: 180, birth_year: 1985,
       goal: "lose", steps_planka: NEW_PLANKA, created_at: nowIso, updated_at: nowIso }];
-    const goals = [{ id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
-      amount: 2600, unit: "Kcal", period: "Day", created_at: nowIso, updated_at: nowIso }];
+    // Планка живёт в ИСТОРИИ, и записана НОВАЯ — как у человека после вчерашнего
+    // пересчёта. Если заморозку кто-то снесёт, дни пересчитаются по ней (11500 из
+    // 11800 — недобор), и подмена станет видна. Без записи в истории день судился бы
+    // собственным результатом и выглядел бы выполненным при любом раскладе.
+    const planka_history = [
+      { id: `calories:${ymd(30)}`, kind: "calories",
+        date: ymd(30), amount: 2600, created_at: nowIso, updated_at: nowIso },
+      { id: `steps:${ymd(30)}`, kind: "steps",
+        date: ymd(30), amount: NEW_PLANKA, created_at: nowIso, updated_at: nowIso },
+    ];
     // Продукт с испорченным железом — миграции будет что стирать, и она дёрнет
     // invalidate_food за все дни, где его ели.
     const foods = [{ id: "liver", name: "Куриная печень", kcal: 137, protein: 20, fat: 6, carbs: 1,
@@ -64,7 +79,7 @@ const seed = async (page, uid) => {
       ind_steps.push({ date: ymd(i), value: WALKED, ratio: WALKED / OLD_PLANKA,
         target: OLD_PLANKA, computed_at: nowIso });
     }
-    for (const [store, rows] of Object.entries({ app_flags, profile, goals, foods, diary, step_entries, ind_steps })) {
+    for (const [store, rows] of Object.entries({ app_flags, profile, planka_history, foods, diary, step_entries, ind_steps })) {
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");
         for (const r of rows) tx.objectStore(store).put(r);

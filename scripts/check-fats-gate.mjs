@@ -28,7 +28,8 @@ const FOODS = [
     fp: { sfa_pct: 15, mufa_pct: 70, pufa_pct: 15, epa_dha_pct: 0 } },
   { id: "mack", name: "Скумбрия", kcal: 191, fat: 13.9,
     fp: { sfa_pct: 24, mufa_pct: 38, pufa_pct: 26, epa_dha_pct: 18 } },
-  { id: "butter", name: "Сливочное масло", kcal: 717, fat: 82,
+  // Сливочное — МОЛОЧНАЯ ГЛОБУЛА: в омега-3 её жир считается, в баланс не входит.
+  { id: "butter", name: "Сливочное масло", kcal: 717, fat: 82, milk: true,
     fp: { sfa_pct: 65, mufa_pct: 26, pufa_pct: 4, epa_dha_pct: 0 } },
   // Печень — чтобы закрыть недельную планку железа: 9 мг при усвоении 0.25.
   { id: "liver", name: "Печень куриная", kcal: 137, fat: 6, iron: [9.0, 0.25],
@@ -40,7 +41,9 @@ const EATEN_TODAY = [["olive", 30], ["mack", 150], ["butter", 20]];
 //   оливковое  30 г → жир 30.00 → НЖК 4.50  МНЖК 21.00 ПНЖК 4.50
 //   скумбрия  150 г → жир 20.85 → НЖК 5.00  МНЖК 7.92  ПНЖК 5.42  EPA+DHA 3.75
 //   сливочное  20 г → жир 16.40 → НЖК 10.66 МНЖК 4.26  ПНЖК 0.66
-const WANT = { epa_dha: 3.75, ratio: (33.19 + 10.58) / 20.16 };
+// Омега-3 берётся из ВСЕГО жира, баланс — из жира БЕЗ молочных глобул, поэтому
+// сливочное в отношение не входит: (28.92 + 9.92) / 9.50.
+const WANT = { epa_dha: 3.75, ratio: (28.92 + 9.92) / 9.50 };
 
 const seed = (opts) => async (page, uid) => {
   await page.evaluate(async ({ uid, FOODS, EATEN_TODAY, opts }) => {
@@ -78,8 +81,6 @@ const seed = (opts) => async (page, uid) => {
     const profile = [{ key: "profile", sex: "male", height_cm: 180,
       birth_year: new Date().getFullYear() - 45, goal: "lose", steps_planka: 9000,
       created_at: nowIso, updated_at: nowIso }];
-    const goals = [{ id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
-      amount: 2600, unit: "Kcal", period: "Day", created_at: nowIso, updated_at: nowIso }];
     // Планка живёт в ИСТОРИИ — она и есть цель. Без неё приложение считает,
     // что планки нет вовсе, и не показывает ни одного индикатора.
     const planka_history = [{ id: `calories:${ymd(30)}`, kind: "calories",
@@ -89,6 +90,9 @@ const seed = (opts) => async (page, uid) => {
       nutrients: {}, package_weight: null, is_recipe: false, recipe_id: null,
       archived: false, is_restaurant: false, is_snack: false, is_liquid_cal: false,
       is_veg_fruit: false, is_egg: false, is_red_meat: false, is_heme: false,
+      // Без этого поля жир продукта в баланс НЕ ИДЁТ вовсе: «не знаем, глобула ли
+      // это» — не «не глобула», и шкала показывает прочерк.
+      is_milk_globule: !!f.milk,
       iron_mg: f.iron ? f.iron[0] : 0, iron_absorption: f.iron ? f.iron[1] : 0.05,
       fat_profile: opts.withProfiles ? f.fp : null,
       created_at: nowIso, updated_at: nowIso,
@@ -108,7 +112,7 @@ const seed = (opts) => async (page, uid) => {
         created_at: nowIso, updated_at: nowIso });
     }
     const avail = Array.from(db.objectStoreNames);
-    for (const [store, rows] of Object.entries({ app_flags, profile, goals, planka_history, foods, diary })) {
+    for (const [store, rows] of Object.entries({ app_flags, profile, planka_history, foods, diary })) {
       if (!avail.includes(store)) continue;
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");
@@ -237,7 +241,7 @@ const YMD0 = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, 
   const shown = Number((/[−+-]?[\d.]+/.exec(bal.replace("−", "-")) || [""])[0]);
   const side = await page.locator('[data-gauge="Баланс жира"]').getAttribute("data-balance-side");
   const want_dev = WANT.ratio - 2.0;
-  check(`отклонение = ${want_dev.toFixed(2)}`, near(shown, want_dev), `${shown}`);
+  check(`отклонение = ${want_dev.toFixed(2)}`, near(shown, want_dev), `${shown} из ${JSON.stringify(bal)}`);
   check("полоса вправо, раз отклонение положительное", side === "right", String(side));
   await page.screenshot({ path: process.env.SHOT || "/tmp/fats-gauges.png", fullPage: false });
   await context.close();

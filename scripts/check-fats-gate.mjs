@@ -80,6 +80,10 @@ const seed = (opts) => async (page, uid) => {
       created_at: nowIso, updated_at: nowIso }];
     const goals = [{ id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
       amount: 2600, unit: "Kcal", period: "Day", created_at: nowIso, updated_at: nowIso }];
+    // Планка живёт в ИСТОРИИ — она и есть цель. Без неё приложение считает,
+    // что планки нет вовсе, и не показывает ни одного индикатора.
+    const planka_history = [{ id: `calories:${ymd(30)}`, kind: "calories",
+      date: ymd(30), amount: 2600, created_at: nowIso, updated_at: nowIso }];
     const foods = FOODS.map((f) => ({
       id: f.id, name: f.name, kcal: f.kcal, protein: 10, fat: f.fat, carbs: 0,
       nutrients: {}, package_weight: null, is_recipe: false, recipe_id: null,
@@ -104,7 +108,7 @@ const seed = (opts) => async (page, uid) => {
         created_at: nowIso, updated_at: nowIso });
     }
     const avail = Array.from(db.objectStoreNames);
-    for (const [store, rows] of Object.entries({ app_flags, profile, goals, foods, diary })) {
+    for (const [store, rows] of Object.entries({ app_flags, profile, goals, planka_history, foods, diary })) {
       if (!avail.includes(store)) continue;
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");

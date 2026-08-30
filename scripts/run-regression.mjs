@@ -129,7 +129,7 @@ const one = ({ file, where }) => new Promise((resolve) => {
   // `e2e/` запускается ИЗ СВОЕГО каталога: его проверки зовут соседние скрипты
   // относительным путём (`../frontend/scripts/...`), и из корня он бьёт мимо.
   // Адрес приложения там называется `BASE`, а не `FE`.
-  const p = spawn('node', [file], {
+  const p = spawn('node', [where === 'e2e' ? file : `scripts/${file}`], {
     cwd: where === 'e2e' ? e2eDir : undefined,
     env: {
       ...process.env,

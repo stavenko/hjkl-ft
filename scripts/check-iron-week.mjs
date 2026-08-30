@@ -71,6 +71,10 @@ function seed({ ironOpenDaysAgo, calciumGateDaysAgo = 9, withIronFood = true, le
         // «Железо» в карте нутриентов — оно не должно попасть ни в одну форму.
         const nutrients = { "Кальций": 1200, "Клетчатка": 30 };
         if (legacyIronNutrient) nutrients["Железо"] = 9.9;
+    // Планка живёт в ИСТОРИИ — она и есть цель. Без неё приложение считает,
+    // что планки нет вовсе, и не показывает ни одного индикатора.
+    const planka_history = [{ id: `calories:${ymd(30)}`, kind: "calories",
+      date: ymd(30), amount: 2500, created_at: nowIso, updated_at: nowIso }];
         const foods = [{
           id: "f-liver", name: "Куриная печень", kcal: 137, protein: 20, fat: 6, carbs: 1,
           nutrients, package_weight: null, is_recipe: false, recipe_id: null, archived: false,
@@ -94,7 +98,7 @@ function seed({ ironOpenDaysAgo, calciumGateDaysAgo = 9, withIronFood = true, le
         // Кальциевые ворота закрываются по РЕАЛЬНЫМ данным: у кальция нет
         // кэш-стора, состояние дня считается из еды. 200 г печени × 1200 мг/100 г
         // = 2400 мг в день, норма 1000 — все завершённые дни зелёные.
-        const records = { app_flags, profile, goals, foods, diary };
+        const records = { app_flags, profile, goals, planka_history, foods, diary };
         const available = Array.from(db.objectStoreNames);
         for (const [store, rows] of Object.entries(records)) {
           if (!rows.length) continue;

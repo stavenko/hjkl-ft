@@ -48,7 +48,11 @@ const seed = async (page, uid) => {
       step_entries.push({ id: "s" + i, date: ymd(i), steps: WALKED,
         created_at: nowIso, updated_at: nowIso });
     }
-    for (const [store, rows] of Object.entries({ app_flags, profile, goals, step_entries })) {
+    // Планка живёт в ИСТОРИИ — она и есть цель. Без неё приложение считает,
+    // что планки нет вовсе, и не показывает ни одного индикатора.
+    const planka_history = [{ id: `calories:${ymd(30)}`, kind: "calories",
+      date: ymd(30), amount: 2600, created_at: nowIso, updated_at: nowIso }];
+    for (const [store, rows] of Object.entries({ app_flags, profile, goals, planka_history, step_entries })) {
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");
         for (const r of rows) tx.objectStore(store).put(r);

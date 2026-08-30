@@ -43,6 +43,10 @@ const makeSeed = (closedWeeks) => async (page, uid) => {
     // Печень: 9 мг железа, усвоение 0.25 → 200 г дают 4.5 мг усвоенного в день,
     // за неделю 31.5 мг при норме ~10.1. «Пустой» день — вода, дневник ведётся,
     // но железа нет.
+    // Планка живёт в ИСТОРИИ — она и есть цель. Без неё приложение считает,
+    // что планки нет вовсе, и не показывает ни одного индикатора.
+    const planka_history = [{ id: `calories:${ymd(30)}`, kind: "calories",
+      date: ymd(30), amount: 2600, created_at: nowIso, updated_at: nowIso }];
     const foods = [
       { id: "liver", name: "Куриная печень", kcal: 137, protein: 20, fat: 6, carbs: 1,
         nutrients: {}, package_weight: null, is_recipe: false, recipe_id: null, archived: false,
@@ -65,7 +69,7 @@ const makeSeed = (closedWeeks) => async (page, uid) => {
         grams: 200, waste_grams: 0, meal_label: "lunch", deleted: false,
         created_at: nowIso, updated_at: nowIso });
     }
-    for (const [store, rows] of Object.entries({ app_flags, profile, goals, foods, diary })) {
+    for (const [store, rows] of Object.entries({ app_flags, profile, goals, planka_history, foods, diary })) {
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");
         for (const r of rows) tx.objectStore(store).put(r);

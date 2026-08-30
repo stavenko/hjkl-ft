@@ -36,6 +36,10 @@ const seed = async (page, uid) => {
     const goals = [{ id: "g-cal", nutrient: "Calories", key: "calories", direction: "AtMost",
       amount: 2600, unit: "Kcal", period: "Day", created_at: nowIso, updated_at: nowIso }];
     // Печень БЕЗ железа — фоновый проход её ещё не разобрал.
+    // Планка живёт в ИСТОРИИ — она и есть цель. Без неё приложение считает,
+    // что планки нет вовсе, и не показывает ни одного индикатора.
+    const planka_history = [{ id: `calories:${ymd(30)}`, kind: "calories",
+      date: ymd(30), amount: 2600, created_at: nowIso, updated_at: nowIso }];
     const foods = [{ id: "liver", name: "Куриная печень", kcal: 137, protein: 20, fat: 6, carbs: 1,
       nutrients: {}, package_weight: null, is_recipe: false, recipe_id: null, archived: false,
       is_restaurant: false, is_snack: false, is_liquid_cal: false, is_veg_fruit: false,
@@ -47,7 +51,7 @@ const seed = async (page, uid) => {
       diary.push({ id: "d" + i, food_id: "liver", date: ymd(i), time: null, grams: 200,
         waste_grams: 0, meal_label: "lunch", deleted: false, created_at: nowIso, updated_at: nowIso });
     }
-    for (const [store, rows] of Object.entries({ app_flags, profile, goals, foods, diary })) {
+    for (const [store, rows] of Object.entries({ app_flags, profile, goals, planka_history, foods, diary })) {
       await new Promise((res, rej) => {
         const tx = db.transaction([store], "readwrite");
         for (const r of rows) tx.objectStore(store).put(r);

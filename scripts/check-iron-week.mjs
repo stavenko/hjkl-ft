@@ -162,17 +162,24 @@ const today = new Date().toISOString().slice(0, 10);
   await page.waitForTimeout(9000);
   const body = (await page.locator('[data-testid="progress-widget"]').innerText().catch(() => "")).replace(/\s+/g, " ");
   check("виджет показывает недельный gauge по железу", body.includes("Железо/нед"), body.slice(0, 160));
-  // Железо стоит В ТОЙ ЖЕ сетке, что дневные полосы, — напротив кальция.
-  const sameRow = await page.evaluate(() => {
+  // Недельные шкалы стоят СВОЕЙ сеткой, парами, под дневными: они про другой срок,
+  // и мешать их с сегодняшним днём нельзя. Железо — первая ячейка этой сетки, гем —
+  // соседняя: две стороны одного разговора.
+  const weeklyRow = await page.evaluate(() => {
     const ca = document.querySelector('[data-gauge="Кальций"]');
     const fe = document.querySelector('[data-gauge="Железо/нед"]');
-    if (!ca || !fe) return null;
-    return { sameParent: ca.parentElement === fe.parentElement,
-             dy: Math.abs(ca.getBoundingClientRect().top - fe.getBoundingClientRect().top) };
+    const he = document.querySelector('[data-gauge="Гем/нед"]');
+    if (!ca || !fe || !he) return null;
+    return { withHeme: fe.parentElement === he.parentElement,
+             apartFromDaily: ca.parentElement !== fe.parentElement,
+             dy: Math.abs(he.getBoundingClientRect().top - fe.getBoundingClientRect().top),
+             belowDaily: fe.getBoundingClientRect().top > ca.getBoundingClientRect().top };
   });
-  check("железо в одной сетке с кальцием", !!sameRow && sameRow.sameParent, JSON.stringify(sameRow));
-  check("железо на одной высоте с кальцием (напротив)", !!sameRow && sameRow.dy < 2,
-    sameRow ? `сдвиг ${sameRow.dy.toFixed(1)} px` : "нет элементов");
+  check("железо в одной сетке с гемом, а не с дневными",
+    !!weeklyRow && weeklyRow.withHeme && weeklyRow.apartFromDaily, JSON.stringify(weeklyRow));
+  check("железо на одной высоте с гемом (напротив), ниже дневных",
+    !!weeklyRow && weeklyRow.dy < 2 && weeklyRow.belowDaily,
+    weeklyRow ? `сдвиг ${weeklyRow.dy.toFixed(1)} px` : "нет элементов");
   check("подписи «День N из 7» больше нет", !/День \d+ из 7/.test(body), body.slice(0, 200));
   // 3 дня × 4.5 мг = 13.5 усвоенного; норма мужчины 45 лет — 10.08 мг.
   check("gauge считает УСВОЕННОЕ железо (13.5 мг за 3 дня)", /13[.,]5/.test(body), body.slice(0, 200));

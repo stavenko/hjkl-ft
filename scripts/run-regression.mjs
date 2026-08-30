@@ -14,13 +14,23 @@
 // Проверка считается пройденной по КОДУ ВОЗВРАТА: так они и написаны.
 
 import { spawn } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { appendFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { serveWithProxy } from './lib/devserver.mjs';
 
 const DIST = process.env.FE_DIST ?? new URL('../frontend/dist', import.meta.url).pathname;
 const DEV = process.env.DEV ? (process.env.DEV_URL ?? 'https://renorma-fit-dev.pages.dev') : null;
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS ?? 240_000);
 const filter = process.argv[2] ?? '';
+
+// Полный лог пишется САМ, а не зависит от того, как вызвали команду: вывод у
+// прогона длинный, итог печатается перед подробностями, и любой `| tail` его
+// срезает. На этом я уже один раз потерял результат часового прогона.
+const LOG = process.env.LOG ?? `regression-${DEV ? 'dev' : 'local'}.log`;
+writeFileSync(LOG, '');
+const say = (line = '') => {
+  console.log(line);
+  appendFileSync(LOG, line + '\n');
+};
 
 // Свои четыре набора поднимают сервер сами — здесь они лишние. Остальные
 // исключения названы поимённо: у каждой своя причина, и молчаливого пропуска
@@ -59,8 +69,8 @@ const server = await serveWithProxy({
     `landing_url = "https://renorma.app"`, `app_origin = "${o}"`,
   ].join('\n'),
 });
-console.log(`${DEV ? `выкаченное приложение (${DEV})` : `локальная сборка (${DIST})`} на ${server.url}`);
-console.log(`проверок: ${run.length}, пропущено: ${skipped.length}\n`);
+say(`${DEV ? `выкаченное приложение (${DEV})` : `локальная сборка (${DIST})`} на ${server.url}`);
+say(`проверок: ${run.length}, пропущено: ${skipped.length}\n`);
 
 const one = (file) => new Promise((resolve) => {
   const started = Date.now();
@@ -87,18 +97,20 @@ const one = (file) => new Promise((resolve) => {
 const results = [];
 for (const file of run) {
   const r = await one(file);
+  appendFileSync(LOG, `\n═══ ${file} ═══\n${r.out}\n`);
   const mark = r.signal ? 'ВЫШЛО ВРЕМЯ' : r.code === 0 ? 'OK  ' : 'FAIL';
-  console.log(`${mark} ${file} (${r.secs} с)`);
+  say(`${mark} ${file} (${r.secs} с)`);
   results.push(r);
 }
 server.close();
 
 const bad = results.filter((r) => r.code !== 0);
-console.log(`\n── итог ──\nпрошло ${results.length - bad.length} из ${results.length}`);
-for (const [f, why] of skipped.map((f) => [f, SKIP.get(f)])) console.log(`  пропущено ${f} — ${why}`);
+say(`\n── итог ──\nпрошло ${results.length - bad.length} из ${results.length}`);
+for (const [f, why] of skipped.map((f) => [f, SKIP.get(f)])) say(`  пропущено ${f} — ${why}`);
 for (const r of bad) {
-  console.log(`\n── ${r.file} ${r.signal ? '(убита по времени)' : `(код ${r.code})`} ──`);
-  console.log(r.out.split('\n').filter((l) => /❌|FAIL|Error|error/i.test(l)).slice(0, 12).join('\n')
+  say(`\n── ${r.file} ${r.signal ? '(убита по времени)' : `(код ${r.code})`} ──`);
+  say(r.out.split('\n').filter((l) => /❌|FAIL|Error|error/i.test(l)).slice(0, 12).join('\n')
     || r.out.slice(-800));
 }
+say(`\nполный вывод каждой проверки — в ${LOG}`);
 process.exit(bad.length ? 1 : 0);

@@ -23,3 +23,6 @@ renorma-lp.jpeg
 .lava-hook-api-key
 .admin-approve-secret
 .lava-api-key
+
+# Логи прогона регрессии (scripts/run-regression.mjs).
+regression-*.log

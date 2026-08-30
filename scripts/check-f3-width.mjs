@@ -1,5 +1,7 @@
 import { chromium } from "playwright";
-const FE = process.argv[2];
+// Адрес — как у всех остальных проверок: `FE=`. Аргументом он тоже принимается,
+// но общий прогон его не передаёт, и проверка падала на `page.goto(undefined)`.
+const FE = process.argv[2] || process.env.FE || "https://renorma-fit-dev.pages.dev";
 const uid = "s4w-" + Date.now();
 const b = await chromium.launch({ headless: true });
 const ctx = await b.newContext({ viewport: { width: 430, height: 900 }, serviceWorkers: "block" });

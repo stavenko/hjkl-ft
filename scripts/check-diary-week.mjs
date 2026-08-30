@@ -18,10 +18,14 @@
 //
 // Запуск: node scripts/check-diary-week.mjs
 
-import { serveWithProxy, launchBrowser } from './lib/devserver.mjs';
+import { serveWithProxy, launchBrowser, isOwnNavigationError } from './lib/devserver.mjs';
 import { createPaidUser, mintToken } from './lib/devuser.mjs';
 
 const DIST = process.env.FE ?? new URL('../frontend/dist', import.meta.url).pathname;
+
+// Прогон против ВЫКАЧЕННОГО приложения: DEV=1 берёт статику с dev, а не из
+// локального dist. Тогда проверка захватывает и саму выкладку.
+const DEV = process.env.DEV ? (process.env.DEV_URL ?? 'https://renorma-fit-dev.pages.dev') : null;
 
 let fail = 0;
 const check = (n, ok, extra = '') => {
@@ -53,6 +57,7 @@ const readDay = async ({ date, today }) => {
 
 const server = await serveWithProxy({
   root: DIST,
+  upstream: DEV,
   configFor: (o) => [
     `api_base_url = ""`, `auth_base_url = "${o}/api/auth"`, `push_base_url = "${o}/api/push"`,
     `ai_base_url = "${o}/api/ai"`, `payment_base_url = "${o}/api/payment"`,
@@ -67,8 +72,11 @@ const { userId: uid } = await createPaidUser('diary-week');
 const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
 const page = await ctx.newPage();
 const panics = [];
-const ownNavigation = (m) => /compilation aborted.*(aborted|cancel)/i.test(m);
-page.on('pageerror', (e) => { if (!ownNavigation(e.message)) panics.push(e.message); });
+page.on('pageerror', (e) => {
+  if (isOwnNavigationError(e.message, e.stack)) return;
+  panics.push(e.message);
+  console.log('[ошибка страницы]', (e.stack ?? e.message).slice(0, 300));
+});
 page.on('console', (m) => { if (/panicked at/.test(m.text())) panics.push(m.text().slice(0, 200)); });
 
 await page.goto(server.url, { waitUntil: 'domcontentloaded' });

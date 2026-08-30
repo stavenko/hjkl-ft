@@ -36,11 +36,15 @@
 //   CUR     — каталог собранного куратора (по умолчанию ../curator/dist)
 //   VERBOSE — печатать все запросы приложения к воркерам
 
-import { serveWithProxy, launchBrowser } from './lib/devserver.mjs';
+import { serveWithProxy, launchBrowser, isOwnNavigationError } from './lib/devserver.mjs';
 import { createPaidUser, mintToken } from './lib/devuser.mjs';
 
 const DIST = process.env.FE ?? new URL('../frontend/dist', import.meta.url).pathname;
 const CUR_DIST = process.env.CUR ?? new URL('../curator/dist', import.meta.url).pathname;
+// Прогон против ВЫКАЧЕННОГО приложения: DEV=1 берёт статику с dev, а не из
+// локального dist. Тогда проверка захватывает и саму выкладку.
+const DEV = process.env.DEV ? (process.env.DEV_URL ?? 'https://renorma-fit-dev.pages.dev') : null;
+
 const SUPPORT = process.env.SUPPORT ?? 'https://support-worker-dev.vg-stavenko.workers.dev';
 const OLD_CAL = 2500;
 const OLD_STEPS = 9000;
@@ -183,8 +187,7 @@ async function boot(browser, server, prefix) {
   // сообщает об этом ошибкой загрузки, и она про НАШУ навигацию, а не про
   // приложение: настоящая поломка сборки выглядит иначе и на перезагрузку не
   // проходит. Всё остальное копим как есть.
-  const ownNavigation = (m) => /compilation aborted.*(aborted|cancel)/i.test(m);
-  page.on('pageerror', (e) => { if (!ownNavigation(e.message)) panics.push(e.message); });
+    page.on('pageerror', (e) => { if (!isOwnNavigationError(e.message, e.stack)) panics.push(e.message); });
   page.on('console', (m) => { if (/panicked at/.test(m.text())) panics.push(m.text().slice(0, 200)); });
 
   await page.goto(server.url, { waitUntil: 'domcontentloaded' });
@@ -292,6 +295,7 @@ async function settleAndRun(page, expectRun = true) {
 // ═══════════════════════════════════════════════════════════════════════════
 const server = await serveWithProxy({
   root: DIST,
+  upstream: DEV,
   configFor: (o) => [
     `api_base_url = ""`, `auth_base_url = "${o}/api/auth"`, `push_base_url = "${o}/api/push"`,
     `ai_base_url = "${o}/api/ai"`, `payment_base_url = "${o}/api/payment"`,
@@ -502,6 +506,7 @@ section('4г. кураторское приложение показывает �
 // воркер и сам разбирал JSON, а приложение куратора не открывалось ни разу.
 const curServer = await serveWithProxy({
   root: CUR_DIST,
+  upstream: DEV ? 'https://renorma-curator-dev.pages.dev' : null,
   configFor: (o) => [
     `auth_base_url = "${o}/api/auth"`, `support_base_url = "${o}/api/support"`,
     `push_base_url = "${o}/api/push"`, `app_origin = "${o}"`,
@@ -526,6 +531,7 @@ const cpanics = [];
 // повторилась, а по одному сообщению не отличить сбой приложения от заминки
 // самого браузера при клике. Стек ответит на это сразу, а не через прогон.
 cpage.on('pageerror', (e) => {
+  if (isOwnNavigationError(e.message, e.stack)) return;
   cpanics.push(e.message);
   console.log('[куратор, ошибка страницы]', (e.stack ?? e.message).slice(0, 400));
 });

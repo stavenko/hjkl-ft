@@ -19,10 +19,14 @@
 // Запуск: node scripts/check-planka-sync.mjs
 //   FE — каталог собранного фронтенда (по умолчанию ../frontend/dist)
 
-import { serveWithProxy, launchBrowser } from './lib/devserver.mjs';
+import { serveWithProxy, launchBrowser, isOwnNavigationError } from './lib/devserver.mjs';
 import { createPaidUser, mintToken } from './lib/devuser.mjs';
 
 const DIST = process.env.FE ?? new URL('../frontend/dist', import.meta.url).pathname;
+// Прогон против ВЫКАЧЕННОГО приложения: DEV=1 берёт статику с dev, а не из
+// локального dist. Тогда проверка захватывает и саму выкладку.
+const DEV = process.env.DEV ? (process.env.DEV_URL ?? 'https://renorma-fit-dev.pages.dev') : null;
+
 const SUPPORT = process.env.SUPPORT ?? 'https://support-worker-dev.vg-stavenko.workers.dev';
 const CAL = 2500;
 const FIBER = 32;
@@ -86,6 +90,7 @@ const settle = async (page, want, tries = 6) => {
 
 const server = await serveWithProxy({
   root: DIST,
+  upstream: DEV,
   configFor: (o) => [
     `api_base_url = ""`, `auth_base_url = "${o}/api/auth"`, `push_base_url = "${o}/api/push"`,
     `ai_base_url = "${o}/api/ai"`, `payment_base_url = "${o}/api/payment"`,

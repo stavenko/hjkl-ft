@@ -34,13 +34,23 @@ export const DEV_WORKERS = {
   bug: 'https://bug-report-worker-dev.vg-stavenko.workers.dev',
 };
 
-/// Поднять сервер над `root` (каталог dist).
+/// Поднять сервер над `root` (каталог dist) — или над ВЫКАЧЕННЫМ приложением.
 ///
 /// `configFor(origin)` — содержимое `config/frontend.toml`, которое увидит
 /// приложение: адреса воркеров подменяются на прокси этого же сервера.
+///
+/// `upstream` (например `https://renorma-fit-dev.pages.dev`) — брать статику
+/// оттуда, а не с диска. Тогда браузер выполняет ИМЕННО ТЕ байты, что выкачены:
+/// проверка захватывает и саму выкладку — заголовки, `_worker.js`, пути к
+/// картинкам, — а не только сборку у нас в каталоге. Наружу по-прежнему ходит
+/// node: браузеру в этом окружении интернет недоступен.
+///
+/// Конфигурация подменяется в обоих случаях: приложению нельзя отдать настоящие
+/// адреса воркеров — до них браузер не дотянется.
+///
 /// Возвращает `{ url, calls, close }`, где `calls` — журнал проксированных
 /// запросов: `{ worker, method, path, status }`.
-export async function serveWithProxy({ root, port = 0, configFor }) {
+export async function serveWithProxy({ root, port = 0, configFor, upstream }) {
   const calls = [];
   const srv = createServer(async (req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
@@ -89,6 +99,22 @@ export async function serveWithProxy({ root, port = 0, configFor }) {
       return res.end(configFor(`http://127.0.0.1:${srv.address().port}`));
     }
 
+    // Статика с выкаченного приложения — когда проверяем именно выкладку.
+    if (upstream) {
+      try {
+        const up = await fetch(upstream + path + u.search, { redirect: 'follow' });
+        const buf = Buffer.from(await up.arrayBuffer());
+        // Тип берём у источника: он же отдаёт wasm, шрифты и картинки.
+        res.writeHead(up.ok ? 200 : up.status, {
+          'Content-Type': up.headers.get('content-type') ?? TYPES[extname(path)] ?? 'text/html',
+        });
+        return res.end(buf);
+      } catch (e) {
+        res.writeHead(502).end(String(e));
+        return;
+      }
+    }
+
     // Статика. `normalize` — против `..` в пути: сервер локальный, но пусть не
     // умеет отдавать что попало с диска.
     const rel = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
@@ -109,6 +135,19 @@ export async function serveWithProxy({ root, port = 0, configFor }) {
   await new Promise((r) => srv.listen(port, '127.0.0.1', r));
   const url = `http://127.0.0.1:${srv.address().port}`;
   return { url, calls, close: () => srv.close() };
+}
+
+/// Ошибка страницы, вызванная НАШЕЙ ЖЕ навигацией, а не приложением.
+///
+/// Проверки перезагружают приложение часто и иногда — посреди докачки wasm.
+/// Браузер отменяет запрос, и загрузчик сообщает об этом двумя способами:
+/// «compilation aborted» либо `TypeError: Failed to fetch` из `__wbg_init`.
+/// Про приложение это не говорит ничего: настоящая поломка сборки повторяется
+/// на каждой загрузке, и следом падает всё остальное, а не одна эта строка.
+/// Заметнее при `DEV=1`: файлы едут из CDN, и окно гонки шире.
+export function isOwnNavigationError(message, stack = '') {
+  if (/compilation aborted.*(aborted|cancel)/i.test(message)) return true;
+  return /Failed to fetch/i.test(message) && /__wbg_init|init\.js/.test(stack);
 }
 
 /// Запустить браузер.

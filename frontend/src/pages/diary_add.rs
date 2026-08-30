@@ -35,10 +35,6 @@ pub fn DiaryAddPage() -> impl IntoView {
         move || version.get(),
         |_| async { local::list_foods().await },
     );
-    let goals_res = create_resource(
-        move || version.get(),
-        |_| async { local::list_goals().await },
-    );
     let today_entries_res = create_resource(
         move || version.get(),
         |_| async {
@@ -48,7 +44,6 @@ pub fn DiaryAddPage() -> impl IntoView {
     );
 
     let foods = move || foods_res.get().unwrap_or_default();
-    let goals = move || goals_res.get().unwrap_or_default();
     let _today_entries = move || today_entries_res.get().unwrap_or_default();
 
 

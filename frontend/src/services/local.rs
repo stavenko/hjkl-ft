@@ -257,19 +257,6 @@ pub async fn calorie_goal_amount() -> Option<f64> {
     crate::services::plankas::current(crate::services::plankas::Kind::Calories)
 }
 
-/// Планка калорий из СТАРОЙ записи в `goals` — до появления истории планок она
-/// жила только там. Читается один раз при гидратации кэша: см. `plankas::hydrate`.
-pub async fn legacy_calorie_goal() -> Option<f64> {
-    list_goals()
-        .await
-        .into_iter()
-        .find(|g| {
-            g.nutrient == "Calories"
-                && g.direction == GoalDirection::AtMost
-                && g.amount > 0.0
-        })
-        .map(|g| g.amount)
-}
 
 
 // ── История планок ───────────────────────────────────────────────────────────
@@ -1947,61 +1934,27 @@ pub async fn change_recipe_weight(recipe_id: &str, new_total_grams: f64) -> Opti
 
 // --- Goals ---
 
-pub async fn list_goals() -> Vec<Goal> {
+/// Строки старого хранилища целей. ЧИТАЕТ ТОЛЬКО МИГРАЦИЯ: планка живёт в
+/// истории, а `goals` осталось коробкой с прошлым, из которой её достают
+/// последний раз (см. `migrations::m025_planka_from_goals`).
+pub(crate) async fn legacy_goals() -> Vec<Goal> {
     db::list_all("goals").await
 }
 
-pub async fn create_goal(input: CreateGoalInput) -> Goal {
-    let key = api_types::nutrient_key::generate(&input.nutrient);
-    let goal = Goal {
-        id: new_id(),
-        nutrient: input.nutrient,
-        key,
-        direction: input.direction,
-        amount: input.amount,
-        unit: input.unit,
-        period: input.period,
-        created_at: now(),
-        updated_at: now(),
-    };
-    db::put("goals", &goal).await;
-    goal
-}
-
-pub async fn update_goal(goal: &Goal) {
-    db::put("goals", goal).await;
-}
-
-pub async fn delete_goal(id: &str) {
-    record_deletion("goals", id).await;
-    db::delete("goals", id).await;
+/// Калорийная цель из старого хранилища — вход миграции m025.
+pub async fn legacy_calorie_goal_row() -> Option<Goal> {
+    legacy_goals()
+        .await
+        .into_iter()
+        .find(|g| g.nutrient == "Calories" && g.amount > 0.0)
 }
 
 /// Create or update the hidden daily-Calories `AtMost` goal (the "planka") to
 /// `amount` kcal. Used when the user accepts the calorie planka in ch3.
 pub async fn set_calorie_goal(amount: f64) {
-    match list_goals().await.into_iter().find(|g| g.nutrient == "Calories") {
-        Some(mut g) => {
-            g.direction = GoalDirection::AtMost;
-            g.amount = amount;
-            g.unit = GoalUnit::Kcal;
-            g.period = GoalPeriod::Day;
-            g.updated_at = now();
-            update_goal(&g).await;
-        }
-        None => {
-            create_goal(CreateGoalInput {
-                nutrient: "Calories".to_string(),
-                direction: GoalDirection::AtMost,
-                amount,
-                unit: GoalUnit::Kcal,
-                period: GoalPeriod::Day,
-            })
-            .await;
-        }
-    }
-    // Установка попадает в ИСТОРИЮ: индикатор судит день по планке, действовавшей
-    // именно в тот день, а не по сегодняшней.
+    // Пишем в ИСТОРИЮ, и только туда. Раньше отсюда заводилась ещё и запись в
+    // `goals` — зеркало, из-за которого интерфейс подписывался не на тот сигнал и
+    // видел планку раньше, чем она появлялась. Зеркала больше нет.
     record_planka(PLANKA_CALORIES, amount).await;
     // Планка по белку — ДОЛЯ калорийной, значит движется вместе с ней. Пересчёт
     // стоит здесь, а не у вызывающих: через `set_calorie_goal` проходят ВСЕ пути
@@ -2013,27 +1966,6 @@ pub async fn set_calorie_goal(amount: f64) {
     // next automatic weekly letter is a full week out. Single point covering BOTH
     // the manual «Пересчитать» button and the background weekly recompute.
     crate::services::letters::mark_planka_recomputed();
-}
-
-/// Create (idempotently) the daily calcium goal — an `AtLeast` nutrient goal keyed
-/// by the display name `Кальций`, so the food editor shows a calcium field and the
-/// background enricher fills calcium on new foods. Set when the calcium week opens.
-pub async fn set_calcium_goal(amount_mg: f64) {
-    if list_goals()
-        .await
-        .into_iter()
-        .any(|g| g.nutrient == crate::services::indicators::N_CALCIUM)
-    {
-        return; // already exists — don't duplicate or overwrite a user-tuned value
-    }
-    create_goal(CreateGoalInput {
-        nutrient: crate::services::indicators::N_CALCIUM.to_string(),
-        direction: GoalDirection::AtLeast,
-        amount: amount_mg,
-        unit: GoalUnit::Mg,
-        period: GoalPeriod::Day,
-    })
-    .await;
 }
 
 // ── "Planka needs recalculating" signal ──────────────────────────────────────
@@ -2066,22 +1998,6 @@ pub fn set_planka_stale(v: bool) {
     use leptos::SignalSet;
     crate::services::app_flags::set_bool(PLANKA_STALE_KEY, v);
     planka_stale_signal().set(v);
-}
-
-/// One-time migration: the steps planka used to live as a `Goal{nutrient:"Steps"}`
-/// in the synced `goals` store, which every nutrient-iterating food UI wrongly
-/// picked up. Move it to its own profile field (`profile::steps_planka`) and delete
-/// the goal (soft-delete + push, so it clears server-side too). Idempotent: a no-op
-/// once no Steps goal remains.
-pub async fn migrate_steps_goal_to_planka() {
-    let Some(g) = list_goals().await.into_iter().find(|g| g.nutrient == "Steps") else {
-        return;
-    };
-    if crate::services::profile::get_steps_planka().is_none() && g.amount > 0.0 {
-        crate::services::profile::set_steps_planka(g.amount);
-    }
-    delete_goal(&g.id).await;
-    crate::services::sync::push_background();
 }
 
 // --- Weight Entries ---

@@ -45,14 +45,6 @@ pub fn main() {
                 return;
             }
             services::app_flags::activate().await;
-            // Разовый перенос планки шагов из `goals` в поле профиля. Только здесь:
-            // без базы читать нечего, а флаг о выполнении принадлежит пользователю.
-            // Выполняется ДО первой отрисовки, чтобы `goals` были чисты к моменту,
-            // когда любой продуктовый экран начнёт их перебирать.
-            if !services::app_flags::get_bool("steps_planka_migrated_v1") {
-                services::local::migrate_steps_goal_to_planka().await;
-                services::app_flags::set_bool("steps_planka_migrated_v1", true);
-            }
         }
         services::i18n::init_lang();
         services::i18n::init_weight_unit();

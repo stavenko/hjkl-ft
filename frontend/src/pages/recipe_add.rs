@@ -24,14 +24,13 @@ pub fn RecipeAddPage() -> impl IntoView {
     let version = create_rw_signal(0u32);
 
     let foods_res = create_resource(move || version.get(), |_| async { local::list_foods().await });
-    let goals_res = create_resource(move || version.get(), |_| async { local::list_goals().await });
+
     let recipe_res = create_resource(
         move || (recipe_id(), version.get()),
         |(id, _)| async move { local::get_recipe(&id).await },
     );
 
     let foods = move || foods_res.get().unwrap_or_default();
-    let goals = move || goals_res.get().unwrap_or_default();
 
 
     // Ingredients already in the recipe → shown as a disabled checkmark.

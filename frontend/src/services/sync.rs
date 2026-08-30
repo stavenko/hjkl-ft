@@ -97,7 +97,7 @@ async fn set_client_version(v: u64) {
 /// "ind_days" with the composite `"<indicator>:<date>"` id.
 fn local_target(store: &str, id: &str) -> Option<(String, String)> {
     match store {
-        "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "profile"
+        "foods" | "diary" | "recipes" | "recipe_ingredients" | "profile"
         | "weight_entries" | "step_entries" | "deletions" | "app_flags"
         | "planka_history" | "support_msgs" => {
             Some((store.to_string(), id.to_string()))
@@ -281,7 +281,7 @@ async fn apply_upsert(store: &str, row: &serde_json::Value, ctx: &mut ApplyCtx) 
         }
         // Сообщения неизменяемы, а ключ уникален, поэтому LWW по created_at
         // безобиден: два устройства, скачавшие одно и то же, пишут одно и то же.
-        "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "weight_entries"
+        "foods" | "diary" | "recipes" | "recipe_ingredients" | "weight_entries"
         | "step_entries" | "deletions" | "planka_history" | "support_msgs" => {
             let Some(id) = row.get("id").and_then(|v| v.as_str()) else {
                 leptos::logging::error!("sync v2: {store} row without id: {row}");
@@ -442,7 +442,7 @@ async fn migration_days() -> std::collections::BTreeMap<String, Vec<serde_json::
             .push(serde_json::json!({ "store": store, "op": "upsert", "row": row, "ts": ts }));
     };
     for store in [
-        "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries",
+        "foods", "diary", "recipes", "recipe_ingredients", "weight_entries",
         "step_entries", "profile", "planka_history", "support_msgs",
     ] {
         for row in db::list_all::<serde_json::Value>(store).await {
@@ -646,7 +646,7 @@ async fn migrate_inner(
 /// Local stores wiped by an ADOPT (app_flags is handled separately — its
 /// device-local keys must survive).
 const ADOPT_WIPE_STORES: &[&str] = &[
-    "foods", "diary", "recipes", "recipe_ingredients", "goals", "weight_entries",
+    "foods", "diary", "recipes", "recipe_ingredients", "weight_entries",
     "step_entries", "profile", "deletions", "planka_history",
     "support_msgs", "ind_protein", "ind_veg_fruit", "ind_steps", "ind_calories",
 ];
@@ -758,7 +758,10 @@ pub fn sync_now_background() {
 }
 
 pub async fn is_empty() -> bool {
-    db::count("foods").await == 0 && db::count("goals").await == 0
+    // Раньше пустоту определяли по еде И целям. Целей больше нет; планка теперь
+    // в истории, по ней и судим — у человека, который чем-то пользовался, есть
+    // либо еда, либо планка.
+    db::count("foods").await == 0 && db::count("planka_history").await == 0
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

@@ -69,6 +69,7 @@ mod m021_reask_veg_fruit_again;
 mod m022_reask_heme_red_meat;
 mod m023_reask_fat_profile;
 mod m024_reask_veg_fruit_roots;
+mod m025_planka_from_goals;
 
 #[cfg(test)]
 mod tests;
@@ -215,6 +216,11 @@ const ALL: &[Migration] = &[
         version: m024_reask_veg_fruit_roots::VERSION,
         description: m024_reask_veg_fruit_roots::DESCRIPTION,
         script: || Box::pin(m024_reask_veg_fruit_roots::script()),
+    },
+    Migration {
+        version: m025_planka_from_goals::VERSION,
+        description: m025_planka_from_goals::DESCRIPTION,
+        script: || Box::pin(m025_planka_from_goals::script()),
     },
 ];
 

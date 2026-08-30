@@ -19,7 +19,7 @@ pub async fn script() -> Result<(), String> {
     let today = local::today_date().format("%Y-%m-%d").to_string();
 
     // ── Калории: дата создания цели ──
-    if let Some(goal) = local::list_goals()
+    if let Some(goal) = local::legacy_goals()
         .await
         .into_iter()
         .find(|g| g.nutrient == "Calories" && g.amount > 0.0)

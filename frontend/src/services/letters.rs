@@ -218,22 +218,11 @@ async fn recompute_calorie_planka(force: bool) {
 
     // Планки ещё нет → пересчитывать нечего (гейт второй недели не сработал).
     //
-    // Источников ДВА, и спрашивать надо оба. Планка живёт в истории, но записи в
-    // `goals` она при этом не отменила: та по-прежнему заводится каждым нашим
-    // пересчётом и есть у всех, кто получил планку до появления истории.
-    //
-    // Односторонние условия ломаются оба, зеркально. Только по `goals` — и
-    // человек, которого куратор ведёт с самого начала, после отвязки остаётся с
-    // кураторским числом навсегда: у него `goals` пуст, директива пишет лишь
-    // историю. Только по истории — и человек с давней планкой и пустой историей
-    // перестаёт пересчитываться совсем.
-    let goals = local::list_goals().await;
-    let goal = goals.iter().find(|g| {
-        g.nutrient == "Calories"
-            && g.direction == api_types::GoalDirection::AtMost
-            && g.amount > 0.0
-    });
-    let Some(previous) = local::calorie_goal_amount().await.or(goal.map(|g| g.amount)) else {
+    // Источник ОДИН — история. Раньше здесь спрашивались оба: и история, и запись
+    // в `goals`, потому что у человека с давней планкой история могла быть пуста.
+    // Теперь её заводит миграция (`m025_planka_from_goals`), и второй источник не
+    // нужен: планка — это запись в истории, других мест у неё нет.
+    let Some(previous) = local::calorie_goal_amount().await else {
         leptos::logging::log!("планка калорий: пересчёта нет — планка ещё не поставлена");
         return;
     };
@@ -246,10 +235,7 @@ async fn recompute_calorie_planka(force: bool) {
         .await
         .first()
         .and_then(|e| chrono::NaiveDate::parse_from_str(&e.date, "%Y-%m-%d").ok())
-        .or_else(|| {
-            goal.and_then(|g| g.created_at.get(0..10))
-                .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-        });
+;
     let anchor = app_flags::get(PLANKA_ANCHOR_KEY)
         .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
         .or(first_planka_day)

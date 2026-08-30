@@ -154,6 +154,11 @@ fn builder(name: &str) -> rexie::RexieBuilder {
                 .add_index(rexie::Index::new("updated_at", "updated_at")),
         )
         .add_object_store(
+            // Цели БОЛЬШЕ НЕ ИСПОЛЬЗУЮТСЯ — планка живёт в истории. Store всё ещё
+            // объявлен намеренно: `idb` удаляет необъявленное при ОТКРЫТИИ базы,
+            // то есть раньше, чем успеет отработать миграция, которая достаёт
+            // оттуда планку (`m025_planka_from_goals`). Снять объявление можно
+            // выпуском позже, когда миграция отработает у всех.
             ObjectStore::new("goals")
                 .key_path("id")
                 .add_index(rexie::Index::new("nutrient", "nutrient"))
@@ -473,7 +478,7 @@ fn key_field(store: &str) -> &'static str {
 /// from these records during the transition).
 fn outbox_target(store: &str, local_key: &str) -> Option<(String, String)> {
     match store {
-        "foods" | "diary" | "recipes" | "recipe_ingredients" | "goals" | "profile"
+        "foods" | "diary" | "recipes" | "recipe_ingredients" | "profile"
         | "weight_entries" | "step_entries" | "deletions" | "planka_history"
         | "support_msgs" => Some((store.to_string(), local_key.to_string())),
         "app_flags" => (!crate::services::app_flags::is_device_local(local_key))
@@ -514,7 +519,6 @@ fn is_synced_store(store: &str) -> bool {
             | "diary"
             | "recipes"
             | "recipe_ingredients"
-            | "goals"
             | "profile"
             | "weight_entries"
             | "step_entries"

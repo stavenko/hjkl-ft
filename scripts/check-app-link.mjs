@@ -10,7 +10,7 @@
 //   3. на экране — инструкция по установке, без всякого онбординга и входа.
 //
 // Для сравнения проверяется голый корень: там манифест обязан остаться общим.
-import { chromium } from "playwright";
+import { chromium, devices } from "playwright";
 
 const BASE = process.env.FE || "https://renorma-fit-dev.pages.dev";
 const UID = "demo-user-123";
@@ -25,7 +25,11 @@ const b = await chromium.launch({ headless: true });
 
 // ── ссылка из Mini App, чистый браузер ──────────────────────────────────────
 {
-  const context = await b.newContext({ serviceWorkers: "block" });
+  // Ссылку открывают С ТЕЛЕФОНА — оттуда её и присылает Mini App. Браузер без
+  // телефонного User-Agent попадает в ДЕСКТОПНУЮ ветку экрана установки, где
+  // вместо инструкции стоит «приложение предназначено для мобильных устройств»
+  // (см. pwa_prompt.rs): ставить его на компьютер незачем.
+  const context = await b.newContext({ ...devices["iPhone 13"], serviceWorkers: "block" });
   const page = await context.newPage();
   await page.goto(`${BASE}/?u=${UID}`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(10000);
@@ -37,8 +41,12 @@ const b = await chromium.launch({ headless: true });
   check("манифест ведёт в аккаунт", mf.start_url === `/?u=${UID}` && mf.id === `/app-${UID}`,
     `${mf.start_url} · ${mf.id}`);
 
-  const install = await page.locator('[data-testid="pwa-btn-dismiss"]').count();
-  check("сразу показана установка", install > 0, `экранов установки ${install}`);
+  // Признак экрана установки — САМА ИНСТРУКЦИЯ, пронумерованные шаги. Кнопка
+  // «Продолжить в браузере» для этого не годится: она есть только в десктопной
+  // ветке, а с телефона выхода из инструкции нет — приложение обязано стоять
+  // как PWA.
+  const steps = await page.locator(".steps .step-num").count();
+  check("сразу показана установка", steps > 0, `шагов инструкции ${steps}`);
   const text = (await page.locator("body").innerText()).replace(/\s+/g, " ");
   check("установка, а не онбординг и не «ссылка устарела»",
     text.includes("установить на рабочий стол") && !text.includes("Ссылка устарела"),

@@ -107,6 +107,10 @@ export async function serveWithProxy({ root, port = 0, configFor, upstream }) {
       const headers = {};
       if (req.headers.authorization) headers.authorization = req.headers.authorization;
       if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
+      // Origin ПЕРЕДАЁМ: церемония ключа-паспорта привязана к происхождению
+      // страницы, и без этого заголовка auth-воркер отвечает «missing ceremony
+      // origin» — вход не начинается вовсе, и проверять его нечем.
+      if (req.headers.origin) headers.origin = req.headers.origin;
       try {
         const up = await fetch(target, { method: req.method, headers, body });
         const buf = Buffer.from(await up.arrayBuffer());

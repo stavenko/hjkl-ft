@@ -223,11 +223,31 @@ const one = ({ file, where }) => new Promise((resolve) => {
 // Больше ядер брать смысла нет, а меньше — тоже: одна проверка идёт до трёх минут,
 // и она же становится дном прогона. `JOBS=1` возвращает прежний порядок по одной —
 // пригодится, если понадобится ловить проверку, которая не терпит соседей.
+// Проверки, которые ЖДУТ МОДЕЛЬ: фоновый проход признаков переспрашивает продукты
+// по-настоящему, и каждая такая занимает минуты. Вчетвером они друг друга топят —
+// очередь к модели общая, — и падают не по делу: «стало undefined».
+//
+// Поэтому им отдана ОДНА дорожка: между собой они идут по очереди, а остальные
+// проверки в это время идут своим чередом. Общее время от этого не растёт: раньше
+// эти же минуты просто тратились впустую.
+const MODEL_BOUND = new Set([
+  'check-fats-retry-gate.mjs',
+  'check-heme-reask.mjs',
+  'check-processed-meat-reask.mjs',
+  'check-veg-fruit-reask.mjs',
+  'check-calcium-iron-reset.mjs',
+  'check-fat-reset.mjs',
+]);
+
 const results = [];
-let next = 0;
-const worker = async () => {
-  while (next < run.length) {
-    const item = run[next++];
+const queues = {
+  model: run.filter(({ file }) => MODEL_BOUND.has(file)),
+  rest: run.filter(({ file }) => !MODEL_BOUND.has(file)),
+};
+const takeFrom = (q) => q.shift();
+const worker = async (q) => {
+  while (q.length) {
+    const item = takeFrom(q);
     const r = await one(item);
     const name = item.where === 'e2e' ? `e2e/${r.file}` : r.file;
     appendFileSync(LOG, `\n═══ ${name} ═══\n${r.out}\n`);
@@ -236,7 +256,10 @@ const worker = async () => {
     say(`${mark} ${name} (${r.secs} с)   [${results.length}/${run.length}]`);
   }
 };
-await Promise.all(Array.from({ length: Math.min(JOBS, run.length) }, worker));
+await Promise.all([
+  worker(queues.model),
+  ...Array.from({ length: Math.max(1, JOBS - 1) }, () => worker(queues.rest)),
+]);
 // Порядок завершения случаен — итог печатается по именам, чтобы два прогона можно
 // было сравнить построчно.
 results.sort((a, b) => a.file.localeCompare(b.file));

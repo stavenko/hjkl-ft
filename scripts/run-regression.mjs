@@ -66,6 +66,7 @@ const SKIP = new Map([
   ['check-admin-wipe-ui.mjs', 'проверяет АДМИНКУ'],
   ['check-landing-consent.mjs', 'проверяет ЛЕНДИНГ'],
   ['check-miniapp-app-link.mjs', 'проверяет мини-приложение Telegram'],
+  ['check-miniapp-access-button.mjs', 'проверяет мини-приложение Telegram'],
   ['check-miniapp-consent.mjs', 'проверяет мини-приложение Telegram'],
   ['check-miniapp-dev-entry.mjs', 'проверяет мини-приложение Telegram'],
   ['check-smoke-front.mjs', 'ходит на отдельный смоук-стенд fit-smoke'],

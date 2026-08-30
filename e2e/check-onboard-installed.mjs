@@ -6,7 +6,7 @@
 // перезагрузку и уводит на конечный экран.
 //
 // Прогон: node check-onboard-installed.mjs
-import { chromium } from "playwright";
+import { chromium, devices } from "playwright";
 
 const BASE = process.env.BASE || "https://renorma-fit-dev.pages.dev";
 const UID = "00000000-1111-2222-3333-444444444444";
@@ -20,7 +20,10 @@ const check = (ok, what) => {
 const b = await chromium.launch();
 
 async function openOnboard(seedInstalled) {
-  const ctx = await b.newContext({ viewport: { width: 390, height: 844 } });
+  // ТЕЛЕФОН, а не окно телефонного размера: без телефонного User-Agent экран
+  // установки уходит в десктопную ветку, где вместо инструкции стоит «приложение
+  // предназначено для мобильных устройств» — на компьютер его ставить незачем.
+  const ctx = await b.newContext({ ...devices["iPhone 13"] });
   await ctx.addInitScript(() => sessionStorage.setItem("update_auto_applied", "1"));
   const page = await ctx.newPage();
   await page.goto(`${BASE}/onboard?u=${UID}`, { waitUntil: "domcontentloaded" });

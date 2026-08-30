@@ -3,8 +3,8 @@
 //
 // После инвалидации кальция (и у только что заведённого продукта) значения нет —
 // и форма показывала строку не для всех: кальция в ней просто не было, вписать его
-// руками было негде. Сеем продукт с ПУСТОЙ картой нутриентов и смотрим, что все три
-// строки на месте. Заодно: пустое поле не должно сохраниться нулём — иначе фоновый
+// руками было негде. Сеем продукт с ПУСТОЙ картой нутриентов и смотрим, что строки
+// на месте. Заодно: пустое поле не должно сохраниться нулём — иначе фоновый
 // проход решит, что нутриент выяснен, и никогда его не запросит.
 import { chromium } from "playwright";
 
@@ -92,21 +92,20 @@ await page.goto(`${BASE}/diary`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector("#splash", { state: "detached", timeout: 20000 }).catch(() => {});
 await page.waitForTimeout(3000);
 
-// Долгое нажатие по строке дневника → «Изменить».
-const row = page.getByText("Треска").first();
-await row.waitFor({ timeout: 15000 });
-const box = await row.boundingBox();
-await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-await page.mouse.down();
-await page.waitForTimeout(900);
-await page.mouse.up();
-await page.waitForTimeout(800);
-await page.getByText("Изменить", { exact: false }).first().click().catch(() => {});
+// Правка открывается из меню строки дневника: «⋮» → «Изменить». Долгого нажатия
+// больше нет: вчера и сегодня устроены одинаково, и меню у обоих вызывается
+// кнопкой.
+await page.getByText("Треска").first().waitFor({ timeout: 15000 });
+await page.locator('[data-testid="diary-row-menu"]').first().click();
+await page.locator('[data-testid="diary-menu-edit"]').first().click();
 await page.waitForSelector('[data-testid="food-edit-page"]', { timeout: 15000 });
 
 const block = await page.locator('[data-testid="ai-found-block"]').innerText();
 console.log("блок «Найдено автоматически»:\n  " + block.replace(/\n+/g, " | "));
-for (const n of ["Кальций", "Омега-3", "Клетчатка", "Железо", "Усвоение железа"]) {
+// Спрашиваемый нутриент остался ОДИН — кальций; клетчатку отдаёт растительный
+// узел конвейера признаков, и своей строки в форме у неё больше нет. Омега-3
+// показывается не как нутриент, а как часть состава жира: «из них омега-3».
+for (const n of ["Кальций", "Железо", "Усвоение железа", "из них омега-3"]) {
   check(`строка «${n}» на месте`, block.includes(n), block.includes(n) ? "" : "нет в блоке");
 }
 

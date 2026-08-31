@@ -117,7 +117,11 @@ const CASES = [
 /// спрашивается вовсе — замер показал, что вместе эти два вопроса тянут модель вниз:
 /// стоило добавить правила про массу, как поехали сами цифры таблицы (1490 ккал,
 /// жиры 146, вместо ккал взяты кДж).
-const PROMPT_TABLE =
+const PROMPT_TABLE = (distinct) =>
+  (distinct === 1
+    ? `На всех фотографиях ОДНА И ТА ЖЕ упаковка, снятая с разных сторон: это ОДИН продукт, и позиция в ` +
+      `списке должна быть ровно одна.\n\n`
+    : "") +
   `Ты — nutrition vision assistant. На фотографиях — еда, которую съел человек: снимки упаковки с ` +
   `этикеткой, снимки самого продукта, снимки тарелки с готовой едой — или всё сразу.\n\n` +
   `Собери список еды. Несколько фотографий могут показывать ОДИН И ТОТ ЖЕ продукт с разных сторон или ` +
@@ -136,6 +140,38 @@ const PROMPT_MASS =
   `Заполняй поля ПО ПОРЯДКУ: сначала выпиши надпись, затем определи, чем она является, и лишь потом ` +
   `назови число. Не выводи количество из типичного размера такой упаковки: по этой массе мы считаем, ` +
   `что человек съел всю пачку, и выдуманная масса станет выдуманным весом съеденного.`;
+
+/// Вопрос ТРЕТИЙ, отдельным заходом: одна упаковка на кадрах или разные.
+///
+/// Отдельно — потому что вместе не работает. Когда это рассуждение стояло полем
+/// НАД списком еды, раздвоение сметаны оно вылечило, но испортило чтение: выписка
+/// строки поехала (энергия вклинилась в середину, 662 кДж стали «66,2 г», числа
+/// переставились ПЕРЕД подписями), и числа разложились по ней уже неверно. Тот же
+/// урок, что и с массой упаковки: два вопроса в одном запросе тянут друг друга вниз.
+const PROMPT_SAME =
+  `На фотографиях — упаковки продуктов. Один вопрос: это ОДНА И ТА ЖЕ упаковка, снятая с разных ` +
+  `сторон, или РАЗНЫЕ продукты?\n\n` +
+  `Сравнивай саму упаковку: форму, цвета, шрифт, узор. Надписи на разных сторонах ОТЛИЧАЮТСЯ — на одной ` +
+  `стороне название продукта, на другой состав и таблица, — и сами по себе разных продуктов НЕ означают.`;
+
+const SAME_SCHEMA = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  title: "SamePackage",
+  type: "object",
+  properties: {
+    what_is_the_same_and_what_differs: {
+      description: "ПО-РУССКИ, одним предложением: что на кадрах совпадает (форма, цвета, шрифт) и " +
+        "что отличается.",
+      type: "string",
+    },
+    distinct_foods: {
+      description: "Сколько РАЗНЫХ продуктов на кадрах — следует из предыдущего поля. Одна упаковка, " +
+        "снятая дважды, это 1.",
+      type: "integer",
+    },
+  },
+  required: ["what_is_the_same_and_what_differs", "distinct_foods"],
+};
 
 const NUM_OR_NULL = { type: ["number", "null"] };
 const STR_OR_NULL = { type: ["string", "null"] };
@@ -165,11 +201,6 @@ const SCHEMA = {
       items: {
         type: "object",
         properties: {
-          what_the_photos_show: {
-            description: "Что именно на каждом кадре: этикетка упаковки, продукт без этикетки или " +
-              "тарелка с готовой едой. Одной фразой.",
-            type: "string",
-          },
           nutrition_line_verbatim: {
             description: "ДОСЛОВНАЯ строка пищевой ценности со снимка, целиком, со всеми подписями и " +
               "единицами, как напечатана. Строка бывает разорвана между кадрами — собери её из всех. " +
@@ -237,7 +268,7 @@ const SCHEMA = {
             type: "number",
           },
         },
-        required: ["what_the_photos_show", "nutrition_line_verbatim", "how_legible_was_the_line",
+        required: ["nutrition_line_verbatim", "how_legible_was_the_line",
                    "energy_verbatim", "food_name", "kcal_per_100g", "protein_per_100g",
                    "fat_per_100g", "carbs_per_100g", "sugar_per_100g", "fiber_per_100g",
                    "saturated_fat_per_100g", "confidence_numbers_are_read_not_guessed"],
@@ -328,9 +359,22 @@ function parseRaw(raw) {
   const cleaned = raw.trim().replace(/^```(json)?/, "").replace(/```$/, "").trim();
   const o = cleaned.indexOf("{"), a = cleaned.indexOf("[");
   const start = a > -1 && (o === -1 || a < o) ? a : o;
-  if (start === -1) throw new Error(`в ответе нет JSON: ${cleaned.slice(0, 120)}`);
-  const close = cleaned[start] === "[" ? "]" : "}";
-  const end = cleaned.lastIndexOf(close);
+  if (start === -1) throw new Error(`в ответе нет JSON: ${cleaned.slice(0, 160)}`);
+  // Берём ПЕРВЫЙ сбалансированный контейнер, а не «до последней скобки»: модель
+  // иногда дописывает после ответа ещё один объект или прозу со скобками, и разрез
+  // по последней скобке склеивает из них мусор.
+  const open = cleaned[start], close = open === "[" ? "]" : "}";
+  let depth = 0, inStr = false, esc = false, end = -1;
+  for (let i = start; i < cleaned.length; i++) {
+    const c = cleaned[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === open) depth++;
+    else if (c === close && --depth === 0) { end = i; break; }
+  }
+  if (end === -1) throw new Error(`JSON не закрыт: ${cleaned.slice(start, start + 160)}`);
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
@@ -472,6 +516,15 @@ async function runCase(token, c) {
     let items, mass;
     try {
       // До трёх попыток: ответ, не сходящийся сам с собой, не показывают человеку.
+      // Сперва — сколько продуктов на кадрах; ответ уходит в чтение как данность.
+      let distinct = 1;
+      if (images.length > 1) {
+        try {
+          const same = await ask(token, images, PROMPT_SAME, SAME_SCHEMA);
+          distinct = same.distinct_foods ?? 1;
+          console.log(`  прогон ${i + 1}: упаковок — ${distinct}; «${same.what_is_the_same_and_what_differs}»`);
+        } catch { /* не ответил — считаем, что продукт один */ }
+      }
       let bad = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         const answer = await ask(token, images, PROMPT_TABLE, SCHEMA);

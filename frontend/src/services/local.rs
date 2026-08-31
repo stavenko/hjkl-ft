@@ -812,9 +812,9 @@ pub async fn save_food_to_diary(
         grams,
         waste_grams,
         meal_label,
-        deleted: false,
         created_at: now(),
         updated_at: now(),
+        ..DiaryEntry::direct()
     };
     db::put("diary", &entry).await;
     // Прошлый день уже подсчитан и заморожен — его итоги надо пересудить, иначе
@@ -970,9 +970,9 @@ pub async fn duplicate_diary_entry(
         waste_grams: src.waste_grams,
         // Target meal chosen in the duplicate dialog; falls back to the source's.
         meal_label: meal_label.or_else(|| src.meal_label.clone()),
-        deleted: false,
         created_at: now(),
         updated_at: now(),
+        ..DiaryEntry::direct()
     };
     db::put("diary", &entry).await;
     if past {
@@ -1215,9 +1215,9 @@ pub async fn add_draft_to_diary(draft_id: &str, grams: f64) -> Option<DiaryEntry
         grams,
         waste_grams: 0.0,
         meal_label: None,
-        deleted: false,
         created_at: now(),
         updated_at: now(),
+        ..DiaryEntry::direct()
     };
     db::put("diary", &entry).await;
     Some(entry)
@@ -1294,9 +1294,9 @@ pub async fn add_detected_foods_to_diary(items: &[ResolvedFood]) -> Vec<DiaryEnt
             grams: it.grams,
             waste_grams: 0.0,
             meal_label: None,
-            deleted: false,
             created_at: now(),
             updated_at: now(),
+            ..DiaryEntry::direct()
         };
         db::put("diary", &entry).await;
         // Classify this food's categories in the background (as `save_food_to_diary`).

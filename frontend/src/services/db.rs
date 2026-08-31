@@ -98,10 +98,13 @@ fn bump(store_name: &str) {
     });
 }
 
+/// 24: добавлен store `images` — единое хранилище картинок по хэшу содержимого
+/// (см. `services::images`). Запись дневника держит хэши, а не сами байты.
+///
 /// 23: снят store `curator_plankas`. Планка живёт в одном месте — в истории
 /// (`planka_history`), и отдельное кураторское хранилище стало лишним. Store не
 /// объявлен в билдере ниже, и `idb` удалит его при открытии сам.
-const DB_VERSION: u32 = 23;
+const DB_VERSION: u32 = 24;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -112,7 +115,7 @@ const ALL_STORES: &[&str] = &[
     "goals", "food_drafts", "weight_entries", "step_entries",
     "progress_photos", "summaries", "chat", "profile", "deletions", "_sync_meta",
     "app_flags", "planka_history", "food_probe",
-    "support_msgs", "support_outbox", "support_meta",
+    "support_msgs", "support_outbox", "support_meta", "images",
 ];
 
 /// Per-user database name. Each account gets its own IndexedDB so a different
@@ -246,6 +249,16 @@ fn builder(name: &str) -> rexie::RexieBuilder {
         // и НЕ синкается: это след разговора с моделью на этом устройстве, а не данные
         // человека.
         .add_object_store(ObjectStore::new("food_probe").key_path("key"))
+        // Картинки, по строке на изображение, ключ — хэш содержимого (см.
+        // `services::images`). Одна фотография, попавшая в две записи, лежит здесь
+        // однажды. НЕ синкается: снимок сделан на этом устройстве и живёт на нём,
+        // как и фотографии прогресса, а гонять мегабайты base64 через журнал синка
+        // нечем и незачем.
+        .add_object_store(
+            ObjectStore::new("images")
+                .key_path("hash")
+                .add_index(rexie::Index::new("created_at", "created_at")),
+        )
 }
 
 /// How long to wait for a database open before treating it as blocked. A schema

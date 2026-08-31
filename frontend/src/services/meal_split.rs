@@ -309,9 +309,9 @@ mod tests {
             grams: 100.0,
             waste_grams: 0.0,
             meal_label: None,
-            deleted: false,
             created_at: created_at.to_string(),
             updated_at: created_at.to_string(),
+            ..api_types::DiaryEntry::direct()
         }
     }
 

@@ -303,12 +303,48 @@ pub struct RecipeIngredient {
     pub updated_at: String,
 }
 
+/// Какая это запись дневника. Их три, и вложенности между ними нет — агрегатор
+/// держит ссылки на еду прямо в себе, а не через вложенные записи. См.
+/// `docs/lazy-diary-entry.md` §3.
+///
+/// Поле старым строкам не писалось, поэтому `Default` — `Direct`: всё, что уже
+/// лежит в дневнике, это ссылка на еду с граммами, и миграции данных для них не
+/// нужно.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiaryEntryKind {
+    /// Ссылка на еду с граммами. Создаётся из поиска; так работал дневник всегда.
+    #[default]
+    Direct,
+    /// Описание и фотографии, которые ещё предстоит разобрать. Нутриентов из такой
+    /// записи не вытащить: для итогов дня её как будто нет, пока она не
+    /// распознается.
+    Pending,
+    /// Разобранная запись: агрегатор ссылок на еду с граммами. Своих нутриентов не
+    /// имеет — вклад в индикаторы и цели считается по `items`, как у рецепта.
+    Aggregate,
+}
+
+/// Одна позиция агрегатора: ссылка на `Food` и съеденные граммы.
+///
+/// День и приём пищи не дублируются — они лежат на самой записи дневника, одни на
+/// весь список.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DiaryFoodItem {
+    pub food_id: String,
+    pub grams: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiaryEntry {
     pub id: String,
+    /// Еда этой записи — ТОЛЬКО у `Direct`. У `Pending` и `Aggregate` пусто: там
+    /// еда либо ещё не определена, либо лежит списком в `items`.
     pub food_id: String,
     pub date: String,
     pub time: Option<String>,
+    /// Съеденные граммы — ТОЛЬКО у `Direct`; у остальных ноль (граммы у каждой
+    /// позиции `items` свои).
     pub grams: f64,
     /// Inedible waste (bones, pits, …) in grams. Calories count `grams - waste_grams`.
     #[serde(default)]
@@ -316,8 +352,68 @@ pub struct DiaryEntry {
     pub meal_label: Option<String>,
     #[serde(default)]
     pub deleted: bool,
+    /// Форма записи. `serde(default)` — старые строки читаются как `Direct`.
+    #[serde(default)]
+    pub kind: DiaryEntryKind,
+    /// Описание, которое человек написал сам. Только у `Pending` / `Aggregate`.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Хэши картинок в провайдере изображений (`services::images`), а не сами
+    /// картинки: одна фотография, попавшая в две записи, хранится один раз.
+    #[serde(default)]
+    pub images: Vec<String>,
+    /// Разобранный список еды. Непустой только у `Aggregate`.
+    #[serde(default)]
+    pub items: Vec<DiaryFoodItem>,
+    /// Лейбл в два-три слова, которым распознанная запись показывается вместо
+    /// фотографий и описания. Сочиняется нейросетью по `items` и `description`.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Когда запись распознали. От этого момента считается недельный срок, после
+    /// которого её картинки больше не храним.
+    #[serde(default)]
+    pub recognized_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl DiaryEntry {
+    /// Заготовка обычной записи-ссылки: всё, что относится к ленивым формам,
+    /// пусто. Заполните `id`, еду, день и граммы, остальное возьмите отсюда через
+    /// `..DiaryEntry::direct()` — тогда новое поле, добавленное ленивой записи, не
+    /// заденет ни один из старых вызовов.
+    pub fn direct() -> Self {
+        Self {
+            id: String::new(),
+            food_id: String::new(),
+            date: String::new(),
+            time: None,
+            grams: 0.0,
+            waste_grams: 0.0,
+            meal_label: None,
+            deleted: false,
+            kind: DiaryEntryKind::Direct,
+            description: None,
+            images: Vec::new(),
+            items: Vec::new(),
+            label: None,
+            recognized_at: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
+
+    /// Участвует ли запись в подсчётах. `Pending` не участвует ничем: пока она не
+    /// разобрана, это обещание распознавания, а не съеденная еда — мы не можем ни
+    /// добавить по ней, ни отнять.
+    pub fn is_countable(&self) -> bool {
+        !matches!(self.kind, DiaryEntryKind::Pending)
+    }
+
+    /// Ждёт ли запись разбора.
+    pub fn is_pending(&self) -> bool {
+        matches!(self.kind, DiaryEntryKind::Pending)
+    }
 }
 
 /// Draft from AI lookup — not yet a confirmed Food.
@@ -891,4 +987,58 @@ pub struct SyncPullV2Response {
     pub version: u64,
     #[serde(default)]
     pub batches: Vec<SyncBatch>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Строка, уже лежащая у людей в дневнике, ничего не знает о ленивых записях.
+    /// Она обязана прочитаться как обычная ссылка на еду — на этом стоит решение НЕ
+    /// делать миграцию данных: старым строкам просто нечего менять.
+    #[test]
+    fn old_diary_row_reads_as_direct() {
+        let raw = r#"{
+            "id": "01912f00-0000-7000-8000-000000000001",
+            "food_id": "food-1",
+            "date": "2026-06-05",
+            "time": "12:30",
+            "grams": 150.0,
+            "waste_grams": 0.0,
+            "meal_label": "lunch",
+            "deleted": false,
+            "created_at": "2026-06-05T12:30:00+00:00",
+            "updated_at": "2026-06-05T12:30:00+00:00"
+        }"#;
+        let entry: DiaryEntry = serde_json::from_str(raw).expect("старая строка должна читаться");
+        assert_eq!(entry.kind, DiaryEntryKind::Direct);
+        assert_eq!(entry.grams, 150.0);
+        assert!(entry.images.is_empty());
+        assert!(entry.items.is_empty());
+        assert!(entry.description.is_none());
+        assert!(entry.is_countable());
+        assert!(!entry.is_pending());
+    }
+
+    /// Нераспознанная запись из подсчётов выпадает целиком: пока её не разобрали,
+    /// это обещание распознавания, а не съеденная еда.
+    #[test]
+    fn pending_entry_is_not_countable() {
+        let entry = DiaryEntry {
+            kind: DiaryEntryKind::Pending,
+            description: Some("гречка с котлетой".to_string()),
+            images: vec!["abc".to_string()],
+            ..DiaryEntry::direct()
+        };
+        assert!(!entry.is_countable());
+        assert!(entry.is_pending());
+
+        let done = DiaryEntry {
+            kind: DiaryEntryKind::Aggregate,
+            items: vec![DiaryFoodItem { food_id: "food-1".to_string(), grams: 200.0 }],
+            ..entry
+        };
+        assert!(done.is_countable());
+        assert!(!done.is_pending());
+    }
 }

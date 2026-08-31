@@ -19,6 +19,7 @@ pub mod flags_pipeline;
 pub mod food_probe;
 pub mod diag;
 pub mod i18n;
+pub mod images;
 pub mod heme;
 pub mod indicators;
 pub mod iron;

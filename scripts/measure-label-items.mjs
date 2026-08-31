@@ -64,6 +64,8 @@ const SINGLE = arg("single", null);
 // По умолчанию СВОЙ сервер: он бесплатный. Прямой путь через ai-worker — за деньги
 // и только по явному флагу.
 const ROUTE = arg("route", "queue");
+const RAW = process.argv.includes("--raw");
+// Показать сырой ответ модели целиком — чем она обосновала числа.
 
 // `null` в ожидании значит «поле обязано остаться пустым»: этого на этикетке нет,
 // и выдумывать его нельзя.
@@ -457,7 +459,9 @@ async function runCase(token, c) {
       // До трёх попыток: ответ, не сходящийся сам с собой, не показывают человеку.
       let bad = null;
       for (let attempt = 0; attempt < 3; attempt++) {
-        items = ((await ask(token, images, PROMPT_TABLE, SCHEMA)).items || []).map(flatten);
+        const answer = await ask(token, images, PROMPT_TABLE, SCHEMA);
+        if (RAW) console.log(JSON.stringify(answer, null, 2));
+        items = (answer.items || []).map(flatten);
         bad = items.map(kcalDisagreement).find(Boolean);
         if (!bad) break;
         const it = items[0];

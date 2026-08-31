@@ -4,7 +4,7 @@
 // Деления картинок на «этикетку» и «еду» больше нет (ТЗ §6.5), поэтому промпт
 // один на оба случая: он сам решает, что перед ним.
 //
-//   node scripts/measure-label-items.mjs [--n 3] [--case сметана|сырок] [--single 1|2]
+//   node scripts/measure-label-items.mjs [--n 3] [--case сметана|оливки|сырок] [--single 1|2]
 //
 //   --case     прогнать только один кейс
 //   --single   отправить только N-й снимок кейса — видно, что даёт каждый кадр
@@ -19,6 +19,11 @@
 // первом снимке название и калорийность, на втором не обрезанные углеводы.
 // Правильный ответ — ОДНА позиция со сведёнными цифрами, а не две половинки и не
 // два продукта. Поодиночке каждый кадр даёт правдоподобную, но неверную строку.
+//
+// «оливки» — два снимка: на одном таблица, на другом название и МАССЫ. Их две —
+// «масса нетто 290 г» и «масса пищевой продукции, помещённой в жидкую среду,
+// 180 г». По ТЗ §6.2 надпись массы означает «съедена вся упаковка», но съедены
+// будут оливки, а не рассол: верный ответ — 180 г.
 //
 // «сырок» — один снимок, зато с тремя ловушками на жир: в названии стоит
 // «массовая доля жира 5%», в таблице есть «в творожной части – 5,0 г», а жир
@@ -54,6 +59,15 @@ const CASES = [
     want: { kcal: 160, protein: 2.7, fat: 15.0, carbs: 3.6, sugar: null, package_weight_g: null },
   },
   {
+    name: "оливки",
+    files: ["scripts/fixtures/label-olives-1.jpg", "scripts/fixtures/label-olives-2.jpg"],
+    nameKeys: ["оливк"],
+    // Масс на банке ДВЕ: «масса нетто 290 г» и «масса пищевой продукции,
+    // помещённой в жидкую среду, 180 г». Съедены будут оливки, а не рассол,
+    // поэтому «вся банка» — это 180 г.
+    want: { kcal: 149, protein: 1.6, fat: 14.6, carbs: 0.0, sugar: null, package_weight_g: 180 },
+  },
+  {
     name: "сырок",
     files: ["scripts/fixtures/label-syrok.jpg"],
     nameKeys: ["сыр"],
@@ -61,7 +75,11 @@ const CASES = [
   },
 ];
 
-const PROMPT =
+/// Вопрос ПЕРВЫЙ: что за еда и что написано в таблице. Про массу упаковки здесь не
+/// спрашивается вовсе — замер показал, что вместе эти два вопроса тянут модель вниз:
+/// стоило добавить правила про массу, как поехали сами цифры таблицы (1490 ккал,
+/// жиры 146, вместо ккал взяты кДж).
+const PROMPT_TABLE =
   `Ты — nutrition vision assistant. На фотографиях — еда, которую съел человек. Это могут быть ` +
   `снимки упаковки с этикеткой, снимки самого продукта, снимки тарелки с готовой едой — или всё сразу.\n\n` +
   `Рассуждай про себя, затем выдай СТРОГИЙ JSON.\n` +
@@ -79,17 +97,30 @@ const PROMPT =
   `Оставь суть и определяющую цифру (жирность), отбрось описательное: «СЫРОК ТВОРОЖНЫЙ ГЛАЗИРОВАННЫЙ С ` +
   `АРОМАТОМ ВАНИЛИ, МАССОВАЯ ДОЛЯ ЖИРА 5%» → «глазированный сырок 5%»; «сметана, массовая доля жира ` +
   `15,0%» → «сметана 15%».\n` +
-  `- kcal, protein, fat, carbs — на 100 г, числами. Энергию бери в ккал (число перед «ккал»), кДж игнорируй.\n` +
+  `- kcal, protein, fat, carbs — на 100 г, числами. Энергию бери в ККАЛ: это число перед словом «ккал», ` +
+  `а НЕ перед «кДж». Значения переписывай ровно как напечатано, не пересчитывай и не округляй.\n` +
   `- sugar — только если на упаковке есть отдельная запись про сахар. Часто она спрятана В СКОБКАХ ` +
   `внутри строки углеводов и названа «сахароза»: «углеводы – 36,4 г (в т.ч. сахароза – 29,0 г)» → ` +
   `carbs 36.4, sugar 29.0. Такой записи нет — sugar: null, и НИКОГДА не переписывай в сахар значение углеводов.\n` +
   `- fiber, saturated_fat — так же: только из своей строки на упаковке, иначе null.\n` +
-  `- package_weight_g — ТОЛЬКО если на снимке ВИДНА надпись массы нетто («450 г», «масса нетто 180 г»); ` +
-  `иначе null. НЕ выводи её из типичного размера такой упаковки: по массе нетто мы считаем, что человек ` +
-  `съел всю пачку, и выдуманное нетто станет выдуманным весом съеденного.\n` +
   `- grams — сколько человек съел, если это видно (порция на тарелке); для снимка упаковки null.\n` +
   `- confidence — 0..1, насколько ты уверен в позиции.\n\n` +
   `Верни ТОЛЬКО JSON, без прозы.`;
+
+/// Вопрос ВТОРОЙ, отдельным заходом: сколько еды в упаковке. Спрашивается ЦИТАТА —
+/// процитировать несуществующую надпись труднее, чем назвать правдоподобное число,
+/// а по ТЗ §6.2 эта масса означает «съедена вся пачка», и выдуманная масса стала бы
+/// выдуманным весом съеденного.
+const PROMPT_MASS =
+  `На фотографиях — упаковка продукта. Один вопрос: написана ли где-нибудь МАССА ЕДЫ в этой упаковке.\n\n` +
+  `- Надписи массы на снимке НЕТ — верни null в обоих полях. Не выводи массу из типичного размера такой ` +
+  `упаковки и не бери числа из таблицы пищевой ценности: «на 100 г» — это не масса упаковки.\n` +
+  `- Масс НЕСКОЛЬКО — бери массу продукта БЕЗ ЖИДКОСТИ: не «масса нетто 290 г» (это вместе с рассолом), ` +
+  `а «масса пищевой продукции, помещённой в жидкую среду, 180 г» (бывает «масса основного продукта», ` +
+  `«сухой остаток»). Рассол не едят.\n` +
+  `- text — ДОСЛОВНАЯ надпись со снимка, из которой взята масса. Не можешь процитировать её словами с ` +
+  `упаковки — значит её там нет, оба поля null.\n\n` +
+  `Верни ТОЛЬКО JSON: {"grams": 180, "text": "Масса пищевой продукции, помещённой в жидкую среду 180 г"}`;
 
 const NUM_OR_NULL = { type: ["number", "null"] };
 const SCHEMA = {
@@ -104,7 +135,6 @@ const SCHEMA = {
         properties: {
           name: { type: "string" },
           grams: NUM_OR_NULL,
-          package_weight_g: NUM_OR_NULL,
           kcal: NUM_OR_NULL,
           protein: NUM_OR_NULL,
           fat: NUM_OR_NULL,
@@ -114,12 +144,20 @@ const SCHEMA = {
           saturated_fat: NUM_OR_NULL,
           confidence: { type: "number" },
         },
-        required: ["name", "grams", "package_weight_g", "kcal", "protein", "fat", "carbs",
+        required: ["name", "grams", "kcal", "protein", "fat", "carbs",
                    "sugar", "fiber", "saturated_fat", "confidence"],
       },
     },
   },
   required: ["items"],
+};
+
+const MASS_SCHEMA = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  title: "PackageMass",
+  type: "object",
+  properties: { grams: NUM_OR_NULL, text: { type: ["string", "null"] } },
+  required: ["grams", "text"],
 };
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
@@ -147,8 +185,8 @@ async function mintToken() {
 }
 
 /// Тот же формат запроса, что у `ai::vision_chat`: текст плюс image_url с data-URL.
-async function ask(token, images) {
-  const parts = [{ type: "text", text: PROMPT }];
+async function ask(token, images, prompt, schema) {
+  const parts = [{ type: "text", text: prompt }];
   for (const b64 of images) {
     parts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } });
   }
@@ -158,7 +196,7 @@ async function ask(token, images) {
     body: JSON.stringify({
       model: MODEL,
       messages: [{ role: "user", content: parts }],
-      response_format: { type: "json_schema", json_schema: { name: "response", schema: SCHEMA, strict: true } },
+      response_format: { type: "json_schema", json_schema: { name: "response", schema, strict: true } },
       stream: true, think: false, max_tokens: 2000,
     }),
   });
@@ -170,7 +208,7 @@ async function ask(token, images) {
     if (payload === "[DONE]") continue;
     try { content += JSON.parse(payload).choices?.[0]?.delta?.content ?? ""; } catch { /* пропуск */ }
   }
-  return JSON.parse(content.replace(/^```(json)?/, "").replace(/```$/, "").trim()).items || [];
+  return JSON.parse(content.replace(/^```(json)?/, "").replace(/```$/, "").trim());
 }
 
 const near = (got, want) =>
@@ -187,16 +225,21 @@ async function runCase(token, c) {
 
   let okCount = 0, okName = 0, okAll = 0;
   for (let i = 0; i < N; i++) {
-    let items;
-    try { items = await ask(token, images); }
-    catch (e) { console.log(`  прогон ${i + 1}: сбой — ${e.message}`); continue; }
+    let items, mass;
+    try {
+      items = (await ask(token, images, PROMPT_TABLE, SCHEMA)).items || [];
+      mass = await ask(token, images, PROMPT_MASS, MASS_SCHEMA);
+    } catch (e) { console.log(`  прогон ${i + 1}: сбой — ${e.message}`); continue; }
+    // Масса — ответ отдельного вопроса, кладём её в позицию для сверки.
+    for (const it of items) { it.package_weight_g = mass.grams ?? null; it.package_weight_text = mass.text ?? null; }
 
     if (items.length === 1) okCount++;
     for (const it of items) {
       const shown = FIELDS
         .map((k) => `${SHORT[k]}=${it[k] === null ? "—" : it[k]}${near(it[k], c.want[k]) ? "" : " ✗"}`)
         .join(" ");
-      console.log(`  прогон ${i + 1}: [${items.length}] «${it.name}»  ${shown}`);
+      const quote = it.package_weight_text ? `  ← «${it.package_weight_text}»` : "";
+      console.log(`  прогон ${i + 1}: [${items.length}] «${it.name}»  ${shown}${quote}`);
     }
     if (items.length === 1) {
       const it = items[0];

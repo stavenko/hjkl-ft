@@ -885,6 +885,31 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
         .ok_or_else(|| Error::RustError("missing model".into()))?
         .to_string();
 
+    // МОДЕЛИ СО СВОЕЙ СХЕМОЙ ВЫЗОВА. У moondream её задаёт `task`:
+    // query | caption | point | detect. Две последние возвращают КООРДИНАТЫ —
+    // рамки объектов и точки, — а это то, чего у чат-моделей нет вовсе.
+    //
+    // Такая модель ждёт не переписку, а свои поля: снимок в `image`, вопрос в
+    // `question`, описание искомого в `target`. Наш путь Workers AI собран вокруг
+    // `messages`, и без этого проброса картинка до модели НЕ ДОЕЗЖАЕТ: замер
+    // показал `input_tokens: 9` и уверенный рассказ про уличную сцену, которой на
+    // снимке не было.
+    //
+    // Поля переносятся, только когда клиент прислал `task`, — у обычного чата его
+    // нет, и его путь остаётся нетронутым.
+    const NATIVE_TASK_FIELDS: [&str; 6] =
+        ["image", "question", "target", "max_objects", "caption_length", "reasoning"];
+    if body.get("task").is_some_and(|t| t.is_string()) {
+        run_params.insert("task".to_string(), body["task"].clone());
+        // `messages` такой модели не нужны и сбивают её с толку.
+        run_params.remove("messages");
+        for field in NATIVE_TASK_FIELDS {
+            if let Some(v) = body.get(field) {
+                run_params.insert(field.to_string(), v.clone());
+            }
+        }
+    }
+
     let run_params = serde_json::Value::Object(run_params);
     let out = ai_run(env, &model, &run_params).await?;
 

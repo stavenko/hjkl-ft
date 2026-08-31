@@ -14,7 +14,8 @@
 // таблица на другом, масса на третьем. Поэтому пустое поле здесь — нормальный,
 // ожидаемый ответ, а не провал: сводить кадры будет следующий проход.
 //
-//   node scripts/measure-per-image.mjs [--route queue|direct] [--only ПОДСТРОКА] [--raw]
+//   node scripts/measure-per-image.mjs [--route queue|direct] [--dir КАТАЛОГ]
+//                                       [--only ПОДСТРОКА] [--raw]
 
 import { readFileSync, readdirSync } from "node:fs";
 
@@ -31,6 +32,7 @@ const arg = (name, def) => {
 };
 const ROUTE = arg("route", "queue");
 const ONLY = arg("only", null);
+const DIR = arg("dir", "scripts/fixtures");
 const RAW = process.argv.includes("--raw");
 
 const PROMPT =
@@ -274,11 +276,11 @@ async function main() {
   const token = await mintToken();
   console.log(ROUTE === "direct" ? `прямой путь, модель ${MODEL}` : "свой сервер (ocr-queue → Qwen2.5-VL)");
 
-  const files = readdirSync("scripts/fixtures")
+  const files = readdirSync(DIR)
     .filter((f) => f.endsWith(".jpg") && (!ONLY || f.includes(ONLY)))
     .sort();
   for (const f of files) {
-    const image = readFileSync(`scripts/fixtures/${f}`).toString("base64");
+    const image = readFileSync(`${DIR}/${f}`).toString("base64");
     let a;
     try {
       a = ROUTE === "direct" ? await askDirect(token, image) : await askQueue(token, image);

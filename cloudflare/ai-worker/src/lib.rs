@@ -253,6 +253,16 @@ async fn handle_vision_annotate(
             params.insert(field.to_string(), v.clone());
         }
     }
+    // Картинку платформа берёт data-URL'ом или адресом. ГОЛЫЙ base64 она не
+    // распознаёт и отвечает «8005: Engine Not Ready» — ошибкой, по которой причину
+    // не угадать никогда (я потратил на неё несколько заходов). Дописываем префикс
+    // сами, чтобы вызывающему не пришлось знать эту тонкость.
+    if let Some(img) = params.get("image").and_then(|v| v.as_str()) {
+        if !img.starts_with("data:") && !img.starts_with("http") {
+            let fixed = format!("data:image/jpeg;base64,{img}");
+            params.insert("image".to_string(), serde_json::Value::String(fixed));
+        }
+    }
     // Поток здесь не нужен: ответ короткий, а разбирать его проще целиком.
     params.insert("stream".to_string(), serde_json::Value::Bool(false));
 

@@ -182,6 +182,14 @@ const SCHEMA = {
               "Текст может лежать на боку. Строки не видно — null.",
             ...STR_OR_NULL,
           },
+          how_legible_was_the_line: {
+            description: "Насколько РАЗБОРЧИВА была строка, которую ты только что выписал, на самом " +
+              "снимке. \"clear\" — прочитана посимвольно, сомнений нет. \"partial\" — часть символов " +
+              "или цифр пришлось додумывать по смыслу. \"unreadable\" — шрифт слишком мелкий или " +
+              "смазан, разобрать нельзя.",
+            type: "string",
+            enum: ["clear", "partial", "unreadable"],
+          },
           energy_verbatim: {
             description: "Как записана энергия, ЦЕЛИКОМ и обе величины, как напечатано: " +
               "«281,4 кДж (66,8 ккал)» или «120,9ккал/509,7кДж». Не видно — null.",
@@ -227,10 +235,18 @@ const SCHEMA = {
             description: "Насыщенные жиры, если у них есть своя строка на упаковке; иначе null.",
             ...NUM_OR_NULL,
           },
+          confidence_numbers_are_read_not_guessed: {
+            description: "0..1: насколько ты уверен, что числа выше ПРОЧИТАНЫ со снимка, а не взяты " +
+              "из общих представлений о таком продукте. Близко к 1 — каждую цифру видно. Около 0,5 — " +
+              "часть цифр восстановлена по смыслу. Близко к 0 — числа правдоподобны, но со снимка не " +
+              "прочитаны.",
+            type: "number",
+          },
         },
-        required: ["what_the_photos_show", "nutrition_line_verbatim", "energy_verbatim", "food_name",
-                   "kcal_per_100g", "protein_per_100g", "fat_per_100g", "carbs_per_100g",
-                   "sugar_per_100g", "fiber_per_100g", "saturated_fat_per_100g"],
+        required: ["what_the_photos_show", "nutrition_line_verbatim", "how_legible_was_the_line",
+                   "energy_verbatim", "food_name", "kcal_per_100g", "protein_per_100g",
+                   "fat_per_100g", "carbs_per_100g", "sugar_per_100g", "fiber_per_100g",
+                   "saturated_fat_per_100g", "confidence_numbers_are_read_not_guessed"],
       },
     },
   },
@@ -440,7 +456,12 @@ const FROM_ANSWER = {
 
 /// Ответ модели → плоская запись, которой оперируют проверки и отчёт.
 function flatten(it) {
-  const out = { name: it.food_name ?? "", nutrition_text: it.nutrition_line_verbatim ?? null };
+  const out = {
+    name: it.food_name ?? "",
+    nutrition_text: it.nutrition_line_verbatim ?? null,
+    legible: it.how_legible_was_the_line ?? null,
+    confidence: it.confidence_numbers_are_read_not_guessed ?? null,
+  };
   for (const [short, full] of Object.entries(FROM_ANSWER)) out[short] = it[full] ?? null;
   return out;
 }
@@ -493,7 +514,8 @@ async function runCase(token, c) {
             .map((k) => `${SHORT[k]}=${it[k] === null ? "—" : it[k]}${near(it[k], c.want[k]) ? "" : " ✗"}`)
             .join(" ");
       const quote = it.package_weight_text ? `  ← «${it.package_weight_text}»` : "";
-      console.log(`  прогон ${i + 1}: [${items.length}] «${it.name}»  ${shown}${quote}`);
+      const self = `  [разборчивость ${it.legible}, уверенность ${it.confidence}]`;
+      console.log(`  прогон ${i + 1}: [${items.length}] «${it.name}»  ${shown}${self}${quote}`);
     }
     if (items.length === 1) {
       const it = items[0];

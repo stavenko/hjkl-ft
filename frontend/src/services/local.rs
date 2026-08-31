@@ -95,6 +95,57 @@ pub async fn list_diary(date: &str) -> Vec<DiaryEntry> {
     entries.into_iter().filter(|e| !e.deleted).collect()
 }
 
+/// Сколько живут картинки РАСПОЗНАННОЙ записи, считая с момента разбора.
+///
+/// Нераспознанной записи срок не идёт: её картинки — единственное, из чего эту
+/// запись ещё можно разобрать, и выбросить их значило бы потерять съеденное. У
+/// разобранной они остаются только показать человеку, что он снимал, и через
+/// неделю уступают место.
+pub const IMAGE_KEEP_DAYS: i64 = 7;
+
+/// Хэши картинок, которые ещё нужны кому-то из записей дневника.
+///
+/// Всё, чего здесь нет, провайдер вправе выбросить. Чистая функция — час берётся
+/// снаружи, чтобы правило срока проверялось тестом, а не наступлением следующей
+/// недели.
+pub(crate) fn live_image_hashes(
+    entries: &[DiaryEntry],
+    now: chrono::DateTime<chrono::Utc>,
+) -> std::collections::BTreeSet<String> {
+    let mut live = std::collections::BTreeSet::new();
+    for entry in entries {
+        if entry.deleted {
+            continue;
+        }
+        let keep = match entry.kind {
+            // Ждёт разбора — картинки нужны самому разбору, срока нет.
+            DiaryEntryKind::Pending => true,
+            // Разобрана — держим неделю от разбора. Записи без отметки о разборе
+            // (её ставит пайплайн) судим по последней правке: иначе строка без
+            // отметки хранила бы свои картинки вечно.
+            DiaryEntryKind::Aggregate => entry
+                .recognized_at
+                .as_deref()
+                .or(Some(entry.updated_at.as_str()))
+                .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+                .is_none_or(|at| (now - at.with_timezone(&chrono::Utc)).num_days() < IMAGE_KEEP_DAYS),
+            // Ссылка на еду картинок не носит.
+            DiaryEntryKind::Direct => false,
+        };
+        if keep {
+            live.extend(entry.images.iter().cloned());
+        }
+    }
+    live
+}
+
+/// Выбросить картинки, которые больше никому не нужны. Возвращает число удалённых.
+pub async fn sweep_images() -> usize {
+    let entries: Vec<DiaryEntry> = db::list_all("diary").await;
+    let live = live_image_hashes(&entries, chrono::Utc::now());
+    crate::services::images::prune(&live).await
+}
+
 /// All distinct dates with at least one non-deleted diary entry.
 pub async fn list_diary_dates() -> Vec<String> {
     let entries: Vec<DiaryEntry> = db::list_all("diary").await;
@@ -2240,6 +2291,88 @@ pub async fn list_progress_photos() -> Vec<ProgressPhoto> {
 
 #[cfg(test)]
 mod tests {
+    mod image_retention {
+        use super::super::{live_image_hashes, IMAGE_KEEP_DAYS};
+        use api_types::{DiaryEntry, DiaryEntryKind, DiaryFoodItem};
+
+        fn now() -> chrono::DateTime<chrono::Utc> {
+            chrono::DateTime::parse_from_rfc3339("2026-08-31T12:00:00+00:00")
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        }
+
+        fn days_ago(n: i64) -> String {
+            (now() - chrono::Duration::days(n)).to_rfc3339()
+        }
+
+        fn pending(hash: &str) -> DiaryEntry {
+            DiaryEntry {
+                id: format!("pending-{hash}"),
+                kind: DiaryEntryKind::Pending,
+                images: vec![hash.to_string()],
+                created_at: days_ago(30),
+                updated_at: days_ago(30),
+                ..DiaryEntry::direct()
+            }
+        }
+
+        fn aggregate(hash: &str, recognized_days_ago: i64) -> DiaryEntry {
+            DiaryEntry {
+                id: format!("aggregate-{hash}"),
+                kind: DiaryEntryKind::Aggregate,
+                images: vec![hash.to_string()],
+                items: vec![DiaryFoodItem { food_id: "food-1".to_string(), grams: 100.0 }],
+                recognized_at: Some(days_ago(recognized_days_ago)),
+                created_at: days_ago(recognized_days_ago),
+                updated_at: days_ago(recognized_days_ago),
+                ..DiaryEntry::direct()
+            }
+        }
+
+        /// Нераспознанной записи срок не идёт: её картинки — единственное, из чего
+        /// её ещё можно разобрать. Человек без связи месяц не должен потерять еду.
+        #[test]
+        fn pending_keeps_its_images_forever() {
+            let live = live_image_hashes(&[pending("a")], now());
+            assert!(live.contains("a"));
+        }
+
+        /// У разобранной записи картинки живут неделю и не дольше.
+        #[test]
+        fn aggregate_keeps_images_for_a_week() {
+            let entries = [aggregate("fresh", IMAGE_KEEP_DAYS - 1), aggregate("stale", IMAGE_KEEP_DAYS)];
+            let live = live_image_hashes(&entries, now());
+            assert!(live.contains("fresh"));
+            assert!(!live.contains("stale"));
+        }
+
+        /// Удалённая запись не держит ничего, даже если её ещё не разобрали.
+        #[test]
+        fn deleted_entry_holds_nothing() {
+            let entry = DiaryEntry { deleted: true, ..pending("gone") };
+            assert!(live_image_hashes(&[entry], now()).is_empty());
+        }
+
+        /// Разобранная запись без отметки о разборе судится по последней правке —
+        /// иначе она хранила бы свои картинки вечно.
+        #[test]
+        fn aggregate_without_recognized_at_falls_back_to_updated_at() {
+            let old = DiaryEntry { recognized_at: None, ..aggregate("old", 30) };
+            let recent = DiaryEntry { recognized_at: None, ..aggregate("recent", 1) };
+            let live = live_image_hashes(&[old, recent], now());
+            assert!(!live.contains("old"));
+            assert!(live.contains("recent"));
+        }
+
+        /// Одна картинка в двух записях переживает смерть одной из них: провайдер
+        /// хранит её однажды, и решает судьбу общий список живых хэшей.
+        #[test]
+        fn shared_image_survives_while_any_holder_lives() {
+            let entries = [aggregate("shared", 30), pending("shared")];
+            assert!(live_image_hashes(&entries, now()).contains("shared"));
+        }
+    }
+
     mod recipe_flags {
         use super::super::{recipe_flags, recipe_nutrition, RecipeIngredient};
         use api_types::{FatProfile, Food};

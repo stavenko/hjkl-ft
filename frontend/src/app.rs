@@ -168,6 +168,9 @@ pub fn App() -> impl IntoView {
                 // а не ждёт следующего запуска.
                 crate::services::classify::sweep_unprocessed().await;
             }
+            // Картинки разобранных записей живут неделю (`local::IMAGE_KEEP_DAYS`).
+            // Уборка идёт раз за запуск: снимки тяжёлые, а места на телефоне мало.
+            crate::services::local::sweep_images().await;
         });
     });
 

@@ -4,7 +4,7 @@
 // Деления картинок на «этикетку» и «еду» больше нет (ТЗ §6.5), поэтому промпт
 // один на оба случая: он сам решает, что перед ним.
 //
-//   node scripts/measure-label-items.mjs [--n 3] [--case сметана|оливки|сырок] [--single 1|2]
+//   node scripts/measure-label-items.mjs [--n 3] [--case сметана|оливки|творог|сырок] [--single 1|2]
 //
 //   --case     прогнать только один кейс
 //   --single   отправить только N-й снимок кейса — видно, что даёт каждый кадр
@@ -24,6 +24,10 @@
 // «масса нетто 290 г» и «масса пищевой продукции, помещённой в жидкую среду,
 // 180 г». По ТЗ §6.2 надпись массы означает «съедена вся упаковка», но съедены
 // будут оливки, а не рассол: верный ответ — 180 г.
+//
+// «творог» — один снимок, масса на нём есть и равна 250 г. Рядом с цифрами стоят
+// числа-обманки: крупная «1.2 %» жирности под датой, код «497» и килоджоули 406,5
+// прямо перед калорийностью.
 //
 // «сырок» — один снимок, зато с тремя ловушками на жир: в названии стоит
 // «массовая доля жира 5%», в таблице есть «в творожной части – 5,0 г», а жир
@@ -68,6 +72,14 @@ const CASES = [
     want: { kcal: 149, protein: 1.6, fat: 14.6, carbs: 0.0, sugar: null, package_weight_g: 180 },
   },
   {
+    name: "творог",
+    files: ["scripts/fixtures/label-tvorog.jpg"],
+    nameKeys: ["творог"],
+    // Числа-соседи: крупная «1.2 %» жирности под датой, код «497» и килоджоули
+    // 406,5 прямо перед калориями. Масса напечатана дважды и оба раза 250 г.
+    want: { kcal: 96, protein: 18, fat: 1.2, carbs: 3.3, sugar: null, package_weight_g: 250 },
+  },
+  {
     name: "сырок",
     files: ["scripts/fixtures/label-syrok.jpg"],
     nameKeys: ["сыр"],
@@ -94,14 +106,20 @@ const PROMPT_TABLE =
   `4. Заполняй только то, что ВИДНО. Не помнишь — не выдумывай: не прочитанное поле оставь null.\n\n` +
   `Правила:\n` +
   `- name — на РУССКОМ, короткое каноническое название продукта. ЖЁСТКИЙ ПРЕДЕЛ: не больше ТРЁХ слов. ` +
-  `Оставь суть и определяющую цифру (жирность), отбрось описательное: «СЫРОК ТВОРОЖНЫЙ ГЛАЗИРОВАННЫЙ С ` +
-  `АРОМАТОМ ВАНИЛИ, МАССОВАЯ ДОЛЯ ЖИРА 5%» → «глазированный сырок 5%»; «сметана, массовая доля жира ` +
-  `15,0%» → «сметана 15%».\n` +
-  `- kcal, protein, fat, carbs — на 100 г, числами. Энергию бери в ККАЛ: это число перед словом «ккал», ` +
-  `а НЕ перед «кДж». Значения переписывай ровно как напечатано, не пересчитывай и не округляй.\n` +
+  `Оставь суть и определяющую цифру жирности с упаковки, отбрось описательное: из «СЫРОК ТВОРОЖНЫЙ ` +
+  `ГЛАЗИРОВАННЫЙ С АРОМАТОМ ВАНИЛИ, МАССОВАЯ ДОЛЯ ЖИРА N%» получается «глазированный сырок N%».\n` +
+  `- nutrition_text — СНАЧАЛА выпиши ДОСЛОВНО строку пищевой ценности со снимка, целиком, со всеми ` +
+  `подписями и единицами, как она напечатана. Собери её из нескольких кадров, если она разорвана. Числа ` +
+  `ниже бери ТОЛЬКО из этой выписанной строки — не с других мест этикетки (жирность под датой, код ` +
+  `партии, срок годности) и НИКОГДА не из примеров этой инструкции.\n` +
+  `- kcal, protein, fat, carbs — на 100 г, ровно как в выписанной строке: не пересчитывай и не округляй. ` +
+  `Держи подписи при числах: то, что стоит после «белки», — это protein, после «жиры» — fat, после ` +
+  `«углеводы» — carbs, и перепутать их нельзя.\n` +
+  `- Энергия обычно записана ДВУМЯ величинами подряд, «<число> кДж / <число> ккал». Нужна та, за которой ` +
+  `стоит «ккал», — как правило ВТОРАЯ и вчетверо МЕНЬШАЯ. Число перед «кДж» не бери никогда.\n` +
   `- sugar — только если на упаковке есть отдельная запись про сахар. Часто она спрятана В СКОБКАХ ` +
-  `внутри строки углеводов и названа «сахароза»: «углеводы – 36,4 г (в т.ч. сахароза – 29,0 г)» → ` +
-  `carbs 36.4, sugar 29.0. Такой записи нет — sugar: null, и НИКОГДА не переписывай в сахар значение углеводов.\n` +
+  `внутри строки углеводов и названа «сахароза»: «углеводы – X г (в т.ч. сахароза – Y г)» → carbs = X, ` +
+  `sugar = Y. Такой записи нет — sugar: null, и НИКОГДА не переписывай в сахар значение углеводов.\n` +
   `- fiber, saturated_fat — так же: только из своей строки на упаковке, иначе null.\n` +
   `- grams — сколько человек съел, если это видно (порция на тарелке); для снимка упаковки null.\n` +
   `- confidence — 0..1, насколько ты уверен в позиции.\n\n` +
@@ -134,6 +152,7 @@ const SCHEMA = {
         type: "object",
         properties: {
           name: { type: "string" },
+          nutrition_text: { type: ["string", "null"] },
           grams: NUM_OR_NULL,
           kcal: NUM_OR_NULL,
           protein: NUM_OR_NULL,
@@ -144,7 +163,7 @@ const SCHEMA = {
           saturated_fat: NUM_OR_NULL,
           confidence: { type: "number" },
         },
-        required: ["name", "grams", "kcal", "protein", "fat", "carbs",
+        required: ["name", "nutrition_text", "grams", "kcal", "protein", "fat", "carbs",
                    "sugar", "fiber", "saturated_fat", "confidence"],
       },
     },
@@ -211,6 +230,38 @@ async function ask(token, images, prompt, schema) {
   return JSON.parse(content.replace(/^```(json)?/, "").replace(/```$/, "").trim());
 }
 
+/// Сходится ли прочитанное с самим собой: 4 ккал на грамм белка и углеводов, 9 на
+/// грамм жира. Расхождение НЕ говорит, какое из чисел неверно, — оно говорит, что
+/// чтению нельзя верить. Замер это показал дважды: на уменьшенном снимке модель
+/// теряла калорийность (подставляя килоджоули и код партии) при верных макросах, а
+/// на крупном читала калорийность верно, зато путала жиры с белками. Латать тут
+/// нечего — такой ответ отвергается, и модель отвечает заново, как в
+/// `ai::generate_validated`.
+///
+/// Порог широкий: у производителей свои округления, у оливок расхождение восемь
+/// процентов при верно прочитанной строке. Килоджоули промахиваются вчетверо и
+/// отсекаются с большим запасом.
+const KCAL_TOLERANCE = 0.2;
+
+function kcalDisagreement(item) {
+  const { protein: p, fat: f, carbs: c, kcal } = item;
+  if ([p, f, c, kcal].some((v) => v === null)) return null;
+  const computed = p * 4 + f * 9 + c * 4;
+  if (computed <= 0) return null;
+  const off = Math.abs(kcal - computed) / computed;
+  return off > KCAL_TOLERANCE ? { computed: Math.round(computed * 10) / 10, off } : null;
+}
+
+/// Цитата, из которой взята масса, обязана быть НАДПИСЬЮ О МАССЕ. Модель приносила
+/// сюда строку пищевой ценности и выуживала из неё число — такую массу отклоняем.
+function validateMass(mass) {
+  const text = (mass.text || "").toLowerCase();
+  const looksLikeMass = /масс|нетто|вес/.test(text);
+  const looksLikeTable = /ценност|ккал|кдж|белк|углевод/.test(text);
+  if (!looksLikeMass || looksLikeTable) return { grams: null, text: null, rejected: mass.text || null };
+  return mass;
+}
+
 const near = (got, want) =>
   want === null ? got === null : got !== null && Math.abs(got - want) <= Math.max(0.15, want * 0.02);
 
@@ -223,32 +274,58 @@ async function runCase(token, c) {
   const ref = FIELDS.map((k) => `${SHORT[k]} ${c.want[k] === null ? "—" : c.want[k]}`).join(", ");
   console.log(`\n[${c.name}] снимков ${images.length}, эталон на 100 г: ${ref}`);
 
-  let okCount = 0, okName = 0, okAll = 0;
+  let okCount = 0, okName = 0, okAll = 0, refused = 0;
   for (let i = 0; i < N; i++) {
     let items, mass;
     try {
-      items = (await ask(token, images, PROMPT_TABLE, SCHEMA)).items || [];
-      mass = await ask(token, images, PROMPT_MASS, MASS_SCHEMA);
+      // До трёх попыток: ответ, не сходящийся сам с собой, не показывают человеку.
+      let bad = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        items = (await ask(token, images, PROMPT_TABLE, SCHEMA)).items || [];
+        bad = items.map(kcalDisagreement).find(Boolean);
+        if (!bad) break;
+        console.log(`  прогон ${i + 1}: попытка ${attempt + 1} отвергнута — ` +
+          `ккал ${items[0].kcal} против ${bad.computed} по макросам (${(bad.off * 100).toFixed(0)}%)`);
+      }
+      // Попытки кончились, а ответ так и не сошёлся сам с собой: этикетка признаётся
+      // НЕПРОЧИТАННОЙ. Позиция идёт дальше без цифр с упаковки — КБЖУ ей подберут по
+      // названию, как любой еде без этикетки. Числа, за которые никто не отвечает, в
+      // дневник не попадают.
+      if (bad) {
+        for (const it of items) {
+          it.kcal = it.protein = it.fat = it.carbs = it.sugar = null;
+          it.label_unreadable = true;
+        }
+      }
+      mass = validateMass(await ask(token, images, PROMPT_MASS, MASS_SCHEMA));
+      if (mass.rejected) console.log(`  прогон ${i + 1}: масса отклонена, цитата не про массу — «${mass.rejected.slice(0, 80)}»`);
     } catch (e) { console.log(`  прогон ${i + 1}: сбой — ${e.message}`); continue; }
     // Масса — ответ отдельного вопроса, кладём её в позицию для сверки.
     for (const it of items) { it.package_weight_g = mass.grams ?? null; it.package_weight_text = mass.text ?? null; }
 
     if (items.length === 1) okCount++;
     for (const it of items) {
-      const shown = FIELDS
-        .map((k) => `${SHORT[k]}=${it[k] === null ? "—" : it[k]}${near(it[k], c.want[k]) ? "" : " ✗"}`)
-        .join(" ");
+      const shown = it.label_unreadable
+        ? `этикетка не прочитана, КБЖУ подберут по названию (нетто ${it.package_weight_g ?? "—"})`
+        : FIELDS
+            .map((k) => `${SHORT[k]}=${it[k] === null ? "—" : it[k]}${near(it[k], c.want[k]) ? "" : " ✗"}`)
+            .join(" ");
       const quote = it.package_weight_text ? `  ← «${it.package_weight_text}»` : "";
       console.log(`  прогон ${i + 1}: [${items.length}] «${it.name}»  ${shown}${quote}`);
     }
     if (items.length === 1) {
       const it = items[0];
       if (c.nameKeys.some((k) => it.name.toLowerCase().includes(k))) okName++;
-      if (FIELDS.every((k) => near(it[k], c.want[k]))) okAll++;
+      if (it.label_unreadable) refused++;
+      else if (FIELDS.every((k) => near(it[k], c.want[k]))) okAll++;
     }
   }
-  console.log(`  → одна позиция ${okCount}/${N}, название ${okName}/${N}, все поля ${okAll}/${N}`);
-  return { okCount, okName, okAll };
+  const wrong = N - okAll - refused;
+  console.log(`  → одна позиция ${okCount}/${N}, название ${okName}/${N}, ` +
+    `все поля ${okAll}/${N}` +
+    (refused ? `, честный отказ ${refused}/${N}` : "") +
+    (wrong ? `, НЕВЕРНО ${wrong}/${N}` : ""));
+  return { okCount, okName, okAll, refused };
 }
 
 async function main() {

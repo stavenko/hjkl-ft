@@ -48,6 +48,7 @@
 import { readFileSync } from "node:fs";
 
 const AI = process.env.AI || "https://ai-worker-dev.vg-stavenko.workers.dev";
+const OCR = process.env.OCR || "https://ocr-queue-dev.vg-stavenko.workers.dev";
 const PAY = process.env.PAY || "https://payment-worker-dev.vg-stavenko.workers.dev";
 const SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
 // Картиночная модель прямого пути — та, что стоит в `vision_model` дев-конфига.
@@ -60,6 +61,9 @@ const arg = (name, def) => {
 };
 const N = Number(arg("n", 3));
 const SINGLE = arg("single", null);
+// По умолчанию СВОЙ сервер: он бесплатный. Прямой путь через ai-worker — за деньги
+// и только по явному флагу.
+const ROUTE = arg("route", "queue");
 
 // `null` в ожидании значит «поле обязано остаться пустым»: этого на этикетке нет,
 // и выдумывать его нельзя.
@@ -118,42 +122,14 @@ const CASES = [
 /// стоило добавить правила про массу, как поехали сами цифры таблицы (1490 ккал,
 /// жиры 146, вместо ккал взяты кДж).
 const PROMPT_TABLE =
-  `Ты — nutrition vision assistant. На фотографиях — еда, которую съел человек. Это могут быть ` +
-  `снимки упаковки с этикеткой, снимки самого продукта, снимки тарелки с готовой едой — или всё сразу.\n\n` +
-  `Рассуждай про себя, затем выдай СТРОГИЙ JSON.\n` +
-  `Шаги:\n` +
-  `1. Пойми, что перед тобой на КАЖДОЙ фотографии: этикетка, продукт или тарелка с едой.\n` +
-  `2. Собери список еды. ВАЖНО: несколько фотографий могут показывать ОДИН И ТОТ ЖЕ продукт с ` +
-  `разных сторон или с разным приближением — это ОДНА позиция, а не несколько. Считай еду дважды ` +
-  `только если это действительно разная еда.\n` +
-  `3. Прочитай на упаковке пищевую ценность на 100 г. Таблица может быть РАЗОРВАНА между кадрами: ` +
-  `название на одном снимке, цифры на другом, часть строки обрезана краем — СВЕДИ прочитанное со ` +
-  `всех фотографий в одну таблицу. Текст может лежать на боку или вверх ногами — всё равно прочитай.\n` +
-  `4. Заполняй только то, что ВИДНО. Не помнишь — не выдумывай: не прочитанное поле оставь null.\n\n` +
-  `Правила:\n` +
-  `- name — на РУССКОМ, короткое каноническое название продукта. ЖЁСТКИЙ ПРЕДЕЛ: не больше ТРЁХ слов. ` +
-  `Оставь суть и определяющую цифру жирности с упаковки, отбрось описательное: из «СЫРОК ТВОРОЖНЫЙ ` +
-  `ГЛАЗИРОВАННЫЙ С АРОМАТОМ ВАНИЛИ, МАССОВАЯ ДОЛЯ ЖИРА N%» получается «глазированный сырок N%».\n` +
-  `- nutrition_text — СНАЧАЛА выпиши ДОСЛОВНО строку пищевой ценности со снимка, целиком, со всеми ` +
-  `подписями и единицами, как она напечатана. Собери её из нескольких кадров, если она разорвана. Числа ` +
-  `ниже бери ТОЛЬКО из этой выписанной строки — не с других мест этикетки (жирность под датой, код ` +
-  `партии, срок годности) и НИКОГДА не из примеров этой инструкции.\n` +
-  `- kcal, protein, fat, carbs — на 100 г, ровно как в выписанной строке: не пересчитывай и не округляй. ` +
-  `Держи подписи при числах: то, что стоит после «белки», — это protein, после «жиры» — fat, после ` +
-  `«углеводы» — carbs, и перепутать их нельзя.\n` +
-  `- Энергия обычно записана ДВУМЯ величинами подряд, в любом порядке: «X кДж / Y ккал» или «Y ккал/X кДж». ` +
-  `Выбирай по ПОДПИСИ, а не по месту: нужно число, у которого стоит «ккал». Оно всегда примерно вчетверо ` +
-  `МЕНЬШЕ числа при «кДж». Число при «кДж» не бери никогда.\n` +
-  `- Строки может не быть вовсе: у мяса, рыбы и масла углеводы часто не печатают. Нет строки — null, ` +
-  `выдумывать нечего.\n` +
-
-  `- sugar — только если на упаковке есть отдельная запись про сахар. Часто она спрятана В СКОБКАХ ` +
-  `внутри строки углеводов и названа «сахароза»: «углеводы – X г (в т.ч. сахароза – Y г)» → carbs = X, ` +
-  `sugar = Y. Такой записи нет — sugar: null, и НИКОГДА не переписывай в сахар значение углеводов.\n` +
-  `- fiber, saturated_fat — так же: только из своей строки на упаковке, иначе null.\n` +
-  `- grams — сколько человек съел, если это видно (порция на тарелке); для снимка упаковки null.\n` +
-  `- confidence — 0..1, насколько ты уверен в позиции.\n\n` +
-  `Верни ТОЛЬКО JSON, без прозы.`;
+  `Ты — nutrition vision assistant. На фотографиях — еда, которую съел человек: снимки упаковки с ` +
+  `этикеткой, снимки самого продукта, снимки тарелки с готовой едой — или всё сразу.\n\n` +
+  `Собери список еды. Несколько фотографий могут показывать ОДИН И ТОТ ЖЕ продукт с разных сторон или ` +
+  `с разным приближением — это ОДНА позиция. Считай еду дважды только если это действительно разная еда.\n\n` +
+  `Заполняй поля ПО ПОРЯДКУ: сначала то, что видишь, затем то, что из увиденного следует. Заполняй ` +
+  `только прочитанное — не помнишь, не разобрал, обрезано краем кадра: оставь null. Не бери числа с ` +
+  `лицевой стороны упаковки («много белка, 11 г») — это реклама, а не таблица. И никогда не бери числа ` +
+  `из примеров в описаниях полей.`;
 
 /// Вопрос ВТОРОЙ, отдельным заходом: сколько еды в упаковке. Спрашивается ЦИТАТА —
 /// процитировать несуществующую надпись труднее, чем назвать правдоподобное число,
@@ -161,64 +137,135 @@ const PROMPT_TABLE =
 /// выдуманным весом съеденного.
 const PROMPT_MASS =
   `На фотографиях — упаковка продукта. Один вопрос: сколько ЕДЫ в этой упаковке.\n\n` +
-  `Найди на снимке надпись, объявляющую количество, и определи, ЧТО ИМЕННО она объявляет:\n` +
-  `- "net" — масса всего содержимого упаковки («масса нетто»);\n` +
-  `- "drained" — масса продукта БЕЗ жидкости («масса пищевой продукции, помещённой в жидкую среду», ` +
-  `«масса основного продукта», «сухой остаток»);\n` +
-  `- "portion" — величина, относящаяся к ПОРЦИИ или к части содержимого, а не ко всей упаковке ` +
-  `(«на порцию N г», «в одной штуке N г»);\n` +
-  `- "pack_energy" — врезка, объявляющая калорийность всей пачки: «на N г: X ккал». Здесь N — масса пачки;\n` +
-  `- "none" — надписи о количестве на снимке нет.\n\n` +
-  `Правила:\n` +
-  `- Не выводи количество из типичного размера такой упаковки и не бери числа из таблицы пищевой ` +
-  `ценности: «на 100 г» — это способ подачи цифр, а не размер пачки.\n` +
-  `- Масса бывает в килограммах («0,430 кг») — переведи в граммы, grams всегда в граммах.\n` +
-  `- Если подходящих надписей несколько, верни ту, что точнее отвечает на вопрос «сколько еды в пачке», ` +
-  `и назови её вид честно.\n` +
-  `- text — ДОСЛОВНАЯ надпись со снимка. Не можешь процитировать её словами с упаковки — kind: "none".\n\n` +
-  `Верни ТОЛЬКО JSON: {"kind": "net", "grams": 250, "text": "МАССА НЕТТО: 250 г"}`;
+  `Заполняй поля ПО ПОРЯДКУ: сначала выпиши надпись, затем определи, чем она является, и лишь потом ` +
+  `назови число. Не выводи количество из типичного размера такой упаковки: по этой массе мы считаем, ` +
+  `что человек съел всю пачку, и выдуманная масса станет выдуманным весом съеденного.`;
 
 const NUM_OR_NULL = { type: ["number", "null"] };
+const STR_OR_NULL = { type: ["string", "null"] };
+
+/// Порядок полей — рабочий инструмент, а не оформление.
+///
+/// Схема уезжает модели ТЕКСТОМ, и она заполняет поля сверху вниз, опираясь на уже
+/// написанное. Поэтому сначала идёт то, что модель ВИДИТ (что на кадрах, дословная
+/// строка), и только потом то, что из увиденного СЛЕДУЕТ (название, числа). Стой
+/// «kcal» выше выписки — модель называла бы число раньше, чем прочла строку, и
+/// выписка превращалась бы в оправдание задним числом.
+///
+/// Описания полей — тоже инструкция модели, а не комментарий для людей: в проекте
+/// это записано прямо (`ai.rs:1405`, «`///` на полях уезжает В ПРОМПТ»). Порядок
+/// здесь стоил кому-то точности: правка ради гема молча испортила глобулу,
+/// 20/20 → 17/20 (`ai.rs:1811`).
 const SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   title: "PhotoItems",
   type: "object",
   properties: {
     items: {
+      description: "Еда, которую человек съел. Один продукт, снятый с разных сторон, — ОДНА позиция. " +
+        "Состав на упаковке («Состав: сливки, закваска») — это НЕ отдельные позиции: там перечислено, " +
+        "из чего сделан продукт, а съеден он один.",
       type: "array",
       items: {
         type: "object",
         properties: {
-          name: { type: "string" },
-          nutrition_text: { type: ["string", "null"] },
-          grams: NUM_OR_NULL,
-          kcal: NUM_OR_NULL,
-          protein: NUM_OR_NULL,
-          fat: NUM_OR_NULL,
-          carbs: NUM_OR_NULL,
-          sugar: NUM_OR_NULL,
-          fiber: NUM_OR_NULL,
-          saturated_fat: NUM_OR_NULL,
-          confidence: { type: "number" },
+          what_the_photos_show: {
+            description: "Что именно на каждом кадре: этикетка упаковки, продукт без этикетки или " +
+              "тарелка с готовой едой. Одной фразой.",
+            type: "string",
+          },
+          nutrition_line_verbatim: {
+            description: "ДОСЛОВНАЯ строка пищевой ценности со снимка, целиком, со всеми подписями и " +
+              "единицами, как напечатана. Строка бывает разорвана между кадрами — собери её из всех. " +
+              "Текст может лежать на боку. Строки не видно — null.",
+            ...STR_OR_NULL,
+          },
+          energy_verbatim: {
+            description: "Как записана энергия, ЦЕЛИКОМ и обе величины, как напечатано: " +
+              "«281,4 кДж (66,8 ккал)» или «120,9ккал/509,7кДж». Не видно — null.",
+            ...STR_OR_NULL,
+          },
+          food_name: {
+            description: "Короткое каноническое название продукта по-русски. ЖЁСТКИЙ ПРЕДЕЛ: не больше " +
+              "трёх слов. Оставь суть и определяющую цифру жирности, отбрось описательное.",
+            type: "string",
+          },
+          kcal_per_100g: {
+            description: "Из energy_verbatim: число, при котором стоит «ккал». Не то, при котором «кДж» " +
+              "— оно примерно вчетверо больше. Если рядом есть врезка на порцию («на N г: X ккал»), она " +
+              "сюда НЕ идёт: здесь только сто граммов.",
+            ...NUM_OR_NULL,
+          },
+          protein_per_100g: {
+            description: "Из nutrition_line_verbatim: число при подписи «белки» или «белок».",
+            ...NUM_OR_NULL,
+          },
+          fat_per_100g: {
+            description: "Из nutrition_line_verbatim: число при подписи «жиры» или «жир». У РАЗНЫХ " +
+              "подписей числа РАЗНЫЕ — не повторяй сюда значение белков. Если в скобках указан жир " +
+              "части продукта («в творожной части»), он сюда не идёт: нужен жир всего продукта.",
+            ...NUM_OR_NULL,
+          },
+          carbs_per_100g: {
+            description: "Из nutrition_line_verbatim: число при подписи «углеводы». У мяса и рыбы такой " +
+              "строки часто нет вовсе — тогда null.",
+            ...NUM_OR_NULL,
+          },
+          sugar_per_100g: {
+            description: "Отдельная запись про сахар, если она есть. Часто спрятана В СКОБКАХ внутри " +
+              "строки углеводов и названа «сахароза». Такой записи нет — null; значение углеводов сюда " +
+              "не переписывай.",
+            ...NUM_OR_NULL,
+          },
+          fiber_per_100g: {
+            description: "Клетчатка, если у неё есть своя строка на упаковке; иначе null.",
+            ...NUM_OR_NULL,
+          },
+          saturated_fat_per_100g: {
+            description: "Насыщенные жиры, если у них есть своя строка на упаковке; иначе null.",
+            ...NUM_OR_NULL,
+          },
         },
-        required: ["name", "nutrition_text", "grams", "kcal", "protein", "fat", "carbs",
-                   "sugar", "fiber", "saturated_fat", "confidence"],
+        required: ["what_the_photos_show", "nutrition_line_verbatim", "energy_verbatim", "food_name",
+                   "kcal_per_100g", "protein_per_100g", "fat_per_100g", "carbs_per_100g",
+                   "sugar_per_100g", "fiber_per_100g", "saturated_fat_per_100g"],
       },
     },
   },
   required: ["items"],
 };
 
+/// Тот же приём: сперва выписка надписи, затем чем эта надпись является, и лишь
+/// потом число. Раньше здесь первым стоял ответ, а цитата последней — то есть
+/// модель называла массу, а потом сочиняла, откуда её взяла.
 const MASS_SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   title: "PackageMass",
   type: "object",
   properties: {
-    kind: { type: "string", enum: ["net", "drained", "portion", "pack_energy", "none"] },
-    grams: NUM_OR_NULL,
-    text: { type: ["string", "null"] },
+    mass_label_verbatim: {
+      description: "ДОСЛОВНАЯ надпись со снимка, объявляющая количество продукта: «МАССА НЕТТО: 250 г», " +
+        "«Масса нетто 0,430 кг», «на 140 г: 93,5 ккал». Процитировать нечего — null.",
+      ...STR_OR_NULL,
+    },
+    what_this_label_declares: {
+      description: "Чем является выписанная надпись. net — масса всего содержимого упаковки; drained — " +
+        "масса продукта БЕЗ жидкости («помещённой в жидкую среду», «сухой остаток»); portion — величина " +
+        "для порции или части содержимого, а не для всей пачки; pack_energy — врезка с калорийностью " +
+        "всей пачки «на N г: X ккал», где N и есть масса пачки; none — надписи нет.",
+      type: "string",
+      enum: ["net", "drained", "portion", "pack_energy", "none"],
+    },
+    grams_of_food_in_package: {
+      description: "Сколько ГРАММОВ еды в упаковке — следует из двух предыдущих полей. Если на упаковке " +
+        "указаны ДВЕ массы, бери меньшую — ту, что БЕЗ жидкости: рассол и сироп не едят, поэтому " +
+        "«масса пищевой продукции, помещённой в жидкую среду, 180 г» важнее, чем «масса нетто 290 г». " +
+        "Килограммы переведи в граммы. Числа из таблицы пищевой ценности сюда не идут: «на 100 г» — " +
+        "способ подачи цифр, а не размер пачки. Надписи нет — null.",
+      ...NUM_OR_NULL,
+    },
   },
-  required: ["kind", "grams", "text"],
+  required: ["mass_label_verbatim", "what_this_label_declares", "grams_of_food_in_package"],
 };
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
@@ -245,8 +292,63 @@ async function mintToken() {
   return token;
 }
 
-/// Тот же формат запроса, что у `ai::vision_chat`: текст плюс image_url с data-URL.
-async function ask(token, images, prompt, schema) {
+/// Схема ТЕКСТОМ в промпт.
+///
+/// На on-prem её больше передать нечем: поллер шлёт в llama-swap только `model`,
+/// `temperature`, `stream` и `messages` — поля `response_format` там нет. Так что
+/// описания и порядок полей доезжают до модели единственным способом — текстом.
+///
+/// Это не костыль ради очереди: ai-worker поступает так же и на своём пути
+/// (`cloudflare/ai-worker/src/lib.rs:534`) — шлёт схему ДВАЖДЫ, полем и текстом,
+/// потому что одного поля стороннему провайдеру не хватает. Формулировка взята
+/// оттуда же, из `thirdparty_json_instruction`.
+const schemaInstruction = (schema) => {
+  const { $schema, title, ...rest } = schema;
+  return `\n\nYou MUST respond with ONLY valid JSON (no markdown, no explanation, no code fences). ` +
+    `Respond with ONE object, never an array of objects. ` +
+    `The JSON MUST conform to this exact schema:\n${JSON.stringify(rest)}`;
+};
+
+/// Вытащить JSON из сырого текста модели: снять заборы кода и взять внешний
+/// контейнер. Ровно то же делает `ai::extract_json_value` — на очереди разбор
+/// клиентский, потому что поллер отдаёт сырой ответ как есть.
+function parseRaw(raw) {
+  const cleaned = raw.trim().replace(/^```(json)?/, "").replace(/```$/, "").trim();
+  const o = cleaned.indexOf("{"), a = cleaned.indexOf("[");
+  const start = a > -1 && (o === -1 || a < o) ? a : o;
+  if (start === -1) throw new Error(`в ответе нет JSON: ${cleaned.slice(0, 120)}`);
+  const close = cleaned[start] === "[" ? "]" : "}";
+  const end = cleaned.lastIndexOf(close);
+  return JSON.parse(cleaned.slice(start, end + 1));
+}
+
+/// ON-PREM: задание в очередь, дальше опрос до готовности. Поллер запускает промпт
+/// на своём Qwen2.5-VL и возвращает СЫРОЙ текст — ни схемы, ни разбора, ни проверок
+/// на его стороне нет (`services/ocr-poller/poller.py`).
+async function askQueue(token, images, prompt, schema) {
+  const submit = await fetch(`${OCR}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ images, prompt: prompt + schemaInstruction(schema) }),
+  });
+  if (!submit.ok) throw new Error(`submit HTTP ${submit.status}: ${(await submit.text()).slice(0, 160)}`);
+  const { job_id: jobId } = await submit.json();
+
+  // Своя очередь и своя видеокарта: 32b по нескольким кадрам думает долго.
+  for (let i = 0; i < 200; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const res = await fetch(`${OCR}/job/${jobId}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) continue;
+    const job = await res.json();
+    if (job.status === "done") return parseRaw(job.result || "");
+    if (job.status === "error") throw new Error(`очередь: ${job.error || "recognition failed"}`);
+  }
+  throw new Error("очередь не ответила за пять минут");
+}
+
+/// ПРЯМОЙ путь через ai-worker — за деньги, поэтому только по флагу `--route direct`.
+/// Здесь схема уходит и полем, и текстом: воркер сам добавит её в промпт.
+async function askDirect(token, images, prompt, schema) {
   const parts = [{ type: "text", text: prompt }];
   for (const b64 of images) {
     parts.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } });
@@ -269,8 +371,11 @@ async function ask(token, images, prompt, schema) {
     if (payload === "[DONE]") continue;
     try { content += JSON.parse(payload).choices?.[0]?.delta?.content ?? ""; } catch { /* пропуск */ }
   }
-  return JSON.parse(content.replace(/^```(json)?/, "").replace(/```$/, "").trim());
+  return parseRaw(content);
 }
+
+const ask = (token, images, prompt, schema) =>
+  ROUTE === "direct" ? askDirect(token, images, prompt, schema) : askQueue(token, images, prompt, schema);
 
 /// Сходится ли прочитанное с самим собой: 4 ккал на грамм белка и углеводов, 9 на
 /// грамм жира. Расхождение НЕ говорит, какое из чисел неверно, — оно говорит, что
@@ -280,10 +385,11 @@ async function ask(token, images, prompt, schema) {
 /// нечего — такой ответ отвергается, и модель отвечает заново, как в
 /// `ai::generate_validated`.
 ///
-/// Порог широкий: у производителей свои округления, у оливок расхождение восемь
-/// процентов при верно прочитанной строке. Килоджоули промахиваются вчетверо и
-/// отсекаются с большим запасом.
-const KCAL_TOLERANCE = 0.2;
+/// Порог выбран по замеру, а не на глаз. Законное расхождение — округления
+/// производителя: у оливок восемь процентов при верно прочитанной строке. Ложное
+/// чтение сырка на своей модели дало девятнадцать и при прежнем пороге в двадцать
+/// процентов проскочило как верное. Двенадцать разделяют эти два случая.
+const KCAL_TOLERANCE = 0.12;
 
 function kcalDisagreement(item) {
   const { kcal } = item;
@@ -310,18 +416,32 @@ function kcalDisagreement(item) {
 /// содержимого, а не пачка.
 const MASS_KINDS = { drained: 3, net: 2, pack_energy: 1, portion: 0, none: 0 };
 
-function acceptMass(mass) {
-  const rank = MASS_KINDS[mass.kind] ?? 0;
-  if (rank === 0 || mass.grams === null) {
-    return { grams: null, text: null, rejected: mass.kind === "none" ? null : `${mass.kind}: ${mass.text}` };
+function acceptMass(answer) {
+  const kind = answer.what_this_label_declares;
+  const grams = answer.grams_of_food_in_package ?? null;
+  const text = answer.mass_label_verbatim ?? null;
+  if ((MASS_KINDS[kind] ?? 0) === 0 || grams === null) {
+    return { grams: null, text: null, rejected: kind === "none" ? null : `${kind}: ${text}` };
   }
-  return mass;
+  return { grams, text };
 }
 
 const near = (got, want) =>
   want === null ? got === null : got !== null && Math.abs(got - want) <= Math.max(0.15, want * 0.02);
 
+// Имена полей ответа → короткие подписи отчёта.
 const FIELDS = ["kcal", "protein", "fat", "carbs", "sugar", "package_weight_g"];
+const FROM_ANSWER = {
+  kcal: "kcal_per_100g", protein: "protein_per_100g", fat: "fat_per_100g",
+  carbs: "carbs_per_100g", sugar: "sugar_per_100g",
+};
+
+/// Ответ модели → плоская запись, которой оперируют проверки и отчёт.
+function flatten(it) {
+  const out = { name: it.food_name ?? "", nutrition_text: it.nutrition_line_verbatim ?? null };
+  for (const [short, full] of Object.entries(FROM_ANSWER)) out[short] = it[full] ?? null;
+  return out;
+}
 const SHORT = { kcal: "ккал", protein: "Б", fat: "Ж", carbs: "У", sugar: "сахар", package_weight_g: "нетто" };
 
 async function runCase(token, c) {
@@ -337,7 +457,7 @@ async function runCase(token, c) {
       // До трёх попыток: ответ, не сходящийся сам с собой, не показывают человеку.
       let bad = null;
       for (let attempt = 0; attempt < 3; attempt++) {
-        items = (await ask(token, images, PROMPT_TABLE, SCHEMA)).items || [];
+        items = ((await ask(token, images, PROMPT_TABLE, SCHEMA)).items || []).map(flatten);
         bad = items.map(kcalDisagreement).find(Boolean);
         if (!bad) break;
         const it = items[0];
@@ -391,7 +511,9 @@ async function main() {
   const only = arg("case", null);
   const cases = only ? CASES.filter((c) => c.name === only) : CASES;
   if (!cases.length) { console.error(`нет кейса «${only}»`); process.exit(1); }
-  console.log(`модель ${MODEL}, повторов ${N}`);
+  console.log(ROUTE === "direct"
+    ? `прямой путь, модель ${MODEL}, повторов ${N}`
+    : `свой сервер (ocr-queue → Qwen2.5-VL), повторов ${N}`);
   for (const c of cases) await runCase(token, c);
 }
 

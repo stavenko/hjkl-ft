@@ -196,7 +196,80 @@ async fn handle(req: Request, env: &Env, ctx: &Context) -> Result<Response> {
         return handle_chat_completions(req, env, ctx, &user_id).await;
     }
 
+    if path == "/vision/annotate" {
+        let authorization = req.headers().get("Authorization")?.unwrap_or_default();
+        if !subscription_active(env, &authorization).await? {
+            return Ok(error_response("subscription_required", 402));
+        }
+        return handle_vision_annotate(req, env, ctx, &user_id).await;
+    }
+
     Ok(error_response("Not found", 404))
+}
+
+/// РАЗМЕТКА СНИМКА. Отдельная ручка для моделей, у которых свой формат вызова.
+///
+/// Своей она сделана намеренно, а не врезкой в `/chat/completions`. Там переписка,
+/// схема ответа и накопленные правила её подачи; здесь — снимок и вопрос «что на
+/// нём и где». Тела запросов не пересекаются ничем, и смешивать их значило бы
+/// таскать в каждом чате поля, которые чату не нужны.
+///
+/// Что умеет moondream (`task`): `query` — прочитать и ответить, `caption` —
+/// описать, `point` — вернуть точки, `detect` — вернуть РАМКИ по описанию цели в
+/// `target`. Последние два дают координаты, которых у чат-моделей нет вовсе.
+///
+/// Тело: `{ "model": …, "task": "detect", "image": "<base64 или https-адрес>",
+/// "target": "nutrition facts", "max_objects": 5 }`. Ответ отдаётся КАК ЕСТЬ —
+/// разбирает его вызывающий, здесь никакой своей логики нет.
+async fn handle_vision_annotate(
+    mut req: Request,
+    env: &Env,
+    ctx: &Context,
+    user_id: &str,
+) -> Result<Response> {
+    let body: serde_json::Value = match req.json().await {
+        Ok(v) => v,
+        Err(e) => return Ok(error_response(&format!("invalid JSON body: {e}"), 400)),
+    };
+    let model = body
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("@cf/moondream/moondream3.1-9B-A2B")
+        .to_string();
+    // Без картинки размечать нечего — и молча отвечать про несуществующий снимок
+    // модель умеет очень уверенно, поэтому отказываем сразу.
+    if !body.get("image").is_some_and(|v| v.is_string()) {
+        return Ok(error_response("missing image", 400));
+    }
+
+    let mut params = serde_json::Map::new();
+    params.insert(
+        "task".to_string(),
+        body.get("task").cloned().unwrap_or_else(|| serde_json::json!("query")),
+    );
+    for field in ["image", "question", "target", "max_objects", "caption_length",
+                  "reasoning", "max_tokens", "temperature", "top_p"] {
+        if let Some(v) = body.get(field) {
+            params.insert(field.to_string(), v.clone());
+        }
+    }
+    // Поток здесь не нужен: ответ короткий, а разбирать его проще целиком.
+    params.insert("stream".to_string(), serde_json::Value::Bool(false));
+
+    let out = ai_run(env, &model, &serde_json::Value::Object(params)).await?;
+    let out_val: serde_json::Value = serde_wasm_bindgen::from_value(out)
+        .map_err(|e| Error::RustError(format!("AI.run output decode: {e}")))?;
+
+    // Учёт расхода — тот же, что у чата, и так же best-effort: он не имеет права
+    // помешать ответу.
+    if let Some((p, c)) = usage_split(&out_val) {
+        let env = env.clone();
+        let user_id = user_id.to_string();
+        let model = model.clone();
+        ctx.wait_until(async move { report_usage(&env, &user_id, &model, p, c).await });
+    }
+
+    Response::from_json(&out_val)
 }
 
 // ── Neuro-token usage accounting (best-effort) ────────────────────────────────
@@ -884,31 +957,6 @@ The JSON MUST conform to this exact schema:\n{schema_json}"
         .and_then(|m| m.as_str())
         .ok_or_else(|| Error::RustError("missing model".into()))?
         .to_string();
-
-    // МОДЕЛИ СО СВОЕЙ СХЕМОЙ ВЫЗОВА. У moondream её задаёт `task`:
-    // query | caption | point | detect. Две последние возвращают КООРДИНАТЫ —
-    // рамки объектов и точки, — а это то, чего у чат-моделей нет вовсе.
-    //
-    // Такая модель ждёт не переписку, а свои поля: снимок в `image`, вопрос в
-    // `question`, описание искомого в `target`. Наш путь Workers AI собран вокруг
-    // `messages`, и без этого проброса картинка до модели НЕ ДОЕЗЖАЕТ: замер
-    // показал `input_tokens: 9` и уверенный рассказ про уличную сцену, которой на
-    // снимке не было.
-    //
-    // Поля переносятся, только когда клиент прислал `task`, — у обычного чата его
-    // нет, и его путь остаётся нетронутым.
-    const NATIVE_TASK_FIELDS: [&str; 6] =
-        ["image", "question", "target", "max_objects", "caption_length", "reasoning"];
-    if body.get("task").is_some_and(|t| t.is_string()) {
-        run_params.insert("task".to_string(), body["task"].clone());
-        // `messages` такой модели не нужны и сбивают её с толку.
-        run_params.remove("messages");
-        for field in NATIVE_TASK_FIELDS {
-            if let Some(v) = body.get(field) {
-                run_params.insert(field.to_string(), v.clone());
-            }
-        }
-    }
 
     let run_params = serde_json::Value::Object(run_params);
     let out = ai_run(env, &model, &run_params).await?;

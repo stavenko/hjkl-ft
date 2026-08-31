@@ -2,22 +2,31 @@
 // удалось прочесть с упаковки.
 //
 // Деления картинок на «этикетку» и «еду» больше нет (ТЗ §6.5), поэтому промпт
-// один на оба случая: он сам решает, что перед ним. Здесь меряется самый
-// неудобный подслучай — ОДИН продукт, снятый ДВАЖДЫ, у которого таблица разорвана
-// между кадрами: на первом снимке есть название и калорийность, на втором — не
-// обрезанные углеводы. Правильный ответ — ОДНА позиция со сведёнными цифрами, а
-// не две половинки и не два продукта.
+// один на оба случая: он сам решает, что перед ним.
 //
-//   node scripts/measure-label-items.mjs [--n 3] [--single 1|2]
+//   node scripts/measure-label-items.mjs [--n 3] [--case сметана|сырок] [--single 1|2]
 //
-//   --single   отправить только один снимок из двух — видно, что даёт каждый
-//              кадр поодиночке и что добавляет их сведение
+//   --case     прогнать только один кейс
+//   --single   отправить только N-й снимок кейса — видно, что даёт каждый кадр
+//              поодиночке и что добавляет их сведение
 //
 // Разворачивать снимки не нужно: текст на них лежит на боку, и модель читает его
 // как есть — проверено.
 //
-// Эталон вычитан со снимков вручную: сметана 15 %, на 100 г — 160 ккал, белки
-// 2,7, жиры 15,0, углеводы 3,6.
+// КЕЙСЫ
+//
+// «сметана» — один продукт, снятый ДВАЖДЫ, таблица разорвана между кадрами: на
+// первом снимке название и калорийность, на втором не обрезанные углеводы.
+// Правильный ответ — ОДНА позиция со сведёнными цифрами, а не две половинки и не
+// два продукта. Поодиночке каждый кадр даёт правдоподобную, но неверную строку.
+//
+// «сырок» — один снимок, зато с тремя ловушками на жир: в названии стоит
+// «массовая доля жира 5%», в таблице есть «в творожной части – 5,0 г», а жир
+// продукта — 11,1 г. Плюс единственный пока случай, где сахар на этикетке
+// ВЫДЕЛЕН отдельной строкой («в т.ч. сахароза – 29,0 г») и обязан доехать.
+//
+// Эталоны вычитаны со снимков вручную. У сырка глиф жира двоится между «17,1» и
+// «11,1», и решает арифметика: 10,0×4 + 36,4×4 + 11,1×9 = 285,5 ккал ровно.
 
 import { readFileSync } from "node:fs";
 
@@ -35,14 +44,22 @@ const arg = (name, def) => {
 const N = Number(arg("n", 3));
 const SINGLE = arg("single", null);
 
-const FIXTURES = ["scripts/fixtures/label-smetana-1.jpg", "scripts/fixtures/label-smetana-2.jpg"];
-
-// Что должно получиться: ОДНА позиция, вот с такими цифрами на 100 г.
-const WANT = {
-  count: 1,
-  nameKeys: ["сметан"],
-  per100g: { kcal: 160, protein: 2.7, fat: 15.0, carbs: 3.6 },
-};
+// `null` в ожидании значит «поле обязано остаться пустым»: этого на этикетке нет,
+// и выдумывать его нельзя.
+const CASES = [
+  {
+    name: "сметана",
+    files: ["scripts/fixtures/label-smetana-1.jpg", "scripts/fixtures/label-smetana-2.jpg"],
+    nameKeys: ["сметан"],
+    want: { kcal: 160, protein: 2.7, fat: 15.0, carbs: 3.6, sugar: null, package_weight_g: null },
+  },
+  {
+    name: "сырок",
+    files: ["scripts/fixtures/label-syrok.jpg"],
+    nameKeys: ["сыр"],
+    want: { kcal: 285.5, protein: 10.0, fat: 11.1, carbs: 36.4, sugar: 29.0, package_weight_g: null },
+  },
+];
 
 const PROMPT =
   `Ты — nutrition vision assistant. На фотографиях — еда, которую съел человек. Это могут быть ` +
@@ -58,12 +75,15 @@ const PROMPT =
   `всех фотографий в одну таблицу. Текст может лежать на боку или вверх ногами — всё равно прочитай.\n` +
   `4. Заполняй только то, что ВИДНО. Не помнишь — не выдумывай: не прочитанное поле оставь null.\n\n` +
   `Правила:\n` +
-  `- name — на РУССКОМ, короткое каноническое название продукта (1-3 слова), с жирностью или ` +
-  `другой определяющей цифрой, если она есть на упаковке: «сметана 15%».\n` +
+  `- name — на РУССКОМ, короткое каноническое название продукта. ЖЁСТКИЙ ПРЕДЕЛ: не больше ТРЁХ слов. ` +
+  `Оставь суть и определяющую цифру (жирность), отбрось описательное: «СЫРОК ТВОРОЖНЫЙ ГЛАЗИРОВАННЫЙ С ` +
+  `АРОМАТОМ ВАНИЛИ, МАССОВАЯ ДОЛЯ ЖИРА 5%» → «глазированный сырок 5%»; «сметана, массовая доля жира ` +
+  `15,0%» → «сметана 15%».\n` +
   `- kcal, protein, fat, carbs — на 100 г, числами. Энергию бери в ккал (число перед «ккал»), кДж игнорируй.\n` +
-  `- sugar, fiber, saturated_fat — ТОЛЬКО если на упаковке есть ОТДЕЛЬНАЯ строка про них; иначе null. ` +
-  `Сахар — это НЕ углеводы: не переписывай значение углеводов в сахар. Российские этикетки обычно НЕ ` +
-  `выделяют сахар отдельно — нет строки «в том числе сахара» — значит sugar: null.\n` +
+  `- sugar — только если на упаковке есть отдельная запись про сахар. Часто она спрятана В СКОБКАХ ` +
+  `внутри строки углеводов и названа «сахароза»: «углеводы – 36,4 г (в т.ч. сахароза – 29,0 г)» → ` +
+  `carbs 36.4, sugar 29.0. Такой записи нет — sugar: null, и НИКОГДА не переписывай в сахар значение углеводов.\n` +
+  `- fiber, saturated_fat — так же: только из своей строки на упаковке, иначе null.\n` +
   `- package_weight_g — ТОЛЬКО если на снимке ВИДНА надпись массы нетто («450 г», «масса нетто 180 г»); ` +
   `иначе null. НЕ выводи её из типичного размера такой упаковки: по массе нетто мы считаем, что человек ` +
   `съел всю пачку, и выдуманное нетто станет выдуманным весом съеденного.\n` +
@@ -153,45 +173,48 @@ async function ask(token, images) {
   return JSON.parse(content.replace(/^```(json)?/, "").replace(/```$/, "").trim()).items || [];
 }
 
-const near = (got, want) => got !== null && Math.abs(got - want) <= Math.max(0.15, want * 0.02);
+const near = (got, want) =>
+  want === null ? got === null : got !== null && Math.abs(got - want) <= Math.max(0.15, want * 0.02);
 
-async function main() {
-  const token = await mintToken();
-  const files = SINGLE ? [FIXTURES[Number(SINGLE) - 1]] : FIXTURES;
+const FIELDS = ["kcal", "protein", "fat", "carbs", "sugar", "package_weight_g"];
+const SHORT = { kcal: "ккал", protein: "Б", fat: "Ж", carbs: "У", sugar: "сахар", package_weight_g: "нетто" };
+
+async function runCase(token, c) {
+  const files = SINGLE ? [c.files[Number(SINGLE) - 1]] : c.files;
   const images = files.map((f) => readFileSync(f).toString("base64"));
-  console.log(`модель ${MODEL}, снимков ${images.length}, повторов ${N}`);
-  console.log(`эталон: сметана 15%, 100 г → ккал 160, Б 2,7, Ж 15,0, У 3,6\n`);
+  const ref = FIELDS.map((k) => `${SHORT[k]} ${c.want[k] === null ? "—" : c.want[k]}`).join(", ");
+  console.log(`\n[${c.name}] снимков ${images.length}, эталон на 100 г: ${ref}`);
 
-  let okCount = 0, okName = 0, okNums = 0;
+  let okCount = 0, okName = 0, okAll = 0;
   for (let i = 0; i < N; i++) {
     let items;
     try { items = await ask(token, images); }
     catch (e) { console.log(`  прогон ${i + 1}: сбой — ${e.message}`); continue; }
 
-    const countOk = items.length === WANT.count;
-    if (countOk) okCount++;
+    if (items.length === 1) okCount++;
     for (const it of items) {
-      const nums = ["kcal", "protein", "fat", "carbs"]
-        .map((k) => `${k}=${it[k]}${near(it[k], WANT.per100g[k]) ? "" : " ✗"}`).join(" ");
-      const extra = [
-        it.package_weight_g !== null ? `нетто ${it.package_weight_g}` : null,
-        it.sugar !== null ? `сахар ${it.sugar}` : null,
-        it.fiber !== null ? `клетчатка ${it.fiber}` : null,
-        it.saturated_fat !== null ? `НЖК ${it.saturated_fat}` : null,
-        it.grams !== null ? `съедено ${it.grams}` : null,
-      ].filter(Boolean).join(", ");
-      console.log(`  прогон ${i + 1}: [${items.length}] «${it.name}»  ${nums}${extra ? `  (${extra})` : ""}`);
+      const shown = FIELDS
+        .map((k) => `${SHORT[k]}=${it[k] === null ? "—" : it[k]}${near(it[k], c.want[k]) ? "" : " ✗"}`)
+        .join(" ");
+      console.log(`  прогон ${i + 1}: [${items.length}] «${it.name}»  ${shown}`);
     }
     if (items.length === 1) {
       const it = items[0];
-      if (WANT.nameKeys.some((k) => it.name.toLowerCase().includes(k))) okName++;
-      if (["kcal", "protein", "fat", "carbs"].every((k) => near(it[k], WANT.per100g[k]))) okNums++;
+      if (c.nameKeys.some((k) => it.name.toLowerCase().includes(k))) okName++;
+      if (FIELDS.every((k) => near(it[k], c.want[k]))) okAll++;
     }
   }
+  console.log(`  → одна позиция ${okCount}/${N}, название ${okName}/${N}, все поля ${okAll}/${N}`);
+  return { okCount, okName, okAll };
+}
 
-  console.log(`\nодна позиция:      ${okCount}/${N}`);
-  console.log(`название верное:   ${okName}/${N}`);
-  console.log(`все четыре числа:  ${okNums}/${N}`);
+async function main() {
+  const token = await mintToken();
+  const only = arg("case", null);
+  const cases = only ? CASES.filter((c) => c.name === only) : CASES;
+  if (!cases.length) { console.error(`нет кейса «${only}»`); process.exit(1); }
+  console.log(`модель ${MODEL}, повторов ${N}`);
+  for (const c of cases) await runCase(token, c);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -15,9 +15,12 @@
 // ожидаемый ответ, а не провал: сводить кадры будет следующий проход.
 //
 //   node scripts/measure-per-image.mjs [--route queue|direct] [--dir КАТАЛОГ]
-//                                       [--only ПОДСТРОКА] [--raw]
+//                                       [--only ПОДСТРОКА] [--raw] [--json ФАЙЛ]
+//
+// --json складывает разбор кадров в файл: второй проход — уже текстовый, и мерить
+// его надо на неподвижном входе, а не поверх каждый раз заново плавающего зрения.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 
 const AI = process.env.AI || "https://ai-worker-dev.vg-stavenko.workers.dev";
 const OCR = process.env.OCR || "https://ocr-queue-dev.vg-stavenko.workers.dev";
@@ -33,6 +36,7 @@ const arg = (name, def) => {
 const ROUTE = arg("route", "queue");
 const ONLY = arg("only", null);
 const DIR = arg("dir", "scripts/fixtures");
+const JSON_OUT = arg("json", null);
 const RAW = process.argv.includes("--raw");
 
 const PROMPT =
@@ -274,6 +278,7 @@ const num = (v) => (v === null || v === undefined ? "—" : v);
 
 async function main() {
   const token = await mintToken();
+  const collected = {};
   console.log(ROUTE === "direct" ? `прямой путь, модель ${MODEL}` : "свой сервер (ocr-queue → Qwen2.5-VL)");
 
   const files = readdirSync(DIR)
@@ -288,6 +293,7 @@ async function main() {
       console.log(`\n${f}\n  сбой — ${e.message}`);
       continue;
     }
+    collected[f] = a;
     if (RAW) { console.log(`\n${f}`); console.log(JSON.stringify(a, null, 2)); continue; }
 
     console.log(`\n${f}  [${a.photo_kind}]  ${a.what_is_on_the_photo}`);
@@ -304,6 +310,11 @@ async function main() {
       const t = (a.all_text_verbatim || "").replace(/\s+/g, " ").trim();
       console.log(`  текст (${t.length} симв.): ${t.slice(0, 220)}${t.length > 220 ? "…" : ""}`);
     }
+  }
+
+  if (JSON_OUT) {
+    writeFileSync(JSON_OUT, JSON.stringify(collected, null, 2) + "\n");
+    console.log(`\nразбор кадров записан: ${JSON_OUT} (${Object.keys(collected).length} шт.)`);
   }
 }
 

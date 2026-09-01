@@ -85,6 +85,47 @@ const CASES = [
     seen: { name: "Ракушки", kcal: null, protein: null, fat: null, carbs: null },
     pool: ["f01", "f02"], want: "f01",
   },
+  // ── почти-повторы: база зарастает именно ими ──
+  //
+  // «Макароны, макароны, макарошки, ма кароны» — четыре записи об одном и том же.
+  // Регистр и описка обязаны решаться кодом; уменьшительное кодом не берётся, и
+  // это честный вопрос к модели.
+  {
+    what: "ПОВТОР: то же слово с маленькой буквы",
+    seen: { name: "макароны", kcal: 337, protein: 10.4, fat: 1.1, carbs: 71.5 },
+    pool: ["f01", "f02"], want: "f01",
+  },
+  {
+    what: "ПОВТОР: лишний пробел — «ма кароны»",
+    seen: { name: "Ма кароны", kcal: 337, protein: 10.4, fat: 1.1, carbs: 71.5 },
+    pool: ["f01", "f02"], want: "f01",
+  },
+  {
+    what: "ПОВТОР: описка в одной букве — «макарони»",
+    seen: { name: "Макарони", kcal: 337, protein: 10.4, fat: 1.1, carbs: 71.5 },
+    pool: ["f01", "f02"], want: "f01",
+  },
+  {
+    what: "ПОВТОР: уменьшительное «макарошки» — кодом не берётся",
+    seen: { name: "Макарошки", kcal: 337, protein: 10.4, fat: 1.1, carbs: 71.5 },
+    pool: ["f01", "f02"], want: "f01",
+  },
+  {
+    what: "ПОВТОР: то же с хвостом — «макароны отварные»",
+    seen: { name: "Макароны отварные", kcal: 337, protein: 10.4, fat: 1.1, carbs: 71.5 },
+    pool: ["f01", "f02"], want: "f01",
+  },
+  {
+    what: "ЛОВУШКА: «мясо» рядом с «маслом» — два шага правки, но и числа врозь",
+    seen: { name: "Мясо говяжье", kcal: 187, protein: 18.9, fat: 12.4, carbs: 0 },
+    pool: ["f34", "f17"], want: null,
+  },
+  {
+    what: "ЛОВУШКА: «сельдерей» рядом с «сельдью»",
+    seen: { name: "Сельдерей стеблевой", kcal: 13, protein: 0.9, fat: 0.1, carbs: 2.1 },
+    pool: ["f21", "f24"], want: null,
+  },
+
   // ── ловушки: в базе НЕТ этого продукта, правильный ответ — никто ──
   {
     what: "ЛОВУШКА: десерт «Картошка» против картофеля отварного",
@@ -130,6 +171,41 @@ function numbersAgree(seen, food) {
 /// отсеиваются молча: спека прямо велит на любое отличие заводить новую копию, и
 /// спрашивать об этом модель незачем — она может согласиться.
 const survivors = (seen, pool) => pool.filter((id) => numbersAgree(seen, byId[id]) !== false);
+
+// ── совпадение имени: что ещё берётся кодом ──
+
+/// Имя к сравнимому виду: регистр, ё, пунктуация и ПРОБЕЛЫ прочь. Пробелы убираем
+/// целиком, потому что «ма кароны» — это те же макароны с промахом по клавише, а
+/// не другой продукт.
+const canonName = (s) =>
+  s.toLowerCase().replace(/ё/g, "е").replace(/[^а-яa-z0-9]/g, "");
+
+/// Расстояние Левенштейна — сколько правок отделяет одно написание от другого.
+function distance(a, b) {
+  if (a === b) return 0;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/// Одно и то же написание с точностью до описки. Порог зависит от длины, и
+/// короткие слова не трогаем вовсе: «мясо» и «масло» отличаются на две правки из
+/// пяти букв, а это совершенно разная еда. Уменьшительные («макарошки») сюда не
+/// попадают — там правок больше, и это вопрос к модели, а не к строкам.
+function sameName(a, b) {
+  const x = canonName(a), y = canonName(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const len = Math.min(x.length, y.length);
+  if (len < 6) return false;
+  return distance(x, y) <= (len >= 10 ? 2 : 1);
+}
 
 // ── вопрос к модели: только про имя ──
 
@@ -223,14 +299,54 @@ async function ask(token, seen, pool) {
   return j;
 }
 
+/// Порог `sameName` решает судьбу записи без всякой модели, поэтому проверяется
+/// точно, парами. Короткие слова не трогаются намеренно: «мясо» и «масло»
+/// отличаются на две правки из пяти букв, а это разная еда.
+function checkSameName() {
+  const same = [
+    ["Макароны", "макароны"], ["Ма кароны", "Макароны"], ["Макарони", "Макароны"],
+    ["макароны", "МАКАРОНЫ"], ["Творог 5%", "творог 5 %"], ["Йогурт", "Йогурт"],
+    ["Сметана 15%", "сметана 15%"],
+  ];
+  const diff = [
+    ["Мясо", "Масло"], ["Сельдь", "Сельдерей"], ["Макароны", "Макарошки"],
+    ["Молоко", "Мороженое"], ["Лук", "Лук-порей"], ["Сыр", "Сырок"],
+    ["Курица", "Куркума"], ["Икра", "Игра"],
+  ];
+  const bad = [];
+  for (const [a, b] of same) if (!sameName(a, b)) bad.push(`не сошлись, а должны: «${a}» / «${b}»`);
+  for (const [a, b] of diff) if (sameName(a, b)) bad.push(`СКЛЕИЛО разное: «${a}» / «${b}»`);
+  console.log(bad.length ? `проверка имени: ${bad.length} расхождений` : "проверка имени: все пары верно");
+  for (const b of bad) console.log(`   ${b}`);
+  return bad.length === 0;
+}
+
 async function main() {
+  checkSameName();
   const token = await mintToken();
   console.log(`модель ${MODEL}, повторов ${N}\n`);
 
   const ways = {
     "модели всё сразу": (c) => c.pool,
     "сначала арифметика": (c) => survivors(c.seen, c.pool),
+    "арифметика + имя": (c) => survivors(c.seen, c.pool),
+    "и полное совпадение чисел": (c) => survivors(c.seen, c.pool),
   };
+  // «арифметика + имя» сначала пробует решить кодом: если среди переживших
+  // арифметику есть продукт с ТЕМ ЖЕ написанием с точностью до описки — это он, и
+  // модель не нужна. Так «Макароны», «макароны» и «ма кароны» перестают плодить
+  // копии, не рискуя ложным согласием: числа уже сошлись.
+  const byNameFirst = (c, pool) => pool.find((id) => sameName(c.seen.name, byId[id].name)) || null;
+
+  /// Все четыре числа прочитаны, все четыре сошлись, кандидат остался один — и
+  /// попал он в кандидаты не случайно, а по общему ключевому слову. Спека это и
+  /// называет полной копией по КБЖУ; спрашивать здесь модель незачем, а её отказ
+  /// стоит лишней копии продукта в базе — ровно того, чего мы избегаем.
+  const allFourRead = (seen) =>
+    ["kcal", "protein", "fat", "carbs"].every((k) => seen[k] !== null && seen[k] !== undefined);
+  const byFullNumbers = (c, pool) =>
+    pool.length === 1 && allFourRead(c.seen) && numbersAgree(c.seen, byId[pool[0]]) === true
+      ? pool[0] : null;
 
   const score = {};
   for (const k of Object.keys(ways)) score[k] = { ok: 0, falseYes: 0, falseNo: 0, wrong: 0, n: 0 };
@@ -239,8 +355,13 @@ async function main() {
     console.log(`— ${c.what}`);
     for (const [way, poolOf] of Object.entries(ways)) {
       const pool = poolOf(c);
+      const shortcut =
+        way === "арифметика + имя" ? byNameFirst(c, pool)
+        : way === "и полное совпадение чисел" ? (byNameFirst(c, pool) || byFullNumbers(c, pool))
+        : null;
       const got = [];
       for (let i = 0; i < N; i++) {
+        if (shortcut) { got.push({ match_id: shortcut, why: "то же написание — решено кодом" }); continue; }
         try { got.push(await retry(() => ask(token, c.seen, pool))); }
         catch (e) { got.push({ match_id: "СБОЙ", why: e.message }); }
       }
@@ -253,14 +374,14 @@ async function main() {
         if (g.match_id === null) { s.falseNo++; return "ложный отказ"; }
         s.wrong++; return `не тот: ${g.match_id}`;
       });
-      console.log(`   ${way.padEnd(20)} кандидатов ${pool.length}: ${marks.join(", ")}`);
+      console.log(`   ${way.padEnd(26)} кандидатов ${pool.length}${shortcut ? " (кодом)" : ""}: ${marks.join(", ")}`);
       if (RAW) for (const g of got) console.log(`      «${g.why}»`);
     }
   }
 
   console.log();
   for (const [way, s] of Object.entries(score)) {
-    console.log(`${way.padEnd(20)} верно ${s.ok}/${s.n}   ЛОЖНЫХ СОГЛАСИЙ ${s.falseYes}   ` +
+    console.log(`${way.padEnd(26)} верно ${s.ok}/${s.n}   ЛОЖНЫХ СОГЛАСИЙ ${s.falseYes}   ` +
                 `ложных отказов ${s.falseNo}   выбран не тот ${s.wrong}`);
   }
 }

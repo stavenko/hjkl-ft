@@ -32,6 +32,7 @@ const arg = (name, def) => {
 const MODEL = arg("model", process.env.MODEL || "@cf/qwen/qwen3.8-27b");
 const REBUILD = process.argv.includes("--rebuild");
 const GENERIC_CACHE = "scripts/fixtures/user-foods-generic.json";
+const KEYWORDS_CACHE = "scripts/fixtures/user-foods-keywords.json";
 
 const FOODS = JSON.parse(readFileSync("scripts/fixtures/user-foods.json", "utf8")).foods;
 
@@ -97,6 +98,62 @@ function byWords(q) {
 /// По обобщающему слову: и у запроса, и у КАЖДОГО продукта базы оно заготовлено
 /// заранее. Готовить надо с обеих сторон — иначе «ракушки», превращённые в
 /// «макароны», всё равно не найдут лежащие в базе «Спагетти Barilla №5».
+/// Привести список слов в годный для индекса вид. Модель приносит его сырым, и в
+/// нём три постоянные болячки: повторы (у творога «сухой творог» пришёл пятнадцать
+/// раз — та же вырожденная петля, что и в расшифровках), выдуманные слова
+/// («барабарки», «литтре») и голые числа (у сметаны «15» из «15%»). Повторы и
+/// числа убираем — первое раздувает индекс, второе слепляет всё подряд, в чьём
+/// названии есть та же цифра. Выдуманные слова не трогаем: отличить их от редкого
+/// настоящего названия нечем, а вреда от них нет — они просто ни с чем не сойдутся.
+function cleanKeywords(list) {
+  const out = [], seen = new Set();
+  for (const raw of list || []) {
+    const w = String(raw).trim().toLowerCase().replace(/ё/g, "е");
+    if (w.length < 3) continue;
+    if (!/[а-яa-z]/.test(w)) continue;          // «15», «70%» — не слова
+    if (seen.has(w)) continue;
+    seen.add(w);
+    out.push(w);
+    if (out.length >= 12) break;                // индекс должен быть конечным
+  }
+  return out;
+}
+
+/// По списку ключевых слов: пересечение основ. Запас здесь намеренный — лишний
+/// кандидат стоит одной строки в промпте, а упущенный стоит второй копии продукта
+/// в базе навсегда.
+function byKeywords(keywords, queryKeywords) {
+  const wanted = new Set();
+  for (const w of cleanKeywords(queryKeywords)) for (const st of stems(w)) wanted.add(st);
+  return FOODS.filter((f) =>
+    cleanKeywords(keywords[f.id]).some((w) => [...stems(w)].some((st) => wanted.has(st))));
+}
+
+/// Обратный индекс: основа слова → продукты, у которых она есть. Строится один
+/// раз при загрузке базы, дальше поиск — это несколько взятий по ключу, а не
+/// проход по каталогу. Перебор на сорока пяти продуктах незаметен, но каталог
+/// растёт, а сопоставление зовётся на КАЖДЫЙ распознанный продукт.
+function buildIndex(keywords) {
+  const idx = new Map();
+  for (const f of FOODS) {
+    for (const w of cleanKeywords(keywords[f.id])) {
+      for (const st of stems(w)) {
+        if (!idx.has(st)) idx.set(st, new Set());
+        idx.get(st).add(f.id);
+      }
+    }
+  }
+  return idx;
+}
+
+function byIndex(idx, queryKeywords) {
+  const hits = new Set();
+  for (const w of cleanKeywords(queryKeywords)) {
+    for (const st of stems(w)) for (const id of idx.get(st) || []) hits.add(id);
+  }
+  return FOODS.filter((f) => hits.has(f.id));
+}
+
 function byGeneric(q, generic, queryGeneric) {
   const wanted = stems(queryGeneric || "");
   const hits = FOODS.filter((f) => {
@@ -126,6 +183,42 @@ const GENERIC_SCHEMA = {
   required: ["generic"],
 };
 
+/// Отдельный проход по продукту: не одно слово, а всё, по чему его разумно искать.
+/// Готовится ОДИН раз — при заведении еды в базу и при распознавании нового
+/// продукта, — поэтому сам поиск остаётся кодом и работает без сети.
+const KEYWORDS_SCHEMA = {
+  type: "object",
+  properties: {
+    keywords: {
+      description: "Слова, по которым этот продукт разумно искать, от частного к общему. " +
+        "Обязательно: само название; род, к которому продукт принадлежит («ракушки» — это " +
+        "макароны); общеупотребительные синонимы и другие названия того же («сёмга» и «лосось», " +
+        "«творог» и «коттедж»); бренд, если он в названии. Каждое слово в именительном падеже, " +
+        "одно-два слова, без жирности, веса, сорта и способа приготовления. Лучше дать лишнее " +
+        "близкое слово, чем упустить нужное: по этим словам продукт будут ИСКАТЬ, и не найденное " +
+        "заведётся в базе второй раз. Но не уходи в надкатегории вроде «еда», «продукты», " +
+        "«молочное»: под них попадёт половина базы.",
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+  required: ["keywords"],
+};
+
+/// Повтор с нарастающей паузой. HTTP 500 от воркера приходит вперемешку с
+/// успехами — это перегрузка, а не отказ, и ждать дешевле, чем терять продукт:
+/// один непроставленный набор слов делает замер несравнимым.
+async function retry(what, attempts = 5) {
+  let last;
+  for (let i = 0; i < attempts; i++) {
+    try { return await what(); } catch (e) {
+      last = e;
+      await new Promise((r) => setTimeout(r, 700 * 2 ** i));
+    }
+  }
+  throw last;
+}
+
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
 async function mintToken() {
@@ -147,6 +240,31 @@ async function mintToken() {
     body: JSON.stringify({ claimId: co.claimId, secret: co.secret }),
   });
   return token;
+}
+
+async function askKeywords(token, name) {
+  const r = await fetch(`${AI}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [{ role: "user", content:
+        `Продукт: «${name}».\n\nПо каким словам его следует искать? Ответь одним объектом JSON.` }],
+      response_format: { type: "json_schema", json_schema: { name: "r", schema: KEYWORDS_SCHEMA, strict: true } },
+      stream: true, think: false, max_tokens: 400,
+    }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  let content = "";
+  for (const line of (await r.text()).split("\n")) {
+    if (!line.startsWith("data: ")) continue;
+    const p = line.slice(6).trim();
+    if (p === "[DONE]") continue;
+    try { content += JSON.parse(p).choices?.[0]?.delta?.content ?? ""; } catch { /* пропуск */ }
+  }
+  const kw = JSON.parse(content.replace(/^```(json)?/, "").replace(/```$/, "").trim()).keywords;
+  if (!Array.isArray(kw) || !kw.length) throw new Error("пустой список слов");
+  return kw;
 }
 
 async function askGeneric(token, name) {
@@ -174,6 +292,29 @@ async function askGeneric(token, name) {
 
 /// Собрать (или прочитать) обобщения для всего каталога. Готовятся ОДИН раз на
 /// продукт: в приложении это делается при заведении еды, а не при каждом поиске.
+async function catalogKeywords(token) {
+  if (!REBUILD && existsSync(KEYWORDS_CACHE)) return JSON.parse(readFileSync(KEYWORDS_CACHE, "utf8"));
+  const out = {};
+  const failures = [];
+  const queue = [...FOODS];
+  const worker = async () => {
+    for (;;) {
+      const f = queue.shift();
+      if (!f) return;
+      try { out[f.id] = await retry(() => askKeywords(token, f.name)); }
+      catch (e) { failures.push(`${f.name}: ${e.message}`); }
+    }
+  };
+  await worker();
+  if (failures.length) {
+    console.error(`ключевые слова не дались для ${failures.length} продуктов:`);
+    for (const f of failures) console.error(`  ${f}`);
+    throw new Error("каталог размечен не полностью — мерить на нём нельзя");
+  }
+  writeFileSync(KEYWORDS_CACHE, JSON.stringify(out, null, 2) + "\n");
+  return out;
+}
+
 async function catalogGeneric(token) {
   if (!REBUILD && existsSync(GENERIC_CACHE)) return JSON.parse(readFileSync(GENERIC_CACHE, "utf8"));
   const out = {};
@@ -183,7 +324,7 @@ async function catalogGeneric(token) {
     for (;;) {
       const f = queue.shift();
       if (!f) return;
-      try { out[f.id] = await askGeneric(token, f.name); }
+      try { out[f.id] = await retry(() => askGeneric(token, f.name)); }
       catch (e) { out[f.id] = null; failures.push(`${f.name}: ${e.message}`); }
     }
   };
@@ -200,12 +341,14 @@ async function catalogGeneric(token) {
 async function main() {
   const token = await mintToken();
   const generic = await catalogGeneric(token);
+  const keywords = await catalogKeywords(token);
   console.log(`модель ${MODEL}, каталог ${FOODS.length} продуктов\n`);
 
   const strategies = {
     "подстрока (как сейчас)": (c) => bySubstring(c.q),
     "по словам": (c) => byWords(c.q),
     "по обобщению": (c) => byGeneric(c.q, generic, c.queryGeneric),
+    "по ключевым словам": (c) => byKeywords(keywords, c.queryKeywords),
   };
 
   // Обобщение запроса — тот же вопрос модели, что и для каталога.
@@ -214,8 +357,10 @@ async function main() {
     // Три попытки: сеть и лимиты подводят, а один потерянный запрос портит целую
     // строку сравнения — и портит незаметно, если подменить его чем попало.
     for (let i = 0; i < 3 && !c.queryGeneric; i++) {
-      try { c.queryGeneric = await askGeneric(token, c.q); }
-      catch (e) { if (i === 2) qFailed.push(`${c.q}: ${e.message}`); }
+      try {
+        c.queryGeneric = await retry(() => askGeneric(token, c.q));
+        c.queryKeywords = await retry(() => askKeywords(token, c.q));
+      } catch (e) { if (i === 2) qFailed.push(`${c.q}: ${e.message}`); }
     }
   }
   if (qFailed.length) {
@@ -244,8 +389,36 @@ async function main() {
         c.want.length && !c.want.some((w) => ids.includes(w)) ? " ПРОМАХ" : ""}`);
     }
     console.log(line.join("   "));
-    console.log(`    обобщение запроса: «${c.queryGeneric}»`);
+    console.log(`    обобщение: «${c.queryGeneric}»   слова: ${(c.queryKeywords || []).join(", ")}`);
   }
+
+  // Индекс обязан давать РОВНО то же, что перебор: если разойдётся, быстрый путь
+  // не оптимизация, а другой поиск.
+  const idx = buildIndex(keywords);
+  const same = CASES.every((c) => {
+    const a = byKeywords(keywords, c.queryKeywords).map((f) => f.id).join();
+    return a === byIndex(idx, c.queryKeywords).map((f) => f.id).join();
+  });
+  console.log(`\nиндекс совпадает с перебором: ${same ? "да" : "НЕТ"}, ключей в индексе ${idx.size}`);
+
+  // На сорока пяти продуктах разницы нет — раздуем каталог, чтобы она проявилась.
+  const BIG = 20000;
+  const grown = [];
+  for (let i = 0; i < BIG; i++) grown.push({ id: `g${i}`, name: `Продукт ${i}` });
+  const bigKw = {};
+  for (const f of grown) bigKw[f.id] = [`слово${f.id}`, `род${f.id % 500}`];
+  const realFoods = FOODS.splice(0, FOODS.length, ...grown);
+  const bigIdx = buildIndex(bigKw);
+  const probe = ["род7"];
+  let t = performance.now();
+  for (let i = 0; i < 200; i++) byKeywords(bigKw, probe);
+  const scanMs = performance.now() - t;
+  t = performance.now();
+  for (let i = 0; i < 200; i++) byIndex(bigIdx, probe);
+  const idxMs = performance.now() - t;
+  FOODS.splice(0, FOODS.length, ...realFoods);
+  console.log(`на каталоге ${BIG}: перебор ${(scanMs / 200).toFixed(2)} мс на поиск, ` +
+              `индекс ${(idxMs / 200).toFixed(2)} мс`);
 
   console.log();
   for (const [name, s] of Object.entries(score)) {

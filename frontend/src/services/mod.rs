@@ -35,6 +35,7 @@ pub mod profile;
 pub mod processed_meat;
 pub mod push;
 pub mod red_meat;
+pub mod search;
 pub mod sticky;
 pub mod stories;
 pub mod subscription;

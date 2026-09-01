@@ -42,12 +42,12 @@ pub fn RecipesPage() -> impl IntoView {
     };
 
     let filtered = move || {
-        let q = search.get().to_lowercase();
+        let q = search.get();
         // Hide any recipe that was cooked again (`superseded_by` set → it has a
         // successor). Only recipes without a successor are shown. Explicit field,
         // not name-matching.
         recipes().into_iter().filter(|r| {
-            let matches_search = q.is_empty() || r.name.to_lowercase().contains(&q);
+            let matches_search = crate::services::search::matches(&r.name, &q);
             matches_search && r.superseded_by.is_none()
         }).collect::<Vec<_>>()
     };

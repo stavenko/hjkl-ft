@@ -6,7 +6,7 @@ use super::food_list_item::FoodListItem;
 use super::waste_field::WasteField;
 use super::restaurant_field::RestaurantField;
 use crate::services::i18n::t;
-use crate::services::{db, local};
+use crate::services::{db, local, search as food_search};
 
 /// Shared, presentational food picker: search input, filtered+paginated food
 /// list with a "+" pick action, "new food" via the editor, and the grams /
@@ -64,7 +64,9 @@ pub fn FoodPicker(
 
     // foods (incl. recipes) + uncommitted drafts, most-recently-used first.
     let items = Signal::derive(move || {
-        let q = search.get().to_lowercase();
+        // Запрос и названия сравниваются нормализованными — пробел по краям и
+        // запятая в названии не должны прятать еду (`services::search`).
+        let q = search.get();
         let diary_times = diary_times_res.get().unwrap_or_default();
         let food_ids: std::collections::HashSet<String> =
             foods.get().iter().map(|f| f.id.clone()).collect();
@@ -86,7 +88,7 @@ pub fn FoodPicker(
             if exclude_restaurant && f.is_restaurant { continue; }
             // Skip the finished food of a superseded (re-cooked) recipe.
             if superseded_food_ids.contains(&f.id) { continue; }
-            if !q.is_empty() && !f.name.to_lowercase().contains(&q) { continue; }
+            if !food_search::matches(&f.name, &q) { continue; }
             let icon = if f.is_recipe { "\u{1f373}" } else { "\u{1f37d}\u{fe0f}" };
             let sort_key = diary_times.get(&f.id).cloned().unwrap_or_else(|| f.created_at.clone());
             list.push((f, icon, sort_key));
@@ -95,7 +97,7 @@ pub fn FoodPicker(
             if draft.food_id.is_some() { continue; }
             if food_ids.contains(&draft.id) { continue; }
             let food = draft.to_food();
-            if !q.is_empty() && !food.name.to_lowercase().contains(&q) { continue; }
+            if !food_search::matches(&food.name, &q) { continue; }
             list.push((food, "\u{270f}\u{fe0f}", draft.created_at.clone()));
         }
         list.sort_by(|a, b| b.2.cmp(&a.2));

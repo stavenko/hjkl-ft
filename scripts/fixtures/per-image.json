@@ -1,4 +1,29 @@
 {
+  "food-liver-cauliflower.jpg": {
+    "what_is_on_the_photo": "На фото видна тарелка с едой, состоящей из цветной капусты и мясного блюда.",
+    "photo_kind": "food",
+    "foods_on_the_photo": [
+      {
+        "name": "Цветная капуста",
+        "how_big_is_the_portion": "Цветная капуста занимает верхнюю половину тарелки, слой средней толщины.",
+        "grams": 200
+      },
+      {
+        "name": "Мясное блюдо",
+        "how_big_is_the_portion": "Мясное блюдо занимает нижнюю половину тарелки, слой средней толщины.",
+        "grams": 150
+      }
+    ],
+    "product_name_printed": null,
+    "netto_weight_printed_g": null,
+    "nutrition_line_verbatim": null,
+    "energy_verbatim": null,
+    "kcal_per_100g_printed": null,
+    "protein_per_100g_printed": null,
+    "carbs_per_100g_printed": null,
+    "fat_per_100g_printed": null,
+    "all_text_verbatim": null
+  },
   "label-chicken.jpg": {
     "what_is_on_the_photo": "Этикетка упаковки с текстовой информацией о продукте.",
     "photo_kind": "label",

@@ -57,16 +57,16 @@ impl GaugePace {
     /// остаться не выше. Правило вынесено сюда, а не считается по месту, чтобы его
     /// можно было закрепить тестом: пустая шкала красного мяса горела оранжевым
     /// ровно за то, ради чего она заведена.
+    /// ЦВЕТ ЧИТАЕТСЯ ПО ТОЧКАМ, а не по скрытой формуле: последняя горящая точка
+    /// стоит ровно на `expected`, и глазами видно, обгоняет её заливка или нет.
+    /// Разъехаться этим двум нельзя — иначе шкала показывает одно, а красится по
+    /// другому.
     pub fn on_track(&self, value: f64, target: f64) -> bool {
+        let expected = self.expected(target);
         if self.at_most {
-            // Потолок считается по ТЕКУЩЕМУ дню, а не по прошедшим: право съесть
-            // сегодняшнюю долю уже наступило. Иначе первый же кусок в понедельник
-            // давал оранжевую обводку при зелёной полосе — полоса судит тем же
-            // темпом, но с текущим днём (`red_meat::WeeklyRedMeat::state`).
-            let today = Self { passed: self.passed + 1, ..*self };
-            value <= today.expected(target)
+            value <= expected
         } else {
-            value >= self.expected(target)
+            value >= expected
         }
     }
 }
@@ -90,30 +90,24 @@ mod tests {
     }
 
     #[test]
-    fn potolok_uspevaet_kogda_ostalsya_nizhe_tempa() {
+    fn potolok_uspevaet_kogda_ne_obognal_tochki() {
         assert!(cap(3).on_track(0.0, 700.0), "ноль красного мяса — лучший исход");
-        assert!(cap(3).on_track(400.0, 700.0), "ровно по темпу четвёртого дня — укладывается");
-        assert!(!cap(3).on_track(450.0, 700.0), "быстрее темпа — предупреждение");
+        assert!(cap(3).on_track(300.0, 700.0), "заливка ровно на третьей точке — укладывается");
+        assert!(!cap(3).on_track(350.0, 700.0), "заливка обогнала точку — предупреждение");
     }
 
-    /// Потолок судится по ТЕКУЩЕМУ дню: дневная доля уже заработана, и первый кусок
-    /// в понедельник не должен зажигать предупреждение.
+    /// Цвет обязан совпадать с тем, что видно: заливка правее последней горящей
+    /// точки — предупреждение, левее — спокойствие. У потолка (`red_meat`) точки
+    /// ставятся по ТЕКУЩЕМУ дню, поэтому и порог тот же — `limit × день / 7`, как в
+    /// `red_meat::WeeklyRedMeat::state`.
     #[test]
-    fn v_pervyi_den_potolok_daet_svoyu_dolyu() {
-        assert!(cap(0).on_track(0.0, 700.0));
-        assert!(cap(0).on_track(100.0, 700.0), "дневная доля в первый день — норма");
-        assert!(!cap(0).on_track(150.0, 700.0), "вдвое больше дневной доли — уже нет");
-    }
-
-    /// Обводка обязана совпадать с цветом полосы: та считает темп как
-    /// `limit × день / 7` (см. `red_meat::WeeklyRedMeat::state`).
-    #[test]
-    fn obvodka_sovpadaet_s_cvetom_polosy() {
-        for (day, grams, ok) in [(1u32, 100.0, true), (3, 300.0, true), (3, 350.0, false),
+    fn cvet_sovpadaet_s_tochkami_i_s_polosoy() {
+        for (day, grams, ok) in [(1u32, 100.0, true), (1, 150.0, false),
+                                 (3, 300.0, true), (3, 350.0, false),
                                  (7, 700.0, true), (7, 800.0, false)] {
-            let pace = cap(day - 1);
+            let pace = cap(day);                       // у потолка passed = текущий день
             let by_bar = grams <= 700.0 * f64::from(day) / 7.0;
-            assert_eq!(pace.on_track(grams, 700.0), by_bar, "день {day}, {grams} г");
+            assert_eq!(pace.on_track(grams, 700.0), by_bar, "день {day}, {grams} г — полоса");
             assert_eq!(pace.on_track(grams, 700.0), ok, "день {day}, {grams} г");
         }
     }

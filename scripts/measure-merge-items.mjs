@@ -26,7 +26,7 @@ const arg = (name, def) => {
   return i > -1 && process.argv[i + 1] && !process.argv[i + 1].startsWith("--")
     ? process.argv[i + 1] : def;
 };
-const MODEL = arg("model", process.env.MODEL || "@cf/qwen/qwen3-30b-a3b-fp8");
+const MODEL = arg("model", process.env.MODEL || "@cf/qwen/qwen3.8-27b");
 const N = Number(arg("n", 3));
 const RAW = process.argv.includes("--raw");
 const JOBS = 3;
@@ -38,6 +38,33 @@ const PASS1 = JSON.parse(readFileSync("scripts/fixtures/per-image.json", "utf8")
 /// бюджета. Целиком такое слать некуда, а обрывать жалко — в хвосте попадается
 /// нужное (у оливок там масса без жидкости). Режем по длине честного текста.
 const TEXT_CAP = 1500;
+
+/// Доля своих кусков в расшифровке: у здорового текста почти каждый отрезок в
+/// сорок знаков встречается один раз, у зациклившегося — одни и те же снова и
+/// снова. На наших кадрах мера разделяет без всякого зазора для спора: здоровые
+/// дают 0,945–1,000, сорвавшаяся сметана 0,42 и 0,016.
+function ownFraction(text, k = 40) {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length < k * 3) return 1;
+  const seen = new Set();
+  for (let i = 0; i + k <= t.length; i++) seen.add(t.slice(i, i + k));
+  return seen.size / (t.length - k + 1);
+}
+const LOOPED_BELOW = 0.8;
+
+/// Выбросить повторы, сохранив порядок: от зациклившейся расшифровки остаётся её
+/// содержательная часть, а не двадцать тысяч знаков одной строки.
+function dropRepeats(text) {
+  const out = [];
+  const seen = new Set();
+  for (const piece of text.split(/(?<=[.;])\s+|\n+/)) {
+    const key = piece.replace(/\s+/g, " ").trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(piece.trim());
+  }
+  return out.join(" ");
+}
 
 /// Кадр — читаемым блоком, а не сырым JSON: разбирает это текстовая модель, и
 /// подписанные по-русски строки она понимает лучше, чем ключи со змеиным именем.
@@ -59,7 +86,16 @@ function frameBlock(name, r) {
     ["жиры", r.fat_per_100g_printed], ["углеводы", r.carbs_per_100g_printed],
   ].filter(([, v]) => v !== null && v !== undefined).map(([k, v]) => `${k} ${v}`);
   if (kbju.length) lines.push(`  прочитано на 100 г: ${kbju.join(", ")}`);
-  const t = (r.all_text_verbatim || "").replace(/\s+/g, " ").trim();
+  let t = (r.all_text_verbatim || "").replace(/\s+/g, " ").trim();
+  // Кадр, на котором расшифровка сорвалась в повтор, читался с трудом — и его
+  // числа при споре с другим кадром того же продукта весят меньше. Не выбрасываем
+  // их: у сметаны сорвались ОБА кадра, но верные 160 пришли как раз с того, что
+  // сорвался слабее. Сообщаем модели, насколько плохо шло чтение, и решает она.
+  if (t && ownFraction(t) < LOOPED_BELOW) {
+    lines.push(`  ВНИМАНИЕ: расшифровка этого кадра сорвалась в повтор — читалось плохо. ` +
+      `Если другой кадр того же продукта даёт другие числа и читался нормально, верь тому кадру.`);
+    t = dropRepeats(t);
+  }
   if (t) lines.push(`  текст с упаковки: ${t.slice(0, TEXT_CAP)}${t.length > TEXT_CAP ? " …(обрезано)" : ""}`);
   return lines.join("\n");
 }
@@ -319,7 +355,7 @@ async function main() {
   await Promise.all(Array.from({ length: JOBS }, worker));
   rows.sort((a, b) => a.idx - b.idx);
 
-  let miss = 0, extra = 0, badGrams = 0, badSrc = 0, badKbju = 0, total = 0;
+  let miss = 0, extra = 0, badGrams = 0, badSrc = 0, badKbju = 0, incoh = 0, total = 0;
   for (const row of rows) {
     console.log(`— ${row.what}${row.failed ? `   (сбоев ${row.failed})` : ""}`);
     for (const ans of row.runs) {
@@ -329,6 +365,12 @@ async function main() {
       const missing = row.want.filter((w) => !findItem(items, w.key)).map((w) => w.key[0]);
       const matched = new Set(row.want.map((w) => findItem(items, w.key)).filter(Boolean));
       const extras = items.filter((i) => !matched.has(i));
+      // Модель сама объявляет правило, по которому берёт граммы, — и обязана его
+      // держать: сказала default_100, значит ровно 100. Расхождение здесь ловится
+      // без всякого эталона, это спор ответа с самим собой.
+      const incoherent = items
+        .filter((i) => i.where_grams_came_from === "default_100" && i.grams !== 100)
+        .map((i) => `${i.name}: default_100, а ${i.grams} г`);
       const gWrong = [], sWrong = [], kWrong = [];
       for (const w of row.want) {
         const it = findItem(items, w.key);
@@ -340,7 +382,7 @@ async function main() {
           .filter(([, g, wv]) => !numOk(g, wv)).map(([n, g, wv]) => `${n} ${g}≠${wv}`);
         if (bad.length) kWrong.push(`${it.name}: ${bad.join(", ")}`);
       }
-      miss += missing.length; extra += extras.length;
+      miss += missing.length; extra += extras.length; incoh += incoherent.length;
       badGrams += gWrong.length; badSrc += sWrong.length; badKbju += kWrong.length;
       console.log(`   ${got || "(пусто)"}`);
       if (missing.length) console.log(`     не найдено: ${missing.join(", ")}`);
@@ -348,12 +390,14 @@ async function main() {
       if (gWrong.length) console.log(`     граммы: ${gWrong.join(", ")}`);
       if (sWrong.length) console.log(`     источник: ${sWrong.join(", ")}`);
       if (kWrong.length) console.log(`     КБЖУ: ${kWrong.join("; ")}`);
+      if (incoherent.length) console.log(`     сам себе противоречит: ${incoherent.join(", ")}`);
       if (RAW) console.log(`     группировка: ${ans.how_frames_group}`);
     }
     console.log();
   }
   console.log(`итого за ${total} прогонов: пропущено ${miss}, лишних ${extra}, ` +
-              `граммы ${badGrams}, источник ${badSrc}, КБЖУ ${badKbju}`);
+              `граммы ${badGrams}, источник ${badSrc}, КБЖУ ${badKbju}, ` +
+              `несогласованных ${incoh}`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

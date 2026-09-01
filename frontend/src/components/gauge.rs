@@ -26,6 +26,11 @@ pub fn at_least_colors(value: f64, target: f64) -> (&'static str, Option<&'stati
 ///
 /// From that same expectation the gauge takes its outline: an ORANGE glow while
 /// the value trails the lit dots, a GREEN one once it runs ahead of them.
+///
+/// У ШКАЛЫ-ПОТОЛКА (`at_most`) правило обратное. Красное мясо — не цель, а предел
+/// в 700 г за неделю: идти МЕДЛЕННЕЕ равномерного темпа там хорошо, а пустая шкала
+/// — лучший из возможных исходов. Общее правило красило такую шкалу оранжевым
+/// ровно за то, ради чего она заведена.
 #[derive(Clone, Copy, PartialEq)]
 pub struct GaugePace {
     /// Parts the period is divided into (7 for a week).
@@ -33,6 +38,8 @@ pub struct GaugePace {
     /// Parts already COMPLETED (day 3 of 7 → 2). `0` on the first day: nothing is
     /// owed yet, so the gauge can't be behind.
     pub passed: u32,
+    /// Планка — ПОТОЛОК, а не цель: хорошо быть НИЖЕ ожидаемого по темпу.
+    pub at_most: bool,
 }
 
 impl GaugePace {
@@ -42,6 +49,73 @@ impl GaugePace {
             return 0.0;
         }
         target * self.passed as f64 / self.segments as f64
+    }
+
+    /// Успевает ли человек — по этому и красится обводка шкалы.
+    ///
+    /// У цели «успевать» значит набрать не меньше ожидаемого по темпу, у потолка —
+    /// остаться не выше. Правило вынесено сюда, а не считается по месту, чтобы его
+    /// можно было закрепить тестом: пустая шкала красного мяса горела оранжевым
+    /// ровно за то, ради чего она заведена.
+    pub fn on_track(&self, value: f64, target: f64) -> bool {
+        if self.at_most {
+            // Потолок считается по ТЕКУЩЕМУ дню, а не по прошедшим: право съесть
+            // сегодняшнюю долю уже наступило. Иначе первый же кусок в понедельник
+            // давал оранжевую обводку при зелёной полосе — полоса судит тем же
+            // темпом, но с текущим днём (`red_meat::WeeklyRedMeat::state`).
+            let today = Self { passed: self.passed + 1, ..*self };
+            value <= today.expected(target)
+        } else {
+            value >= self.expected(target)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GaugePace;
+
+    fn goal(passed: u32) -> GaugePace {
+        GaugePace { segments: 7, passed, at_most: false }
+    }
+    fn cap(passed: u32) -> GaugePace {
+        GaugePace { segments: 7, passed, at_most: true }
+    }
+
+    #[test]
+    fn cel_uspevaet_kogda_nabral_ne_menshe_tempa() {
+        assert!(goal(3).on_track(300.0, 700.0), "300 из 700 к третьему дню — в темпе");
+        assert!(!goal(3).on_track(200.0, 700.0), "200 — отстаёт");
+        assert!(!goal(3).on_track(0.0, 700.0), "пустая шкала цели — отставание");
+    }
+
+    #[test]
+    fn potolok_uspevaet_kogda_ostalsya_nizhe_tempa() {
+        assert!(cap(3).on_track(0.0, 700.0), "ноль красного мяса — лучший исход");
+        assert!(cap(3).on_track(400.0, 700.0), "ровно по темпу четвёртого дня — укладывается");
+        assert!(!cap(3).on_track(450.0, 700.0), "быстрее темпа — предупреждение");
+    }
+
+    /// Потолок судится по ТЕКУЩЕМУ дню: дневная доля уже заработана, и первый кусок
+    /// в понедельник не должен зажигать предупреждение.
+    #[test]
+    fn v_pervyi_den_potolok_daet_svoyu_dolyu() {
+        assert!(cap(0).on_track(0.0, 700.0));
+        assert!(cap(0).on_track(100.0, 700.0), "дневная доля в первый день — норма");
+        assert!(!cap(0).on_track(150.0, 700.0), "вдвое больше дневной доли — уже нет");
+    }
+
+    /// Обводка обязана совпадать с цветом полосы: та считает темп как
+    /// `limit × день / 7` (см. `red_meat::WeeklyRedMeat::state`).
+    #[test]
+    fn obvodka_sovpadaet_s_cvetom_polosy() {
+        for (day, grams, ok) in [(1u32, 100.0, true), (3, 300.0, true), (3, 350.0, false),
+                                 (7, 700.0, true), (7, 800.0, false)] {
+            let pace = cap(day - 1);
+            let by_bar = grams <= 700.0 * f64::from(day) / 7.0;
+            assert_eq!(pace.on_track(grams, 700.0), by_bar, "день {day}, {grams} г");
+            assert_eq!(pace.on_track(grams, 700.0), ok, "день {day}, {grams} г");
+        }
     }
 }
 
@@ -264,7 +338,9 @@ pub fn Gauge(
 
     // Pace markers + the outline that says whether we're keeping up. Both are
     // empty for an ordinary (single-day) gauge.
-    let ahead = pace.map(|p| value >= p.expected(target));
+    // «Успеваю» для цели — набрать не меньше ожидаемого, для потолка — остаться не
+    // выше него.
+    let ahead = pace.map(|p| p.on_track(value, target));
     let track_glow = match ahead {
         // Ahead of the daily pace → green outline; behind → orange. Ring + soft
         // glow so it reads on both light and dark schemes.

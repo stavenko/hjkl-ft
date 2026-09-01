@@ -841,6 +841,7 @@ pub fn DashboardPage() -> impl IntoView {
                                 let pace = crate::components::gauge::GaugePace {
                                     segments: 7,
                                     passed: w.day_of_week.saturating_sub(1),
+                                    at_most: false,
                                 };
                                 view! {
                                     <Gauge value=w.absorbed_mg target=w.target_mg
@@ -863,6 +864,7 @@ pub fn DashboardPage() -> impl IntoView {
                                 let pace = crate::components::gauge::GaugePace {
                                     segments: 7,
                                     passed: w.day_of_week.saturating_sub(1),
+                                    at_most: false,
                                 };
                                 view! {
                                     <Gauge value=w.portions target=w.target
@@ -883,6 +885,7 @@ pub fn DashboardPage() -> impl IntoView {
                                 let pace = crate::components::gauge::GaugePace {
                                     segments: 7,
                                     passed: w.day_of_week.saturating_sub(1),
+                                    at_most: false,
                                 };
                                 // Точки темпа — только у накопительных величин, см.
                                 // тот же разбор в progress_widget.

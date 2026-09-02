@@ -26,6 +26,7 @@ pub mod heme;
 pub mod indicators;
 pub mod iron;
 pub mod iron_pipeline;
+pub mod lazy_food;
 pub mod letters;
 pub mod local;
 pub mod meal_split;

@@ -8,7 +8,7 @@ pub(crate) fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
@@ -43,7 +43,7 @@ pub fn today() -> String {
     today_date().format("%Y-%m-%d").to_string()
 }
 
-fn time_now() -> String {
+pub(crate) fn time_now() -> String {
     chrono::Local::now().format("%H:%M").to_string()
 }
 

@@ -381,6 +381,7 @@ async fn poll_inner(first_wait: u32) -> Result<(), String> {
         apply_planka_directives(&r.messages).await;
         apply_curator_planka_directives(&r.messages).await;
         apply_week_directives(&r.messages).await;
+        apply_feature_directives(&r.messages).await;
         store_cursor(&peer, r.next_after_seq).await;
         if !r.has_more {
             break;
@@ -433,6 +434,55 @@ async fn apply_planka_directives(msgs: &[LiveMessage]) {
             action_done: false,
         });
     }
+}
+
+// ── Директива включения возможности ──────────────────────────────────────────
+//
+// `{feature, on}` — куратор включает или выключает человеку новый способ работы.
+// Ручки в настройках для этого нет: человек не обязан знать, что внутри две
+// записи еды, а мы должны уметь вернуть его на старую, если новая подведёт.
+
+/// App-flag: наибольший `seq` уже применённой директивы возможностей.
+const FEATURE_DIRECTIVE_SEQ_KEY: &str = "feature_directive_seq";
+
+/// Применить кураторские директивы `set_feature`.
+///
+/// Применяются ВСЕ новые по порядку `seq`, а не только последняя: возможности
+/// разные, и «включить одну, выключить другую» это две правки. Для одной и той же
+/// возможности порядок по `seq` даёт последнее слово последней директиве.
+///
+/// Неизвестное имя молча пропускается — `features::set` его не примет. Опечатка
+/// куратора не должна заводить флаг, который никто никогда не прочитает.
+async fn apply_feature_directives(msgs: &[LiveMessage]) {
+    let last = crate::services::app_flags::get(FEATURE_DIRECTIVE_SEQ_KEY)
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let mut ordered: Vec<(u64, String, bool)> = Vec::new();
+    for m in msgs {
+        if m.kind != "set_feature" || m.seq <= last {
+            continue;
+        }
+        let Some(payload) = m.payload.as_deref() else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) else { continue };
+        let Some(feature) = v.get("feature").and_then(|f| f.as_str()) else { continue };
+        if !crate::services::features::is_known(feature) {
+            continue;
+        }
+        // Нет поля `on` — считаем «включить»: директива называется set_feature, и
+        // прислать её, чтобы ничего не изменить, никто не станет.
+        let on = v.get("on").and_then(|o| o.as_bool()).unwrap_or(true);
+        ordered.push((m.seq, feature.to_string(), on));
+    }
+    if ordered.is_empty() {
+        return;
+    }
+    ordered.sort_by_key(|(seq, _, _)| *seq);
+    let highest = ordered.last().map(|(seq, _, _)| *seq).unwrap_or(last);
+    for (_, feature, on) in &ordered {
+        crate::services::features::set(feature, *on);
+    }
+    crate::services::app_flags::set(FEATURE_DIRECTIVE_SEQ_KEY, &highest.to_string());
+    crate::services::sync::push_background();
 }
 
 // ── Директива правки планки ──────────────────────────────────────────────────

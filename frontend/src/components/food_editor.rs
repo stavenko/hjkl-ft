@@ -59,7 +59,7 @@ struct Resolved {
 /// the request with `400 "cannot identify image file"`. Rendering every input
 /// through a `<canvas>` normalises it to real JPEG and shrinks the payload /
 /// vision-token count (cap longest side at `MAX_DIM`).
-async fn file_to_jpeg_base64(file: &web_sys::File) -> Result<String, String> {
+pub(crate) async fn file_to_jpeg_base64(file: &web_sys::File) -> Result<String, String> {
     const MAX_DIM: f64 = 1536.0;
     let window = web_sys::window().ok_or("no window")?;
     let blob: &web_sys::Blob = file.unchecked_ref();

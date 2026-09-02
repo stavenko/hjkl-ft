@@ -9,6 +9,7 @@ pub mod food_modal;
 pub mod food_edit_modal;
 pub mod food_weight_modal;
 pub mod new_food_panel;
+pub mod other_food_panel;
 pub mod mini_chart;
 pub mod waste_field;
 pub mod restaurant_field;

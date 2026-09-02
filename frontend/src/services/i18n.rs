@@ -581,6 +581,11 @@ fn en(key: &str) -> &'static str {
         "diary_add.cancel" => "Cancel",
         "diary_add.nothing_found" => "Nothing found",
         "diary_add.new_food" => "New food",
+        "diary_add.other_food" => "Other food",
+        "other_food.description_placeholder" => "What did you eat? Words alone are fine, no photos needed",
+        "other_food.add" => "Add",
+        "other_food.hint" => "The entry appears in the diary right away and recognises itself once there is a network",
+        "other_food.not_recognised" => "Not recognised yet",
         "diary_add.more" => "Show",
         "diary_add.products" => "more",
         "diary_add.add_new_food" => "Add new food",
@@ -1571,6 +1576,16 @@ fn ru(key: &str) -> &'static str {
         "diary_add.cancel" => "Отмена",
         "diary_add.nothing_found" => "Ничего не найдено",
         "diary_add.new_food" => "Новая еда",
+        // Новый способ записи (features::LAZY_FOOD). Кнопка названа «Другая еда», а
+        // не «Новая»: человек не заводит продукт в справочник, он записывает то, что
+        // съел, и что из этого станет новым продуктом — наша забота.
+        "diary_add.other_food" => "Другая еда",
+        "other_food.description_placeholder" => "Что вы съели? Можно словами и без фотографий",
+        "other_food.add" => "Добавить",
+        // «Добавить», а не «Распознать»: запись попадает в дневник сразу, а разбор
+        // идёт фоном и может подождать сети.
+        "other_food.hint" => "Запись появится в дневнике сразу, а распознается сама, когда будет сеть",
+        "other_food.not_recognised" => "Ещё не распознано",
         "diary_add.more" => "Ещё",
         "diary_add.products" => "продуктов",
         "diary_add.add_new_food" => "Добавить новый продукт",

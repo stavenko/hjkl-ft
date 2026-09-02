@@ -43,6 +43,13 @@ pub fn FoodPicker(
     #[prop(default = true)]
     render_search_row: bool,
 ) -> impl IntoView {
+    // Новый способ записи еды включает КУРАТОР, флагом. Выключен — весь этот
+    // компонент ведёт себя ровно как прежде.
+    let lazy_on = move || {
+        crate::services::features::is_on(crate::services::features::LAZY_FOOD)
+    };
+    let show_other = create_rw_signal(false);
+
     // Use the caller's search signal if given, else own one.
     let search = search.unwrap_or_else(|| create_rw_signal(String::new()));
     // Foods picked during THIS picker session. A food is shown as added (and its
@@ -131,7 +138,7 @@ pub fn FoodPicker(
     view! {
         // Search row — hidden while the new-food editor is open, and entirely
         // omitted when the caller renders its own input (`render_search_row=false`).
-        <Show when=move || render_search_row && !show_editor.get()>
+        <Show when=move || render_search_row && !show_editor.get() && !show_other.get()>
             <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 0.75rem;">
                 <input
                     attr:data-testid="diary-add-input-search"
@@ -152,7 +159,15 @@ pub fn FoodPicker(
             </div>
         </Show>
 
-        <Show when=move || !show_editor.get()>
+        {move || show_other.get().then(|| view! {
+            <crate::components::other_food_panel::OtherFoodPanel
+                date=crate::services::local::today()
+                on_added=Callback::new(move |_| show_other.set(false))
+                on_cancel=Callback::new(move |_| show_other.set(false))
+            />
+        })}
+
+        <Show when=move || !show_editor.get() && !show_other.get()>
             {move || {
                 if items.get().is_empty() {
                     view! {
@@ -219,13 +234,18 @@ pub fn FoodPicker(
                                     }
                                 })
                             }}
+                            // Под флагом lazy_food кнопка ведёт на новый экран, а
+                            // не в форму продукта, и называется иначе: человек не
+                            // заводит продукт в справочник, он записывает съеденное.
+                            // Флаг выключен — всё как было, ни одна строка старого
+                            // пути не тронута.
                             <div style="text-align: center; padding: 16px 0;">
                                 <button
-                                    attr:data-testid="diary-add-btn-new-food"
+                                    attr:data-testid=move || if lazy_on() { "diary-add-btn-other-food" } else { "diary-add-btn-new-food" }
                                     class="is-size-6 has-text-link has-text-weight-medium"
                                     style="background: none; border: none; cursor: pointer;"
-                                    on:click=move |_| show_editor.set(true)
-                                >{move || t("diary_add.new_food")}</button>
+                                    on:click=move |_| if lazy_on() { show_other.set(true) } else { show_editor.set(true) }
+                                >{move || if lazy_on() { t("diary_add.other_food") } else { t("diary_add.new_food") }}</button>
                             </div>
                         </div>
                     }.into_view()

@@ -28,12 +28,22 @@ const arg = (name, def) => {
 };
 const MODEL = arg("model", process.env.MODEL || "qwen3-vl-plus");
 const ONLY = arg("only", null);
+/// Поперечник посуды в сантиметрах, если он известен. Это ЕДИНСТВЕННОЕ шаткое число
+/// метода: доли и толщины модель называет устойчиво, а диаметр на одном и том же
+/// снимке рыбы дала то 22, то 27 — и ответ разъехался в полтора раза, потому что
+/// площадь растёт как квадрат. Спросить у человека размер его тарелок один раз и
+/// хранить в настройках — и неопределённость уходит целиком.
+const PLATE_CM = Number(arg("plate", 0)) || null;
 
 /// Эталоны — то, что человек взвесил. Без них замер бессмыслен: геометрию можно
 /// получить какую угодно, вопрос только в том, сходится ли она с правдой.
 const TRUTH = {
   // Ключ — корни, по которым узнаём позицию: модель называет печень то «мясом», то
   // «говядиной», и сверять надо с тем, что она сказала, а не с тем, что мы ждали.
+  // Размеры посуды названы человеком: маленькая 19 см, большая 26 см. На снимке с
+  // печенью большая (400 г соцветий на маленькой лежали бы горкой в 6 см), на
+  // снимке с рыбой маленькая — проверено вилкой: она занимает 1068 px при тарелке
+  // в 1150, то есть тарелка едва длиннее вилки.
   "food-liver-cauliflower.jpg": [
     { keys: ["печен", "мясо", "говяд", "субпрод"], grams: 300 },
     { keys: ["капуст"], grams: 400 },
@@ -167,9 +177,11 @@ async function main() {
     catch (e) { console.log(`${f}\n  сбой — ${e.message}\n`); continue; }
 
     console.log(`${f}`);
-    console.log(`  посуда: ${a.tableware}  →  ${a.tableware_diameter_cm} см`);
+    const d = PLATE_CM || a.tableware_diameter_cm;
+    console.log(`  посуда: ${a.tableware}  →  модель ${a.tableware_diameter_cm} см` +
+                (PLATE_CM ? `, считаем по заданным ${PLATE_CM} см` : ""));
     for (const r of a.regions || []) {
-      const g = grams(a.tableware_diameter_cm, r);
+      const g = grams(d, r);
       const truth = (TRUTH[f] || [])
         .find((t) => t.keys.some((k) => r.name.toLowerCase().includes(k)))?.grams;
       console.log(`  ${r.name}: доля ${r.share_of_plate}, слой ${r.thickness_cm} см, ${r.how_dense}` +

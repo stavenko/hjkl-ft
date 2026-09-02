@@ -171,6 +171,9 @@ pub fn App() -> impl IntoView {
             // Картинки разобранных записей живут неделю (`local::IMAGE_KEEP_DAYS`).
             // Уборка идёт раз за запуск: снимки тяжёлые, а места на телефоне мало.
             crate::services::local::sweep_images().await;
+            // Нераспознанные записи разбираются фоном. Проход сам молчит, если
+            // возможность выключена или сети нет, — звать его можно смело.
+            crate::services::lazy_food::run_queue().await;
         });
     });
 
@@ -199,6 +202,15 @@ pub fn App() -> impl IntoView {
     //     re-verifies once the probe reports reachable again.
     // `verifying` guards against a second concurrent status fetch.
     let verifying = create_rw_signal(false);
+
+    // Сеть появилась — разбираем то, что накопилось. Записи, сделанные без сети,
+    // иначе ждали бы следующего запуска приложения.
+    create_effect(move |_| {
+        if matches!(net::is_online().get(), Some(true)) {
+            crate::services::lazy_food::run_queue_background();
+        }
+    });
+
     create_effect(move |_| {
         let online = net::is_online().get();
         match state.get() {

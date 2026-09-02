@@ -266,20 +266,11 @@ pub fn DiaryPage() -> impl IntoView {
     let editable = move || local::is_editable_day(&date.get());
 
 
+    // Считает `local::entry_nutrient`: форм записи стало три, и складывать их
+    // умеет одно место, покрытое тестами. Нераспознанная запись даёт ноль — она не
+    // еда с неизвестными нутриентами, а обещание разобраться.
     let nutrient_sum = move |nutrient: &str, es: &[DiaryEntry], fs: &[Food]| -> f64 {
-        es.iter().map(|e| {
-            let food = fs.iter().find(|f| f.id == e.food_id);
-            food.map(|f| {
-                let factor = (e.grams - e.waste_grams).max(0.0) / 100.0;
-                match nutrient {
-                    "Calories" => f.effective_kcal() * factor,
-                    "Protein" => f.protein * factor,
-                    "Fat" => f.fat * factor,
-                    "Carbs" => f.carbs * factor,
-                    custom => f.nutrients.get(custom).copied().unwrap_or(0.0) * factor,
-                }
-            }).unwrap_or(0.0)
-        }).sum()
+        es.iter().map(|e| local::entry_nutrient(e, fs, nutrient)).sum()
     };
 
     view! {

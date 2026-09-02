@@ -316,3 +316,56 @@ mod tests {
         );
     }
 }
+
+// ── фоновая очередь ──────────────────────────────────────────────────────────
+//
+// Запись ложится в дневник сразу, а разбирается когда получится. Сети нет — запись
+// остаётся нераспознанной и продолжает так выглядеть; это состояние законное, а не
+// сбой, и никакой ошибки человеку показывать не нужно.
+
+use std::cell::Cell;
+
+thread_local! {
+    /// Идёт ли разбор прямо сейчас. Без этого возврат в приложение, приход сети и
+    /// новая запись запустили бы три прохода разом по одной и той же очереди, и
+    /// одна запись разобралась бы трижды, заведя три копии каждой еды.
+    static RUNNING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Разобрать всё, что стоит в очереди. Зовётся при запуске, при появлении сети и
+/// после того, как человек записал новую еду.
+///
+/// Флаг возможности проверяется ЗДЕСЬ, а не у каждого вызывающего: выключили
+/// возможность — фон замолкает сам, где бы его ни позвали.
+pub async fn run_queue() {
+    if !crate::services::features::is_on(crate::services::features::LAZY_FOOD) {
+        return;
+    }
+    if !crate::services::net::online_now() {
+        return;
+    }
+    if RUNNING.with(|r| r.replace(true)) {
+        return;
+    }
+    let entries: Vec<DiaryEntry> = db::list_all::<DiaryEntry>("diary").await;
+    let queue: Vec<DiaryEntry> = awaiting_recognition(&entries).into_iter().cloned().collect();
+    for entry in queue {
+        // Сеть могла пропасть посреди очереди — тогда останавливаемся и оставляем
+        // остальное на следующий раз, а не молотим впустую по одной ошибке.
+        if !crate::services::net::online_now() {
+            break;
+        }
+        match recognize(&entry).await {
+            Ok(_) => crate::services::sync::push_background(),
+            Err(e) => leptos::logging::warn!("запись {} не разобрана: {e}", entry.id),
+        }
+    }
+    RUNNING.with(|r| r.set(false));
+}
+
+/// Запустить разбор, не дожидаясь его окончания.
+pub fn run_queue_background() {
+    leptos::spawn_local(async {
+        run_queue().await;
+    });
+}

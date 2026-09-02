@@ -49,6 +49,48 @@ pub(crate) fn time_now() -> String {
 
 // --- Foods ---
 
+/// Сколько данного нутриента даёт ОДНА запись дневника.
+///
+/// Форм записи три, и считаются они по-разному:
+///
+///   Direct     ссылка на еду и граммы — так дневник работал всегда;
+///   Aggregate  своей еды нет, вклад складывается из `items`, как у рецепта;
+///   Pending    ещё не разобрана, и вклад её РОВНО НОЛЬ.
+///
+/// Ноль у нераспознанной записи — не заглушка, а решение. Такая запись не еда с
+/// неизвестными нутриентами, а обещание разобраться: показать её нулём калорий
+/// значило бы соврать человеку, будто он съел что-то бескалорийное. Поэтому она и
+/// выглядит в дневнике иначе, и в цифры не входит, пока не распознается.
+///
+/// Отходы (`waste_grams`) вычитаются только у `Direct`: у агрегатора граммы стоят у
+/// каждой позиции, и общего веса, из которого можно вычесть кость, у него нет.
+pub fn entry_nutrient(entry: &DiaryEntry, foods: &[Food], nutrient: &str) -> f64 {
+    let of = |food: &Food, grams: f64| {
+        let factor = grams / 100.0;
+        match nutrient {
+            "Calories" => food.effective_kcal() * factor,
+            "Protein" => food.protein * factor,
+            "Fat" => food.fat * factor,
+            "Carbs" => food.carbs * factor,
+            custom => food.nutrients.get(custom).copied().unwrap_or(0.0) * factor,
+        }
+    };
+    match entry.kind {
+        api_types::DiaryEntryKind::Pending => 0.0,
+        api_types::DiaryEntryKind::Direct => foods
+            .iter()
+            .find(|f| f.id == entry.food_id)
+            .map_or(0.0, |f| of(f, (entry.grams - entry.waste_grams).max(0.0))),
+        api_types::DiaryEntryKind::Aggregate => entry
+            .items
+            .iter()
+            .map(|it| {
+                foods.iter().find(|f| f.id == it.food_id).map_or(0.0, |f| of(f, it.grams.max(0.0)))
+            })
+            .sum(),
+    }
+}
+
 pub async fn list_foods() -> Vec<Food> {
     db::list_all("foods").await
 }
@@ -2294,6 +2336,67 @@ pub async fn list_progress_photos() -> Vec<ProgressPhoto> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use api_types::{DiaryEntry, Food};
+    // ── вклад записи в итоги дня ──
+
+    #[test]
+    fn pryamaya_zapis_schitaetsya_po_ede_i_grammam() {
+        let food = Food { id: "f1".into(), kcal: 100.0, protein: 10.0, ..Food::default() };
+        let e = DiaryEntry { food_id: "f1".into(), grams: 250.0, ..DiaryEntry::direct() };
+        assert_eq!(entry_nutrient(&e, &[food.clone()], "Calories"), 250.0);
+        assert_eq!(entry_nutrient(&e, &[food], "Protein"), 25.0);
+    }
+
+    #[test]
+    fn othody_vychitayutsya_tolko_u_pryamoj() {
+        let food = Food { id: "f1".into(), kcal: 100.0, ..Food::default() };
+        let e = DiaryEntry { food_id: "f1".into(), grams: 200.0, waste_grams: 50.0, ..DiaryEntry::direct() };
+        assert_eq!(entry_nutrient(&e, &[food], "Calories"), 150.0);
+    }
+
+    #[test]
+    fn nerasspoznannaya_zapis_ne_daet_nichego() {
+        // Не заглушка, а решение: это обещание разобраться, а не бескалорийная еда.
+        let food = Food { id: "f1".into(), kcal: 100.0, ..Food::default() };
+        let e = DiaryEntry {
+            kind: api_types::DiaryEntryKind::Pending,
+            description: Some("съел печень".into()),
+            grams: 300.0,
+            ..DiaryEntry::direct()
+        };
+        assert_eq!(entry_nutrient(&e, &[food], "Calories"), 0.0);
+    }
+
+    #[test]
+    fn agregator_skladyvaetsya_iz_svoih_pozicij() {
+        let liver = Food { id: "f1".into(), kcal: 130.0, protein: 20.0, ..Food::default() };
+        let cabbage = Food { id: "f2".into(), kcal: 25.0, protein: 2.0, ..Food::default() };
+        let e = DiaryEntry {
+            kind: api_types::DiaryEntryKind::Aggregate,
+            items: vec![
+                api_types::DiaryFoodItem { food_id: "f1".into(), grams: 300.0 },
+                api_types::DiaryFoodItem { food_id: "f2".into(), grams: 400.0 },
+            ],
+            ..DiaryEntry::direct()
+        };
+        let foods = vec![liver, cabbage];
+        assert_eq!(entry_nutrient(&e, &foods, "Calories"), 130.0 * 3.0 + 25.0 * 4.0);
+        assert_eq!(entry_nutrient(&e, &foods, "Protein"), 20.0 * 3.0 + 2.0 * 4.0);
+    }
+
+    #[test]
+    fn poteryannaya_eda_ne_valit_schet() {
+        // Позиция ссылается на еду, которой в базе нет: считаем её нулём, а не
+        // роняем весь день.
+        let e = DiaryEntry {
+            kind: api_types::DiaryEntryKind::Aggregate,
+            items: vec![api_types::DiaryFoodItem { food_id: "нет-такой".into(), grams: 100.0 }],
+            ..DiaryEntry::direct()
+        };
+        assert_eq!(entry_nutrient(&e, &[], "Calories"), 0.0);
+    }
+
     mod image_retention {
         use super::super::{live_image_hashes, IMAGE_KEEP_DAYS};
         use api_types::{DiaryEntry, DiaryEntryKind, DiaryFoodItem};

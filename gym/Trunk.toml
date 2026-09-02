@@ -1,0 +1,14 @@
+[serve]
+# Свой порт: приложения стоят рядом и запускаются одновременно (frontend 3601,
+# admin 3701, curator 3702).
+port = 3703
+
+[watch]
+ignore = ["dist"]
+
+# Вынос встроенного модуля в /init.js, ужесточение CSP и штамп версии сборки.
+# См. комментарий в самом скрипте — там причины, а не только шаги.
+[[hooks]]
+stage = "post_build"
+command = "bash"
+command_arguments = ["scripts/build-shell.sh"]

@@ -1,0 +1,52 @@
+[package]
+name = "gym"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+leptos = { version = "0.6", features = ["csr"] }
+# Опознание браузера и пошаговые инструкции по установке — из общего крейта.
+# Второй копии этих экранов быть не должно: они выстраданы на живых устройствах.
+pwa-prompt = { path = "../common/pwa-prompt" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "MediaQueryList",
+    "Location",
+    "History",
+    "Navigator",
+    "Screen",
+    "Storage",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Headers",
+    "UrlSearchParams",
+    "CredentialsContainer",
+    "CredentialCreationOptions",
+    "CredentialRequestOptions",
+    "PublicKeyCredential",
+    "PublicKeyCredentialCreationOptions",
+    "PublicKeyCredentialRequestOptions",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlDocument",
+    "CssStyleDeclaration",
+    "Clipboard",
+    "HtmlInputElement",
+    "ServiceWorkerContainer",
+    "ServiceWorkerRegistration",
+] }
+base64 = "0.22"
+sha2 = "0.10"
+console_error_panic_hook = "0.1"

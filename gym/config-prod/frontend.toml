@@ -1,0 +1,6 @@
+# Прод-адреса воркеров (gym.renorma.app → *.renorma.app).
+# Подменяется в dist/config/frontend.toml скриптом scripts/deploy-prod.sh.
+auth_base_url = "https://auth.renorma.app"
+payment_base_url = "https://pay.renorma.app"
+ai_base_url = "https://ai.renorma.app"
+gym_sync_base_url = "https://gym-sync.renorma.app"

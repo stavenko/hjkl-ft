@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0E1116" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#F4F6F8" media="(prefers-color-scheme: light)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="re:Norma зал" />
+    <title>re:Norma — тренировки</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link data-trunk rel="rust" data-wasm-opt="z" />
+    <link data-trunk rel="copy-dir" href="config" />
+    <link data-trunk rel="copy-dir" href="fonts" />
+    <link data-trunk rel="copy-dir" href="icons" />
+    <!-- Гифки инструкций по установке — из общего крейта, вместе с его экранами. -->
+    <link data-trunk rel="copy-dir" href="../common/pwa-prompt/assets/pwa-img" />
+    <!-- Гифки яндексовского экрана («Поделиться» → Chrome) лежат у приложения
+         худеющего и берутся ОТТУДА, а не копией: они одни и те же, а копия
+         неизбежно отстала бы. Пути в разметке — тоже те же, `/onboard-img/…`,
+         на них завязаны прогоны scripts/check-yandex-screen.mjs. -->
+    <link data-trunk rel="copy-dir" href="../frontend/onboard-img" />
+    <link data-trunk rel="copy-file" href="manifest.webmanifest" />
+    <link data-trunk rel="copy-file" href="_redirects" />
+    <link data-trunk rel="copy-file" href="_headers" />
+    <link data-trunk rel="copy-file" href="sw.js" />
+    <style>
+        /* ── Self-hosted fonts (no third-party hosts; CSP font-src 'self') ── */
+        @font-face {
+            font-family: "Golos Text"; font-style: normal; font-weight: 400 700;
+            font-display: swap; src: url("/fonts/golos-cyrillic.woff2") format("woff2");
+            unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+        }
+        @font-face {
+            font-family: "Golos Text"; font-style: normal; font-weight: 400 700;
+            font-display: swap; src: url("/fonts/golos-latin.woff2") format("woff2");
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+        @font-face {
+            font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700;
+            font-display: swap; src: url("/fonts/jbmono-cyrillic.woff2") format("woff2");
+            unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+        }
+        @font-face {
+            font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700;
+            font-display: swap; src: url("/fonts/jbmono-latin.woff2") format("woff2");
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2074, U+20AC, U+2122, U+2212;
+        }
+
+        /* ── Токены оформления: те же, что у кураторского приложения ──
+           Палитра продуктовая, и второй у приложения тренировок быть не должно.
+           Взяты ЦЕЛИКОМ, включая имена: `--accent` и `--line` читает общий крейт
+           pwa-prompt, который рисует шаги установки. Компонентов здесь ровно
+           столько, сколько приложение показывает, — панелей, вкладок и пузырей
+           переписки в нём нет, и их правил тоже. */
+        :root {
+            --bg: #0E1116; --surface: #161A21; --surface-2: #1C212B; --elev: #232A36;
+            --line: #262E3A; --line-soft: #1E2530;
+            --text: #E8EBF1; --muted: #8B94A3; --faint: #5C6675;
+            --accent: #14B884; --accent-ink: #04130C; --accent-soft: rgba(20,184,132,.15);
+            --danger: #F4536B; --danger-soft: rgba(244,83,107,.15);
+            --warn: #F5B301; --warn-soft: rgba(245,179,1,.14); --warn-ink: #f5c451;
+            --shadow: 0 8px 30px rgba(0,0,0,.45); --shadow-sm: 0 2px 10px rgba(0,0,0,.35);
+            --r: 15px; --r-sm: 11px; --r-pill: 999px;
+            --font-ui: "Golos Text", system-ui, -apple-system, sans-serif;
+            --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+            --safe-t: env(safe-area-inset-top, 0px);
+            --safe-b: env(safe-area-inset-bottom, 0px);
+            --tabbar-h: 62px;
+        }
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg: #EEF1F5; --surface: #FFFFFF; --surface-2: #F5F7FA; --elev: #EDF1F6;
+                --line: #DFE4EA; --line-soft: #EAEEF3;
+                --text: #12161D; --muted: #5A6472; --faint: #97A1AF;
+                --accent: #0F9E70; --accent-ink: #FFFFFF; --accent-soft: rgba(15,158,112,.12);
+                --danger: #E11D48; --danger-soft: rgba(225,29,72,.10);
+                --warn: #B45309; --warn-soft: rgba(180,83,9,.10); --warn-ink: #B45309;
+                --shadow: 0 10px 34px rgba(20,30,50,.12); --shadow-sm: 0 2px 10px rgba(20,30,50,.08);
+            }
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body { margin: 0; height: 100%; }
+        body {
+            background: var(--bg); color: var(--text);
+            font-family: var(--font-ui); font-size: 15px; line-height: 1.5;
+            -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+            letter-spacing: -0.01em;
+        }
+        /* Мягкое свечение сверху — то же, что у остальных приложений. */
+        body::before {
+            content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+            background: radial-gradient(120% 60% at 50% -10%, var(--accent-soft), transparent 60%);
+        }
+        button { font: inherit; color: inherit; cursor: pointer; border: none; background: none; }
+        input { font: inherit; color: inherit; }
+        .mono { font-family: var(--font-mono); font-feature-settings: "tnum" 1; letter-spacing: -0.02em; }
+        ::selection { background: var(--accent-soft); }
+
+        /* ── Оболочка ── */
+        .app {
+            position: relative; z-index: 1;
+            max-width: 720px; margin: 0 auto;
+            height: 100%; height: 100dvh; overflow: hidden;
+            display: flex; flex-direction: column;
+        }
+        /* min-height: 0 обязателен, чтобы flex:1 прокручивался внутри себя, а не
+           растил родителя (flex-элементы по умолчанию min-height:auto). */
+        /* Место под нижнее меню закладывается ЗДЕСЬ: полоса `position: fixed`, и
+           без запаса она накрыла бы последнюю строку списка настроек. На экранах
+           онбординга меню нет, но и лишние 62 px внизу там не мешают — содержимое
+           центрируется. */
+        .screen { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+            padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 8px); }
+        /* `margin:auto` на flex-элементе — безопасный способ центрировать то, что
+           может оказаться выше экрана: `justify-content:center` обрезал бы верх, и
+           прокрутить к нему было бы нельзя. Инструкция по установке ровно такая. */
+        .screen--center { display: flex; }
+        .center { margin: auto; width: 100%; max-width: 400px; padding: 24px calc(24px + var(--safe-t)) 24px; }
+
+        /* Значок приложения на вводных экранах: он же стоит на домашнем экране,
+           и человек узнаёт по нему, что поставил именно это. */
+        .applogo { display: block; width: 76px; height: 76px; border-radius: 18px;
+            margin: 0 auto 18px; }
+        .h1 { font-size: 1.5rem; font-weight: 680; letter-spacing: -0.03em; margin: 0 0 6px;
+            text-align: center; }
+        .sub { color: var(--muted); margin: 0 0 24px; text-align: center; line-height: 1.55; }
+
+        /* ── Карточка ── */
+        .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+            padding: 15px; box-shadow: var(--shadow-sm); }
+
+        /* Снимок интерфейса под шагом инструкции (яндексовский экран). Общие шаги
+           крейта pwa-prompt рисуют свои картинки классом `.step-shot` и стилем,
+           который везут с собой. */
+        .shot { display: block; width: 100%; border-radius: 12px;
+            border: 1px solid var(--line); margin-bottom: 18px; }
+
+        /* ── Нижнее меню ──
+           Иконка пока одна, но полоса — настоящая: разделы у приложения будут, и
+           появятся они рядом, а не вместо. Тот же расчёт под безопасную зону, что
+           у кураторского приложения. */
+        .tabbar {
+            position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+            display: flex; justify-content: center; max-width: 720px; margin: 0 auto;
+            padding: 6px 8px calc(6px + var(--safe-b));
+            background: color-mix(in srgb, var(--bg) 86%, transparent);
+            backdrop-filter: saturate(1.4) blur(16px);
+            -webkit-backdrop-filter: saturate(1.4) blur(16px);
+            border-top: 1px solid var(--line-soft);
+        }
+        /* Ширина пункта ОГРАНИЧЕНА: с одним пунктом растянутая на весь экран
+           подсветка читается как полоса, а не как выбранный раздел. Появятся
+           разделы — разойдутся по центру, каждый в своей колонке. */
+        .tab {
+            flex: 1 1 0; max-width: 120px;
+            display: flex; flex-direction: column; align-items: center; gap: 3px;
+            padding: 7px 4px; border-radius: 12px; color: var(--faint);
+            font-size: .7rem; font-weight: 600;
+            transition: color .18s, background .18s;
+        }
+        .tab--on { color: var(--accent); background: var(--accent-soft); }
+        .tab:active { transform: scale(.94); }
+        .tab__icon { position: relative; display: block; width: 22px; height: 22px; }
+        .tab__icon svg {
+            width: 22px; height: 22px; stroke: currentColor; fill: none;
+            stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+        }
+        /* Точка «есть обновление» — на иконке, а не на подписи: подпись может и не
+           влезть, иконка есть всегда. */
+        .tab__dot {
+            position: absolute; top: -2px; right: -3px;
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--danger); border: 1.5px solid var(--bg);
+        }
+
+        /* ── Списки настроек ── */
+        .pad { padding: 16px; }
+        .section {
+            text-transform: uppercase; letter-spacing: .04em; font-size: .7rem; font-weight: 700;
+            color: var(--faint); margin: 24px 0 8px 4px;
+        }
+        .card--rows { padding: 0; overflow: hidden; }
+        .row {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 13px 15px;
+        }
+        .row-btn {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            width: 100%; padding: 13px 15px; text-align: left; font-weight: 500;
+            transition: background .15s;
+        }
+        .row-btn + .row-btn { border-top: 1px solid var(--line-soft); }
+        .row-btn:active { background: var(--elev); }
+        .row-btn:disabled { opacity: .5; cursor: default; }
+        .row-btn--danger { color: var(--danger); }
+        .tick { color: var(--accent); font-weight: 700; }
+        .chevron { color: var(--faint); font-size: 1.1rem; }
+        /* Та же красная точка, что в меню, — в строке «Версия». */
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); flex: none; }
+        /* Фраза восстановления: крупно, вразрядку и моноширинно — её переписывают
+           от руки, и слитный текст тут читается хуже. */
+        .phrase {
+            font-family: var(--font-mono); font-size: 1.1rem; font-weight: 600;
+            line-height: 1.8; text-align: center; word-spacing: .3em;
+            margin-bottom: 10px;
+        }
+
+        /* ── Кнопки ── */
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+            padding: 11px 15px; border-radius: var(--r-sm); font-weight: 600; font-size: .92rem;
+            background: var(--surface-2); border: 1px solid var(--line); color: var(--text);
+            transition: transform .1s, background .15s, border-color .15s; min-height: 42px;
+            text-decoration: none; }
+        .btn:active { transform: scale(.97); }
+        .btn:disabled { opacity: .5; cursor: default; }
+        .btn--primary { background: var(--accent); color: var(--accent-ink); border-color: transparent;
+            box-shadow: 0 6px 18px var(--accent-soft); }
+        .btn--block { width: 100%; }
+        .btn--sm { padding: 7px 12px; min-height: 34px; font-size: .84rem; flex: none; }
+
+        /* ── Переключатель языка ── */
+        .seg { display: flex; gap: 3px; padding: 3px; background: var(--surface-2);
+            border: 1px solid var(--line); border-radius: var(--r-sm); }
+        .seg__btn { flex: 1; padding: 8px 10px; border-radius: 8px; font-weight: 600; font-size: .88rem;
+            color: var(--muted); transition: color .15s, background .15s; }
+        .seg__btn--on { background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-sm); }
+
+        /* ── Поля ── */
+        .field { width: 100%; background: var(--surface-2); border: 1px solid var(--line);
+            border-radius: var(--r-sm); padding: 12px 14px; color: var(--text); outline: none;
+            transition: border-color .15s, box-shadow .15s; }
+        .field::placeholder { color: var(--faint); }
+        .field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+        /* Метка поля: плейсхолдер исчезает, стоит начать печатать, а имя человек
+           вводит один раз и должен видеть, что это именно имя. */
+        .label { display: block; font-size: .78rem; font-weight: 600; letter-spacing: .02em;
+            color: var(--faint); margin: 0 0 7px; }
+        .hint { font-size: .82rem; color: var(--muted); margin: 8px 0 0; }
+
+        /* Второстепенное действие — ссылкой, а не второй кнопкой: две одинаковые
+           кнопки не отвечают на вопрос «а мне-то куда». */
+        .alt { display: flex; align-items: center; justify-content: center; gap: 7px;
+            margin-top: 20px; color: var(--muted); font-size: .92rem; }
+        .linkbtn { color: var(--accent); font-weight: 600; font-size: .92rem; padding: 2px; }
+        .linkbtn:disabled { opacity: .5; cursor: default; }
+
+        /* ── Сообщения ── */
+        .banner { margin: 0 0 16px; padding: 11px 14px; border-radius: var(--r-sm);
+            background: var(--danger-soft); color: var(--danger); font-size: .88rem;
+            white-space: pre-wrap; text-align: left; }
+        .banner--warn { background: var(--warn-soft); color: var(--warn-ink); }
+        .banner--ok { background: var(--accent-soft); color: var(--accent); }
+        .spinner { width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid var(--line);
+            border-top-color: var(--accent); animation: spin .8s linear infinite; margin: 0 auto 18px; }
+        /* Спиннер внутри кнопки — вместо её текста, чтобы кнопка не прыгала. */
+        .spinner--btn {
+            width: 14px; height: 14px; border-width: 2px; border-top-color: currentColor;
+            margin: 0; display: inline-block; vertical-align: -2px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Клавиатурный фокус обязан быть виден: сюда попадают и с внешней
+           клавиатуры, и с VoiceOver. */
+        :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+        /* ── Экран загрузки: висит, пока не смонтируется WASM (см. lib.rs).
+           Стили на КЛАССЕ, а не на #splash: тем же экраном накрывает сторож
+           зависшего обновления, когда сплэша на странице уже нет (обновление
+           встало ДО навигации, старое приложение ещё живо). ── */
+        .rn-splash {
+            position: fixed; inset: 0; z-index: 9998;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--bg);
+            font-family: var(--font-ui);
+            animation: sp-fade .45s ease both;
+        }
+        .rn-splash .splash-inner {
+            display: flex; flex-direction: column; align-items: center; gap: 20px;
+            animation: sp-rise .6s cubic-bezier(.2,.7,.3,1) both;
+        }
+        .rn-splash .splash-logo { position: relative; width: 78px; height: 78px; }
+        .rn-splash .splash-logo::before {
+            content: ""; position: absolute; inset: -22px; border-radius: 50%;
+            background: radial-gradient(circle, var(--accent-soft), transparent 68%);
+            animation: sp-glow 2.6s ease-in-out infinite;
+        }
+        /* Тот же знак-кольцо, что на иконке приложения, только крутящийся. */
+        .rn-splash .splash-ring {
+            position: absolute; inset: 0; border-radius: 50%;
+            background: conic-gradient(from -90deg, var(--accent) 0 60%, var(--danger) 60% 90%, var(--warn) 90% 100%);
+            -webkit-mask: radial-gradient(circle, transparent 19px, #000 20px);
+            mask: radial-gradient(circle, transparent 19px, #000 20px);
+            animation: sp-spin 5.5s cubic-bezier(.55,.15,.45,.85) infinite;
+        }
+        .rn-splash .splash-word { font-size: 1.6rem; font-weight: 700; letter-spacing: -.02em; color: var(--text); }
+        /* Сообщение сторожа — ВНУТРИ экрана загрузки, под словом. */
+        .rn-splash .splash-stuck { max-width: 20rem; padding: 0 8px; text-align: center; }
+        .rn-splash .splash-stuck-title { font-size: 17px; font-weight: 700; line-height: 1.3; color: var(--text); }
+        .rn-splash .splash-stuck-sub { font-size: 14px; line-height: 1.5; color: var(--muted); margin-top: 8px; }
+        .rn-splash .splash-stuck-btn {
+            width: 100%; margin-top: 18px; padding: 15px 16px; border: none; border-radius: var(--r-sm);
+            background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 16px; font-weight: 700;
+            cursor: pointer;
+        }
+        @keyframes sp-spin { to { transform: rotate(360deg); } }
+        @keyframes sp-glow { 0%, 100% { opacity: .5; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.08); } }
+        @keyframes sp-fade { from { opacity: 0; } }
+        @keyframes sp-rise { from { opacity: 0; transform: translateY(10px); } }
+    </style>
+</head>
+<body>
+<div id="splash" class="rn-splash">
+    <div class="splash-inner">
+        <div class="splash-logo"><div class="splash-ring"></div></div>
+        <div class="splash-word">re:Norma</div>
+    </div>
+</div>
+<script>
+// ---- Проверка совместимости (ДО того, как init.js подтянет WASM) ------------
+//
+// Приложение собрано под wasm32 с reference-types: Rust 1.82+ включает их по
+// умолчанию, а wasm-bindgen их ТРЕБУЕТ — отключить нельзя. Браузер без них не
+// может инстанцировать модуль: init() упал бы глубоко внутри, и человек остался
+// бы на вечном экране загрузки, ничего о причине не узнав.
+//
+// Поэтому проверяем здесь и, если не поддержано, рисуем внятное сообщение и
+// ставим флаг, который init.js смотрит ДО инстанцирования — чтобы многомегабайтный
+// wasm даже не качался на устройство, которое его не запустит.
+(function () {
+    var ok = false;
+    try {
+        // (module (func ref.null func drop)) — детектор reference-types из
+        // wasm-feature-detect: `ref.null` (0xd0) проходит валидацию только там,
+        // где предложение поддержано (iOS/Safari 16.4+, Chrome 96+).
+        ok = WebAssembly.validate(new Uint8Array(
+            [0,97,115,109,1,0,0,0,1,4,1,96,0,0,3,2,1,0,10,7,1,5,0,208,112,26,11]));
+    } catch (e) { ok = false; }
+    if (ok) return;
+    window.__RN_INCOMPATIBLE__ = true;
+    var ua = navigator.userAgent || '';
+    var isIOS = /iP(hone|od|ad)/i.test(ua)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var isChrome = /(Chrome|CriOS|Chromium)\//i.test(ua) && !/Edg\//i.test(ua);
+    var lead, howto;
+    if (isIOS) {
+        // На iOS движок браузера привязан к версии системы — обновлять надо её.
+        lead = 'Вам необходимо обновить операционную систему телефона до iOS 16.4 или новее.';
+        howto = 'Откройте «Настройки» → «Основные» → «Обновление ПО».';
+    } else if (isChrome) {
+        lead = 'Вам необходимо обновить Chrome до версии 96 или новее.';
+        howto = 'Обновите приложение Google Chrome в магазине приложений.';
+    } else {
+        lead = 'Вам необходимо обновить браузер и операционную систему до последней версии.';
+        howto = '';
+    }
+    var html = ''
+        + '<div style="max-width:360px;padding:0 28px;text-align:center;color:var(--text);">'
+        + '<div style="font-size:20px;font-weight:700;line-height:1.3;margin-bottom:16px;">'
+        +   'Тренировки re:Norma не смогут работать в этом браузере</div>'
+        + '<div style="font-size:15px;line-height:1.5;color:var(--muted);margin-bottom:10px;">'
+        +   lead + '</div>'
+        + (howto
+            ? '<div style="font-size:14px;line-height:1.5;color:var(--muted);">' + howto + '</div>'
+            : '')
+        + '</div>';
+    function paint() {
+        var el = document.getElementById('splash');
+        if (el) { el.innerHTML = html; }
+    }
+    if (document.getElementById('splash')) paint();
+    else document.addEventListener('DOMContentLoaded', paint);
+})();
+
+// ---- Сторож зависшего обновления -------------------------------------------
+//
+// Обновление — это `location.reload()`, а он ходит в сеть. Зависнуть он может в
+// двух разных местах, и человек в обоих видит одно: ничего не происходит.
+//   * ДО навигации — старая страница жива, крутится спиннер на кнопке;
+//   * ПОСЛЕ — новая страница загрузилась наполовину и стоит на экране загрузки.
+//
+// Поэтому сторож живёт ЗДЕСЬ, а не в WASM: во втором случае никакого Rust ещё
+// нет. Отметка о начале лежит в sessionStorage и переживает навигацию —
+// единственное место, откуда её видно по обе стороны.
+//
+// Выход ровно один: снести всё, что могло застрять (кэши + сервис-воркер), и
+// загрузиться заново — то же самое, что закрыть браузер и открыть снова.
+(function () {
+    var KEY = 'gym_update_started_at';
+    var WAIT_MS = 15000;
+
+    window.__rnUpdateStarted = function () {
+        try { sessionStorage.setItem(KEY, String(Date.now())); } catch (e) {}
+    };
+    // Приложение поднялось — обновление состоялось, сторожить нечего.
+    window.__rnUpdateDone = function () {
+        try { sessionStorage.removeItem(KEY); } catch (e) {}
+    };
+
+    function hardReset() {
+        var done = function () {
+            try { sessionStorage.removeItem(KEY); } catch (e) {}
+            // `replace`, а не `reload`: перезагрузка могла и зависнуть, а переход
+            // по адресу начинает всё заново, без её очереди.
+            location.replace(location.pathname + location.search);
+        };
+        var jobs = [];
+        try {
+            if (window.caches && caches.keys) {
+                jobs.push(caches.keys().then(function (ks) {
+                    return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+                }));
+            }
+        } catch (e) {}
+        try {
+            if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+                jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+                    return Promise.all(rs.map(function (r) { return r.unregister(); }));
+                }));
+            }
+        } catch (e) {}
+        // Ждём уборку, но НЕ бесконечно: застрявший сброс не должен запереть
+        // человека там же, откуда он выбирается.
+        Promise.race([
+            Promise.all(jobs),
+            new Promise(function (r) { setTimeout(r, 4000); })
+        ]).then(done, done);
+    }
+
+    // Сообщение — часть ЭКРАНА ЗАГРУЗКИ, а не отдельная страница поверх него:
+    // человек всё это время смотрел на кольцо, и подменять картинку ровно в тот
+    // момент, когда мы объясняем, что всё затянулось, — значит добавить ему
+    // второе непонятное событие. Кольцо продолжает крутиться: обновление не
+    // отменено, мы лишь предлагаем выход.
+    function paint() {
+        if (document.getElementById('rn-stuck')) return;
+        var splash = document.getElementById('splash');
+        if (!splash) {
+            splash = document.createElement('div');
+            splash.className = 'rn-splash';
+            splash.style.zIndex = '2147483647';
+            splash.innerHTML = '<div class="splash-inner">'
+                + '<div class="splash-logo"><div class="splash-ring"></div></div>'
+                + '<div class="splash-word">re:Norma</div>'
+                + '</div>';
+            document.body.appendChild(splash);
+        }
+        var inner = splash.querySelector('.splash-inner') || splash;
+        var box = document.createElement('div');
+        box.id = 'rn-stuck';
+        box.className = 'splash-stuck';
+        box.setAttribute('data-testid', 'update-stuck');
+        box.innerHTML = ''
+            + '<div class="splash-stuck-title">Обновление длится слишком долго</div>'
+            + '<div class="splash-stuck-sub">Возможно, произошло зависание из-за сетевых проблем.</div>'
+            + '<button id="rn-stuck-btn" data-testid="update-stuck-btn" class="splash-stuck-btn">'
+            +   'Перезагрузить приложение</button>';
+        inner.appendChild(box);
+        document.getElementById('rn-stuck-btn').addEventListener('click', hardReset);
+    }
+
+    function armFrom(startedAt) {
+        var left = WAIT_MS - (Date.now() - startedAt);
+        setTimeout(function () {
+            // Приложение успело подняться (сплэша нет) — значит обновление прошло.
+            if (!document.getElementById('splash') && !window.__rnUpdatePending) return;
+            paint();
+        }, left > 0 ? left : 0);
+    }
+
+    // Обновление начали в ПРОШЛОЙ жизни страницы: отметка пережила навигацию, а
+    // мы стоим на экране загрузки. Отсчёт продолжается с той же отметки, не с нуля.
+    try {
+        var started = parseInt(sessionStorage.getItem(KEY) || '', 10);
+        if (started) armFrom(started);
+    } catch (e) {}
+
+    // Обновление начинают ЗДЕСЬ И СЕЙЧАС (кнопка в настройках, автоприменение до
+    // входа): страница ещё старая, сплэша на ней нет — отсюда отдельный флаг.
+    window.__rnUpdateArm = function () {
+        window.__rnUpdatePending = true;
+        window.__rnUpdateStarted();
+        armFrom(Date.now());
+    };
+})();
+</script>
+    <script>
+        // Сервис-воркер регистрируется до старта wasm: без него Chrome не
+        // предложит установку, а именно установка — весь смысл этого экрана.
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('/sw.js').catch(function (e) {
+                    console.error('sw register failed', e);
+                });
+            });
+        }
+
+        // Установка завершилась. Отметку читает приложение при следующем запуске:
+        // событие приходит РАНЬШЕ, чем Android доводит установку до конца, и без
+        // отметки человек, вернувшийся во вкладку, снова увидел бы инструкцию.
+        // Та же выстраданная механика, что в приложении худеющего.
+        window.addEventListener('appinstalled', function () {
+            try { localStorage.setItem('gym_pwa_installed', '1'); } catch (e) {}
+            location.reload();
+        });
+    </script>
+</body>
+</html>

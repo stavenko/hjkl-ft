@@ -1,0 +1,5 @@
+# Dev-адреса воркеров (стенд renorma-gym-dev.pages.dev).
+auth_base_url = "https://auth-worker-dev.vg-stavenko.workers.dev"
+payment_base_url = "https://payment-worker-dev.vg-stavenko.workers.dev"
+ai_base_url = "https://ai-worker-dev.vg-stavenko.workers.dev"
+gym_sync_base_url = "https://gym-sync-worker-dev.vg-stavenko.workers.dev"

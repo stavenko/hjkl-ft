@@ -4,6 +4,8 @@
 
 Окружения: `*-dev` (тест, `renorma-fit-dev.pages.dev` и `*-dev.workers.dev`) и `*-prod` (`fit.renorma.app`, `*.renorma.app`). Конвенция: `renorma-<product>-dev|prod`, `<worker>-dev|prod`.
 
+Pages-проекты: `renorma-fit-*` (приложение худеющего), `renorma-admin-*`, `renorma-curator-*`, `renorma-gym-*` (тренировки).
+
 ## Фронтенд (Leptos PWA → Cloudflare Pages)
 
 **Prod** (`renorma-fit-prod` → `fit.renorma.app`):
@@ -51,6 +53,46 @@ cd curator && trunk build --release && npx wrangler pages deploy dist --project-
 > пересекаются структурно, а не только по origin. Соответствующие переменные —
 > `CURATOR_RP_ID`/`CURATOR_RP_ORIGIN` в `cloudflare/auth-worker/wrangler.toml`.
 
+## Тренировки (→ Cloudflare Pages)
+
+**Prod** (`renorma-gym-prod` → `gym.renorma.app`):
+```bash
+gym/scripts/deploy-prod.sh
+```
+**Dev** (`renorma-gym-dev`):
+```bash
+cd gym
+trunk build --release
+cp pwa-worker.js dist/_worker.js
+npx wrangler pages deploy dist --project-name=renorma-gym-dev --branch main --commit-dirty=true
+```
+Dev-конфиг (`config/frontend.toml`) trunk кладёт в `dist/config/` сам — подмена не нужна.
+
+> Версия сборки = `sha256(init.js + sw.js + index.html)[:12]`, публикуется в
+> `/version.json` (штампует `scripts/build-shell.sh` из post_build-хука Trunk).
+> Приложение опрашивает его при запуске и при возвращении на передний план и
+> показывает «Обновить» в Настройках → Версия. Правка одной только оболочки
+> (sw.js/index.html) тоже бампает версию — иначе обновление никогда бы не
+> предложилось. Тот же хук выносит встроенный модуль Trunk в `/init.js` и
+> заменяет в CSP `script-src 'unsafe-inline'` на хеши оставшихся встроенных
+> скриптов, так что **править index.html и катить без пересборки нельзя**:
+> хеши разъедутся, и браузер молча не выполнит ни регистрацию сервис-воркера,
+> ни сторож зависшего обновления.
+
+
+> Домен у приложения тренировок свой, а область ключей — НЕТ, и это ровно
+> наоборот, чем у админки и куратора. Вход сюда идёт ТЕМ ЖЕ паскеем, что и в
+> `fit.renorma.app`: в проде `GYM_RP_ID = "renorma.app"` — общий rp_id,
+> registrable suffix обоих поддоменов, — а различается только origin церемонии
+> (`GYM_RP_ORIGIN`). Переменные в `cloudflare/auth-worker/wrangler.toml`; после
+> их правки auth-worker надо перекатить, иначе вход на gym отобьётся.
+>
+> **На dev общего ключа нет и быть не может**: `pages.dev` — публичный суффикс,
+> и rp_id приложения худеющего (`renorma-fit-dev.pages.dev`) для gym-домена не
+> является registrable suffix — браузер отверг бы церемонию. Поэтому на стенде у
+> зала СВОЯ область (`renorma-gym-dev.pages.dev`) и свой ключ. «Тот же ключ» —
+> это про прод.
+
 ## Воркеры (Rust → Cloudflare Workers)
 
 Каждый `cloudflare/<worker>/wrangler.toml`: `name = "<worker>-dev"` (по умолчанию) + `[env.production] name = "<worker>-prod"`. Билд (`worker-build --release`) запускается автоматически из `[build] command` при `wrangler deploy`.
@@ -66,10 +108,23 @@ cd cloudflare/<worker> && npx wrangler deploy --env production
 
 Воркеры: `ai-worker`, `auth-worker`, `bug-report-worker`, `main-flow` (push/reminders), `ocr-queue`, `payment-worker`, `receipt-worker`, `support-worker`, `sync-worker`, `telegram-worker`.
 
+- **`gym-sync-worker` — ПОКА НЕ КАТИТЬ.** Журнал синхронизации приложения
+  тренировок (`gym-sync.renorma.app`): код готов и повторяет `sync-worker`, но
+  первая версия приложения в него ещё не пишет, а стирание аккаунта до него не
+  доходит — payment-worker ходит в `sync-worker` по service-binding'у, и второй
+  такой привязки к `gym-sync-worker` ещё нет. Заводить её надо ОДНОВРЕМЕННО с
+  первой записью данных, иначе «забыть меня» оставит хвост.
+
 - **`lava-mock` — только dev** (нет `[env.production]`): мок lava.top, в прод не катить (money-safety).
 - **`payment-worker` prod — деньги.** Катить осознанно.
 - Прод-секреты — из CF Secrets Store (не per-worker). `CLOUDFLARE_API_TOKEN` — в репозиторном `.env`.
 
 ## Порядок
 
-Обычный релиз: воркеры (если менялись) → фронтенд/admin/curator. Прод — после проверки на dev.
+Обычный релиз: воркеры (если менялись) → фронтенд/admin/curator/gym. Прод — после проверки на dev.
+
+Первый выкат приложения тренировок: сперва **auth-worker** (в нём заводятся
+`GYM_RP_ID`/`GYM_RP_ORIGIN` и разрешается gym-origin) и **payment-worker** (в
+нём разрешается gym-origin для `GET /subscription`), и только потом сам
+Pages-проект. В обратном порядке приложение выкатится в состояние, где вход
+отбивается браузером ещё до ответа сервера.

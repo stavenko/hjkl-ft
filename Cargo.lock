@@ -1805,6 +1805,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "gym"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "console_error_panic_hook",
+ "js-sys",
+ "leptos",
+ "pwa-prompt",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "toml",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "h2"
 version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -5,6 +5,7 @@ members = [
     "frontend",
     "admin",
     "curator",
+    "gym",
     "common/api-types",
     "common/datashare",
     "common/pwa-prompt",

@@ -40,6 +40,13 @@ ADMIN_RP_ID = "renorma-admin-dev.pages.dev"
 ADMIN_RP_ORIGIN = "https://renorma-admin-dev.pages.dev"
 CURATOR_RP_ID = "renorma-curator-dev.pages.dev"
 CURATOR_RP_ORIGIN = "https://renorma-curator-dev.pages.dev"
+# Приложение тренировок. В DEV у него СВОЯ область ключей, и иначе быть не может:
+# `pages.dev` — публичный суффикс, поэтому rp_id приложения худеющего
+# (`renorma-fit-dev.pages.dev`) для gym-домена не является registrable suffix и
+# браузер отверг бы церемонию. «Тот же ключ, что и у fit» — это ПРОД (ниже),
+# где общий rp_id `renorma.app` покрывает оба поддомена.
+GYM_RP_ID = "renorma-gym-dev.pages.dev"
+GYM_RP_ORIGIN = "https://renorma-gym-dev.pages.dev"
 
 
 # ── Production (separate worker on auth.renorma.app, clean DO data) ──
@@ -97,6 +104,13 @@ ADMIN_RP_ORIGIN = "https://admin.renorma.app"
 # в приложении худеющего, ни в консоли — и наоборот.
 CURATOR_RP_ID = "curator.renorma.app"
 CURATOR_RP_ORIGIN = "https://curator.renorma.app"
+# Зал — НАМЕРЕННО НЕ отдельная область ключей, в отличие от админки и куратора.
+# Требование продукта прямо обратное: в приложение тренировок входят ТЕМ ЖЕ
+# ключом, что и в fit.renorma.app. Поэтому rp_id тут общий, `renorma.app` —
+# он registrable suffix и для fit.renorma.app, и для gym.renorma.app, значит
+# один паскей действителен в обоих. Отличается только origin церемонии.
+GYM_RP_ID = "renorma.app"
+GYM_RP_ORIGIN = "https://gym.renorma.app"
 # Смоук-фронт на соседнем поддомене: rpId тот же (renorma.app — его суффикс),
 # поэтому ключ, созданный на смоуке, действует и на fit.renorma.app.
 RP_ORIGINS_EXTRA = "https://fit-smoke.renorma.app"

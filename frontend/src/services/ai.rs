@@ -3557,6 +3557,77 @@ mod tests {
     }
 
     #[test]
+    fn povtor_v_rasshifrovke_shlopyvaetsya() {
+        // Так это и приходит с сорвавшегося кадра: одна фраза снова и снова. У
+        // взвешенной сметаны их было 194 подряд, 26846 знаков при 270 осмысленных.
+        let looped = "Сметана 15%. Хранить при +4. Хранить при +4. Хранить при +4. Хранить при +4.";
+        assert_eq!(collapse_repeats(looped), "Сметана 15%. Хранить при +4.");
+    }
+
+    #[test]
+    fn zdorovyj_tekst_ne_teryaet_nichego() {
+        let good = "Творог обезжиренный. Состав: молоко. Масса нетто 250 г.";
+        assert_eq!(collapse_repeats(good), good);
+    }
+
+    #[test]
+    fn kadr_etiketki_sobiraetsya_bez_pustyh_polej() {
+        let r = PhotoRead {
+            what_is_on_the_photo: "этикетка".into(),
+            photo_kind: "label".into(),
+            foods_on_the_photo: vec![],
+            product_name_printed: Some("Творог".into()),
+            netto_weight_printed_g: Some(250.0),
+            kcal_per_100g_printed: Some(96.0),
+            protein_per_100g_printed: Some(18.0),
+            fat_per_100g_printed: None,
+            carbs_per_100g_printed: None,
+            all_text_verbatim: None,
+        };
+        let block = frame_block("kadr-1.jpg", &r);
+        assert!(block.contains("название на упаковке: Творог"));
+        assert!(block.contains("масса нетто, г: 250"));
+        assert!(block.contains("ккал 96, белки 18"));
+        // Непрочитанного в блоке быть не должно — иначе второй проход решит, что
+        // жиры равны нулю, а не что их не прочли.
+        assert!(!block.contains("жиры"));
+        assert!(!block.contains("текст с упаковки"));
+    }
+
+    #[test]
+    fn kadr_edy_perechislyaet_edu_a_ne_etiketku() {
+        let r = PhotoRead {
+            what_is_on_the_photo: "тарелка".into(),
+            photo_kind: "food".into(),
+            foods_on_the_photo: vec![
+                PhotoFood { name: "печень".into(), grams: Some(300.0) },
+                PhotoFood { name: "капуста".into(), grams: None },
+            ],
+            product_name_printed: None,
+            netto_weight_printed_g: None,
+            kcal_per_100g_printed: None,
+            protein_per_100g_printed: None,
+            fat_per_100g_printed: None,
+            carbs_per_100g_printed: None,
+            all_text_verbatim: None,
+        };
+        let block = frame_block("tarelka.jpg", &r);
+        assert!(block.contains("печень — 300 г"));
+        assert!(block.contains("капуста (граммы не оценены)"));
+        assert!(!block.contains("масса нетто"));
+    }
+
+    #[test]
+    fn opisanie_i_ego_otsutstvie_oba_skazany_vsluh() {
+        let with = merge_prompt(&[], "съел половину десерта");
+        assert!(with.contains("съел половину десерта"));
+        assert!(with.contains("Снимков нет"));
+        let without = merge_prompt(&["КАДР a.jpg: этикетка".into()], "   ");
+        assert!(without.contains("Описания человек не оставил"));
+        assert!(without.contains("КАДР a.jpg"));
+    }
+
+    #[test]
     fn stroka_zhira_nahoditsya_po_tochnomu_imeni() {
         assert_eq!(fat_row_by_key("dairy_fat").map(|r| r.key), Some("dairy_fat"));
         assert_eq!(fat_row_by_key("  Dairy_Fat  ").map(|r| r.key), Some("dairy_fat"));
@@ -3747,4 +3818,505 @@ pub(crate) fn prompt_dump() -> serde_json::Value {
             "schema": schemars::schema_for!(FatProfileAnswer),
         },
     })
+}
+
+// --- Ленивая запись: разбор снимков по одному ---------------------------------
+//
+// Новый способ записи еды, включаемый флагом `features::LAZY_FOOD`. Старые пути
+// (`vision_direct`, `food_items_direct`) остаются нетронутыми рядом.
+//
+// Здесь четыре ОТДЕЛЬНЫХ запроса вместо одного, и это не стройность ради
+// стройности. В этом проекте раз за разом подтверждалось, что два вопроса в одном
+// запросе тянут друг друга вниз: поперечник посуды, спрошенный вместе с едой,
+// скакал 22 и 27 см на одном снимке, а спрошенный отдельно дал 19.2 при настоящих
+// 19. Замеры лежат в scripts/measure-per-image.mjs, measure-plate-size.mjs,
+// measure-portion-steps.mjs, measure-merge-items.mjs.
+
+/// Что первый проход прочёл с ОДНОГО снимка.
+///
+/// Кадров у одного продукта бывает несколько — название на одном, таблица на
+/// другом, масса на третьем, — и каждый разбирается порознь. Поэтому пустое поле
+/// здесь нормальный ответ, а не провал: сводит кадры второй проход.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PhotoRead {
+    #[serde(default)]
+    pub what_is_on_the_photo: String,
+    /// `food` — еда, которую человек ест; `label` — упаковка с текстом.
+    #[serde(default)]
+    pub photo_kind: String,
+    #[serde(default)]
+    pub foods_on_the_photo: Vec<PhotoFood>,
+    #[serde(default)]
+    pub product_name_printed: Option<String>,
+    #[serde(default)]
+    pub netto_weight_printed_g: Option<f64>,
+    #[serde(default)]
+    pub kcal_per_100g_printed: Option<f64>,
+    #[serde(default)]
+    pub protein_per_100g_printed: Option<f64>,
+    #[serde(default)]
+    pub fat_per_100g_printed: Option<f64>,
+    #[serde(default)]
+    pub carbs_per_100g_printed: Option<f64>,
+    #[serde(default)]
+    pub all_text_verbatim: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PhotoFood {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub grams: Option<f64>,
+}
+
+impl PhotoRead {
+    pub fn is_label(&self) -> bool {
+        self.photo_kind.eq_ignore_ascii_case("label")
+    }
+}
+
+/// Промпт первого прохода. Главное правило в нём — про неполноту кадра: без него
+/// модель дописывает название по виду упаковки, а масса нетто с одного кадра
+/// становится массой всего, что человек ел.
+///
+/// Полная расшифровка стоит ПОСЛЕДНИМ полем намеренно. Мелкий нечитаемый шрифт —
+/// адрес завода, оговорки — загоняет модель в повтор: она гоняет одну строку, пока
+/// не кончится бюджет, и ответ обрывается на полуслове. Стояла расшифровка выше —
+/// вместе с ней пропадали и название, и КБЖУ (оба кадра сметаны не читались вовсе);
+/// стоит последней — теряется только её хвост.
+///
+/// Энергия выписывается ОТДЕЛЬНОЙ строкой-уликой от белков-жиров-углеводов: без неё
+/// перед глазами творог и йогурт отдавали число при кДж вместо ккал — 406.5 и 281.4
+/// вместо 96 и 66.8.
+fn lazy_photo_prompt() -> String {
+    "На фотографии — то, что человек собирается записать в дневник питания. Разбери ЭТОТ ОДИН снимок.\n\
+     Сначала определи, что перед тобой: ЕДА, которую человек ест, или ЭТИКЕТКА упаковки с текстом. \
+     Дальше отвечай только на вопросы своего случая, поля чужого оставь пустыми.\n\
+     ВАЖНО. Человек снимает ОДИН продукт двумя или тремя кадрами, и на этом отдельном кадре сведений \
+     почти наверняка НЕ ХВАТАЕТ: название может быть снято отдельно, таблица отдельно, масса отдельно. \
+     Часть надписей обрезана краем кадра или не попала в него вовсе. Это НОРМАЛЬНО. Не видно — оставь \
+     поле пустым, ничего не додумывай и не восстанавливай по памяти. Пустое поле здесь — правильный \
+     ответ. Это касается ВСЕХ полей, включая название продукта.\n\
+     Для еды называй ПРОДУКТ, а не разряд: «печень», «треска», «гречка», но не «мясное блюдо» и не \
+     «гарнир» — по разряду не найти ни нутриентов, ни прошлой записи.\n\
+     Для этикетки: бери число при «ккал», а не при «кДж» — они стоят рядом и различаются примерно \
+     вчетверо. Строку, которую не разобрать, пропусти и иди дальше: НИКОГДА не повторяй уже выписанное.\n\
+     Ответь ТОЛЬКО этим JSON, поля в этом порядке:\n\
+     {\"what_is_on_the_photo\":\"по-русски, одним предложением\",\
+     \"photo_kind\":\"food|label\",\
+     \"foods_on_the_photo\":[{\"name\":\"...\",\"grams\":null}],\
+     \"product_name_printed\":null,\"netto_weight_printed_g\":null,\
+     \"energy_verbatim\":null,\"kcal_per_100g_printed\":null,\
+     \"nutrition_line_verbatim\":null,\"protein_per_100g_printed\":null,\
+     \"fat_per_100g_printed\":null,\"carbs_per_100g_printed\":null,\
+     \"all_text_verbatim\":null}"
+        .to_string()
+}
+
+/// Разобрать ОДИН снимок. Зовётся по разу на кадр — в этом весь смысл прохода.
+pub async fn read_photo(
+    image: &str,
+    on_progress: impl Fn(u8, u32, u32),
+) -> Result<PhotoRead, String> {
+    let raw = vision_chat(&lazy_photo_prompt(), std::slice::from_ref(&image.to_string()), on_progress).await?;
+    parse_one::<PhotoRead>(&raw).map_err(|e| format!("разбор снимка: {e}: {}", snippet(&raw)))
+}
+
+// --- Ленивая запись: размер посуды -------------------------------------------
+
+/// Ответ прохода про посуду: рамки объектов и запасная прикидка.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlateMeasure {
+    /// `fork` | `spoon` | `knife` — прибор, видимый ЦЕЛИКОМ; иначе `none`/`phone`.
+    #[serde(default)]
+    pub reference: String,
+    #[serde(default)]
+    pub plate_box: Vec<f64>,
+    #[serde(default)]
+    pub reference_box: Vec<f64>,
+    #[serde(default)]
+    pub diameter_cm_guess: Option<f64>,
+}
+
+/// Промпт прохода про посуду. Спрашиваются РАМКИ, а не сантиметры.
+///
+/// Прикидывать размеры модель не умеет: четыре способа спросить дали от 16% до 241%
+/// ошибки площади, причём закрытый список записывал всякую тарелку в обеденные, а
+/// вопрос «во сколько раз шире вилки» получал ответ «в 1.8 раза» на снимке, где
+/// тарелка длиннее вилки в 1.08. Показывать, ГДЕ объект, — другое умение, и ему эти
+/// модели учены отдельно: на кадре с целиком видной вилкой вышло 19.2 см при 19.
+fn plate_prompt() -> String {
+    "На снимке еда в посуде. Нужен ТОЛЬКО размер самой посуды — про еду не думай вовсе.\n\
+     Мерить будем по столовому прибору, если он есть в кадре и виден ЦЕЛИКОМ. Твоё дело — показать, \
+     где посуда и где этот прибор; сантиметры посчитают без тебя.\n\
+     Прибора нет, или он виден лишь частично, или закрыт посудой — пиши \"none\": по обрезанному \
+     предмету мерить нельзя. Если в кадре телефон или планшет — \"phone\"; мерить по нему не будут.\n\
+     Рамки в долях кадра: [x0, y0, x1, y1], где 0 — левый верхний угол, 1 — правый нижний.\n\
+     Поле diameter_cm_guess заполняй на случай \"none\": тарелки бывают очень разные, десертная и \
+     закусочная заметно меньше обеденной, миска бывает совсем небольшой. Не считай всякую тарелку \
+     обеденной по умолчанию — смотри на кадр.\n\
+     Ответь ТОЛЬКО этим JSON:\n\
+     {\"reference\":\"fork|spoon|knife|phone|none\",\"plate_box\":[0,0,0,0],\
+     \"reference_box\":[0,0,0,0],\"diameter_cm_guess\":0}"
+        .to_string()
+}
+
+/// Поперечник посуды в сантиметрах и то, откуда он взялся.
+///
+/// `frame_w`/`frame_h` — размеры кадра в пикселях. Они нужны, потому что доли кадра
+/// по горизонтали и по вертикали — разное число пикселей, и считать длины прямо в
+/// долях значит растянуть кадр в квадрат (74% ошибки против 2%).
+pub async fn measure_plate(
+    image: &str,
+    frame_w: f64,
+    frame_h: f64,
+    on_progress: impl Fn(u8, u32, u32),
+) -> Result<(f64, crate::services::portion::PlateSource), String> {
+    use crate::services::portion::{plate_cm_from_boxes, plate_is_plausible, reference_cm, PlateSource};
+
+    let raw = vision_chat(&plate_prompt(), std::slice::from_ref(&image.to_string()), on_progress).await?;
+    let m = parse_one::<PlateMeasure>(&raw).map_err(|e| format!("разбор посуды: {e}: {}", snippet(&raw)))?;
+
+    let boxes = |v: &Vec<f64>| -> Option<[f64; 4]> {
+        (v.len() == 4).then(|| [v[0], v[1], v[2], v[3]])
+    };
+    if let (Some(cm), Some(plate), Some(reference)) =
+        (reference_cm(&m.reference), boxes(&m.plate_box), boxes(&m.reference_box))
+    {
+        if let Some(measured) = plate_cm_from_boxes(plate, reference, cm, frame_w, frame_h) {
+            return Ok((measured, PlateSource::Measured));
+        }
+    }
+    match m.diameter_cm_guess {
+        Some(g) if plate_is_plausible(g) => Ok((g, PlateSource::Guessed)),
+        _ => Err("размер посуды не определён".to_string()),
+    }
+}
+
+// --- Ленивая запись: что на посуде и сколько места занимает --------------------
+
+#[derive(Debug, Clone, Deserialize)]
+struct RegionsAnswer {
+    #[serde(default)]
+    regions: Vec<RegionAnswer>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RegionAnswer {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    share_of_plate: f64,
+    #[serde(default)]
+    thickness_cm: f64,
+    #[serde(default)]
+    how_dense: String,
+}
+
+/// Промпт про еду на посуде. Поперечник НАЗЫВАЕТСЯ модели, и это замерено: назвать
+/// его в промпте дало 13% ошибки, промолчать и подставить в коде — 35%, спросить
+/// толщину в долях поперечника — 40%. Промолчать плохо потому, что модель всё равно
+/// прикидывает размер про себя и привязывает к своей оценке толщину слоя.
+fn regions_prompt(plate_cm: f64) -> String {
+    format!(
+        "Перед тобой снимок еды. Твоя задача — ЧТО на посуде и СКОЛЬКО МЕСТА это занимает.\n\
+         Не думай о калорийности и не называй вес: граммы посчитают без тебя, по твоим размерам. \
+         Отвечай так, как если бы измерял линейкой, а не как если бы прикидывал порцию на глаз.\n\
+         Поперечник посуды известен: {plate_cm:.0} сантиметров. Отталкивайся от него, оценивая высоту \
+         слоя — сам размер посуды прикидывать не нужно.\n\
+         Называй ПРОДУКТ, а не разряд: «печень», «треска», но не «мясное блюдо».\n\
+         share_of_plate — какую долю ДНА посуды закрывает эта еда сверху: 0.5 половину, 0.25 четверть; \
+         считай площадь пятна, а не объём. thickness_cm — насколько высоко еда поднимается над дном в \
+         типичном месте. how_dense: \"solid\" сплошной кусок без пустот (филе, котлета, ломоть), \
+         \"packed\" вязкая масса (каша, пюре, тушёное с подливой), \"loose\" куски с промежутками \
+         воздуха (соцветия, салат, ягоды горкой).\n\
+         Ответь ТОЛЬКО этим JSON:\n\
+         {{\"regions\":[{{\"name\":\"...\",\"share_of_plate\":0,\"thickness_cm\":0,\"how_dense\":\"packed\"}}]}}"
+    )
+}
+
+/// Еда на посуде с уже посчитанными граммами.
+pub async fn read_regions(
+    image: &str,
+    plate_cm: f64,
+    on_progress: impl Fn(u8, u32, u32),
+) -> Result<Vec<(crate::services::portion::Region, f64)>, String> {
+    use crate::services::portion::{grams, Packing, Region};
+
+    let raw = vision_chat(&regions_prompt(plate_cm), std::slice::from_ref(&image.to_string()), on_progress).await?;
+    let a = parse_one::<RegionsAnswer>(&raw).map_err(|e| format!("разбор еды на посуде: {e}: {}", snippet(&raw)))?;
+    Ok(a
+        .regions
+        .into_iter()
+        .filter(|r| !r.name.trim().is_empty() && r.share_of_plate > 0.0 && r.thickness_cm > 0.0)
+        .map(|r| {
+            let region = Region {
+                name: r.name,
+                share_of_plate: r.share_of_plate.clamp(0.0, 1.0),
+                thickness_cm: r.thickness_cm,
+                packing: Packing::parse(&r.how_dense),
+            };
+            let g = grams(plate_cm, &region);
+            (region, g)
+        })
+        .collect())
+}
+
+// --- Ленивая запись: сведение кадров и описания в список еды -------------------
+//
+// Проход уже ТЕКСТОВЫЙ: картинок здесь нет, есть разбор кадров и слова человека.
+// Идёт через `generate`, поэтому схема доезжает полем, а `///` ниже попадают в
+// промпт — так устроены все структурированные запросы в этом файле.
+
+/// Откуда взялись граммы. Объявляется ДО самих граммов: сначала правило, потом
+/// число по нему. Порядок полей в этом файле не украшение — перестановка одного
+/// поля однажды стоила трёх верных ответов из двадцати.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct MergedItem {
+    /// Название продукта по-русски. Если оно напечатано на упаковке — бери
+    /// напечатанное, вместе с видом продукта (не «Картошка», а «Десерт «Картошка»»).
+    /// Если название пришло только из описания — бери слова человека.
+    pub name: String,
+    /// Имена кадров, из которых собрана эта позиция, через запятую. Позиция целиком
+    /// из описания — null.
+    pub from_frames: Option<String>,
+    /// Откуда берутся граммы, по строгому старшинству. "user_text" — человек назвал
+    /// количество в описании; это старше всего остального, даже если на упаковке
+    /// написано другое. Названо — не значит числом: ложка, ломоть, штука, тарелка,
+    /// половина пачки это тоже названное количество. "package_netto" — количество не
+    /// названо, но на упаковке есть масса нетто: считаем, что съедена вся пачка.
+    /// "photo_estimate" — количество видно по снимку еды. "default_100" — узнать
+    /// неоткуда НИ ОТКУДА, и тогда в граммах стоит ровно 100 и никогда ничего
+    /// другого; поставил иное число — значит источник был не этот.
+    pub where_grams_came_from: String,
+    /// Сколько граммов этого человек съест, по источнику из предыдущего поля. Меры
+    /// вроде ложки, штуки или половины пачки переведи в граммы сам.
+    pub grams: f64,
+    /// Калорийность на 100 г, ТОЛЬКО если она прочитана с упаковки в разборе кадров.
+    /// По памяти не восстанавливай: нутриенты подберём отдельным шагом. Нет — null.
+    pub kcal_per_100g: Option<f64>,
+    /// Белки на 100 г с упаковки; нет — null.
+    pub protein_per_100g: Option<f64>,
+    /// Жиры на 100 г с упаковки; нет — null.
+    pub fat_per_100g: Option<f64>,
+    /// Углеводы на 100 г с упаковки; нет — null.
+    pub carbs_per_100g: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct MergedItems {
+    /// ПО-РУССКИ, одним-двумя предложениями: какие кадры относятся к одному и тому же
+    /// продукту и почему; если кадров нет — почему список получился таким из описания.
+    pub how_frames_group: String,
+    /// Что человек собирается съесть, каждая позиция отдельно.
+    pub items: Vec<MergedItem>,
+}
+
+/// Кадр читаемым блоком для второго прохода: подписанные по-русски строки текстовая
+/// модель понимает лучше, чем ключи со змеиным именем.
+///
+/// Расшифровка обрезается и схлопывается. У сорвавшегося в повтор кадра она бывает
+/// длиной в двадцать шесть тысяч знаков, из которых осмысленных двести семьдесят, —
+/// такое не только дорого, но и сбивает.
+fn frame_block(name: &str, r: &PhotoRead) -> String {
+    let mut lines = vec![format!("КАДР {name}: {}", r.what_is_on_the_photo)];
+    if !r.is_label() {
+        let list: Vec<String> = r
+            .foods_on_the_photo
+            .iter()
+            .map(|f| match f.grams {
+                Some(g) => format!("{} — {g:.0} г", f.name),
+                None => format!("{} (граммы не оценены)", f.name),
+            })
+            .collect();
+        lines.push(format!(
+            "  на снимке еда: {}",
+            if list.is_empty() { "ничего не распознано".into() } else { list.join("; ") }
+        ));
+        return lines.join("\n");
+    }
+    let mut put = |label: &str, v: String| lines.push(format!("  {label}: {v}"));
+    if let Some(n) = r.product_name_printed.as_deref().filter(|s| !s.trim().is_empty()) {
+        put("название на упаковке", n.to_string());
+    }
+    if let Some(w) = r.netto_weight_printed_g {
+        put("масса нетто, г", format!("{w:.0}"));
+    }
+    let kbju: Vec<String> = [
+        ("ккал", r.kcal_per_100g_printed),
+        ("белки", r.protein_per_100g_printed),
+        ("жиры", r.fat_per_100g_printed),
+        ("углеводы", r.carbs_per_100g_printed),
+    ]
+    .iter()
+    .filter_map(|(k, v)| v.map(|v| format!("{k} {v}")))
+    .collect();
+    if !kbju.is_empty() {
+        put("прочитано на 100 г", kbju.join(", "));
+    }
+    if let Some(text) = r.all_text_verbatim.as_deref() {
+        let cleaned = collapse_repeats(text);
+        if !cleaned.is_empty() {
+            let cut: String = cleaned.chars().take(1500).collect();
+            put("текст с упаковки", cut);
+        }
+    }
+    lines.join("\n")
+}
+
+/// Выбросить повторы, сохранив порядок.
+///
+/// Модель зрения на нечитаемом мелком шрифте срывается в повтор: у одного кадра
+/// сметаны одна и та же фраза пришла 194 раза подряд, 26846 знаков при 270
+/// осмысленных. Целиком такое слать некуда.
+pub(crate) fn collapse_repeats(text: &str) -> String {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out: Vec<&str> = Vec::new();
+    for piece in text.split_inclusive(['.', ';', '\n']) {
+        let key = piece.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+        if key.is_empty() || !seen.insert(key) {
+            continue;
+        }
+        out.push(piece.trim());
+    }
+    out.join(" ").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn merge_prompt(frames: &[String], description: &str) -> String {
+    let mut p = String::from(
+        "Человек записывает еду в дневник питания. Он приложил снимки и, может быть, описал словами, \
+         что съел. Снимки уже разобраны по отдельности — ниже разбор каждого. Собери из всего этого \
+         список того, что человек собирается съесть.\n\n\
+         ГЛАВНОЕ. Кадров может быть несколько НА ОДИН продукт: название снято отдельно, таблица \
+         отдельно, масса отдельно. Такие кадры — ОДНА позиция списка, а не три. И наоборот: разные \
+         продукты не сливай в один.\n\n",
+    );
+    if frames.is_empty() {
+        p.push_str("Снимков нет.\n\n");
+    } else {
+        p.push_str("РАЗБОР КАДРОВ\n\n");
+        p.push_str(&frames.join("\n\n"));
+        p.push_str("\n\n");
+    }
+    if description.trim().is_empty() {
+        p.push_str("Описания человек не оставил.\n\n");
+    } else {
+        p.push_str(&format!("ОПИСАНИЕ ОТ ЧЕЛОВЕКА\n«{}»\n\n", description.trim()));
+    }
+    p.push_str(
+        "Всё, что человек назвал в описании, — тоже позиции списка, даже если упаковки и снимка для \
+         этого нет: ложка мёда рядом с творогом это вторая позиция, а не примечание к первой.\n\n\
+         Если кадры одного продукта дают РАЗНЫЕ числа — выбери одно, то, которое прочитано увереннее \
+         (полная строка таблицы надёжнее обрывка). Среднее между ними брать НЕЛЬЗЯ: получится число, \
+         которого нет ни на упаковке, ни в жизни.\n\n\
+         Позиция списка — то, что человек кладёт в рот, а не упаковка и не блюдо целиком. Обобщающей \
+         позиции вроде «обед» или «продукты» быть не должно.",
+    );
+    p
+}
+
+/// Свести разобранные кадры и описание человека в список еды.
+pub async fn merge_into_items(
+    frames: &[(String, PhotoRead)],
+    description: &str,
+    on_token: impl Fn(AiPhase) + Clone + 'static,
+) -> Result<MergedItems, String> {
+    let blocks: Vec<String> = frames.iter().map(|(name, r)| frame_block(name, r)).collect();
+    generate::<MergedItems>(merge_prompt(&blocks, description), on_token).await
+}
+
+// --- Ленивая запись: разметка ключевыми словами --------------------------------
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FoodKeywords {
+    /// Слова, по которым этот продукт разумно искать, от частного к общему.
+    /// Обязательно: само название; род, к которому продукт принадлежит («ракушки» —
+    /// это макароны); общеупотребительные синонимы и другие названия того же
+    /// («сёмга» и «лосось»); бренд, если он в названии. Каждое слово в именительном
+    /// падеже, одно-два слова, без жирности, веса, сорта и способа приготовления.
+    /// Лучше дать лишнее близкое слово, чем упустить нужное: по этим словам продукт
+    /// будут ИСКАТЬ, и не найденное заведётся в базе второй раз. Но не уходи в
+    /// надкатегории вроде «еда», «продукты», «молочное»: под них попадёт полбазы.
+    pub keywords: Vec<String>,
+}
+
+/// Разметить продукт словами для поиска. Зовётся ОДИН раз на продукт — при заведении
+/// еды, а не при каждом поиске.
+pub async fn keywords_for(
+    name: &str,
+    on_token: impl Fn(AiPhase) + Clone + 'static,
+) -> Result<Vec<String>, String> {
+    let prompt = format!(
+        "Продукт: «{name}».\n\nПо каким словам его следует искать? Ответь одним объектом JSON."
+    );
+    let a = generate::<FoodKeywords>(prompt, on_token).await?;
+    Ok(crate::services::food_search::clean_keywords(&a.keywords))
+}
+
+// --- Ленивая запись: выбор из отобранных кандидатов ----------------------------
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct PickAnswer {
+    /// ПО-РУССКИ, одним предложением: почему выбран именно этот продукт или почему
+    /// не подошёл ни один.
+    pub why: String,
+    /// Идентификатор продукта из списка — если это ТОТ ЖЕ САМЫЙ продукт, просто
+    /// названный иначе. Ни один не подходит — null. Null это нормальный, частый и НЕ
+    /// плохой ответ: у человека в базе может просто не быть этого продукта, и завести
+    /// его заново дешевле, чем приписать ему чужие нутриенты.
+    pub match_id: Option<String>,
+}
+
+/// Выбрать из кандидатов тот же самый продукт — или не выбрать никого.
+///
+/// Кандидаты сюда приходят УЖЕ просеянными арифметикой (`food_search::survivors`), и
+/// это принципиально: на замере модель соглашалась считать творог 110/17/3.0 тем же,
+/// что лежащий в базе 96/18/1.2, потому что названия совпадают. Спека же на любое
+/// отличие велит заводить новую копию, и цена ложного согласия — чужое КБЖУ в
+/// дневнике, тогда как цена ложного отказа всего лишь вторая копия в базе.
+pub async fn pick_same_food(
+    seen_name: &str,
+    seen: &crate::services::food_search::SeenNutrition,
+    pool: &[&api_types::Food],
+    on_token: impl Fn(AiPhase) + Clone + 'static,
+) -> Result<Option<String>, String> {
+    if pool.is_empty() {
+        return Ok(None);
+    }
+    let nutr = |kcal: Option<f64>, p: Option<f64>, f: Option<f64>, c: Option<f64>| match kcal {
+        None => "нутриенты не прочитаны".to_string(),
+        Some(k) => format!(
+            "{k} ккал, Б {}, Ж {}, У {} на 100 г",
+            p.map_or("?".into(), |v| v.to_string()),
+            f.map_or("?".into(), |v| v.to_string()),
+            c.map_or("?".into(), |v| v.to_string())
+        ),
+    };
+    let list = pool
+        .iter()
+        .map(|f| {
+            format!(
+                "- id={}: «{}» — {}",
+                f.id,
+                f.name,
+                nutr(Some(f.kcal), Some(f.protein), Some(f.fat), Some(f.carbs))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = format!(
+        "У человека в дневнике питания есть своя база продуктов. Мы распознали продукт и ищем, нет ли \
+         его там уже, чтобы не заводить второй раз.\n\n\
+         РАСПОЗНАЛИ: «{seen_name}» — {}\n\n\
+         ЕСТЬ В БАЗЕ:\n{list}\n\n\
+         Тот же продукт — это тот же продукт, как бы его ни назвали: «ракушки» и «макароны», «сёмга» и \
+         «лосось», название с брендом и без. Разный вид, сорт или способ приготовления — это РАЗНЫЕ \
+         продукты, даже если слова похожи: топлёное масло не сливочное, индейка не курица, десерт \
+         «Картошка» не картофель. Сомневаешься — отвечай null.",
+        nutr(seen.kcal, seen.protein, seen.fat, seen.carbs)
+    );
+    let a = generate::<PickAnswer>(prompt, on_token).await?;
+    // Уверенно названный несуществующий id бессмыслен — такой ответ это отказ.
+    Ok(a.match_id.filter(|id| pool.iter().any(|f| &f.id == id)))
 }

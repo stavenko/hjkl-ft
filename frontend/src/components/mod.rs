@@ -8,6 +8,8 @@ pub mod food_list_item;
 pub mod food_modal;
 pub mod food_edit_modal;
 pub mod food_weight_modal;
+pub mod lazy_diary_row;
+pub mod lazy_food_edit;
 pub mod new_food_panel;
 pub mod other_food_panel;
 pub mod mini_chart;

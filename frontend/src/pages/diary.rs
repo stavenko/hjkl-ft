@@ -232,6 +232,10 @@ pub fn DiaryPage() -> impl IntoView {
 
     let invalidate = move || version.update(|v| *v += 1);
 
+    // Какую ленивую запись сейчас правим. Форма одна на обе формы записи: у
+    // нераспознанной нижняя половина просто пуста.
+    let editing_lazy = create_rw_signal(Option::<DiaryEntry>::None);
+
     let delete_entry = move |entry_id: String| {
         spawn_local(async move {
             match local::remove_food_diary(&entry_id).await {
@@ -280,6 +284,20 @@ pub fn DiaryPage() -> impl IntoView {
         // the pan. Scrolling the document itself is robust. Only the date row is
         // `position: sticky` (below); the FAB stays `position: fixed`.
         <div style="background: var(--bulma-background); min-height: 100dvh;">
+        // Правка ленивой записи — поверх дневника, полноэкранным листом. Форма одна
+        // на обе формы записи: у нераспознанной нижняя половина пуста.
+        {move || editing_lazy.get().map(|e| view! {
+            <div attr:data-testid="lazy-edit-sheet"
+                style="position: fixed; inset: 0; z-index: 40; background: var(--bulma-background); overflow-y: auto; padding: 16px;">
+                <crate::components::lazy_food_edit::LazyFoodEdit
+                    entry=e
+                    foods=Signal::derive(foods)
+                    on_saved=Callback::new(move |_| { editing_lazy.set(None); invalidate(); })
+                    on_cancel=Callback::new(move |_| editing_lazy.set(None))
+                />
+            </div>
+        })}
+
         // Tap-away backdrop: closes the open row menu when tapping outside it.
         // pointerdown, not click: iOS Safari doesn't fire `click` on a bare <div>
         // on tap, so the tap-away close never worked on iPhone.
@@ -429,6 +447,21 @@ pub fn DiaryPage() -> impl IntoView {
                           // `is_last` suppresses the row divider on the final row so
                           // dividers sit only BETWEEN entries, not after the last one.
                           let render_row = move |entry: DiaryEntry, is_last: bool| -> View {
+                            // Ленивые формы записи рисуются своим компонентом и сюда
+                            // не идут: обычная строка знает про еду, граммы, отходы,
+                            // повтор и копирование, и ни одно из этих понятий к
+                            // нераспознанной записи не применимо.
+                            if entry.kind != api_types::DiaryEntryKind::Direct {
+                                return view! {
+                                    <crate::components::lazy_diary_row::LazyDiaryRow
+                                        entry=entry.clone()
+                                        foods=Signal::derive(foods)
+                                        is_last=is_last
+                                        on_edit=Callback::new(move |e: DiaryEntry| editing_lazy.set(Some(e)))
+                                        on_delete=Callback::new(move |e: DiaryEntry| delete_entry(e.id.clone()))
+                                    />
+                                }.into_view();
+                            }
                             let entry_id = entry.id.clone();
                             let entry_id2 = entry.id.clone();
                             let fid = entry.food_id.clone();

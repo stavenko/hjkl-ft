@@ -39,6 +39,10 @@ fn is_allowed_origin(origin: &str) -> bool {
         || (origin.starts_with("https://") && origin.ends_with(".renorma.app"))
         || origin == "https://renorma-fit-dev.pages.dev"
         || origin == "https://renorma-admin-dev.pages.dev"
+        // Приложение тренировок на своём dev-домене: подписку оно проверяет тем
+        // же `GET /subscription`, что и приложение худеющего. В проде
+        // gym.renorma.app проходит общим правилом суффикса — расходится только dev.
+        || origin == "https://renorma-gym-dev.pages.dev"
         || origin.starts_with("http://localhost")
         || origin.starts_with("http://127.0.0.1")
 }

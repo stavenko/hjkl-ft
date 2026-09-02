@@ -9,6 +9,7 @@ pub mod config;
 pub mod curator;
 pub mod directives;
 pub mod features;
+pub mod food_search;
 pub mod curator_share;
 pub mod db;
 pub mod egg;

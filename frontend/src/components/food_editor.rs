@@ -268,6 +268,9 @@ pub fn FoodEditor(
             fat: parse(fat.get_untracked()),
             carbs: parse(carbs.get_untracked()),
             nutrients,
+            // Заведённая руками еда размечается ключевыми словами фоном, как и
+            // прочие её признаки.
+            keywords: Vec::new(),
             package_weight: None,
             is_recipe: false,
             recipe_id: None,

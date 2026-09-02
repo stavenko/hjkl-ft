@@ -289,6 +289,7 @@ mod tests {
         let mut f = api_types::Food {
             id: "x".into(), name: "x".into(), kcal: 0.0, protein: 0.0, fat: 0.0, carbs: 0.0,
             nutrients: Default::default(), package_weight: None, is_recipe: false, recipe_id: None,
+            keywords: Vec::new(),
             archived: false, is_restaurant: false,
             is_veg_fruit: None, is_heme: None,
             is_milk_globule: None,

@@ -25,6 +25,7 @@ fn demo_food(name: String, kcal: f64, protein: f64, fat: f64, carbs: f64) -> Foo
         fat,
         carbs,
         nutrients: Default::default(),
+        keywords: Vec::new(),
         package_weight: None,
         is_recipe: false,
         recipe_id: None,

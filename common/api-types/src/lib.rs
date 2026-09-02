@@ -31,7 +31,7 @@ pub enum ApiError {
 
 // --- Domain models ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Food {
     pub id: String,
     pub name: String,
@@ -41,6 +41,17 @@ pub struct Food {
     pub carbs: f64,
     /// Custom nutrients: name -> value (in the unit defined by the goal)
     pub nutrients: BTreeMap<String, f64>,
+    /// Слова, по которым этот продукт следует ИСКАТЬ: само название, род, синонимы,
+    /// бренд. Размечается ОДИН раз при заведении еды, а не при каждом поиске.
+    ///
+    /// Нужны потому, что подстрока не связывает «ракушки» с «макаронами» — у слов нет
+    /// общих букв, и связывать нечего. На замере (scripts/measure-food-search.mjs)
+    /// подстрока находила 3 из 20 запросов, ключевые слова — 20 из 20.
+    ///
+    /// Пусто у всего, что заведено до этого поля, и это не мешает: поиск по словам
+    /// дополняет прежний поиск по названию, а не заменяет его.
+    #[serde(default)]
+    pub keywords: Vec<String>,
     /// Net weight of product in package (grams), if known
     pub package_weight: Option<f64>,
     pub is_recipe: bool,
@@ -443,6 +454,9 @@ impl FoodDraft {
             fat: self.fat,
             carbs: self.carbs,
             nutrients: self.nutrients.clone(),
+            // Черновик заводится вручную, ключевых слов у него нет: их разметит
+            // фоновый проход, как и прочие признаки.
+            keywords: Vec::new(),
             package_weight: self.package_weight,
             is_recipe: false,
             recipe_id: None,

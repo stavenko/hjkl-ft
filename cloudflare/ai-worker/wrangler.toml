@@ -26,21 +26,29 @@ JWT_SECRET = "dev-secret-change-in-production"
 INTERNAL_PUSH_KEY = "dev-internal-push-key"
 
 # ── Сторонние модели (картинки) ───────────────────────────────────────────────
-# Реестр провайдеров лежит в ГЛОБАЛЬНОМ Secrets Store — и в деве, и в проде: там
-# и адреса ручек, и ИМЕНА секретов с ключами. В репозитории нет ни того, ни
-# другого. Формат значения секрета `thirdparty-providers`:
+# Формат реестра: [{"models":[…],"url":"https://…/chat/completions","key":"ИМЯ"}].
+# Имя из поля `key` должно быть объявлено отдельным биндингом Secrets Store (ниже),
+# иначе запрос к такой модели вернёт 503.
 #
-#   [{"models":["<модель>"],"url":"https://…/chat/completions","key":"<ИМЯ_СЕКРЕТА>"}]
+# В ДЕВЕ реестр — обычная переменная, а не секрет, и вот почему. Секретного в нём
+# нет: адрес ручки Alibaba публичен, имя ключа и так стоит биндингом ниже, а само
+# значение ключа лежит в отдельном секрете. Зато в секрете лежал БЕЛЫЙ СПИСОК
+# моделей — и один и тот же секрет читали дев и прод, так что добавление модели
+# для замера немедленно меняло прод. Теперь список правится коммитом, под ревью, и
+# дев с продом развязаны. В ПРОДЕ (ниже) реестр остаётся в Secrets Store.
 #
-# Каждое имя из поля `key` должно быть объявлено ОТДЕЛЬНЫМ биндингом Secrets Store
-# (ниже — по одному на провайдера), иначе запрос к такой модели вернёт 503.
-[[secrets_store_secrets]]
-binding = "THIRDPARTY_PROVIDERS"
-store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
-secret_name = "thirdparty-providers"
+# Модели — то, что авторизовано в Model Studio под этим ключом. Приложение через
+# этот путь просит только qwen3-vl-plus; остальные нужны замерам (scripts/measure-*).
+THIRDPARTY_PROVIDERS = '''[{"models":[
+  "qwen3-vl-plus","qwen-vl-max","qwen-vl-plus","qwen-vl-ocr","qwen3-vl-flash",
+  "qwen3-vl-32b-instruct","qwen3-vl-32b-thinking","qwen3-vl-30b-a3b-instruct",
+  "qwen3-vl-8b-instruct","qwen3-vl-235b-a22b-instruct","qwen3-vl-235b-a22b-thinking",
+  "qwen3.8-max"
+],"url":"https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+"key":"QWEN_STUDIO_API_KEY_SINGAPOUR"}]'''
 
 # Ключ Alibaba Cloud Model Studio, регион Singapore. Имя биндинга = имя, которым
-# на него ссылается поле `key` в реестре.
+# на него ссылается поле `key` в реестре. ЭТО и есть единственное секретное здесь.
 [[secrets_store_secrets]]
 binding = "QWEN_STUDIO_API_KEY_SINGAPOUR"
 store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"

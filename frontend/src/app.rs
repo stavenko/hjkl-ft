@@ -312,10 +312,22 @@ pub fn App() -> impl IntoView {
                     <div style="max-width: 24rem; width: 100%;">
                         <img src="/icon-192.png" alt="re:Norma" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 1rem;" />
                         <h1 class="title is-5" style="margin-bottom: 0.5rem;">{move || t("locked.title")}</h1>
-                        <p class="has-text-grey mb-5" style="line-height: 1.6;">{move || t("locked.body")}</p>
+                        // pre-line: в тексте есть абзац, и он должен остаться абзацем.
+                        <p class="has-text-grey mb-5" style="line-height: 1.6; white-space: pre-line;">{move || t("locked.body")}</p>
+                        // Возобновление подписки живёт в боте: оплата идёт там, а не в
+                        // приложении. Ссылка ведёт сразу на оплату в мини-аппе.
+                        // <a href>, а не <button on:click>: на iOS клик по ссылке без
+                        // href до делегата не доходит (reference_ios_leptos_click_delegation).
+                        <a
+                            attr:data-testid="locked-link-bot"
+                            class="button is-link is-medium is-fullwidth has-text-weight-semibold"
+                            href=move || crate::services::config::get().miniapp_pay_url.clone()
+                        >
+                            {move || t("auth.open_bot")}
+                        </a>
                         <button
                             attr:data-testid="locked-btn-login"
-                            class="button is-light is-fullwidth"
+                            class="button is-light is-fullwidth mt-4"
                             style="text-decoration: underline;"
                             on:click=move |_| {
                                 // Switch account: drop the session and show the login dialog.

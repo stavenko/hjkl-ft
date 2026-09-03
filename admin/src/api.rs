@@ -425,6 +425,22 @@ pub async fn cancel_subscription(contract_id: &str, email: &str) -> Result<(), A
     Ok(())
 }
 
+/// POST /admin/preview-notice — прислать СЕБЕ образец сообщения, которое получит
+/// человек. Тексты со ссылками и разметкой проверяются только так: глазами в телеграме.
+pub async fn preview_notice(kind: &str) -> Result<PreviewNotice, ApiError> {
+    let body = serde_json::to_string(&serde_json::json!({ "kind": kind }))
+        .map_err(|e| ApiError::Other(e.to_string()))?;
+    request_to(&payment_base()?, "POST", "/admin/preview-notice", Some(body)).await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PreviewNotice {
+    #[serde(default)]
+    pub sent: bool,
+    #[serde(default)]
+    pub text: String,
+}
+
 /// A paid user who hasn't set up durable access (no passkey) — «paid but can't get in yet».
 #[derive(Debug, Clone, Deserialize)]
 pub struct PaidNoAccess {

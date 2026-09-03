@@ -1440,6 +1440,8 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
     let selected_payment = create_rw_signal(Option::<api::UnboundPayment>::None);
     let error = create_rw_signal(Option::<String>::None);
     let loading = create_rw_signal(true);
+    // Что ответила отправка образца — показываем прямо на экране.
+    let preview_note = create_rw_signal(Option::<String>::None);
 
     let load = Callback::new(move |_: ()| {
         loading.set(true);
@@ -1501,6 +1503,41 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
 
         <div class="screen">
             {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+
+            // ОБРАЗЦЫ СООБЩЕНИЙ. Тексты о судьбе подписки уходят людям в бот, и
+            // проверить их можно только глазами в телеграме: разметку и ссылки по
+            // исходнику не утвердить. Кнопка шлёт образец САМОМУ оператору.
+            <div style="padding: 16px 16px 2px;">
+                <span class="badge">"Образцы сообщений в бот"</span>
+            </div>
+            <div style="padding: 6px 16px 10px; display:flex; gap:8px; flex-wrap:wrap;">
+                {[("renewal_failed", "не удалось продлить"),
+                  ("cancelled_after_failure", "отменена по неоплате"),
+                  ("cancelled", "отменена")]
+                    .into_iter()
+                    .map(|(kind, label)| {
+                        let send = move |_| {
+                            preview_note.set(Some("отправляю…".to_string()));
+                            spawn_local(async move {
+                                match api::preview_notice(kind).await {
+                                    Ok(p) if p.sent => preview_note.set(Some(
+                                        "образец отправлен — смотрите в боте".to_string())),
+                                    Ok(_) => preview_note.set(Some(
+                                        "телеграм ответил отказом — сообщение не доставлено".to_string())),
+                                    Err(e) => preview_note.set(Some(e.message().to_string())),
+                                }
+                            });
+                        };
+                        view! {
+                            <button attr:data-testid="preview-notice" class="btn btn--ghost"
+                                    on:click=send>{label}</button>
+                        }
+                    })
+                    .collect_view()}
+            </div>
+            {move || preview_note.get().map(|t| view! {
+                <div class="row__meta" style="padding:0 16px 10px;">{t}</div>
+            })}
 
             // Список ПОЛЬЗОВАТЕЛЕЙ: ровно одна строка на человека, сколько бы у
             // него ни было платежей и инвойсов. Что именно пошло не так — видно

@@ -970,6 +970,8 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
     let confirming_reset = create_rw_signal(false);
     let wiping = create_rw_signal(false);
     let report = create_rw_signal(Option::<api::WipeReport>::None);
+    // Открытый чек — письмо от lava целиком.
+    let receipt_open = create_rw_signal(Option::<api::ReceiptFull>::None);
 
     let uid_load = user_id.clone();
     spawn_local(async move {
@@ -1174,15 +1176,37 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
                             <div style="font-weight:650; margin:12px 0 6px;">
                                 {format!("Чеки · {}", receipts.len())}
                             </div>
+                            // Строка чека ОТКРЫВАЕТСЯ: письмо от lava — это не только сумма.
+                            // Про сорванное продление и отмену подписки провайдер сообщает
+                            // только письмом, и разобрать, что там написано, нужно уметь
+                            // прямо отсюда. Кнопка, а не <a>: на iOS клик по ссылке без href
+                            // не доходит (см. reference_ios_leptos_click_delegation).
                             {if receipts.is_empty() {
                                 view! { <div class="row__meta">"нет"</div> }.into_view()
                             } else {
-                                receipts.into_iter().map(|r| view! {
-                                    <div class="row__meta">
-                                        {format!("{} · получен {}",
-                                            fmt_money(r.amount, r.currency.as_deref()),
-                                            r.received_at.map(fmt_ts).unwrap_or_else(|| "—".into()))}
-                                    </div>
+                                receipts.into_iter().map(|r| {
+                                    let id = r.id.clone();
+                                    let open = move |_| {
+                                        let id = id.clone();
+                                        spawn_local(async move {
+                                            match api::receipt_detail(&id).await {
+                                                Ok(Some(full)) => receipt_open.set(Some(full)),
+                                                Ok(None) => error.set(Some("чек не найден".into())),
+                                                Err(e) => error.set(Some(e.message().to_string())),
+                                            }
+                                        });
+                                    };
+                                    view! {
+                                        <button attr:data-testid="user-receipt-row" class="row__meta"
+                                                style="display:block; width:100%; text-align:left; \
+                                                       background:none; border:none; padding:2px 0; \
+                                                       color:inherit; cursor:pointer; text-decoration:underline dotted;"
+                                                on:click=open>
+                                            {format!("{} · получен {}",
+                                                fmt_money(r.amount, r.currency.as_deref()),
+                                                r.received_at.map(fmt_ts).unwrap_or_else(|| "—".into()))}
+                                        </button>
+                                    }
                                 }).collect_view()
                             }}
                         }
@@ -1278,6 +1302,32 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
                         </div>
                     </div>
                 </div>
+            })}
+
+            // Тело чека — то же окно, что и на экране платежей. Письмо приходит
+            // размеченным, поэтому показывается как есть.
+            {move || receipt_open.get().map(|full| {
+                let body = full.body_text.clone().unwrap_or_default();
+                let amount = fmt_money(full.amount, full.currency.as_deref());
+                let when = full.received_at.map(fmt_ts).unwrap_or_default();
+                view! {
+                    <div on:click=move |_| receipt_open.set(None)
+                         attr:data-testid="user-receipt-body"
+                         style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:90; \
+                                display:flex; align-items:center; justify-content:center; padding:16px;">
+                        <div on:click=move |ev: leptos::ev::MouseEvent| ev.stop_propagation()
+                             style="background:#fff; color:#111; max-width:660px; width:100%; \
+                                    max-height:86vh; overflow:auto; border-radius:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; \
+                                        padding:12px 16px; border-bottom:1px solid #eee; \
+                                        position:sticky; top:0; background:#fff;">
+                                <div><b>"Чек"</b>" · "<span class="mono">{amount}</span>" · "{when}</div>
+                                <button class="btn btn--ghost" on:click=move |_| receipt_open.set(None)>"✕"</button>
+                            </div>
+                            <div inner_html=body style="padding:12px 16px;"></div>
+                        </div>
+                    </div>
+                }
             })}
         </div>
     }

@@ -48,6 +48,11 @@ async fn tg_api(env: &Env, method: &str, body: &serde_json::Value) -> Result<()>
             if !(200..300).contains(&status) {
                 let txt = res.text().await.unwrap_or_default();
                 console_error!("tg_api {method}: {status} {txt}");
+                // ОТКАЗ ТЕЛЕГРАМА — ЭТО ОШИБКА, А НЕ ЗАМЕТКА В ЛОГЕ. Раньше здесь
+                // возвращался Ok, и вызывающий считал сообщение доставленным: платёж
+                // помечался «уведомлён», а журнал уведомлений — «написали», хотя
+                // человек не получал ничего. Теперь неудача видна наверху.
+                return Err(Error::RustError(format!("telegram {method}: {status} {txt}")));
             }
             Ok(())
         }

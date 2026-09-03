@@ -1289,11 +1289,22 @@ async fn admin_users(env: &Env) -> Result<Response> {
 /// `{"dryRun": true}` (значение по умолчанию) — только список, без единой отправки.
 async fn admin_notify_cancelled(env: &Env, body: &serde_json::Value) -> Result<Response> {
     let dry_run = body.get("dryRun").and_then(|v| v.as_bool()).unwrap_or(true);
+    // Каждый пользователь стоит двух-трёх обращений к DO, а на воркер их отпущено
+    // ограниченное число — поэтому идём страницами, а не всем списком сразу.
+    // `scanned`/`nextOffset` в ответе говорят, докуда дошли и с чего продолжить.
+    let offset = body.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    // 50 — из замера на деве: страница в 100 человек занимает ~18 с, что уже близко к
+    // потолку, а 50 укладывается в 6 с.
+    let limit = body.get("limit").and_then(|v| v.as_u64()).unwrap_or(50).clamp(1, 200) as usize;
+
     let claim = claim_stub(env)?;
     let mut r = do_get(&claim, "/users-summary").await?;
     let v: serde_json::Value = r.json().await?;
     let empty = vec![];
-    let users = v.get("users").and_then(|x| x.as_array()).unwrap_or(&empty);
+    let all = v.get("users").and_then(|x| x.as_array()).unwrap_or(&empty);
+    let total = all.len();
+    let users: Vec<&serde_json::Value> = all.iter().skip(offset).take(limit).collect();
+    let scanned = users.len();
 
     let mut out: Vec<serde_json::Value> = Vec::new();
     let mut sent_count = 0usize;
@@ -1344,8 +1355,15 @@ async fn admin_notify_cancelled(env: &Env, body: &serde_json::Value) -> Result<R
         }
         out.push(row);
     }
+    let next_offset = offset + scanned;
     Response::from_json(&serde_json::json!({
-        "dryRun": dry_run, "candidates": out.len(), "sent": sent_count, "users": out,
+        "dryRun": dry_run,
+        "totalUsers": total,
+        "scanned": scanned,
+        "nextOffset": if next_offset < total { serde_json::json!(next_offset) } else { serde_json::Value::Null },
+        "candidates": out.len(),
+        "sent": sent_count,
+        "users": out,
     }))
 }
 
@@ -2443,10 +2461,12 @@ async fn cancel(env: &Env, user_id: &str) -> Result<Response> {
 // «неудачное списание» в обработчике вебхука была пустой. Человек узнавал о потере
 // доступа, открыв приложение. Эти тексты закрывают дыру.
 
-/// Не прошло очередное списание. Текст заказчика, дословно.
+/// Не прошло очередное списание. Текст заказчика, дословно; правлена только типографика.
 const MSG_RENEWAL_FAILED: &str = "Не удалось продлить подписку на re:Norma. \
 Возможно, какие-то проблемы со стороны банка или недостаточный баланс на счёте. \
-Если не удастся продлить подписку завтра, мы её отменим.";
+В течение пары дней платёжная система будет пытаться продлить подписку. Если у неё это \
+не получится, она её отменит и вы потеряете доступ к приложению. Вы сможете возобновить \
+доступ, когда возобновите подписку.";
 
 /// Об одном и том же (не прошло списание) нам говорят ДВА канала — письмо от lava и её
 /// вебхук. Сутки с запасом: в это окно второй канал молчит, и человек получает одно
@@ -2487,13 +2507,37 @@ fn days_left_until(end_ms: i64) -> i64 {
 }
 
 /// Telegram-аккаунт, привязанный к учётной записи (через оплаченный claim).
+///
+/// Каждая осечка — вслух: молчаливый `None` здесь означает «человеку не написали», а
+/// именно эту тишину мы и разбираем.
 async fn tg_of_user(env: &Env, user_id: &str) -> Option<i64> {
-    let claim = claim_stub(env).ok()?;
-    let mut r = do_post(&claim, "/tg-for-user", &serde_json::json!({ "userId": user_id }))
-        .await
-        .ok()?;
-    let v: serde_json::Value = r.json().await.ok()?;
-    v.get("tgUserId").and_then(|x| x.as_i64())
+    let claim = match claim_stub(env) {
+        Ok(c) => c,
+        Err(e) => {
+            console_error!("tg_of_user {user_id}: CLAIM_DO: {e}");
+            return None;
+        }
+    };
+    let mut r = match do_post(&claim, "/tg-for-user", &serde_json::json!({ "userId": user_id })).await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            console_error!("tg_of_user {user_id}: запрос: {e}");
+            return None;
+        }
+    };
+    let v: serde_json::Value = match r.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            console_error!("tg_of_user {user_id}: разбор ответа: {e}");
+            return None;
+        }
+    };
+    let tg = v.get("tgUserId").and_then(|x| x.as_i64());
+    if tg.is_none() {
+        console_warn!("tg_of_user {user_id}: телеграм не привязан — написать некуда");
+    }
+    tg
 }
 
 /// Занять право написать человеку. `false` — уже писали (дубль события или тот же

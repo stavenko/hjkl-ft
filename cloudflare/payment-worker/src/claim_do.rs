@@ -638,10 +638,14 @@ impl ClaimDO {
             .storage()
             .sql()
             .exec(
-                "SELECT tg_user_id FROM claims
-                   WHERE claimed_by = ? AND tg_user_id IS NOT NULL
-                   ORDER BY claimed_at DESC LIMIT 1",
-                vec![user_id.into()],
+                // И `claimed_by`, и `user_id`: первый ставится, когда человек привязал
+                // оплату к аккаунту, второй — уже на чекауте. Смотреть только на первый
+                // значило бы молчать как раз с теми, кто заплатил через бота и до
+                // привязки не дошёл.
+                "SELECT tg_user_id FROM claims \
+                   WHERE (claimed_by = ? OR user_id = ?) AND tg_user_id IS NOT NULL \
+                   ORDER BY COALESCE(claimed_at, paid_at, created_at) DESC LIMIT 1",
+                vec![user_id.as_str().into(), user_id.as_str().into()],
             )?
             .to_array::<serde_json::Value>()?
             .into_iter()

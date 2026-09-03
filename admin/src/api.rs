@@ -597,6 +597,9 @@ pub async fn users() -> Result<Vec<UserRow>, ApiError> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReceiptRow {
+    /// Нужен, чтобы открыть тело письма: список отдаёт только сумму и дату.
+    #[serde(default)]
+    pub id: String,
     #[serde(default)]
     pub amount: Option<i64>,
     #[serde(default)]

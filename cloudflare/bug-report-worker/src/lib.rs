@@ -235,7 +235,9 @@ async fn handle(mut req: Request, env: &Env) -> Result<Response> {
         if text.is_empty() {
             return Response::error("missing text", 400);
         }
-        send_alert(env, text).await?;
+        // `parseMode` — только когда вызывающий сам собрал разметку (например ссылку).
+        let parse_mode = body.get("parseMode").and_then(|v| v.as_str());
+        send_alert_as(env, text, parse_mode).await?;
         return Response::from_json(&serde_json::json!({ "ok": true }));
     }
 
@@ -456,6 +458,11 @@ async fn send_unknown_digest(env: &Env) -> Result<()> {
 /// Отправить чужой текст в тот же чат, с пометкой окружения впереди. Бот или чат
 /// не заданы — молча ничего не делаем: это незаданная настройка, а не сбой.
 async fn send_alert(env: &Env, text: &str) -> Result<()> {
+    send_alert_as(env, text, None).await
+}
+
+/// То же с разметкой: `parse_mode` (`HTML`) нужен там, где в тексте есть ссылка.
+async fn send_alert_as(env: &Env, text: &str, parse_mode: Option<&str>) -> Result<()> {
     let token = match token::secret_or_var(env, "TELEGRAM_ALERT_BOT_TOKEN").await {
         Ok(t) if !t.is_empty() => t,
         _ => return Ok(()),
@@ -469,15 +476,33 @@ async fn send_alert(env: &Env, text: &str) -> Result<()> {
         .map(|v| v.to_string())
         .unwrap_or_else(|_| "dev".to_string());
     let mark = if where_from == "prod" { "[прод]" } else { "[дев]" };
-    send_telegram(&token, &chat_id, &format!("{mark} {text}")).await
+    send_telegram_as(&token, &chat_id, &format!("{mark} {text}"), parse_mode).await
 }
 
 /// Отправить сообщение боту-оповещателю. Ошибка доставки уходит в лог и НЕ роняет
 /// вызывающего: сводка — дело второе, а крон, упавший на ней, не выполнит и того,
 /// что делает следом.
 async fn send_telegram(token: &str, chat_id: &str, text: &str) -> Result<()> {
+    send_telegram_as(token, chat_id, text, None).await
+}
+
+/// То же с разметкой. Превью ссылок выключено: под служебным сообщением карточка
+/// сайта занимает пол-экрана и ничего не добавляет.
+async fn send_telegram_as(
+    token: &str,
+    chat_id: &str,
+    text: &str,
+    parse_mode: Option<&str>,
+) -> Result<()> {
     let url = format!("https://api.telegram.org/bot{token}/sendMessage");
-    let payload = serde_json::json!({ "chat_id": chat_id, "text": text });
+    let mut payload = serde_json::json!({
+        "chat_id": chat_id,
+        "text": text,
+        "link_preview_options": { "is_disabled": true },
+    });
+    if let Some(mode) = parse_mode {
+        payload["parse_mode"] = serde_json::json!(mode);
+    }
     let headers = Headers::new();
     headers.set("Content-Type", "application/json")?;
     let mut init = RequestInit::new();

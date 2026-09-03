@@ -1309,17 +1309,75 @@ async fn admin_preview_notice(
         "cancelled" => (cancelled_text(days, false), None),
         _ => (MSG_RENEWAL_FAILED.to_string(), Some("HTML")),
     };
-    let Some(tg) = tg_of_user(env, admin_user_id).await else {
-        return Ok(error_response_detail(
-            "no_telegram",
-            "к вашему аккаунту не привязан телеграм — образец слать некуда",
-            409,
-        ));
+    // ОБРАЗЕЦ ИДЁТ В АЛЕРТНЫЙ ЧАТ, а не в личку оператора. У платёжного бота с
+    // оператором чата может не быть вовсе — он не покупатель; а в чат оповещений он и
+    // так смотрит. Отправляет bug-report-worker: токен и чат живут там, и другим
+    // воркерам их знать незачем.
+    let sent = alert_send(env, &text, parse_mode).await;
+    // Личка платёжного бота — если она есть, образец придёт и туда: там он выглядит
+    // ровно так, как увидит человек.
+    let tg = tg_of_user(env, admin_user_id).await;
+    let sent_direct = match tg {
+        Some(id) => tg_send_as(env, id, &text, parse_mode).await,
+        None => false,
     };
-    let sent = tg_send_as(env, tg, &text, parse_mode).await;
     Response::from_json(&serde_json::json!({
-        "sent": sent, "kind": kind, "tgUserId": tg, "text": text,
+        "sent": sent || sent_direct,
+        "kind": kind,
+        "toAlertChat": sent,
+        "toDirect": sent_direct,
+        "text": text,
     }))
+}
+
+/// Отправить текст в чат оповещений (тот же бот, что шлёт сводки о неопознанной еде).
+/// Ходит через сервис-биндинг: `/internal/alert` у bug-report-worker открыт только так.
+async fn alert_send(env: &Env, text: &str, parse_mode: Option<&str>) -> bool {
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            console_error!("alert_send: INTERNAL_PUSH_KEY не настроен");
+            return false;
+        }
+    };
+    let payload = serde_json::json!({ "text": text, "parseMode": parse_mode }).to_string();
+    let headers = Headers::new();
+    let _ = headers.set("Content-Type", "application/json");
+    let _ = headers.set("X-Internal-Key", &key);
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(JsValue::from_str(&payload)));
+    let request = match Request::new_with_init("https://bug-report-worker/internal/alert", &init) {
+        Ok(r) => r,
+        Err(e) => {
+            console_error!("alert_send: сборка запроса: {e}");
+            return false;
+        }
+    };
+    let bug = match env.service("BUG_REPORT_WORKER") {
+        Ok(s) => s,
+        Err(e) => {
+            console_error!("alert_send: BUG_REPORT_WORKER binding: {e}");
+            return false;
+        }
+    };
+    match bug.fetch_request(request).await {
+        Ok(mut res) => {
+            let sc = res.status_code();
+            if (200..300).contains(&sc) {
+                true
+            } else {
+                let t = res.text().await.unwrap_or_default();
+                console_error!("alert_send: {sc} {t}");
+                false
+            }
+        }
+        Err(e) => {
+            console_error!("alert_send failed: {e}");
+            false
+        }
+    }
 }
 
 /// POST /admin/notify-cancelled — разовая рассылка вдогонку.
@@ -1392,9 +1450,13 @@ async fn admin_notify_cancelled(env: &Env, body: &serde_json::Value) -> Result<R
         if tg.is_none() {
             row["skipped"] = serde_json::json!("no_telegram");
         } else if !dry_run {
-            notify_cancelled(env, Some(uid), tg, &format!("backfill:{uid}"), days_left).await;
-            row["sent"] = serde_json::json!(true);
-            sent_count += 1;
+            let ok = notify_cancelled(env, Some(uid), tg, &format!("backfill:{uid}"), days_left).await;
+            row["sent"] = serde_json::json!(ok);
+            if ok {
+                sent_count += 1;
+            } else {
+                row["skipped"] = serde_json::json!("telegram_refused");
+            }
         }
         out.push(row);
     }
@@ -2806,24 +2868,30 @@ async fn notify_renewal_failed(
 
 /// «Подписка отменена» — по вебхуку об отмене, письму lava или разовой рассылке
 /// вдогонку. Один и тот же журнал уведомлений на все три пути.
+/// Возвращает `true`, только если сообщение ДОШЛО. Отказ телеграма — это `false` и
+/// снятая бронь: отчёт о рассылке не должен считать доставленным то, чего человек не
+/// получил.
 async fn notify_cancelled(
     env: &Env,
     user_id: Option<&str>,
     tg_user_id: Option<i64>,
     ref_id: &str,
     days_left: i64,
-) {
-    let Some(tg) = tg_user_id else { return };
+) -> bool {
+    let Some(tg) = tg_user_id else { return false };
     let id = format!("cancelled:{ref_id}");
     if !notice_reserve(env, &id, "cancelled", user_id, Some(ref_id), NOTICE_COOLDOWN_MS).await {
-        return;
+        return false;
     }
     let after_failure = match user_id {
         Some(uid) => failed_recently(env, uid).await,
         None => false,
     };
-    if !tg_send(env, tg, &cancelled_text(days_left, after_failure)).await {
+    if tg_send(env, tg, &cancelled_text(days_left, after_failure)).await {
+        true
+    } else {
         notice_release(env, &id).await;
+        false
     }
 }
 

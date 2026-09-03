@@ -45,6 +45,7 @@ pub mod stories;
 pub mod subscription;
 pub mod support_chat;
 pub mod sync;
+pub mod test_seed;
 pub mod telemetry;
 pub mod update;
 pub mod webauthn_error;

@@ -130,3 +130,45 @@ export async function registerAccount(page: Page): Promise<{ cdpSession: CDPSess
 
   return { cdpSession, userId };
 }
+
+/**
+ * Push rows into the app's database and reload so the app picks them up.
+ *
+ * Do NOT open IndexedDB from the test: migrations run at startup, walk every
+ * store and rewrite rows to the current schema, and whatever the test wrote is
+ * gone before the first render. That is what `diary-search.spec.ts` still tries
+ * to do — it even hardcodes `DB_VERSION = 12`, which the app left behind long
+ * ago (it is 24 now), and opening an existing database with a LOWER version
+ * fails outright.
+ *
+ * Instead the rows go into localStorage and the APP lays them out itself, right
+ * after migrations (`frontend/src/services/test_seed.rs`). Two consequences
+ * worth knowing:
+ *
+ *   - the test no longer needs to know the schema version at all;
+ *   - the seed is CONSUMED. Deleting a row and reloading leaves it deleted,
+ *     which is what a delete test needs. Call this again to seed again.
+ *
+ * Works only on the test host the app hardcodes; on production the key is
+ * ignored.
+ *
+ * @param page   Playwright page, already registered (the per-user database must exist).
+ * @param data   Store name → rows, e.g. `{ foods: [...], diary: [...] }`.
+ */
+export async function seedDatabase(
+  page: Page,
+  data: Record<string, unknown[]>,
+): Promise<void> {
+  await page.evaluate(
+    ({ key, payload }) => localStorage.setItem(key, JSON.stringify(payload)),
+    { key: 'ft_test_seed', payload: data },
+  );
+  await page.reload();
+}
+
+/** Turn a curator-gated feature on for this account by seeding its app flag. */
+export async function seedFeature(page: Page, feature: string): Promise<void> {
+  await seedDatabase(page, {
+    app_flags: [{ key: `feature.${feature}`, value: 'true', updated_at: new Date().toISOString() }],
+  });
+}

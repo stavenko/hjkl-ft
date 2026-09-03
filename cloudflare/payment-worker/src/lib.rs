@@ -2493,8 +2493,19 @@ mod texts_tests {
 // доступа, открыв приложение. Эти тексты закрывают дыру.
 
 /// Не прошло очередное списание. Текст заказчика, дословно; правлена только типографика.
+/// Причины — те же, что перечисляет в своём письме lava: человеку бесполезно знать
+/// «платёж не прошёл», ему нужно понимать, что именно проверить. Про санкции — ссылка
+/// на разбор самой lava: там список банков и что делать.
+///
+/// РАЗМЕТКА HTML — из-за ссылки. Значит в тексте не должно быть голых `<`, `>` и `&`.
 const MSG_RENEWAL_FAILED: &str = "Не удалось продлить подписку на re:Norma. \
-Возможно, какие-то проблемы со стороны банка или недостаточный баланс на счёте. \
+Возможно, какие-то проблемы со стороны банка или недостаточный баланс на счёте:\n\
+\n\
+• на карте недостаточно денег;\n\
+• есть запрет на онлайн-покупки;\n\
+• <a href=\"https://faq.lava.top/article/68560\">банк находится под санкциями</a>;\n\
+• включён VPN.\n\
+\n\
 В течение пары дней платёжная система будет пытаться продлить подписку. Если у неё это \
 не получится, она её отменит и вы потеряете доступ к приложению. Вы сможете возобновить \
 доступ, когда возобновите подписку.";
@@ -2638,6 +2649,11 @@ async fn notice_release(env: &Env, id: &str) {
 /// Отправить произвольный текст в бот. Best-effort: неудача логируется, наверх не
 /// поднимается — уведомление никогда не должно ронять обработку платежа.
 async fn tg_send(env: &Env, tg_user_id: i64, text: &str) -> bool {
+    tg_send_as(env, tg_user_id, text, None).await
+}
+
+/// То же со ссылками: `parse_mode` (`HTML`) уходит в telegram-worker вместе с текстом.
+async fn tg_send_as(env: &Env, tg_user_id: i64, text: &str, parse_mode: Option<&str>) -> bool {
     let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
         Ok(k) if !k.is_empty() => k,
         _ => {
@@ -2645,7 +2661,10 @@ async fn tg_send(env: &Env, tg_user_id: i64, text: &str) -> bool {
             return false;
         }
     };
-    let payload = serde_json::json!({ "tgUserId": tg_user_id, "text": text }).to_string();
+    let payload = serde_json::json!({
+        "tgUserId": tg_user_id, "text": text, "parseMode": parse_mode,
+    })
+    .to_string();
     let headers = Headers::new();
     let _ = headers.set("Content-Type", "application/json");
     let _ = headers.set("X-Internal-Key", &key);
@@ -2737,7 +2756,7 @@ async fn notify_renewal_failed(
     {
         return;
     }
-    if !tg_send(env, tg, MSG_RENEWAL_FAILED).await {
+    if !tg_send_as(env, tg, MSG_RENEWAL_FAILED, Some("HTML")).await {
         notice_release(env, &id).await;
     }
 }

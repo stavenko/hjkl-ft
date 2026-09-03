@@ -999,6 +999,18 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         return admin_notify_cancelled(env, &body).await;
     }
 
+    // Админ: прислать САМОМУ СЕБЕ то сообщение, которое получит человек. Тексты со
+    // ссылками и разметкой нельзя утвердить по исходнику — их надо увидеть в телеграме.
+    if method == Method::Post && path == "/admin/preview-notice" {
+        let admin_id = match require_admin(&req, env).await {
+            Ok(id) => id,
+            Err(resp) => return Ok(resp),
+        };
+        let mut body_req = req.clone()?;
+        let body: serde_json::Value = body_req.json().await.unwrap_or(serde_json::json!({}));
+        return admin_preview_notice(env, &admin_id, &body).await;
+    }
+
     if method == Method::Post && path == "/admin/cancel-subscription" {
         if let Err(resp) = require_admin(&req, env).await {
             return Ok(resp);
@@ -1277,6 +1289,37 @@ async fn admin_users(env: &Env) -> Result<Response> {
         out.push(row);
     }
     Response::from_json(&serde_json::json!({ "users": out }))
+}
+
+/// POST /admin/preview-notice {kind} — прислать себе образец сообщения.
+///
+/// `kind`: `renewal_failed` (по умолчанию), `cancelled_after_failure`, `cancelled`.
+/// Уходит ТОМУ, КТО ПОЗВАЛ, тем же ботом и тем же путём, что и настоящее уведомление,
+/// — иначе разметку и ссылки не проверить. В журнал уведомлений не пишется: это не
+/// сообщение человеку, а показ образца.
+async fn admin_preview_notice(
+    env: &Env,
+    admin_user_id: &str,
+    body: &serde_json::Value,
+) -> Result<Response> {
+    let kind = body.get("kind").and_then(|v| v.as_str()).unwrap_or("renewal_failed");
+    let days = body.get("daysLeft").and_then(|v| v.as_i64()).unwrap_or(0);
+    let (text, parse_mode) = match kind {
+        "cancelled_after_failure" => (cancelled_text(days, true), None),
+        "cancelled" => (cancelled_text(days, false), None),
+        _ => (MSG_RENEWAL_FAILED.to_string(), Some("HTML")),
+    };
+    let Some(tg) = tg_of_user(env, admin_user_id).await else {
+        return Ok(error_response_detail(
+            "no_telegram",
+            "к вашему аккаунту не привязан телеграм — образец слать некуда",
+            409,
+        ));
+    };
+    let sent = tg_send_as(env, tg, &text, parse_mode).await;
+    Response::from_json(&serde_json::json!({
+        "sent": sent, "kind": kind, "tgUserId": tg, "text": text,
+    }))
 }
 
 /// POST /admin/notify-cancelled — разовая рассылка вдогонку.

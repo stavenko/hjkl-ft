@@ -245,6 +245,7 @@ fn kind_str(k: &WebhookKind) -> &'static str {
         WebhookKind::Cancelled => "cancelled",
         WebhookKind::Refunded => "refunded",
         WebhookKind::Failed => "failed",
+        WebhookKind::Unknown => "unknown",
     }
 }
 
@@ -978,6 +979,26 @@ async fn handle(req: Request, env: &Env) -> Result<Response> {
         return admin_user_wipe(env, &body).await;
     }
 
+    // Админ: последние вебхуки провайдера С ТЕЛОМ — то, чего не хватило при разборе
+    // сентябрьских отмен.
+    if method == Method::Get && path == "/admin/webhook-events" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        let stub = claim_stub(env)?;
+        return relay(do_get(&stub, "/webhook-events").await?).await;
+    }
+    // Админ: разовая рассылка вдогонку тем, у кого подписка уже закончилась, а мы им
+    // об этом так и не написали. По умолчанию — СУХОЙ ПРОГОН (список без отправки).
+    if method == Method::Post && path == "/admin/notify-cancelled" {
+        if let Err(resp) = require_admin(&req, env).await {
+            return Ok(resp);
+        }
+        let mut body_req = req.clone()?;
+        let body: serde_json::Value = body_req.json().await.unwrap_or(serde_json::json!({}));
+        return admin_notify_cancelled(env, &body).await;
+    }
+
     if method == Method::Post && path == "/admin/cancel-subscription" {
         if let Err(resp) = require_admin(&req, env).await {
             return Ok(resp);
@@ -1256,6 +1277,76 @@ async fn admin_users(env: &Env) -> Result<Response> {
         out.push(row);
     }
     Response::from_json(&serde_json::json!({ "users": out }))
+}
+
+/// POST /admin/notify-cancelled — разовая рассылка вдогонку.
+///
+/// Кому: у кого подписка помечена отменённой ИЛИ оплаченный период уже кончился, при
+/// этом в журнале уведомлений об отмене для него НЕТ записи. То есть ровно тем, кого
+/// мы потеряли молча, и никому больше — повторно человек сообщение не получит ни от
+/// этой ручки, ни от вебхука: журнал один на все пути.
+///
+/// `{"dryRun": true}` (значение по умолчанию) — только список, без единой отправки.
+async fn admin_notify_cancelled(env: &Env, body: &serde_json::Value) -> Result<Response> {
+    let dry_run = body.get("dryRun").and_then(|v| v.as_bool()).unwrap_or(true);
+    let claim = claim_stub(env)?;
+    let mut r = do_get(&claim, "/users-summary").await?;
+    let v: serde_json::Value = r.json().await?;
+    let empty = vec![];
+    let users = v.get("users").and_then(|x| x.as_array()).unwrap_or(&empty);
+
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    let mut sent_count = 0usize;
+    for u in users {
+        let uid = u.get("user_id").and_then(|x| x.as_str()).unwrap_or("");
+        if uid.is_empty() {
+            continue;
+        }
+        let sub = sub_stub(env, uid)?;
+        let mut sr = do_get(&sub, "/subscription").await?;
+        let st: serde_json::Value = sr.json().await.unwrap_or(serde_json::json!({}));
+        let end = st.get("end").and_then(|x| x.as_i64()).unwrap_or(0);
+        let active = st.get("active").and_then(|x| x.as_bool()).unwrap_or(false);
+        let status = st.get("status").and_then(|x| x.as_str()).unwrap_or("");
+        // Никогда не плативший (end == 0) — не «потерянный подписчик», его не трогаем.
+        let lost = end > 0 && (!active || status == "cancelled");
+        if !lost {
+            continue;
+        }
+        let mut nr = do_post(
+            &claim,
+            "/notice/sent",
+            &serde_json::json!({ "userId": uid, "kind": "cancelled" }),
+        )
+        .await?;
+        let nv: serde_json::Value = nr.json().await.unwrap_or(serde_json::json!({}));
+        if nv.get("sent").and_then(|x| x.as_bool()).unwrap_or(false) {
+            continue;
+        }
+        let tg = tg_of_user(env, uid)
+            .await
+            .or_else(|| u.get("tg_user_id").and_then(|x| x.as_i64()));
+        let days_left = days_left_until(end);
+        let mut row = serde_json::json!({
+            "userId": uid,
+            "tgUserId": tg,
+            "status": status,
+            "end": end,
+            "daysLeft": days_left,
+            "sent": false,
+        });
+        if tg.is_none() {
+            row["skipped"] = serde_json::json!("no_telegram");
+        } else if !dry_run {
+            notify_cancelled(env, Some(uid), tg, &format!("backfill:{uid}"), days_left).await;
+            row["sent"] = serde_json::json!(true);
+            sent_count += 1;
+        }
+        out.push(row);
+    }
+    Response::from_json(&serde_json::json!({
+        "dryRun": dry_run, "candidates": out.len(), "sent": sent_count, "users": out,
+    }))
 }
 
 /// GET /admin/user-card?user_id= — who exactly is about to be erased: account,
@@ -2148,6 +2239,46 @@ async fn internal_receipt(mut req: Request, env: &Env) -> Result<Response> {
         console_warn!("internal_receipt: no claim for address {email} — archived only");
         return Response::from_json(&serde_json::json!({ "ok": true, "bound": false }));
     };
+    let owner = cv.get("userId").and_then(|v| v.as_str()).map(String::from);
+    // Телеграм берём с самого платежа; если письмо пришло на адрес claim'а, который
+    // человек уже привязал к аккаунту, — уточняем по аккаунту (там свежее).
+    let mut tg_user_id = cv.get("tgUserId").and_then(|v| v.as_i64());
+    if let Some(uid) = owner.as_deref() {
+        if let Some(fresh) = tg_of_user(env, uid).await {
+            tg_user_id = Some(fresh);
+        }
+    }
+
+    // НЕ ВСЯКОЕ ПИСЬМО ОТ LAVA — ЧЕК. Про сорванное продление она сообщает только
+    // письмом (вебхука об этом мы ни разу не видели), и это единственный момент, когда
+    // мы вообще узнаём о проблеме. `kind` проставляет receipt-worker по теме письма.
+    let kind = body.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    let msg_ref = body
+        .get("messageId")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(email.as_str())
+        .to_string();
+    match kind {
+        "renewal_failed" => {
+            console_warn!("письмо lava: не удалось продлить подписку, claim={claim_id}");
+            notify_renewal_failed(env, owner.as_deref(), tg_user_id, &msg_ref).await;
+        }
+        "cancelled" => {
+            console_warn!("письмо lava: подписка отменена, claim={claim_id}");
+            let days_left = match owner.as_deref() {
+                Some(uid) => {
+                    let sub = sub_stub(env, uid)?;
+                    let mut sr = do_get(&sub, "/subscription").await?;
+                    let sv: serde_json::Value = sr.json().await.unwrap_or(serde_json::json!({}));
+                    days_left_until(sv.get("end").and_then(|v| v.as_i64()).unwrap_or(0))
+                }
+                None => 0,
+            };
+            notify_cancelled(env, owner.as_deref(), tg_user_id, &msg_ref, days_left).await;
+        }
+        _ => {}
+    }
 
     let receipt_id = random_claim_secret()?;
     let add = do_post(
@@ -2306,6 +2437,203 @@ async fn cancel(env: &Env, user_id: &str) -> Result<Response> {
     Response::from_json(&sub_json)
 }
 
+// ── Сообщения человеку о судьбе его подписки ─────────────────────────────────
+//
+// Раньше об отвалившемся продлении человеку писала ТОЛЬКО lava, а мы молчали: ветка
+// «неудачное списание» в обработчике вебхука была пустой. Человек узнавал о потере
+// доступа, открыв приложение. Эти тексты закрывают дыру.
+
+/// Не прошло очередное списание. Текст заказчика, дословно.
+const MSG_RENEWAL_FAILED: &str = "Не удалось продлить подписку на re:Norma. \
+Возможно, какие-то проблемы со стороны банка или недостаточный баланс на счёте. \
+Если не удастся продлить подписку завтра, мы её отменим.";
+
+/// Об одном и том же (не прошло списание) нам говорят ДВА канала — письмо от lava и её
+/// вебхук. Сутки с запасом: в это окно второй канал молчит, и человек получает одно
+/// сообщение, а не два.
+const NOTICE_COOLDOWN_MS: i64 = 20 * 3_600_000;
+
+/// Текст об отмене. Доступ обычно доживает до конца оплаченного периода, но если тот
+/// уже прошёл — врать про «ещё N дней» нельзя.
+fn cancelled_text(days_left: i64) -> String {
+    if days_left > 0 {
+        format!(
+            "Подписка на re:Norma отменена — продлить её не удалось. \
+Доступ к приложению сохранится ещё {days_left} {}.",
+            ru_days(days_left)
+        )
+    } else {
+        "Подписка на re:Norma отменена — продлить её не удалось. \
+Доступ к приложению закрыт."
+            .to_string()
+    }
+}
+
+fn ru_days(n: i64) -> &'static str {
+    let (t, h) = ((n % 10) as i64, (n % 100) as i64);
+    if t == 1 && h != 11 {
+        "день"
+    } else if (2..=4).contains(&t) && !(12..=14).contains(&h) {
+        "дня"
+    } else {
+        "дней"
+    }
+}
+
+/// Сколько суток доступа осталось до `end_ms` (округляя вверх, не ниже нуля).
+fn days_left_until(end_ms: i64) -> i64 {
+    let day = 86_400_000i64;
+    (((end_ms - Date::now().as_millis() as i64) + day - 1) / day).max(0)
+}
+
+/// Telegram-аккаунт, привязанный к учётной записи (через оплаченный claim).
+async fn tg_of_user(env: &Env, user_id: &str) -> Option<i64> {
+    let claim = claim_stub(env).ok()?;
+    let mut r = do_post(&claim, "/tg-for-user", &serde_json::json!({ "userId": user_id }))
+        .await
+        .ok()?;
+    let v: serde_json::Value = r.json().await.ok()?;
+    v.get("tgUserId").and_then(|x| x.as_i64())
+}
+
+/// Занять право написать человеку. `false` — уже писали (дубль события или тот же
+/// текст в окне `window_ms`); тогда отправлять НЕЛЬЗЯ. Ошибка резервирования тоже даёт
+/// `false`: лучше промолчать, чем написать дважды.
+async fn notice_reserve(
+    env: &Env,
+    id: &str,
+    kind: &str,
+    user_id: Option<&str>,
+    ref_id: Option<&str>,
+    window_ms: i64,
+) -> bool {
+    let claim = match claim_stub(env) {
+        Ok(c) => c,
+        Err(e) => {
+            console_error!("notice_reserve: CLAIM_DO: {e}");
+            return false;
+        }
+    };
+    let mut r = match do_post(
+        &claim,
+        "/notice/reserve",
+        &serde_json::json!({
+            "id": id, "kind": kind, "userId": user_id, "refId": ref_id, "windowMs": window_ms,
+        }),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            console_error!("notice_reserve {kind}/{id}: {e}");
+            return false;
+        }
+    };
+    let v: serde_json::Value = r.json().await.unwrap_or(serde_json::json!({}));
+    let ok = v.get("reserved").and_then(|x| x.as_bool()).unwrap_or(false);
+    if !ok {
+        let reason = v.get("reason").and_then(|x| x.as_str()).unwrap_or("?");
+        console_log!("notice {kind}/{id}: не отправляем ({reason})");
+    }
+    ok
+}
+
+/// Снять бронь уведомления — отправка не удалась, пусть следующая попытка сработает.
+async fn notice_release(env: &Env, id: &str) {
+    let Ok(claim) = claim_stub(env) else { return };
+    if let Err(e) = do_post(&claim, "/notice/release", &serde_json::json!({ "id": id })).await {
+        console_error!("notice_release {id}: {e}");
+    }
+}
+
+/// Отправить произвольный текст в бот. Best-effort: неудача логируется, наверх не
+/// поднимается — уведомление никогда не должно ронять обработку платежа.
+async fn tg_send(env: &Env, tg_user_id: i64, text: &str) -> bool {
+    let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            console_error!("tg_send: INTERNAL_PUSH_KEY не настроен");
+            return false;
+        }
+    };
+    let payload = serde_json::json!({ "tgUserId": tg_user_id, "text": text }).to_string();
+    let headers = Headers::new();
+    let _ = headers.set("Content-Type", "application/json");
+    let _ = headers.set("X-Internal-Key", &key);
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(JsValue::from_str(&payload)));
+    let request = match Request::new_with_init("https://telegram-worker/internal/send", &init) {
+        Ok(r) => r,
+        Err(e) => {
+            console_error!("tg_send: сборка запроса: {e}");
+            return false;
+        }
+    };
+    let tg = match env.service("TELEGRAM_WORKER") {
+        Ok(s) => s,
+        Err(e) => {
+            console_error!("tg_send: TELEGRAM_WORKER binding: {e}");
+            return false;
+        }
+    };
+    match tg.fetch_request(request).await {
+        Ok(mut res) => {
+            let sc = res.status_code();
+            if (200..300).contains(&sc) {
+                true
+            } else {
+                let t = res.text().await.unwrap_or_default();
+                console_error!("tg_send: {sc} {t}");
+                false
+            }
+        }
+        Err(e) => {
+            console_error!("tg_send failed: {e}");
+            false
+        }
+    }
+}
+
+/// «Не удалось продлить» — по письму от lava или по её вебхуку, что придёт первым.
+/// `ref_id` — id письма либо ключ вебхука: по нему повтор того же события отсекается.
+async fn notify_renewal_failed(
+    env: &Env,
+    user_id: Option<&str>,
+    tg_user_id: Option<i64>,
+    ref_id: &str,
+) {
+    let Some(tg) = tg_user_id else { return };
+    let id = format!("renewal_failed:{ref_id}");
+    if !notice_reserve(env, &id, "renewal_failed", user_id, Some(ref_id), NOTICE_COOLDOWN_MS).await
+    {
+        return;
+    }
+    if !tg_send(env, tg, MSG_RENEWAL_FAILED).await {
+        notice_release(env, &id).await;
+    }
+}
+
+/// «Подписка отменена» — по вебхуку об отмене, письму lava или разовой рассылке
+/// вдогонку. Один и тот же журнал уведомлений на все три пути.
+async fn notify_cancelled(
+    env: &Env,
+    user_id: Option<&str>,
+    tg_user_id: Option<i64>,
+    ref_id: &str,
+    days_left: i64,
+) {
+    let Some(tg) = tg_user_id else { return };
+    let id = format!("cancelled:{ref_id}");
+    if !notice_reserve(env, &id, "cancelled", user_id, Some(ref_id), NOTICE_COOLDOWN_MS).await {
+        return;
+    }
+    if !tg_send(env, tg, &cancelled_text(days_left)).await {
+        notice_release(env, &id).await;
+    }
+}
+
 /// Best-effort: tell the Telegram bot the user cancelled, so it can echo "cancelled —
 /// access for N more days". Resolves the tg user via a claimed Mini App claim; silently
 /// no-ops if the account isn't linked to Telegram.
@@ -2329,14 +2657,20 @@ async fn notify_bot_cancelled(env: &Env, user_id: &str, end_ms: i64) {
         Some(id) => id,
         None => return, // account not linked to a Telegram user
     };
-    let now = Date::now().as_millis() as i64;
-    let day = 86_400_000i64;
-    let days_left = (((end_ms - now) + day - 1) / day).max(0);
+    let days_left = days_left_until(end_ms);
+    // В журнал — чтобы разовая рассылка вдогонку не написала «подписка отменена»
+    // человеку, который отменил её сам и уже получил сообщение.
+    let notice_id = format!("cancelled:self:{user_id}:{end_ms}");
+    if !notice_reserve(env, &notice_id, "cancelled", Some(user_id), None, NOTICE_COOLDOWN_MS).await
+    {
+        return;
+    }
 
     let key = match token::secret_or_var(env, "INTERNAL_PUSH_KEY").await {
         Ok(k) if !k.is_empty() => k,
         _ => {
             console_warn!("notify_bot_cancelled: INTERNAL_PUSH_KEY not configured — skipping");
+            notice_release(env, &notice_id).await;
             return;
         }
     };
@@ -2352,6 +2686,7 @@ async fn notify_bot_cancelled(env: &Env, user_id: &str, end_ms: i64) {
         Ok(r) => r,
         Err(e) => {
             console_error!("notify_bot_cancelled build request failed: {e}");
+            notice_release(env, &notice_id).await;
             return;
         }
     };
@@ -2359,6 +2694,7 @@ async fn notify_bot_cancelled(env: &Env, user_id: &str, end_ms: i64) {
         Ok(s) => s,
         Err(e) => {
             console_error!("notify_bot_cancelled: TELEGRAM_WORKER binding: {e}");
+            notice_release(env, &notice_id).await;
             return;
         }
     };
@@ -2368,9 +2704,13 @@ async fn notify_bot_cancelled(env: &Env, user_id: &str, end_ms: i64) {
             if !(200..300).contains(&sc) {
                 let t = res.text().await.unwrap_or_default();
                 console_error!("notify_bot_cancelled: {sc} {t}");
+                notice_release(env, &notice_id).await;
             }
         }
-        Err(e) => console_error!("notify_bot_cancelled failed: {e}"),
+        Err(e) => {
+            console_error!("notify_bot_cancelled failed: {e}");
+            notice_release(env, &notice_id).await;
+        }
     }
 }
 
@@ -2505,6 +2845,46 @@ async fn webhook(mut req: Request, env: &Env, name: &str) -> Result<Response> {
     let raw = body.unwrap_or(serde_json::json!({}));
     let ev = provider.parse_webhook(&raw);
     let ek = event_key(name, &ev, &raw);
+
+    // ДО любой логики: сказать в лог, ЧТО пришло, и положить тело целиком в архив.
+    // Именно этого не хватило 3 сентября — событие отработало вхолостую и исчезло
+    // бесследно. Архив идемпотентен по ключу события, ретрай провайдера не плодит строк.
+    console_log!(
+        "webhook {name}: eventType={:?} kind={} eventKey={ek} contract={:?} parent={:?} error={:?}",
+        ev.event_type,
+        kind_str(&ev.kind),
+        ev.contract_id,
+        ev.parent_contract_id,
+        ev.error_message
+    );
+    if let Ok(claim) = claim_stub(env) {
+        if let Err(e) = do_post(
+            &claim,
+            "/webhook-event/add",
+            &serde_json::json!({
+                "id": ek,
+                "provider": name,
+                "eventType": ev.event_type,
+                "kind": kind_str(&ev.kind),
+                "contractId": ev.contract_id,
+                "parentContractId": ev.parent_contract_id,
+                "email": ev.email,
+                "errorMessage": ev.error_message,
+                "payload": raw.to_string(),
+            }),
+        )
+        .await
+        {
+            console_error!("webhook archive failed eventKey={ek}: {e}");
+        }
+    }
+    if ev.kind == WebhookKind::Unknown {
+        console_error!(
+            "webhook {name}: НЕИЗВЕСТНЫЙ eventType={:?} — ничего не делаем, тело в архиве \
+             (eventKey={ek})",
+            ev.event_type
+        );
+    }
 
     let mut contract_ids: Vec<String> = vec![];
     if let Some(c) = &ev.contract_id {
@@ -2678,17 +3058,35 @@ async fn webhook(mut req: Request, env: &Env, name: &str) -> Result<Response> {
             notify_push(env, &user_id, msg, "/settings/subscription").await;
         }
         WebhookKind::Cancelled => {
-            do_post(
+            let mut r = do_post(
                 &sub,
                 "/cancel",
                 &serde_json::json!({ "periodEnd": ev.period_end }),
             )
             .await?;
+            // Доступ живёт до конца оплаченного периода — сколько именно, знает DO,
+            // а не мы: `periodEnd` в событии может отсутствовать.
+            let st: serde_json::Value = r.json().await.unwrap_or(serde_json::json!({}));
+            let end = st.get("end").and_then(|v| v.as_i64()).unwrap_or(0);
+            let tg = tg_of_user(env, &user_id).await;
+            notify_cancelled(env, Some(&user_id), tg, &ek, days_left_until(end)).await;
         }
         WebhookKind::Refunded => {
             do_post(&sub, "/refund", &serde_json::json!({})).await?;
         }
-        WebhookKind::Failed => {}
+        // Не прошло списание. Состояние подписки НЕ трогаем — доступ живёт до конца
+        // оплаченного периода, а lava ещё будет пытаться. Но человеку говорим сразу:
+        // у него есть сутки, чтобы пополнить счёт или сменить карту.
+        WebhookKind::Failed => {
+            console_warn!(
+                "webhook {name}: не прошло продление у user={user_id} eventType={:?} error={:?}",
+                ev.event_type,
+                ev.error_message
+            );
+            let tg = tg_of_user(env, &user_id).await;
+            notify_renewal_failed(env, Some(&user_id), tg, &ek).await;
+        }
+        WebhookKind::Unknown => {}
     }
     Response::from_json(&serde_json::json!({ "ok": true }))
 }

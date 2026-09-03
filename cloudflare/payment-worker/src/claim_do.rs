@@ -233,7 +233,189 @@ impl ClaimDO {
             "CREATE INDEX IF NOT EXISTS idx_claims_email ON claims(email)",
             None,
         )?;
+        // АРХИВ ВЕБХУКОВ. Пишется ДО разбора и независимо от того, поняли мы событие
+        // или нет: 3 сентября две подписки закрылись событием, которое мы не опознали,
+        // и восстановить его текст было уже неоткуда. `payload` — сырое тело как есть.
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS webhook_events (
+                id            TEXT PRIMARY KEY,
+                provider      TEXT NOT NULL,
+                event_type    TEXT,
+                kind          TEXT,
+                contract_id   TEXT,
+                parent_id     TEXT,
+                user_id       TEXT,
+                email         TEXT,
+                error_message TEXT,
+                payload       TEXT NOT NULL,
+                received_at   INTEGER NOT NULL
+            )",
+            None,
+        )?;
+        sql.exec(
+            "CREATE INDEX IF NOT EXISTS idx_webhook_events_at ON webhook_events(received_at)",
+            None,
+        )?;
+        // ЖУРНАЛ УВЕДОМЛЕНИЙ. Одна строка — один отправленный человеку текст. Нужен для
+        // двух вещей: не написать дважды об одном и том же (повтор письма, дубль
+        // вебхука) и знать, кому об отмене мы ещё НЕ писали, — по этому и идёт разовая
+        // рассылка вдогонку.
+        sql.exec(
+            "CREATE TABLE IF NOT EXISTS notices (
+                id       TEXT PRIMARY KEY,
+                kind     TEXT NOT NULL,
+                user_id  TEXT,
+                claim_id TEXT,
+                ref_id   TEXT,
+                sent_at  INTEGER NOT NULL
+            )",
+            None,
+        )?;
+        sql.exec(
+            "CREATE INDEX IF NOT EXISTS idx_notices_user ON notices(user_id, kind, sent_at)",
+            None,
+        )?;
         Ok(())
+    }
+
+    /// Положить вебхук в архив. Идемпотентно по ключу события: ретрай провайдера не
+    /// плодит строк. Возвращает `{stored:false}`, если такое событие уже лежит.
+    fn add_webhook_event(&self, b: &serde_json::Value) -> Result<Response> {
+        let id = str_field(b, "id")?;
+        let sql = self.state.storage().sql();
+        let seen = sql
+            .exec("SELECT id FROM webhook_events WHERE id = ?", vec![id.as_str().into()])?
+            .to_array::<serde_json::Value>()?
+            .into_iter()
+            .next()
+            .is_some();
+        sql.exec(
+            "INSERT OR IGNORE INTO webhook_events
+               (id, provider, event_type, kind, contract_id, parent_id, user_id, email,
+                error_message, payload, received_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            vec![
+                id.into(),
+                str_field(b, "provider")?.into(),
+                opt_str(b, "eventType").into(),
+                opt_str(b, "kind").into(),
+                opt_str(b, "contractId").into(),
+                opt_str(b, "parentContractId").into(),
+                opt_str(b, "userId").into(),
+                opt_str(b, "email").into(),
+                opt_str(b, "errorMessage").into(),
+                str_field(b, "payload")?.into(),
+                now_ms().into(),
+            ],
+        )?;
+        Response::from_json(&serde_json::json!({ "ok": true, "stored": !seen }))
+    }
+
+    /// Последние вебхуки для админки — payload включён, он и есть предмет разбора.
+    fn webhook_events_recent(&self) -> Result<Response> {
+        let rows = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT id, provider, event_type, kind, contract_id, parent_id, user_id,                         email, error_message, payload, received_at                    FROM webhook_events ORDER BY received_at DESC LIMIT 100",
+                None,
+            )?
+            .to_array::<serde_json::Value>()
+            .map_err(|e| Error::RustError(format!("webhook-events: {e}")))?;
+        Response::from_json(&serde_json::json!({ "events": rows }))
+    }
+
+    /// Занять право отправить уведомление — ЕДИНСТВЕННОЕ место, где решается, писать
+    /// человеку или промолчать. Отказ бывает двух видов, и они разные по смыслу:
+    ///
+    /// * `duplicate` — ровно это событие уже отработано (тот же id письма/вебхука);
+    /// * `cooldown` — этому человеку уже уходил такой текст за последние `windowMs`.
+    ///   Нужен потому, что об одном и том же (не прошло списание) нам сообщают ДВА
+    ///   независимых канала — письмо от lava и её же вебхук, — и человек не должен
+    ///   получить два одинаковых сообщения.
+    ///
+    /// Проверка и вставка идут одним ходом DO, без await между ними, поэтому гонки нет.
+    fn notice_reserve(&self, b: &serde_json::Value) -> Result<Response> {
+        let id = str_field(b, "id")?;
+        let kind = str_field(b, "kind")?;
+        let user_id = opt_str(b, "userId");
+        let claim_id = opt_str(b, "claimId");
+        let ref_id = opt_str(b, "refId");
+        let window_ms = opt_i64(b, "windowMs").unwrap_or(0);
+        let sql = self.state.storage().sql();
+
+        let dup = sql
+            .exec("SELECT id FROM notices WHERE id = ?", vec![id.as_str().into()])?
+            .to_array::<serde_json::Value>()?
+            .into_iter()
+            .next()
+            .is_some();
+        if dup {
+            return Response::from_json(
+                &serde_json::json!({ "reserved": false, "reason": "duplicate" }),
+            );
+        }
+        if window_ms > 0 {
+            if let Some(uid) = user_id.as_deref() {
+                let recent = sql
+                    .exec(
+                        "SELECT id FROM notices                            WHERE user_id = ? AND kind = ? AND sent_at > ? LIMIT 1",
+                        vec![uid.into(), kind.as_str().into(), (now_ms() - window_ms).into()],
+                    )?
+                    .to_array::<serde_json::Value>()?
+                    .into_iter()
+                    .next()
+                    .is_some();
+                if recent {
+                    return Response::from_json(
+                        &serde_json::json!({ "reserved": false, "reason": "cooldown" }),
+                    );
+                }
+            }
+        }
+        sql.exec(
+            "INSERT INTO notices (id, kind, user_id, claim_id, ref_id, sent_at)              VALUES (?, ?, ?, ?, ?, ?)",
+            vec![
+                id.into(),
+                kind.into(),
+                user_id.into(),
+                claim_id.into(),
+                ref_id.into(),
+                now_ms().into(),
+            ],
+        )?;
+        Response::from_json(&serde_json::json!({ "reserved": true }))
+    }
+
+    /// Снять бронь: сообщение отправить НЕ удалось. Без этого одна осечка телеграма
+    /// навсегда пометила бы человека уведомлённым — и он бы так ничего и не узнал.
+    fn notice_release(&self, b: &serde_json::Value) -> Result<Response> {
+        let id = str_field(b, "id")?;
+        self.state
+            .storage()
+            .sql()
+            .exec("DELETE FROM notices WHERE id = ?", vec![id.into()])?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    /// Писали ли мы уже этому человеку текст такого рода. `{sent, lastAt}`.
+    fn notice_sent(&self, b: &serde_json::Value) -> Result<Response> {
+        let user_id = str_field(b, "userId")?;
+        let kind = str_field(b, "kind")?;
+        let row = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT MAX(sent_at) AS last_at FROM notices WHERE user_id = ? AND kind = ?",
+                vec![user_id.into(), kind.into()],
+            )?
+            .to_array::<serde_json::Value>()?
+            .into_iter()
+            .next();
+        let last_at = row.and_then(|r| r.get("last_at").and_then(|v| v.as_i64()));
+        Response::from_json(&serde_json::json!({ "sent": last_at.is_some(), "lastAt": last_at }))
     }
 
     /// Store a received receipt, bound to its payment (claim). Idempotent on the provider
@@ -354,7 +536,7 @@ impl ClaimDO {
                 // COLLATE NOCASE: inbound recipient addresses arrive LOWERCASED (lava/CF
                 // lowercases the local part), while the stored synthetic email may be mixed
                 // case (base64url claimId) — match case-insensitively.
-                "SELECT claim_id, claimed_by, user_id FROM claims
+                "SELECT claim_id, claimed_by, user_id, tg_user_id FROM claims
                    WHERE email = ? COLLATE NOCASE ORDER BY created_at DESC LIMIT 1",
                 vec![email.into()],
             )?
@@ -367,6 +549,9 @@ impl ClaimDO {
                 "claimId": r.get("claim_id").and_then(|v| v.as_str()),
                 "userId": r.get("claimed_by").and_then(|v| v.as_str())
                     .or_else(|| r.get("user_id").and_then(|v| v.as_str())),
+                // Адрес чека привязан к платежу, а платёж — к телеграму покупателя:
+                // этого хватает, чтобы ответить человеку в бот прямо по письму.
+                "tgUserId": r.get("tg_user_id").and_then(|v| v.as_i64()),
             })),
             None => Response::from_json(&serde_json::json!({ "found": false })),
         }
@@ -1139,6 +1324,23 @@ impl DurableObject for ClaimDO {
             (Method::Post, "/void-by-contract") => {
                 let b: serde_json::Value = req.json().await?;
                 self.void_by_contract(&b)
+            }
+            (Method::Post, "/webhook-event/add") => {
+                let b: serde_json::Value = req.json().await?;
+                self.add_webhook_event(&b)
+            }
+            (Method::Get, "/webhook-events") => self.webhook_events_recent(),
+            (Method::Post, "/notice/reserve") => {
+                let b: serde_json::Value = req.json().await?;
+                self.notice_reserve(&b)
+            }
+            (Method::Post, "/notice/release") => {
+                let b: serde_json::Value = req.json().await?;
+                self.notice_release(&b)
+            }
+            (Method::Post, "/notice/sent") => {
+                let b: serde_json::Value = req.json().await?;
+                self.notice_sent(&b)
             }
             (Method::Post, "/test-activate") => {
                 let b: serde_json::Value = req.json().await?;

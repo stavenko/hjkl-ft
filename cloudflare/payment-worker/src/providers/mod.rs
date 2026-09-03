@@ -13,11 +13,21 @@ pub enum WebhookKind {
     Cancelled,
     Refunded,
     Failed,
+    /// Тип события, которого мы не знаем. ОТДЕЛЬНО от `Failed`: раньше неизвестное
+    /// сваливалось в «неудачное списание» и молча ничего не делало — так мы и
+    /// пропустили отмену двух подписок 3 сентября. Теперь это громкая ошибка в логе,
+    /// а payload всё равно сохраняется целиком.
+    Unknown,
 }
 
 #[derive(Debug, Clone)]
 pub struct WebhookEvent {
     pub kind: WebhookKind,
+    /// Сырой `eventType` провайдера — как есть, без нормализации. Нужен в логе и в
+    /// архиве: по нему видно, что именно прислали, даже когда мы это не разобрали.
+    pub event_type: String,
+    /// Причина отказа от провайдера (`errorMessage`) — почему не прошло списание.
+    pub error_message: Option<String>,
     pub contract_id: Option<String>,
     pub parent_contract_id: Option<String>,
     pub email: Option<String>,

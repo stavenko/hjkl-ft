@@ -33,6 +33,10 @@ async fn email(message: ForwardableEmailMessage, env: Env, _ctx: Context) -> Res
     let verified = sender_is_lava(&auth_results);
     let body_text = decode_body(&raw);
     let (amount_minor, currency) = parse_amount(&body_text);
+    // Тема приходит в MIME-кодировке (=?UTF-8?B?…?=) — по ней и опознаём, что письмо
+    // не чек, а сообщение о судьбе подписки.
+    let subject_text = decode_mime_words(&subject);
+    let notice_kind = classify_notice(&subject_text);
 
     // Key: a sanitized Message-ID makes a retry of the SAME email overwrite the same
     // object (idempotent archive); fall back to time+size when there's no id.
@@ -42,14 +46,16 @@ async fn email(message: ForwardableEmailMessage, env: Env, _ctx: Context) -> Res
     let meta_key = format!("meta/{base}.json");
 
     console_log!(
-        "receipt-worker: CAUGHT to={to} from={from} subject={subject:?} msgid={message_id:?} \
-         size={size} verified={verified} amount_minor={amount_minor:?} currency={currency:?} key={raw_key}"
+        "receipt-worker: CAUGHT to={to} from={from} subject={subject_text:?} msgid={message_id:?} \
+         size={size} verified={verified} amount_minor={amount_minor:?} currency={currency:?} \
+         kind={notice_kind:?} key={raw_key}"
     );
 
     let meta = serde_json::json!({
         "to": to,
         "from": from,
-        "subject": subject,
+        "subject": subject_text,
+        "kind": notice_kind,
         "messageId": message_id,
         "authResults": auth_results,
         "verified": verified,
@@ -76,12 +82,88 @@ async fn email(message: ForwardableEmailMessage, env: Env, _ctx: Context) -> Res
     // never let a spoofed email fabricate a receipt on a payment). Best-effort: a failure
     // here never errors the handler; the raw stays archived either way.
     if verified {
-        bind_receipt(&env, &to, &message_id, amount_minor, currency.as_deref(), &body_text).await;
+        bind_receipt(
+            &env,
+            &to,
+            &message_id,
+            amount_minor,
+            currency.as_deref(),
+            &body_text,
+            notice_kind,
+        )
+        .await;
     } else {
         console_warn!("receipt-worker: sender NOT verified as lava — archived only (auth={auth_results:?})");
     }
 
     Ok(())
+}
+
+/// О ЧЁМ ПИСЬМО. lava шлёт на один и тот же адрес и чеки, и сообщения о судьбе
+/// подписки, а различить их можно только по теме:
+///
+/// * `renewal_failed` — «💔 Не удалось продлить подписку». ЕДИНСТВЕННЫЙ канал, по
+///   которому мы вообще узнаём о сорванном списании: вебхука об этом lava нам ни разу
+///   не присылала (проверено по логам за 27 августа — 3 сентября).
+/// * `cancelled` — «✅ Подписка отменена». Приходит на третьи сутки, когда ретраи
+///   кончились.
+/// * `""` — обычный чек об оплате.
+///
+/// Сравнение по подстроке в нижнем регистре: тему lava может менять — эмодзи, порядок
+/// слов, — а корень «продлить подписку» рядом с «не удалось» устойчив.
+fn classify_notice(subject: &str) -> &'static str {
+    let s = subject.to_lowercase();
+    if s.contains("не удалось") && s.contains("продлить") {
+        "renewal_failed"
+    } else if s.contains("подписка отменена") || s.contains("подписка была отменена") {
+        "cancelled"
+    } else {
+        ""
+    }
+}
+
+/// Раскодировать MIME-encoded-words темы письма (RFC 2047): `=?UTF-8?B?…?=` и
+/// `=?UTF-8?Q?…?=`. Между соседними словами пробел по стандарту опускается, но lava
+/// режет тему по границе слов, поэтому склеиваем как есть, а всё, что вне слов,
+/// оставляем дословно. Незнакомая кодировка — оставляем кусок как есть, а не теряем.
+fn decode_mime_words(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    let mut prev_was_word = false;
+    while let Some(start) = rest.find("=?") {
+        // RFC 2047: пробел МЕЖДУ двумя закодированными словами — разделитель разметки,
+        // а не пробел текста. Иначе «не удалось» + « продлить» склеиваются с двойным.
+        let between = &rest[..start];
+        if !(prev_was_word && between.trim().is_empty()) {
+            out.push_str(between);
+        }
+        let after = &rest[start + 2..];
+        // charset?enc?text?=
+        let Some(q1) = after.find('?') else { break };
+        let Some(q2) = after[q1 + 1..].find('?').map(|i| q1 + 1 + i) else { break };
+        let Some(end) = after[q2 + 1..].find("?=").map(|i| q2 + 1 + i) else { break };
+        let enc = after[q1 + 1..q2].to_ascii_uppercase();
+        let text = &after[q2 + 1..end];
+        let decoded = match enc.as_str() {
+            "B" => base64_decode(&text.chars().filter(|c| !c.is_whitespace()).collect::<String>())
+                .map(|b| String::from_utf8_lossy(&b).into_owned()),
+            "Q" => Some(String::from_utf8_lossy(&qp_decode(text.replace('_', " ").as_bytes())).into_owned()),
+            _ => None,
+        };
+        match decoded {
+            Some(d) => {
+                out.push_str(&d);
+                prev_was_word = true;
+            }
+            None => {
+                out.push_str(&rest[start..start + 2 + end + 2]);
+                prev_was_word = false;
+            }
+        }
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// True when Cloudflare's `Authentication-Results` show a PASSING DKIM signature from a
@@ -227,6 +309,7 @@ async fn bind_receipt(
     amount_minor: Option<i64>,
     currency: Option<&str>,
     body_text: &str,
+    kind: &str,
 ) {
     let key = match internal_key(env).await {
         Some(k) => k,
@@ -241,6 +324,8 @@ async fn bind_receipt(
         "amount": amount_minor,
         "currency": currency,
         "bodyText": body_text,
+        // "" — обычный чек; иначе payment-worker ещё и напишет человеку в бот.
+        "kind": kind,
     })
     .to_string();
     let headers = Headers::new();
@@ -310,4 +395,45 @@ fn slug_of(message_id: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Настоящие темы писем lava, как они пришли 1 и 3 сентября (взяты из логов прода).
+    const SUBJ_FAILED: &str =
+        "lava.top =?UTF-8?B?8J+SlNC90LUg0YPQtNCw0LvQvtGB0Yw=?= =?UTF-8?B?INC/0YDQvtC00LvQuNGC0Ywg0L/QvtC00L/QuNGB0LrRgw==?=";
+    const SUBJ_CANCELLED: &str =
+        "lava.top =?UTF-8?B?4pyFINC/0L7QtNC/0LjRgdC60LAg0L7RgtC80LXQvdC10L3QsA==?=";
+
+    #[test]
+    fn tema_pisma_raskodirovyvaetsya() {
+        assert_eq!(decode_mime_words(SUBJ_FAILED), "lava.top 💔не удалось продлить подписку");
+        assert_eq!(decode_mime_words(SUBJ_CANCELLED), "lava.top ✅ подписка отменена");
+    }
+
+    #[test]
+    fn pisma_o_podpiske_opoznayutsya() {
+        assert_eq!(classify_notice(&decode_mime_words(SUBJ_FAILED)), "renewal_failed");
+        assert_eq!(classify_notice(&decode_mime_words(SUBJ_CANCELLED)), "cancelled");
+    }
+
+    #[test]
+    fn chek_ostayotsya_chekom() {
+        assert_eq!(classify_notice("lava.top Чек об оплате"), "");
+        assert_eq!(classify_notice(""), "");
+    }
+
+    /// Тема без MIME-слов не должна портиться, а незнакомая кодировка — теряться.
+    #[test]
+    fn prostaya_tema_ne_portitsya() {
+        assert_eq!(decode_mime_words("Обычная тема"), "Обычная тема");
+        assert_eq!(decode_mime_words("=?UTF-8?X?zzz?="), "=?UTF-8?X?zzz?=");
+    }
+
+    #[test]
+    fn quoted_printable_slova_tozhe() {
+        assert_eq!(decode_mime_words("=?UTF-8?Q?a=20b_c?="), "a b c");
+    }
 }

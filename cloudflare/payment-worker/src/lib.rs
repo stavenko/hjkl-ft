@@ -2455,6 +2455,37 @@ async fn cancel(env: &Env, user_id: &str) -> Result<Response> {
     Response::from_json(&sub_json)
 }
 
+#[cfg(test)]
+mod texts_tests {
+    use super::{cancelled_text, ru_days};
+
+    /// Про причину говорим только там, где знаем её сами: письмо lava об отмене
+    /// одинаково и для «кончились попытки списания», и для «человек нажал отмену».
+    #[test]
+    fn prichinu_nazyvaem_tolko_kogda_znaem() {
+        assert!(cancelled_text(0, true).contains("продлить её не удалось"));
+        assert!(!cancelled_text(0, false).contains("не удалось"));
+    }
+
+    /// Списание идёт по окончании оплаченного периода, поэтому у отмены «по неоплате»
+    /// остатка дней обычно нет — и обещать его нельзя.
+    #[test]
+    fn ne_obeshchaem_dostup_kotorogo_net() {
+        assert!(cancelled_text(0, true).contains("Доступ к приложению закрыт"));
+        assert!(cancelled_text(12, false).contains("сохранится ещё 12 дней"));
+    }
+
+    #[test]
+    fn dni_sklonyayutsya() {
+        assert_eq!(ru_days(1), "день");
+        assert_eq!(ru_days(3), "дня");
+        assert_eq!(ru_days(5), "дней");
+        assert_eq!(ru_days(11), "дней");
+        assert_eq!(ru_days(21), "день");
+        assert_eq!(ru_days(22), "дня");
+    }
+}
+
 // ── Сообщения человеку о судьбе его подписки ─────────────────────────────────
 //
 // Раньше об отвалившемся продлении человеку писала ТОЛЬКО lava, а мы молчали: ветка
@@ -2473,19 +2504,33 @@ const MSG_RENEWAL_FAILED: &str = "Не удалось продлить подп�
 /// сообщение, а не два.
 const NOTICE_COOLDOWN_MS: i64 = 20 * 3_600_000;
 
-/// Текст об отмене. Доступ обычно доживает до конца оплаченного периода, но если тот
-/// уже прошёл — врать про «ещё N дней» нельзя.
-fn cancelled_text(days_left: i64) -> String {
-    if days_left > 0 {
-        format!(
-            "Подписка на re:Norma отменена — продлить её не удалось. \
-Доступ к приложению сохранится ещё {days_left} {}.",
-            ru_days(days_left)
-        )
+/// Как давно должен быть виден срыв продления, чтобы считать отмену его следствием.
+/// Лесенка lava: попытка, повтор через 8 часов, ещё один через сутки, потом отмена —
+/// то есть между первым отказом и отменой проходит меньше трёх суток. Неделя взята с
+/// запасом на её задержки.
+const FAILURE_LOOKBACK_MS: i64 = 7 * 86_400_000;
+
+/// Текст об отмене.
+///
+/// ПРИЧИНУ НАЗЫВАЕМ ТОЛЬКО ТОГДА, КОГДА ЗНАЕМ ЕЁ САМИ. По письму lava это не
+/// определить: и подписку, закрытую после неудачных списаний, и отменённую человеком
+/// вручную она описывает одним шаблоном — «Вы отменили подписку». Единственный
+/// надёжный признак — наша собственная запись о том, что перед этим у человека
+/// сорвалось продление.
+///
+/// Доступ обычно доживает до конца оплаченного периода. Но списание идёт как раз по
+/// его окончании, поэтому у отмены «по неоплате» дней в остатке обычно нет — и врать
+/// про «ещё N дней» в этом случае нельзя.
+fn cancelled_text(days_left: i64, after_failure: bool) -> String {
+    let head = if after_failure {
+        "Подписка на re:Norma отменена: продлить её не удалось."
     } else {
-        "Подписка на re:Norma отменена — продлить её не удалось. \
-Доступ к приложению закрыт."
-            .to_string()
+        "Подписка на re:Norma отменена."
+    };
+    if days_left > 0 {
+        format!("{head} Доступ к приложению сохранится ещё {days_left} {}.", ru_days(days_left))
+    } else {
+        format!("{head} Доступ к приложению закрыт.")
     }
 }
 
@@ -2640,6 +2685,42 @@ async fn tg_send(env: &Env, tg_user_id: i64, text: &str) -> bool {
     }
 }
 
+/// Отметить в журнале САМ ФАКТ сорванного продления — отдельно от того, удалось ли
+/// написать человеку. Именно по этой отметке потом решается, называть ли причину
+/// отмены: у lava в письме её нет, а у нас есть.
+async fn record_failure_seen(env: &Env, user_id: Option<&str>, ref_id: &str) {
+    let Some(uid) = user_id else { return };
+    notice_reserve(
+        env,
+        &format!("renewal_failed_seen:{ref_id}"),
+        "renewal_failed_seen",
+        Some(uid),
+        Some(ref_id),
+        0,
+    )
+    .await;
+}
+
+/// Был ли у человека срыв продления в последние дни — то есть отмена пришла «по
+/// неоплате», а не по его собственной кнопке.
+async fn failed_recently(env: &Env, user_id: &str) -> bool {
+    let Ok(claim) = claim_stub(env) else { return false };
+    let Ok(mut r) = do_post(
+        &claim,
+        "/notice/sent",
+        &serde_json::json!({ "userId": user_id, "kind": "renewal_failed_seen" }),
+    )
+    .await
+    else {
+        return false;
+    };
+    let v: serde_json::Value = r.json().await.unwrap_or(serde_json::json!({}));
+    v.get("lastAt")
+        .and_then(|x| x.as_i64())
+        .map(|t| Date::now().as_millis() as i64 - t < FAILURE_LOOKBACK_MS)
+        .unwrap_or(false)
+}
+
 /// «Не удалось продлить» — по письму от lava или по её вебхуку, что придёт первым.
 /// `ref_id` — id письма либо ключ вебхука: по нему повтор того же события отсекается.
 async fn notify_renewal_failed(
@@ -2648,6 +2729,8 @@ async fn notify_renewal_failed(
     tg_user_id: Option<i64>,
     ref_id: &str,
 ) {
+    // Факт запоминаем ВСЕГДА — даже если писать некуда: он нужен для текста об отмене.
+    record_failure_seen(env, user_id, ref_id).await;
     let Some(tg) = tg_user_id else { return };
     let id = format!("renewal_failed:{ref_id}");
     if !notice_reserve(env, &id, "renewal_failed", user_id, Some(ref_id), NOTICE_COOLDOWN_MS).await
@@ -2673,7 +2756,11 @@ async fn notify_cancelled(
     if !notice_reserve(env, &id, "cancelled", user_id, Some(ref_id), NOTICE_COOLDOWN_MS).await {
         return;
     }
-    if !tg_send(env, tg, &cancelled_text(days_left)).await {
+    let after_failure = match user_id {
+        Some(uid) => failed_recently(env, uid).await,
+        None => false,
+    };
+    if !tg_send(env, tg, &cancelled_text(days_left, after_failure)).await {
         notice_release(env, &id).await;
     }
 }

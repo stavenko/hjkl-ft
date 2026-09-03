@@ -26,3 +26,7 @@ renorma-lp.jpeg
 
 # Логи прогона регрессии (scripts/run-regression.mjs).
 regression-*.log
+
+# Настройка Playwright под конкретную машину прогона (браузер из образа, прокси,
+# ограничение версии TLS). У каждого своя — в репозиторий не идёт.
+/e2e/pw-local.config.ts

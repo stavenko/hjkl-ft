@@ -50,7 +50,6 @@ pub fn main() {
         services::i18n::init_weight_unit();
         services::update::init(); // update-available signal at the root
         services::net::init(); // connectivity signals at the root
-        services::subscription::init(); // subscription gate signal at the root
         services::push::init_received(); // "notification received on this device" signal
         services::local::init_planka_stale(); // "planka needs recompute" signal at the root
         services::classify::init(); // reset the background food-classification queue
@@ -59,6 +58,26 @@ pub fn main() {
         services::nav::init(); // счётчики нажатий на пункты нижнего меню
         services::letters::init(); // program-letters inbox version signal (mail widget)
         services::sync::init(); // migration-progress signal at the root
+
+        // Засев для испытаний — здесь, а не в `app.rs`. Там он стоял после миграций
+        // (это верно и сохранено: миграции зовутся строкой ниже), но ВНУТРИ эффекта,
+        // который работает лишь на открытом приложении. А испытанию надо засеять в
+        // том числе подписку — ровно то, что приложение и открывает; из-под оверлея
+        // «проверяем подписку» засев не случался никогда.
+        //
+        // Место выбрано двумя границами, и обе проверены падением:
+        //   * ПОСЛЕ сигналов выше — миграции ходят в `sync`, а его сигнал заводится
+        //     здесь же; до него проход падает («RefCell already borrowed» — в WASM
+        //     паника не разматывает стек, и занятая ячейка остаётся занятой);
+        //   * ДО `subscription::init` — ворота подписки читаются из кэша флагов один
+        //     раз, и засеянная подписка обязана лечь раньше.
+        //
+        // На боевом домене `pending` всегда ложь: ни миграции, ни засев отсюда не идут.
+        if services::auth::get_user_id().is_some() && services::test_seed::pending() {
+            services::migrations::run_for_current_db().await;
+            services::test_seed::apply().await;
+        }
+        services::subscription::init(); // subscription gate signal at the root
 
         // The database is ready → drop the splash and show the UI IMMEDIATELY.
         // Everything below is background and MUST NOT block the first paint.

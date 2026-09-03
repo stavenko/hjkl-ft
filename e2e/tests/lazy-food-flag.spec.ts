@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerAccount, seedFeature } from './helpers';
+import { signInSeeded } from './helpers';
 
 /**
  * The new food-logging path is gated by a CURATOR-set feature flag
@@ -20,16 +20,22 @@ import { registerAccount, seedFeature } from './helpers';
  * obvious bug.
  */
 
-/** Register, land on the diary, open the "add food" picker. */
-async function openFoodPicker(page: import('@playwright/test').Page) {
-  await page.goto('/');
-  await registerAccount(page);
+/** Сеанс с нужными флагами, дневник, открытый выбор «что добавить». */
+async function openFoodPicker(
+  page: import('@playwright/test').Page,
+  features: string[] = [],
+) {
+  const now = new Date().toISOString();
+  await signInSeeded(page, {
+    app_flags: features.map((f) => ({ key: `feature.${f}`, value: 'true', updated_at: now })),
+  });
 
   const navDiary = page.getByTestId('nav-diary');
   await navDiary.waitFor({ state: 'visible', timeout: 15_000 });
   await navDiary.click();
 
-  const add = page.getByTestId('diary-btn-add');
+  // Добавление начинается с трапезы: «+» у Завтрака ведёт на /diary/add?meal=…
+  const add = page.getByTestId('meal-add').first();
   await add.waitFor({ state: 'visible', timeout: 10_000 });
   await add.click();
 }
@@ -50,19 +56,10 @@ test.describe('запись еды: старый и новый интерфей�
   });
 
   test('с флагом куратора открывается новый путь — «Другая еда»', async ({ page }) => {
-    await page.goto('/');
-    await registerAccount(page);
-
-    // Флаг ставит куратор директивой; в испытании его кладут прямо в базу — засев
-    // применяется ПОСЛЕ миграций, иначе они бы его стёрли (services/test_seed.rs).
-    await seedFeature(page, 'lazy_food');
-
-    const navDiary = page.getByTestId('nav-diary');
-    await navDiary.waitFor({ state: 'visible', timeout: 15_000 });
-    await navDiary.click();
-    const add = page.getByTestId('diary-btn-add');
-    await add.waitFor({ state: 'visible', timeout: 10_000 });
-    await add.click();
+    // Флаг ставит куратор директивой; в испытании он кладётся прямо в базу —
+    // засев применяется ПОСЛЕ миграций, иначе они бы его стёрли
+    // (frontend/src/services/test_seed.rs).
+    await openFoodPicker(page, ['lazy_food']);
 
     const newButton = page.getByTestId('diary-add-btn-other-food');
     await expect(newButton).toBeVisible({ timeout: 10_000 });

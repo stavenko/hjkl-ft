@@ -172,3 +172,65 @@ export async function seedFeature(page: Page, feature: string): Promise<void> {
     app_flags: [{ key: `feature.${feature}`, value: 'true', updated_at: new Date().toISOString() }],
   });
 }
+
+/**
+ * Завести на устройстве ГОТОВЫЙ сеанс, не проходя онбординг.
+ *
+ * Почему не `registerAccount`. Онбординг сейчас войти не даёт вовсе: страница
+ * `/onboard` требует в адресе `?u=<user_id>` (ключ доступа выдаёт телеграм-бот и
+ * он же знает, кому), а без него уводит на «/». Ссылка с оплаты
+ * (`/onboard#claim=id.secret`, её строит `pages/onboard_tg.rs`) этого `?u=` не
+ * несёт — и падает туда же. Проверено на выкладке dev: и наши испытания, и
+ * прежний `chat-nav.spec.ts` не доживают до кнопки `onboard-btn-register`
+ * одинаково. Это НЕ следствие здешних правок — обе строки лежат в main.
+ *
+ * Поэтому сеанс кладётся напрямую, теми же ключами, которыми его кладёт сам
+ * вход (`services/auth.rs`), а подписка и персона — засевом. Токен ненастоящий:
+ * сервер на него отвечает 401, и это правильно — испытание про экраны, а не про
+ * учётную запись. Всё, что ходит в сеть (синхронизация, поддержка, телеметрия),
+ * тихо ругается в консоль и на отрисовку не влияет.
+ *
+ * @param page  страница Playwright
+ * @param seed  что доложить в базу сверх подписки и персоны
+ */
+export async function signInSeeded(
+  page: Page,
+  seed: Record<string, unknown[]> = {},
+): Promise<string> {
+  const userId = `e2e-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+
+  // Сначала страница — до неё ни localStorage, ни базы этого домена не видно.
+  await page.goto('/');
+  await page.evaluate((uid) => {
+    localStorage.setItem('user_id', uid);
+    // Токен заведомо негодный: он нужен лишь чтобы приложение считало сеанс
+    // существующим (`auth::session_valid_here` смотрит на наличие, не на суть).
+    localStorage.setItem('auth_token', 'e2e-not-a-real-token');
+    localStorage.setItem('auth_ctx', 'browser');
+    localStorage.setItem('pwa_dismissed', 'true');
+  }, userId);
+
+  const now = new Date().toISOString();
+  const flags = (seed.app_flags as unknown[] | undefined) ?? [];
+  await seedDatabase(page, {
+    ...seed,
+    profile: (seed.profile as unknown[] | undefined) ?? [
+      { key: 'profile', sex: 'male', height_cm: 180, birth_year: 1990, goal: 'lose', updated_at: now },
+    ],
+    app_flags: [
+      // Подписка — из кэша, иначе приложение уходит проверять её по сети и
+      // накрывает экран оверлеем «проверяем» (на 401 он не снимается).
+      {
+        key: 'ft_subscription',
+        value: JSON.stringify({ plan: 'e2e', end: Date.now() + 365 * 24 * 3600 * 1000, active: true }),
+        updated_at: now,
+      },
+      { key: 'ft_subscription_checked_at', value: String(Date.now()), updated_at: now },
+      { key: 'push_onboarding_dismissed', value: 'true', updated_at: now },
+      ...flags,
+    ],
+  });
+
+  await expect(page.getByTestId('nav-diary')).toBeVisible({ timeout: 20_000 });
+  return userId;
+}

@@ -50,6 +50,21 @@ pub fn FoodPicker(
     };
     let show_other = create_rw_signal(false);
 
+    // Кнопка «завести еду» — ОДНА на обе ветки списка (пустой поиск и найденное).
+    // Раньше их было две, и вторая, пустая, флага не знала: на свежем аккаунте, где
+    // продуктов ещё нет, новый путь не открывался вовсе — а это ровно первая встреча
+    // человека с приложением. Держим одним куском, чтобы разойтись они больше не могли.
+    let add_food_button = move || {
+        view! {
+            <button
+                attr:data-testid=move || if lazy_on() { "diary-add-btn-other-food" } else { "diary-add-btn-new-food" }
+                class="is-size-6 has-text-link has-text-weight-medium"
+                style="background: none; border: none; cursor: pointer;"
+                on:click=move |_| if lazy_on() { show_other.set(true) } else { show_editor.set(true) }
+            >{move || if lazy_on() { t("diary_add.other_food") } else { t("diary_add.new_food") }}</button>
+        }
+    };
+
     // Use the caller's search signal if given, else own one.
     let search = search.unwrap_or_else(|| create_rw_signal(String::new()));
     // Foods picked during THIS picker session. A food is shown as added (and its
@@ -175,12 +190,7 @@ pub fn FoodPicker(
                             <p class="is-size-6 has-text-grey-light" style="margin-bottom: 16px;">
                                 {move || t("diary_add.nothing_found")}
                             </p>
-                            <button
-                                attr:data-testid="diary-add-btn-new-food"
-                                class="is-size-6 has-text-link has-text-weight-medium"
-                                style="background: none; border: none; cursor: pointer;"
-                                on:click=move |_| show_editor.set(true)
-                            >{move || t("diary_add.add_new_food")}</button>
+                            {add_food_button()}
                         </div>
                     }.into_view()
                 } else {
@@ -240,12 +250,7 @@ pub fn FoodPicker(
                             // Флаг выключен — всё как было, ни одна строка старого
                             // пути не тронута.
                             <div style="text-align: center; padding: 16px 0;">
-                                <button
-                                    attr:data-testid=move || if lazy_on() { "diary-add-btn-other-food" } else { "diary-add-btn-new-food" }
-                                    class="is-size-6 has-text-link has-text-weight-medium"
-                                    style="background: none; border: none; cursor: pointer;"
-                                    on:click=move |_| if lazy_on() { show_other.set(true) } else { show_editor.set(true) }
-                                >{move || if lazy_on() { t("diary_add.other_food") } else { t("diary_add.new_food") }}</button>
+                                {add_food_button()}
                             </div>
                         </div>
                     }.into_view()

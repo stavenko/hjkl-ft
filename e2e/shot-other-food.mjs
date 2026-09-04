@@ -188,6 +188,30 @@ await page.reload({ waitUntil: 'load' });
 await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 25000 });
 await page.waitForTimeout(2500);
 await page.screenshot({ path: OUT + 'other-food-7-recognised.png', fullPage: true });
+
+// ── Правка: сперва РАЗОБРАННОЙ записи, потом НЕРАСПОЗНАННОЙ ─────────────────
+//
+// Строки идут в том же порядке, что на снимке выше: первая — разобранная,
+// вторая — нераспознанная.
+async function openEdit(nth, out) {
+  await page.getByTestId('lazy-row-menu').nth(nth).click();
+  await page.getByTestId('lazy-row-edit').first().waitFor({ state: 'visible', timeout: 10000 });
+  await page.getByTestId('lazy-row-edit').first().click();
+  await page.getByTestId('lazy-food-edit').waitFor({ state: 'visible', timeout: 15000 });
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: OUT + out, fullPage: true });
+  await page.getByTestId('lazy-edit-cancel').click();
+  await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 15000 });
+  await page.waitForTimeout(800);
+}
+await openEdit(0, 'other-food-8-edit-recognised.png');
+await openEdit(1, 'other-food-9-edit-pending.png');
+
+// Меню строки — оно теперь одно и то же у ленивой и у обычной; снимем открытым.
+await page.getByTestId('lazy-row-menu').first().click();
+await page.getByTestId('lazy-row-move').waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(400);
+await page.screenshot({ path: OUT + 'other-food-10-menu.png' });
 console.log('готово');
 
 await browser.close();

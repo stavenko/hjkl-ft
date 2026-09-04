@@ -1075,6 +1075,35 @@ pub async fn duplicate_diary_entry(
     Some(entry)
 }
 
+/// Перенести запись в другой приём пищи.
+///
+/// В отличие от дублирования запись НЕ пересобирается: меняется одно поле, и
+/// поэтому перенос одинаково работает для всех форм записи — и для ссылки на еду, и
+/// для нераспознанной, и для разобранной. Пересборка сгодилась бы только первой:
+/// у остальных вся суть в полях, которых у ссылки нет.
+///
+/// День не трогаем: человек переносит завтрак в обед, а не в другое число, — для
+/// другого числа есть «повторить сегодня».
+pub async fn move_diary_entry(entry_id: &str, meal_label: Option<String>) -> Option<DiaryEntry> {
+    let src: DiaryEntry = db::get("diary", entry_id).await?;
+    if src.meal_label == meal_label {
+        return Some(src);
+    }
+    let moved = moved_to(src, meal_label, now());
+    db::put("diary", &moved).await;
+    Some(moved)
+}
+
+/// Чистая часть переноса — чтобы её можно было проверить без базы.
+///
+/// Здесь важно ровно одно: запись НЕ пересобирается через `DiaryEntry::direct()`,
+/// как это делает дублирование. Пересборка стёрла бы всё, чем живёт ленивая запись
+/// — снимки, описание, разобранные позиции, — и перенесённый завтрак приехал бы в
+/// обед пустым.
+fn moved_to(src: DiaryEntry, meal_label: Option<String>, at: String) -> DiaryEntry {
+    DiaryEntry { meal_label, updated_at: at, ..src }
+}
+
 /// Edit the product (name + KBJU + custom nutrients) behind a diary entry.
 /// Copy-on-write: if the product is referenced ONLY by this entry, edit it in
 /// place; if it's shared (any other non-deleted diary entry, or any recipe
@@ -2754,5 +2783,57 @@ mod recipe_tests {
         let mg = n.iron_mg.unwrap();
         // 1,425 + 3,0 = 4,425 мг на 400 г → 1,10625 на 100 г.
         assert!((mg - 1.10625).abs() < 1e-6, "{mg}");
+    }
+
+    // ── перенос в другой приём ──
+
+    #[test]
+    fn perenos_menyaet_priyom_i_nichego_bolshe() {
+        let src = DiaryEntry {
+            id: "e1".into(),
+            food_id: "f1".into(),
+            date: "2026-09-04".into(),
+            grams: 150.0,
+            meal_label: Some("breakfast".into()),
+            created_at: "2026-09-04T08:00:00Z".into(),
+            updated_at: "2026-09-04T08:00:00Z".into(),
+            ..DiaryEntry::direct()
+        };
+        let out = moved_to(src.clone(), Some("lunch".into()), "2026-09-04T13:00:00Z".into());
+        assert_eq!(out.meal_label.as_deref(), Some("lunch"));
+        assert_eq!(out.updated_at, "2026-09-04T13:00:00Z");
+        // Всё остальное — как было. День в том числе: перенос между приёмами, а не
+        // между числами.
+        assert_eq!(out.id, src.id);
+        assert_eq!(out.date, src.date);
+        assert_eq!(out.grams, src.grams);
+        assert_eq!(out.created_at, src.created_at);
+    }
+
+    #[test]
+    fn perenesennaya_lenivaya_zapis_ne_teryaet_sebya() {
+        // Дублирование пересобирает запись через `DiaryEntry::direct()` и тем стирает
+        // ленивые поля. Перенос так делать не должен: иначе разобранный завтрак
+        // приедет в обед без снимков, без описания и без позиций — то есть пустым.
+        let src = DiaryEntry {
+            id: "e2".into(),
+            date: "2026-09-04".into(),
+            meal_label: Some("breakfast".into()),
+            kind: api_types::DiaryEntryKind::Aggregate,
+            description: Some("печень и капуста".into()),
+            images: vec!["h1".into(), "h2".into()],
+            items: vec![api_types::DiaryFoodItem { food_id: "f-liver".into(), grams: 300.0 }],
+            label: Some("Печень со сливками".into()),
+            created_at: "2026-09-04T08:00:00Z".into(),
+            updated_at: "2026-09-04T08:00:00Z".into(),
+            ..DiaryEntry::direct()
+        };
+        let out = moved_to(src.clone(), Some("dinner".into()), "2026-09-04T19:00:00Z".into());
+        assert_eq!(out.meal_label.as_deref(), Some("dinner"));
+        assert_eq!(out.kind, api_types::DiaryEntryKind::Aggregate);
+        assert_eq!(out.description, src.description);
+        assert_eq!(out.images, src.images);
+        assert_eq!(out.items, src.items);
+        assert_eq!(out.label, src.label);
     }
 }

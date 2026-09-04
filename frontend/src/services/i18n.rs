@@ -554,6 +554,8 @@ fn en(key: &str) -> &'static str {
 
         // Diary: actions
         "diary.delete" => "Delete",
+        "diary.move" => "Move",
+        "diary.move_to" => "Move to meal",
         "diary.duplicate" => "Duplicate",
         "diary.edit" => "Edit",
         "diary.edit_product" => "Edit product",
@@ -778,6 +780,7 @@ fn en(key: &str) -> &'static str {
         // Common
         "common.back" => "Back",
         "common.cancel" => "Cancel",
+        "common.save" => "Save",
         "common.unit.kcal" => "kcal",
         "common.unit.g" => "g",
         "waste.not_whole" => "Didn't eat it whole",
@@ -1566,6 +1569,10 @@ fn ru(key: &str) -> &'static str {
 
         // Дневник: действия
         "diary.delete" => "Удалить",
+        // Перенос в другой приём пищи. «Перенести», а не «Переместить»: короче и
+        // не путается с переносом на другой день, которого здесь нет.
+        "diary.move" => "Перенести",
+        "diary.move_to" => "Перенести в приём",
         "diary.duplicate" => "Дублировать",
         "diary.edit" => "Изменить",
         "diary.edit_product" => "Изменить продукт",
@@ -1800,6 +1807,7 @@ fn ru(key: &str) -> &'static str {
         // Общее
         "common.back" => "Назад",
         "common.cancel" => "Отмена",
+        "common.save" => "Сохранить",
         "common.unit.kcal" => "ккал",
         "common.unit.g" => "г",
         "waste.not_whole" => "Не съел целиком",
@@ -2313,5 +2321,53 @@ mod tests {
                 assert!(en(key).contains(m), "в английском {key} нет подстановки {m}");
             }
         }
+    }
+
+    /// Каждый ключ, который просит приложение, обязан существовать.
+    ///
+    /// Иначе он молча выходит на экран как «???» — именно так на кнопку сохранения
+    /// в правке ленивой записи уехал несуществующий `common.save`, и заметили это
+    /// только на снимке. Проверка идёт по исходникам: сами вызовы `t("…")` и есть
+    /// список того, что должно быть переведено.
+    #[test]
+    fn vse_kljuchi_iz_koda_perevedeny() {
+        use std::path::PathBuf;
+        fn walk(dir: &PathBuf, out: &mut Vec<PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        walk(&root, &mut files);
+        assert!(files.len() > 10, "исходников не нашлось — проверка бесполезна");
+
+        let mut missing: Vec<String> = Vec::new();
+        for f in &files {
+            let Ok(text) = std::fs::read_to_string(f) else { continue };
+            for (i, _) in text.match_indices("t(\"") {
+                let rest = &text[i + 3..];
+                let Some(end) = rest.find('"') else { continue };
+                let key = &rest[..end];
+                // Только ключи с точкой: `t("…")` встречается и с переменной внутри.
+                if !key.contains('.') || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_') {
+                    continue;
+                }
+                if ru(key) == "???" || en(key) == "???" {
+                    let rel = f.strip_prefix(&root).unwrap_or(f).display();
+                    let line = text[..i].matches('\n').count() + 1;
+                    missing.push(format!("{key} ({rel}:{line})"));
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(missing.is_empty(), "нет перевода у ключей:\n  {}", missing.join("\n  "));
     }
 }

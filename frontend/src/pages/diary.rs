@@ -174,6 +174,10 @@ pub fn DiaryPage() -> impl IntoView {
     let menu_open = create_rw_signal(None::<String>);
     // Entry id whose «Дублировать» dialog (pick target meal) is open.
     let dup_target = create_rw_signal(None::<String>);
+    // Перенос в другой приём пищи. Окно выбора то же, что у дублирования, но
+    // держим отдельным сигналом: у окна разный заголовок и разное действие, а
+    // одним сигналом пришлось бы ещё и хранить, что именно затеяли.
+    let move_target = create_rw_signal(None::<String>);
     // The diary entry whose product is being edited (КБЖУ + name, CoW on save).
     let edit_food = create_rw_signal(None::<(String, Food)>);
 
@@ -459,6 +463,7 @@ pub fn DiaryPage() -> impl IntoView {
                                         is_last=is_last
                                         on_edit=Callback::new(move |e: DiaryEntry| editing_lazy.set(Some(e)))
                                         on_delete=Callback::new(move |e: DiaryEntry| delete_entry(e.id.clone()))
+                                        on_move=Callback::new(move |e: DiaryEntry| move_target.set(Some(e.id.clone())))
                                     />
                                 }.into_view();
                             }
@@ -536,6 +541,7 @@ pub fn DiaryPage() -> impl IntoView {
                                                     let eid_d = entry_id.clone();
                                                     let eid_e = entry_id.clone();
                                                     let eid_del = entry_id.clone();
+                                                    let eid_mv = entry_id.clone();
                                                     let fid_e = fid3.clone();
                                                     let fid_ed = fid3.clone();
                                                     // «Повторить сегодня» — то же действие, что было на
@@ -594,6 +600,15 @@ pub fn DiaryPage() -> impl IntoView {
                                                                             move |_| { dup_target.set(Some(id.clone())); menu_open.set(None); }
                                                                         }
                                                                     >{move || t("diary.duplicate")}</button>
+                                                                    <button
+                                                                        attr:data-testid="diary-menu-move"
+                                                                        class="button is-ghost is-small is-fullwidth"
+                                                                        style="justify-content: flex-start; text-decoration: none;"
+                                                                        on:click={
+                                                                            let id = eid_mv.clone();
+                                                                            move |_| { move_target.set(Some(id.clone())); menu_open.set(None); }
+                                                                        }
+                                                                    >{move || t("diary.move")}</button>
                                                                     {past_day.then(|| view! {
                                                                         <button
                                                                             attr:data-testid="diary-menu-repeat"
@@ -806,6 +821,51 @@ pub fn DiaryPage() -> impl IntoView {
                         on_saved=Callback::new(move |_| { invalidate(); sync::push_background(); })
                         on_close=Callback::new(move |_| edit_food.set(None))
                     />
+                })
+            }}
+
+            // «Перенести»: то же окно выбора приёма, что и у дублирования, только
+            // запись не копируется, а меняет приём. День не трогаем — для другого
+            // числа есть «повторить сегодня».
+            {move || {
+                move_target.get().map(|eid| {
+                    let meal_btns = crate::services::meal_split::MAIN_MEALS.iter().map(|m| {
+                        let eid = eid.clone();
+                        let key: &'static str = m.key;
+                        let accent: &'static str = m.accent;
+                        let i18n_key: &'static str = m.i18n_key;
+                        view! {
+                            <button class="button is-fullwidth"
+                                attr:data-testid="diary-move-meal"
+                                style=format!("justify-content: flex-start; margin-bottom: 8px; height: 3rem; \
+                                    border: 1px solid {accent}; color: {accent}; background: {accent}22; font-weight: 600;")
+                                on:click=move |_| {
+                                    let eid = eid.clone();
+                                    move_target.set(None);
+                                    spawn_local(async move {
+                                        local::move_diary_entry(&eid, Some(key.to_string())).await;
+                                        invalidate();
+                                        sync::push_background();
+                                    });
+                                }
+                            >{move || t(i18n_key)}</button>
+                        }
+                    }).collect_view();
+                    view! {
+                        <div class="modal is-active" attr:data-testid="diary-move-sheet">
+                            <div class="modal-background" on:click=move |_| move_target.set(None)></div>
+                            <div class="modal-card" style="max-width: 22rem; width: calc(100% - 2rem);">
+                                <section class="modal-card-body" style="border-radius: 12px;">
+                                    <div class="is-size-6 has-text-weight-bold" style="margin-bottom: 14px;">
+                                        {move || t("diary.move_to")}
+                                    </div>
+                                    {meal_btns}
+                                    <button class="button is-ghost is-fullwidth" style="margin-top: 4px;"
+                                        on:click=move |_| move_target.set(None)>{move || t("common.cancel")}</button>
+                                </section>
+                            </div>
+                        </div>
+                    }
                 })
             }}
 

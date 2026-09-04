@@ -12,6 +12,7 @@
 use api_types::{DiaryEntry, DiaryEntryKind, Food};
 use leptos::*;
 
+use crate::components::kebab::{kebab_icon, ITEM_CLASS, ITEM_STYLE, KEBAB_CLASS, KEBAB_STYLE, MENU_STYLE};
 use crate::components::other_food_panel::EntryThumbnails;
 use crate::services::{i18n::t, local};
 
@@ -24,6 +25,9 @@ pub fn LazyDiaryRow(
     on_edit: Callback<DiaryEntry>,
     /// Удалить запись. Зовётся только у нераспознанной.
     on_delete: Callback<DiaryEntry>,
+    /// Перенести запись в другой приём пищи — тем же окном выбора, что и у обычной
+    /// строки. Держит его страница: окно одно на весь дневник.
+    on_move: Callback<DiaryEntry>,
     /// Скрыть разделитель у последней строки.
     is_last: bool,
 ) -> impl IntoView {
@@ -31,6 +35,7 @@ pub fn LazyDiaryRow(
     let pending = entry.kind == DiaryEntryKind::Pending;
     let e_edit = entry.clone();
     let e_delete = entry.clone();
+    let e_move = entry.clone();
     let e_badges = entry.clone();
 
     // Нераспознанная показывает СЕБЯ: снимки и обрывок описания. Надписи «Ещё не
@@ -123,20 +128,30 @@ pub fn LazyDiaryRow(
                 })}
             </div>
 
+            // Кебаб и меню — из общего места (`components::kebab`), чтобы они не
+            // разошлись с обычной строкой снова: раньше здесь стоял знак «⋯» другой
+            // кнопкой и другого размера.
             <div style="position: relative;">
                 <button
                     attr:data-testid="lazy-row-menu"
-                    class="button is-white is-small"
+                    class=KEBAB_CLASS
+                    style=KEBAB_STYLE
                     on:click=move |_| menu_open.update(|o| *o = !*o)
-                >"⋯"</button>
+                >{kebab_icon()}</button>
                 {move || menu_open.get().then(|| {
                     let e1 = e_edit.clone();
                     let e2 = e_delete.clone();
+                    let e3 = e_move.clone();
                     view! {
-                        <div class="box" style="position: absolute; right: 0; top: 100%; z-index: 10; padding: 4px; min-width: 10rem;">
+                        <div style=MENU_STYLE>
+                            <button
+                                attr:data-testid="lazy-row-move"
+                                class=ITEM_CLASS style=ITEM_STYLE
+                                on:click=move |_| { menu_open.set(false); on_move.call(e3.clone()); }
+                            >{move || t("diary.move")}</button>
                             <button
                                 attr:data-testid="lazy-row-edit"
-                                class="button is-white is-fullwidth is-small"
+                                class=ITEM_CLASS style=ITEM_STYLE
                                 on:click=move |_| { menu_open.set(false); on_edit.call(e1.clone()); }
                             >{move || t("diary.edit")}</button>
                             {pending.then(|| {
@@ -144,7 +159,7 @@ pub fn LazyDiaryRow(
                                 view! {
                                     <button
                                         attr:data-testid="lazy-row-delete"
-                                        class="button is-white is-fullwidth is-small has-text-danger"
+                                        class=format!("{ITEM_CLASS} has-text-danger") style=ITEM_STYLE
                                         on:click=move |_| { menu_open.set(false); on_delete.call(e2.clone()); }
                                     >{move || t("diary.delete")}</button>
                                 }

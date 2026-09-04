@@ -16,6 +16,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { chromium } from "playwright";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,9 +41,15 @@ const UAS = {
     "Chrome/135.0.0.0 Safari/537.36",
 };
 
-// Сессия и подтверждённая подписка — подкладываются в localStorage: воркеров в
-// этом прогоне нет и звать их незачем, проверяется РАЗВИЛКА экранов, а не они.
-// `exp` в токене — 2100 год; подпись поддельная и никем здесь не проверяется.
+// Сессия и подтверждённая подписка — подкладываются в localStorage: в основной
+// части прогона воркеров нет и звать их незачем, проверяется РАЗВИЛКА экранов, а
+// не они. `exp` в токене — 2100 год; подпись поддельная и никем здесь не
+// проверяется.
+//
+// Отдельно, в самом конце, идёт проверка НАСТОЯЩЕЙ подписки: там сессия и
+// оплата заводятся тем же механизмом, что и для приложения питания
+// (frontend/scripts/seed-test-subscription.mjs → TEST_ENTITLEMENT в
+// payment-worker-dev), и приложение спрашивает статус по-честному.
 const TOKEN = "x.eyJzdWIiOiJ1LWFiYzEyM2RlZjQ1NiIsImV4cCI6NDEwMjQ0NDgwMH0.y";
 const SESSION = `
   localStorage.setItem('gym_auth_token', '${TOKEN}');
@@ -76,12 +83,15 @@ if (!BASE) {
   // Иначе прогон проверял бы приложение БЕЗ политики, а хеши встроенных скриптов
   // считает наш же build-shell.sh: ошибка в нём всплыла бы только в проде, где
   // браузер молча не выполнит ни регистрацию воркера, ни сторож обновления.
-  const CSP = (() => {
+  let CSP = (() => {
     const h = path.join(DIST, "_headers");
     if (!fs.existsSync(h)) return null;
     const m = fs.readFileSync(h, "utf8").match(/Content-Security-Policy:\s*(.+)/);
     return m ? m[1].trim() : null;
   })();
+  if (CSP && process.env.PAYMENT_BASE) {
+    CSP = CSP.replace(/(connect-src[^;]*)/, `$1 ${process.env.PAYMENT_BASE}`);
+  }
   if (!CSP) {
     console.error("в сборке нет _headers с CSP — проверять политику нечем");
     process.exit(2);
@@ -108,6 +118,19 @@ if (!BASE) {
         "Content-Security-Policy": CSP,
       });
       res.end(body);
+      return;
+    }
+
+    // PAYMENT_BASE переопределяет адрес payment-worker В САМОЙ КОНФИГУРАЦИИ,
+    // которую читает приложение. Без этого проверку живой подписки нельзя ни
+    // прогнать против заглушки, ни нацелить на другой стенд — а значит нельзя и
+    // убедиться, что она вообще работает.
+    if (url === "/config/frontend.toml" && process.env.PAYMENT_BASE) {
+      const cfg = fs
+        .readFileSync(path.join(DIST, "config/frontend.toml"), "utf8")
+        .replace(/^payment_base_url = .*$/m, `payment_base_url = "${process.env.PAYMENT_BASE}"`);
+      res.writeHead(200, { "Content-Type": "text/plain", "Content-Security-Policy": CSP });
+      res.end(cfg);
       return;
     }
 
@@ -459,6 +482,88 @@ const shown = (page, id) => page.getByTestId(id).isVisible().catch(() => false);
   check(await shown(c.page, "login-phrase-input"), "поле фразы открылось");
   check(await shown(c.page, "login-btn-phrase"), "и кнопка входа по ней");
   await c.ctx.close();
+}
+
+// ── 8. НАСТОЯЩАЯ подписка, а не подложенная ──
+//
+// Всё выше проверяет нашу развилку на подсунутом localStorage. Здесь —
+// единственное место, где приложение по-настоящему ходит в payment-worker:
+// заводится живая dev-подписка тем же механизмом, что и для приложения питания
+// (TEST_ENTITLEMENT: оплаченный guest-claim без денег), и статус спрашивается
+// по-честному. Заодно это проверяет, что gym-origin вообще пускают в CORS.
+//
+// Пропускается, если dev-воркер недоступен: прогон над собранным dist не обязан
+// требовать сети, но и молча делать вид, что проверил, не должен.
+{
+  console.log("\n17. Подписка спрашивается у payment-worker по-настоящему");
+  const PAYMENT = process.env.PAYMENT_BASE
+    || "https://payment-worker-dev.vg-stavenko.workers.dev";
+
+  // Доступность проверяется ИЗ БРАУЗЕРА, а не из node. Это разные сети: в
+  // песочнице агента node ходит наружу через прокси, а headless-браузер — нет
+  // (туннель до воркера открывается и обрывается на первом же обмене). Спроси мы
+  // node, прогон бы уверенно пошёл проверять и упал бы на ровном месте.
+  let browserOnline = false;
+  {
+    const probe = await b.newContext();
+    const pp = await probe.newPage();
+    // Пробуем С САМОЙ СТРАНИЦЫ приложения, а не с `data:`-заглушки: у той
+    // непрозрачный origin, fetch оттуда запрещён и проба всегда врала бы «нет
+    // сети». Заодно это честнее — тот же origin и та же CSP, что у приложения.
+    await pp.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+    browserOnline = await pp.evaluate(async (u) => {
+      try {
+        await fetch(u, { mode: "no-cors" });
+        return true;
+      } catch {
+        return false;
+      }
+    }, `${PAYMENT}/health`);
+    await probe.close();
+  }
+
+  let seeded = null;
+  if (!browserOnline) {
+    console.log("  ПРОПУСК  браузер не дотягивается до dev-воркера — живую подписку не проверить");
+    console.log("           (в песочнице агента наружу ходит только node; на обычной машине проверка идёт)");
+  } else try {
+    const out = execFileSync(
+      "node",
+      [
+        path.join(ROOT, "frontend/scripts/seed-test-subscription.mjs"),
+        `gym-check-${Date.now()}`,
+        "--app", "gym",
+        "--payment", PAYMENT,
+        "--json",
+      ],
+      { encoding: "utf8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    seeded = JSON.parse(out);
+  } catch (e) {
+    console.log(`  ПРОПУСК  не удалось завести подписку: ${String(e.message).split("\n")[0]}`);
+  }
+
+  if (seeded) {
+    check(seeded.status?.active === true, `подписка заведена (plan=${seeded.status?.plan})`);
+    const seed = Object.entries(seeded.storage)
+      .map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`)
+      .join("\n");
+    // Кэша подписки НЕ подкладываем: приложение обязано спросить сам воркер.
+    const { ctx, page, errors } = await open(UAS.ios, `${seed}
+      Object.defineProperty(navigator, 'standalone', { get: () => true });`);
+    // Ждём, пока живой запрос разрешится: экран «проверяем» должен смениться.
+    await page.waitForSelector('[data-testid="app-stub"]', { timeout: 25000 }).catch(() => {});
+    check(await shown(page, "app-stub"), "приложение пустило внутрь по ЖИВОМУ ответу воркера");
+    check(!(await shown(page, "app-locked")), "и не показало «нужна подписка»");
+    check(!(await shown(page, "app-offline")), "и не показало «нет связи» — CORS пропустил");
+    const cached = await page.evaluate(() => localStorage.getItem("gym_subscription"));
+    check(
+      JSON.parse(cached || "{}").active === true,
+      "ответ воркера запомнен в кэше приложения",
+    );
+    check(errors.length === 0, `без ошибок исполнения${errors.length ? `: ${errors[0]}` : ""}`);
+    await ctx.close();
+  }
 }
 
 await b.close();

@@ -13,9 +13,14 @@
 // bundled into the app.
 //
 // Usage:
-//   node scripts/seed-test-subscription.mjs [sub] [--payment <url>]
+//   node scripts/seed-test-subscription.mjs [sub] [--app fit|gym] [--payment <url>] [--json]
 //     sub         account id / JWT `sub` (default "testuser")
+//     --app       which app the browser snippet is for (default "fit"). The
+//                 подписка одна на аккаунт — различаются только ключи в
+//                 localStorage, которыми приложение хранит сессию.
 //     --payment   payment-worker base URL (default payment-worker-dev)
+//     --json      print one JSON object instead of the human-readable report
+//                 (for scripts: {sub, token, status, storage})
 //     JWT_SECRET  env override for the signing secret (default dev secret)
 //
 // Prints the signed JWT, the resulting subscription status, and a browser
@@ -23,11 +28,25 @@
 
 const args = process.argv.slice(2);
 const sub = args.find((a) => !a.startsWith("--")) || "testuser";
+const flag = (name, fallback) => {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : fallback;
+};
+const asJson = args.includes("--json");
+const app = flag("--app", "fit");
+if (app !== "fit" && app !== "gym") {
+  console.error(`--app: ожидается fit или gym, получено "${app}"`);
+  process.exit(2);
+}
+// Ключи сессии у приложений разные, а подписка одна: она живёт в аккаунте, а не
+// в приложении. Поэтому здесь одна таблица, а не второй скрипт — копия
+// неизбежно отстала бы от оригинала.
+const STORAGE = {
+  fit: { user: "user_id", token: "auth_token", extra: { token_id: "tok1", auth_ctx: "browser" } },
+  gym: { user: "gym_user_id", token: "gym_auth_token", extra: {} },
+}[app];
 const SECRET = process.env.JWT_SECRET || "dev-secret-change-in-production";
-const base = (() => {
-  const i = args.indexOf("--payment");
-  return i >= 0 ? args[i + 1] : "https://payment-worker-dev.vg-stavenko.workers.dev";
-})();
+const base = flag("--payment", "https://payment-worker-dev.vg-stavenko.workers.dev");
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
@@ -74,12 +93,19 @@ if (!cl.ok) {
 }
 const status = await cl.json();
 
-console.log("sub:         ", sub);
-console.log("payment:     ", base);
-console.log("subscription:", JSON.stringify(status));
-console.log("token:       ", token);
-console.log("\n// Browser: paste into DevTools / page.evaluate to authorize this session:");
-console.log(`localStorage.setItem('user_id', ${JSON.stringify(sub)});`);
-console.log(`localStorage.setItem('auth_token', ${JSON.stringify(token)});`);
-console.log(`localStorage.setItem('token_id', 'tok1');`);
-console.log(`localStorage.setItem('auth_ctx', 'browser');`);
+// Пары «ключ → значение», которыми браузерная сессия объявляется вошедшей.
+const storage = { [STORAGE.user]: sub, [STORAGE.token]: token, ...STORAGE.extra };
+
+if (asJson) {
+  console.log(JSON.stringify({ sub, app, payment: base, token, status, storage }));
+} else {
+  console.log("app:         ", app);
+  console.log("sub:         ", sub);
+  console.log("payment:     ", base);
+  console.log("subscription:", JSON.stringify(status));
+  console.log("token:       ", token);
+  console.log("\n// Browser: paste into DevTools / page.evaluate to authorize this session:");
+  for (const [k, v] of Object.entries(storage)) {
+    console.log(`localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`);
+  }
+}

@@ -213,9 +213,34 @@ await page.getByTestId('lazy-row-menu').nth(0).click();
 await page.getByTestId('lazy-row-edit').first().click();
 await page.getByTestId('lazy-food-edit').waitFor({ state: 'visible', timeout: 15000 });
 await page.getByTestId('other-food-photo-edit').click();
-await page.getByTestId('other-food-description-edit').click();
-await page.waitForTimeout(800);
+await page.waitForTimeout(600);
+// Правка верха: позиции спрятаны, чтобы человек смотрел на то, что меняет.
+if (await page.getByTestId('lazy-edit-item').count() !== 0) {
+  throw new Error('позиции обязаны быть скрыты на время правки верха');
+}
+// Меняем состав: открываем кадр и удаляем его. В базу это НЕ должно попасть,
+// пока не нажали «Сохранить».
+await page.getByTestId('other-food-thumb').first().click();
+await page.getByTestId('photo-crop').waitFor({ state: 'visible', timeout: 15000 });
+await page.getByTestId('photo-crop-delete').click();
+await page.getByTestId('lazy-food-edit').waitFor({ state: 'visible', timeout: 10000 });
+await page.getByTestId('other-food-description').fill('Правка, которую мы сейчас отменим');
+await page.waitForTimeout(600);
+console.log('кадров после удаления:', await page.getByTestId('other-food-thumb').count());
 await page.screenshot({ path: OUT + 'other-food-11-edit-unlocked.png', fullPage: true });
+
+// «Отмена» обязана вернуть и кадры, и описание, и позиции.
+await page.getByTestId('lazy-edit-cancel-top').click();
+await page.waitForTimeout(800);
+const backItems = await page.getByTestId('lazy-edit-item').count();
+const backThumbs = await page.getByTestId('other-food-thumb-locked').count();
+const backText = await page.getByTestId('other-food-description-locked').innerText();
+console.log(`после отмены: позиций ${backItems}, кадров ${backThumbs}`);
+if (backItems !== 3) throw new Error(`позиции не вернулись: ${backItems}`);
+if (backThumbs !== 2) throw new Error(`кадры не вернулись: ${backThumbs}`);
+if (!backText.includes('по тарелке')) throw new Error(`описание не вернулось: ${backText}`);
+await page.screenshot({ path: OUT + 'other-food-12-edit-cancelled.png', fullPage: true });
+
 await page.getByTestId('lazy-edit-cancel').click();
 await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 15000 });
 await page.waitForTimeout(800);

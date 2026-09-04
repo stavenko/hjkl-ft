@@ -66,8 +66,19 @@ pub fn LazyFoodEdit(
     //
     // У нераспознанной терять нечего: разбора ещё не было, и зоны открыты сразу.
     let recognised = entry.kind == DiaryEntryKind::Aggregate;
-    let photos_locked = create_rw_signal(recognised);
-    let description_locked = create_rw_signal(recognised);
+    // Замок ОДИН на обе зоны, хотя кнопка «Изменить» стоит на каждой. Так задумано:
+    // цена у правки общая (разбор отменяется целиком), и человек, взявшийся править
+    // описание, тут же может поправить и кадр — второй раз решаться незачем.
+    let top_locked = create_rw_signal(recognised);
+    /// Открыта ли правка верха. Пока она открыта, разобранные позиции НЕ
+    /// показываются: человек занят снимками и словами, а список продуктов, который
+    /// вот-вот исчезнет, только отвлекал бы.
+    let editing_top = move || recognised && !top_locked.get();
+
+    // Что было до правки — чтобы «Отмена» вернула и снимки, и описание. Правка
+    // верха НИЧЕГО не пишет в базу до «Сохранить»: ни состав снимков, ни обрезка,
+    // ни описание. Снимок берётся в тот миг, когда зоны отпирают.
+    let snapshot = store_value(None::<(Vec<String>, String)>);
 
     // `store_value`, а не обычные переменные: замыкание `top_changed` нужно и
     // обработчику сохранения, и разметке, а замыкание, захватившее String и Vec, не
@@ -81,6 +92,14 @@ pub fn LazyFoodEdit(
     // Обрезали ли какой-нибудь кадр. Число снимков при обрезке не меняется, а
     // содержимое — да, и по одному счёту такую правку не поймать.
     let photos_touched = create_rw_signal(false);
+    create_effect(move |was: Option<bool>| {
+        let now = top_locked.get();
+        if was == Some(true) && !now {
+            snapshot.set_value(Some((photos.get_untracked(), description.get_untracked())));
+        }
+        now
+    });
+
     create_effect(move |prev: Option<Vec<String>>| {
         let now = photos.get();
         if let Some(p) = prev {
@@ -154,6 +173,19 @@ pub fn LazyFoodEdit(
         });
     };
 
+    // «Отмена» в режиме правки верха. Ничего в базу не писалось, поэтому вернуть
+    // надо только то, что человек менял в памяти: снимки (состав, порядок, обрезку)
+    // и описание. Позиции при этом возвращаются сами — они и не трогались, просто
+    // были спрятаны.
+    let cancel_top = move |_| {
+        if let Some((p, d)) = snapshot.get_value() {
+            photos.set(p);
+            description.set(d);
+        }
+        photos_touched.set(false);
+        top_locked.set(true);
+    };
+
     let rows = move || -> Vec<(usize, DiaryFoodItem)> { items.get().into_iter().enumerate().collect() };
 
     view! {
@@ -163,7 +195,7 @@ pub fn LazyFoodEdit(
             // раньше здесь была своя разметка, и она отстала от добавления.
             <PhotoAndDescription photos=photos description=description
                 input_id="lazy-edit-photo-input"
-                photos_locked=photos_locked description_locked=description_locked />
+                photos_locked=top_locked description_locked=top_locked />
 
             // Предупреждение появляется, только когда верх ДЕЙСТВИТЕЛЬНО изменён:
             // висеть постоянно оно значило бы пугать человека, который зашёл
@@ -175,16 +207,21 @@ pub fn LazyFoodEdit(
             })}
 
             // ── нижняя половина ──
-            <hr style="margin: 16px 0;" />
-            <p class="is-size-7 has-text-weight-semibold">{move || t("lazy_edit.bottom_title")}</p>
+            //
+            // На время правки верха её не показываем вовсе: список продуктов при
+            // сохранении исчезнет, и держать его перед глазами значит предлагать
+            // править то, чего сейчас не станет.
+            {move || (!editing_top()).then(|| view! {
+                <hr style="margin: 16px 0;" />
+                <p class="is-size-7 has-text-weight-semibold">{move || t("lazy_edit.bottom_title")}</p>
 
-            {move || items.get().is_empty().then(|| view! {
-                <p attr:data-testid="lazy-edit-nothing-yet" class="help" style="margin: 8px 0;">
-                    {move || t("lazy_edit.nothing_yet")}
-                </p>
-            })}
+                {move || items.get().is_empty().then(|| view! {
+                    <p attr:data-testid="lazy-edit-nothing-yet" class="help" style="margin: 8px 0;">
+                        {move || t("lazy_edit.nothing_yet")}
+                    </p>
+                })}
 
-            <For each=rows key=|(_, it)| it.food_id.clone() children=move |(idx, it)| {
+                <For each=rows key=|(_, it)| it.food_id.clone() children=move |(idx, it)| {
                 let fid = it.food_id.clone();
                 let fid_for_name = fid.clone();
                 view! {
@@ -206,8 +243,9 @@ pub fn LazyFoodEdit(
                             on:click=move |_| { let f = fid.clone(); items.update(|l| l.retain(|i| i.food_id != f)); }
                         ></button>
                     </div>
-                }
-            } />
+                    }
+                } />
+            })}
 
             <div style="display: flex; gap: 8px; margin-top: 16px;">
                 // Пока снимки достаются из базы, сохранять НЕЛЬЗЯ: список кадров
@@ -216,9 +254,23 @@ pub fn LazyFoodEdit(
                 <button attr:data-testid="lazy-edit-save" class="button is-primary is-fullwidth"
                     disabled=move || saving.get() || loading_photos.get() on:click=save
                 >{move || t("common.save")}</button>
-                <button attr:data-testid="lazy-edit-cancel" class="button is-light"
-                    on:click=move |_| on_cancel.call(())
-                >{move || t("common.cancel")}</button>
+                // «Отмена» значит разное в двух положениях, и это не двусмысленность,
+                // а точность: в правке верха отменять нечего, кроме самой правки, —
+                // форма остаётся открытой и позиции возвращаются на место. В обычном
+                // положении отменять нечего вовсе, и она просто закрывает форму.
+                {move || if editing_top() {
+                    view! {
+                        <button attr:data-testid="lazy-edit-cancel-top" class="button is-light"
+                            on:click=cancel_top
+                        >{move || t("common.cancel")}</button>
+                    }.into_view()
+                } else {
+                    view! {
+                        <button attr:data-testid="lazy-edit-cancel" class="button is-light"
+                            on:click=move |_| on_cancel.call(())
+                        >{move || t("common.cancel")}</button>
+                    }.into_view()
+                }}
             </div>
         </div>
     }

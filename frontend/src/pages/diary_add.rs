@@ -163,7 +163,6 @@ pub fn DiaryAddPage() -> impl IntoView {
                     foods=Signal::derive(foods)
                     disabled_ids=disabled_ids
 
-                    allow_waste=true
                     exclude_restaurant=false
                     on_pick=on_pick
                     on_food_created=on_food_created

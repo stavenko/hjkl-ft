@@ -1,24 +1,18 @@
 use leptos::*;
 use api_types::*;
 use crate::services::i18n::t;
-use super::waste_field::WasteField;
-use super::restaurant_field::RestaurantField;
 
 #[component]
 pub fn FoodWeightModal(
     food: Food,
     initial_grams: f64,
+    /// Несъеденное и «ресторанная еда» — УСТАРЕВШИЕ поля. Спрашивать их больше не
+    /// спрашиваем, но у прежних записей значения есть, и правка граммов не должна
+    /// их стирать: окно принимает их и отдаёт обратно нетронутыми.
     #[prop(default = 0.0)]
     initial_waste: f64,
     #[prop(default = false)]
     initial_restaurant: bool,
-    /// Показывать ли поля «несъеденное» и «ресторанная еда».
-    ///
-    /// Позиции разобранной записи (`DiaryFoodItem`) хранят только еду и граммы —
-    /// ни отходов, ни признака ресторана у них нет. Предлагать их там значило бы
-    /// врать: человек ввёл бы отходы, а они молча исчезли бы при сохранении.
-    #[prop(default = true)]
-    allow_details: bool,
     submit_label: &'static str,
     on_save: Callback<(f64, f64, bool)>,
     on_close: Callback<()>,
@@ -152,11 +146,6 @@ pub fn FoodWeightModal(
                                     </button>
                                 </div>
                             }
-                        })}
-
-                        {allow_details.then(|| view! {
-                            <WasteField grams=Signal::derive(current_val) waste=waste />
-                            <RestaurantField value=restaurant />
                         })}
 
                         <div class="field is-grouped is-grouped-right mt-4">

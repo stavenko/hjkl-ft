@@ -17,8 +17,6 @@ pub mod lazy_food_edit;
 pub mod new_food_panel;
 pub mod other_food_panel;
 pub mod mini_chart;
-pub mod waste_field;
-pub mod restaurant_field;
 pub mod weight_modal;
 pub mod weight_panel;
 pub mod steps_widget;

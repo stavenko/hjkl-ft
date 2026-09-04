@@ -3,8 +3,6 @@ use api_types::*;
 
 use super::food_editor::FoodEditor;
 use super::food_list_item::FoodListItem;
-use super::waste_field::WasteField;
-use super::restaurant_field::RestaurantField;
 use crate::services::i18n::t;
 use crate::services::{db, local};
 
@@ -21,10 +19,6 @@ pub fn FoodPicker(
     foods: Signal<Vec<Food>>,
     /// Food ids that are already added — shown as a disabled checkmark.
     disabled_ids: Signal<Vec<String>>,
-    /// Show the "didn't eat it whole" waste field and the "restaurant food"
-    /// checkbox in the grams step (diary only).
-    #[prop(default = false)]
-    allow_waste: bool,
     /// Hide restaurant-flagged foods from the list (recipe ingredients only).
     #[prop(default = false)]
     exclude_restaurant: bool,
@@ -159,6 +153,11 @@ pub fn FoodPicker(
 
     let weight_food = create_rw_signal(None::<Food>);
     let grams = create_rw_signal("100".to_string());
+    // Несъеденное и «ресторанная еда» — УСТАРЕВШИЕ поля: спрашивать их перестали,
+    // полей в шаге граммов больше нет. Сигналы остались, потому что записи их всё
+    // ещё несут: `waste` теперь всегда пуст (новая запись получает ноль), а
+    // `restaurant` наследуется от самого продукта — у людей есть помеченные, и
+    // менять их калорийность задним числом нельзя.
     let waste = create_rw_signal(String::new());
     let restaurant = create_rw_signal(false);
     let pending_draft_id = create_rw_signal(None::<String>);
@@ -341,10 +340,6 @@ pub fn FoodPicker(
                                         <button attr:data-testid="diary-add-weight-btn-pkg-exact" type="button" class="button is-small" on:click=move |_| grams.set(format!("{pw}"))>{format!("={:.0}g", pw)}</button>
                                         <button attr:data-testid="diary-add-weight-btn-pkg-plus" type="button" class="button is-small" on:click=move |_| adjust(pw)>{format!("+{:.0}g", pw)}</button>
                                     </div>
-                                })}
-                                {allow_waste.then(|| view! {
-                                    <WasteField grams=Signal::derive(move || grams.get().replace(',', ".").parse().unwrap_or(0.0)) waste=waste />
-                                    <RestaurantField value=restaurant />
                                 })}
                             </section>
                             <footer class="modal-card-foot" style="justify-content: flex-end;">

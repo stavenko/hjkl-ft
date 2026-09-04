@@ -305,7 +305,6 @@ pub fn LazyFoodEdit(
                                 <FoodWeightModal
                                     food=food
                                     initial_grams=grams_of()
-                                    allow_details=false
                                     submit_label=t("weight.save")
                                     on_save=Callback::new(move |(g, _waste, _rest): (f64, f64, bool)| {
                                         items.update(|l| if let Some(i) = l.get_mut(idx) { i.grams = g.max(0.0); });

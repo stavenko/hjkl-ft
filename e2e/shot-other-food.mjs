@@ -260,9 +260,21 @@ if (backThumbs !== 2) throw new Error(`кадры не вернулись: ${bac
 if (!backText.includes('по тарелке')) throw new Error(`описание не вернулось: ${backText}`);
 await page.screenshot({ path: OUT + 'other-food-12-edit-cancelled.png', fullPage: true });
 
+// Окно веса ОБЫЧНОЙ записи дневника — там раньше стояли галочки «не съел целиком»
+// и «ресторанная еда». Снимаем, чтобы видеть, что их не осталось.
 await page.getByTestId('lazy-edit-cancel').click();
 await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 15000 });
-await page.waitForTimeout(800);
+await page.locator('button:has-text("180г")').first().click();
+await page.locator('.modal.is-active').waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(600);
+await page.screenshot({ path: OUT + 'other-food-15-diary-weight.png', fullPage: true });
+const modalText = await page.locator('.modal.is-active').innerText();
+for (const gone of ['целиком', 'Отходы', 'Ресторанная']) {
+  if (modalText.includes(gone)) throw new Error(`в окне веса осталось «${gone}»`);
+}
+console.log('окно веса дневника: устаревших полей нет');
+await page.locator('.modal.is-active .delete').first().click();
+await page.waitForTimeout(400);
 
 // Меню строки — оно теперь одно и то же у ленивой и у обычной; снимем открытым.
 await page.getByTestId('lazy-row-menu').first().click();

@@ -157,6 +157,11 @@ pub fn LazyFoodEdit(
                     items: Vec::new(),
                     label: None,
                     recognized_at: None,
+                    // Вопрос к модели стал другим — и прежний ответ, и прежняя
+                    // неудача к нему не относятся. Счётчик попыток обнуляется:
+                    // человек поправил ровно то, из-за чего не вышло.
+                    recognition_error: None,
+                    recognition_tries: 0,
                     images: hashes,
                     description: (!description.get_untracked().trim().is_empty())
                         .then(|| description.get_untracked().trim().to_string()),

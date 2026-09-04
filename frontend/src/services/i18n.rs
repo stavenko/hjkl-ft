@@ -601,6 +601,11 @@ fn en(key: &str) -> &'static str {
         "other_food.add" => "Add",
         "other_food.hint" => "The entry appears in the diary right away and recognises itself once there is a network",
         "other_food.not_recognised" => "Not recognised yet",
+        "lazy_food.err.no_frames_read" => "None of the photos could be read. Describe what you ate, or take new photos",
+        "lazy_food.err.nothing_to_read" => "No photos and no description — nothing to recognise",
+        "lazy_food.err.empty_list" => "No food found in the photos or the description. Describe what you ate",
+        "lazy_food.err.model_failed" => "Could not work it out. We will try again later",
+        "lazy_food.err.gave_up" => "Could not recognise it. Change the photos or the description and we will try again",
         "lazy_edit.top_title" => "Photos and description",
         "lazy_edit.bottom_title" => "What was recognised",
         "lazy_edit.will_reset" => "Photos or description changed — the entry will be recognised again",
@@ -1627,6 +1632,15 @@ fn ru(key: &str) -> &'static str {
         // идёт фоном и может подождать сети.
         "other_food.hint" => "Запись появится в дневнике сразу, а распознается сама, когда будет сеть",
         "other_food.not_recognised" => "Ещё не распознано",
+        // §6.6: если прочесть не удалось, говорим об этом прямо. Молча подставить
+        // справочные значения нельзя — человек об этом не узнает.
+        "lazy_food.err.no_frames_read" => "Не удалось прочесть ни один снимок. Опишите словами, что вы съели, или переснимите",
+        "lazy_food.err.nothing_to_read" => "Ни снимков, ни описания — распознавать нечего",
+        "lazy_food.err.empty_list" => "На снимках и в описании не нашлось еды. Опишите словами, что вы съели",
+        // Сюда сходятся все НЕОЖИДАННЫЕ сбои — сети, модели, разбора ответа.
+        // Человеку от их подробностей толку нет, ему нужно знать, что делать.
+        "lazy_food.err.model_failed" => "Разобрать не получилось. Попробуем ещё раз позже",
+        "lazy_food.err.gave_up" => "Распознать не удалось. Поправьте снимки или описание — попробуем заново",
         "lazy_edit.top_title" => "Снимки и описание",
         "lazy_edit.bottom_title" => "Что распозналось",
         "lazy_edit.will_reset" => "Снимки или описание изменились — запись распознается заново",

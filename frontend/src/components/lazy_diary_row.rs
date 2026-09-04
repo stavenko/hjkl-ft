@@ -58,6 +58,11 @@ pub fn LazyDiaryRow(
     let has_note = !note.is_empty();
     // Ни кадров, ни слов — сказать про запись нечего, и молчать нельзя.
     let mute = pending && !has_note && entry.images.is_empty();
+    // Разбор не удался — говорим об этом прямо (§6.6). Пока попытки не кончились,
+    // причина всё равно показывается: человек вправе знать, что происходит, и
+    // поправить снимки, не дожидаясь третьего провала.
+    let failure = pending.then(|| entry.recognition_error.clone()).flatten();
+    let gave_up = pending && entry.recognition_tries >= crate::services::lazy_food::RECOGNITION_TRIES;
 
     view! {
         <div
@@ -101,6 +106,20 @@ pub fn LazyDiaryRow(
 
                 // Ни кадров, ни слов не бывает почти никогда (добавить пустую запись
                 // нельзя), но если такое случилось — строка не должна быть пустой.
+                // Причина неудачи — под кадрами и описанием, а не вместо них: снимки
+                // человек узнаёт, а сообщение читает.
+                {failure.clone().map(|reason| view! {
+                    <p attr:data-testid="lazy-row-error" class="is-size-7 has-text-danger"
+                        style="margin: 4px 0 0; line-height: 1.25;">
+                        {reason}
+                        {gave_up.then(|| view! {
+                            <span attr:data-testid="lazy-row-gave-up" style="display: block; margin-top: 3px;">
+                                {move || t("lazy_food.err.gave_up")}
+                            </span>
+                        })}
+                    </p>
+                })}
+
                 {mute.then(|| view! {
                     <span attr:data-testid="lazy-row-title" class="is-size-6 has-text-weight-medium"
                         style="color: var(--bulma-text-weak);"

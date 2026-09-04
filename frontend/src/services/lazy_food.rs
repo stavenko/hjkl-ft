@@ -13,7 +13,7 @@
 
 use api_types::{DiaryEntry, DiaryEntryKind, DiaryFoodItem, Food};
 
-use crate::services::{ai, db, food_search, images, local};
+use crate::services::{ai, db, food_search, i18n::t, images, local};
 
 /// Записи, которые ждут разбора. Чистая функция: очередь — это не отдельное
 /// хранилище, а те самые записи дневника, которые ещё не распознаны.
@@ -23,8 +23,32 @@ use crate::services::{ai, db, food_search, images, local};
 pub fn awaiting_recognition(entries: &[DiaryEntry]) -> Vec<&DiaryEntry> {
     entries
         .iter()
-        .filter(|e| !e.deleted && e.kind == DiaryEntryKind::Pending)
+        .filter(|e| {
+            !e.deleted && e.kind == DiaryEntryKind::Pending && e.recognition_tries < RECOGNITION_TRIES
+        })
         .collect()
+}
+
+/// Сколько раз пробуем разобрать запись, прежде чем оставить её в покое.
+///
+/// Три, а не «пока не выйдет»: неудача бывает от сети и от смазанного кадра. Первая
+/// пройдёт сама, вторая не пройдёт никогда, и различить их изнутри нечем. Три
+/// попытки покрывают случайное и не жгут запросы вечно на безнадёжном.
+///
+/// Счётчик обнуляется, когда человек правит снимки или описание: это уже другой
+/// вопрос к модели, и отвечать на него надо заново.
+pub const RECOGNITION_TRIES: u32 = 3;
+
+/// Запись после неудачного разбора: причина словами и попытка в счёт.
+///
+/// Чистая функция — чтобы правило проверялось тестом, а не тремя провалами подряд.
+pub fn after_failure(entry: &DiaryEntry, reason: &str, at: String) -> DiaryEntry {
+    DiaryEntry {
+        recognition_error: Some(reason.to_string()),
+        recognition_tries: entry.recognition_tries.saturating_add(1),
+        updated_at: at,
+        ..entry.clone()
+    }
 }
 
 /// Завести нераспознанную запись из снимков и описания.
@@ -104,15 +128,62 @@ pub fn seen_of(item: &ai::MergedItem) -> food_search::SeenNutrition {
     }
 }
 
-/// Завести новую еду по разобранной позиции.
+/// Какую копию вытесняет новая еда с таким названием.
+///
+/// Вытесняется только ОДНОИМЁННАЯ и только неархивированная: «Творог» вытесняет
+/// «Творог», но десерт «Картошка» не вытесняет картофель — это разная еда, и
+/// архивировать её было бы прямым вредом. Из нескольких одноимённых берём самую
+/// свежую: она и есть та, которой человек пользовался.
+///
+/// Чистая функция — чтобы правило проверялось тестом, а не базой.
+pub fn superseded<'a>(new_name: &str, candidates: &'a [Food]) -> Option<&'a Food> {
+    candidates
+        .iter()
+        .filter(|f| !f.archived && !f.is_recipe && food_search::same_name(new_name, &f.name))
+        .max_by(|a, b| a.updated_at.cmp(&b.updated_at))
+}
+
+/// Перенести в новую копию то, что заполняется ФОНОМ.
+///
+/// Признаки (овощ/фрукт, гемовое железо, молочно-жировая глобула и прочие) и свои
+/// нутриенты выясняются отдельными запросами к модели. У вытесненной копии они уже
+/// выяснены, и та же еда с чуть иной этикеткой не должна выяснять их заново: это
+/// лишние деньги и лишнее ожидание. Спецификация (§6.4) говорит прямо: «то, что
+/// заполняется фоном, копируем из предыдущей еды».
+///
+/// КБЖУ не переносим НИКОГДА — ради них новая копия и заводится.
+pub fn inherit_background(mut fresh: Food, prev: &Food) -> Food {
+    fresh.is_veg_fruit = fresh.is_veg_fruit.or(prev.is_veg_fruit);
+    fresh.is_heme = fresh.is_heme.or(prev.is_heme);
+    fresh.is_milk_globule = fresh.is_milk_globule.or(prev.is_milk_globule);
+    fresh.is_red_meat = fresh.is_red_meat.or(prev.is_red_meat);
+    fresh.is_processed_meat = fresh.is_processed_meat.or(prev.is_processed_meat);
+    fresh.is_egg = fresh.is_egg.or(prev.is_egg);
+    // Свои нутриенты (кальций, железо…) — те, которых у новой ещё нет.
+    for (key, value) in &prev.nutrients {
+        fresh.nutrients.entry(key.clone()).or_insert(*value);
+    }
+    // Ключевые слова тоже разовая работа: у одноимённой копии они те же.
+    if fresh.keywords.is_empty() {
+        fresh.keywords = prev.keywords.clone();
+    }
+    fresh
+}
+
+/// Завести новую еду по разобранной позиции, вытеснив прежнюю одноимённую копию.
 ///
 /// Ключевые слова размечаются ЗДЕСЬ, при заведении, а не при каждом поиске: это
 /// разовая работа на продукт, и только благодаря ей потом находится «ракушки» по
 /// слову «макароны». Разметка не удалась — заводим без неё: еда всё равно найдётся
 /// по названию, а слова допишет следующая попытка.
-pub async fn create_food(item: &ai::MergedItem) -> Food {
+///
+/// Прежняя одноимённая копия АРХИВИРУЕТСЯ (§6.4): в поиске должна оставаться одна,
+/// иначе у человека копятся «Творог», «Творог», «Творог». Из дневника она никуда не
+/// девается — прошлые записи продолжают считаться по тем цифрам, что были тогда.
+pub async fn create_food(item: &ai::MergedItem, candidates: &[Food]) -> Food {
+    let prev = superseded(&item.name, candidates).cloned();
     let keywords = ai::keywords_for(&item.name, |_| {}).await.unwrap_or_default();
-    let food = Food {
+    let mut food = Food {
         id: local::new_id(),
         name: item.name.clone(),
         kcal: item.kcal_per_100g.unwrap_or(0.0),
@@ -124,7 +195,13 @@ pub async fn create_food(item: &ai::MergedItem) -> Food {
         updated_at: local::now(),
         ..Food::default()
     };
+    if let Some(prev) = &prev {
+        food = inherit_background(food, prev);
+    }
     db::put("foods", &food).await;
+    if let Some(prev) = prev {
+        local::archive_food(&prev.id, true).await;
+    }
     food
 }
 
@@ -137,7 +214,7 @@ pub async fn resolve_item(item: &ai::MergedItem, index: &food_search::Index, foo
 
     match resolve_locally(&item.name, &seen, &candidates) {
         Some(Resolution::Existing(id)) => return id,
-        Some(Resolution::New) => return create_food(item).await.id,
+        Some(Resolution::New) => return create_food(item, &candidates).await.id,
         None => {}
     }
     let survivors = food_search::survivors(&seen, &candidates);
@@ -146,7 +223,7 @@ pub async fn resolve_item(item: &ai::MergedItem, index: &food_search::Index, foo
         // И отказ модели, и её сбой ведут в одно место: заводим новую копию. Это
         // хуже, чем найти существующую, но несравнимо лучше, чем приписать еде
         // чужие нутриенты.
-        _ => create_food(item).await.id,
+        _ => create_food(item, &candidates).await.id,
     }
 }
 
@@ -158,24 +235,52 @@ pub async fn resolve_item(item: &ai::MergedItem, index: &food_search::Index, foo
 /// запись остаётся нераспознанной до следующей попытки.
 pub async fn recognize(entry: &DiaryEntry) -> Result<DiaryEntry, String> {
     let mut frames = Vec::new();
+    let mut unread = 0usize;
     for hash in &entry.images {
         let Some(image) = images::get(hash).await else { continue };
         match ai::read_photo(&image, |_, _, _| {}).await {
             Ok(read) => frames.push((hash.clone(), read)),
-            Err(e) => leptos::logging::warn!("кадр {hash} не разобран: {e}"),
+            Err(e) => {
+                // Не только в консоль: непрочитанный кадр это то, о чём человек
+                // должен узнать (§6.6). Считаем их и скажем словами ниже.
+                leptos::logging::warn!("кадр {hash} не разобран: {e}");
+                unread += 1;
+            }
         }
     }
     let description = entry.description.clone().unwrap_or_default();
     if frames.is_empty() && description.trim().is_empty() {
-        return Err("нечего разбирать: ни одного кадра и нет описания".to_string());
+        return Err(if unread > 0 {
+            // Снимки были, но ни один не прочёлся, и слов человек не написал.
+            // Подставить справочные значения нельзя — их не из чего брать.
+            t("lazy_food.err.no_frames_read").to_string()
+        } else {
+            t("lazy_food.err.nothing_to_read").to_string()
+        });
     }
 
-    let merged = ai::merge_into_items(&frames, &description, |_| {}).await?;
+    // Сбой модели или сети НЕ уходит человеку как есть: в записи должно оказаться
+    // объяснение словами, а не «LLM output error: ModelExecution("HTTP 401: …")».
+    // Подробность нужна нам и живёт в консоли; человеку нужно, что делать дальше.
+    let merged = match ai::merge_into_items(&frames, &description, |_| {}).await {
+        Ok(m) => m,
+        Err(e) => {
+            leptos::logging::warn!("разбор списка не удался: {e}");
+            return Err(t("lazy_food.err.model_failed").to_string());
+        }
+    };
     if merged.items.is_empty() {
-        return Err("список еды вышел пустым".to_string());
+        return Err(t("lazy_food.err.empty_list").to_string());
     }
 
-    let foods = local::list_foods().await;
+    // Сопоставляем ТОЛЬКО с неархивированными копиями (§6.4): архивированную не
+    // воскрешаем — если совпадение нашлось бы с ней, заводим новую. Рецепты тоже
+    // мимо: рецепт это не сырой продукт из справочника.
+    let foods: Vec<Food> = local::list_foods()
+        .await
+        .into_iter()
+        .filter(|f| !f.archived && !f.is_recipe)
+        .collect();
     let index = food_search::Index::build(&foods);
     let mut items = Vec::with_capacity(merged.items.len());
     for it in &merged.items {
@@ -187,6 +292,9 @@ pub async fn recognize(entry: &DiaryEntry) -> Result<DiaryEntry, String> {
         items,
         label: Some(short_label(&merged.items)),
         recognized_at: Some(local::now()),
+        // Разобралось — прежняя неудача больше не про эту запись.
+        recognition_error: None,
+        recognition_tries: 0,
         updated_at: local::now(),
         ..entry.clone()
     };
@@ -315,6 +423,97 @@ mod tests {
             "Печень, Капуста и ещё 1"
         );
     }
+
+    // ── §6.4: вытеснение прежней копии ──
+
+    /// Продукт для проверок вытеснения: важны только имя и время правки.
+    fn copy_of_food(id: &str, name: &str, updated: &str) -> Food {
+        Food {
+            id: id.into(),
+            name: name.into(),
+            updated_at: updated.into(),
+            ..Food::default()
+        }
+    }
+
+    #[test]
+    fn vytesnyaetsya_odnoimyonnaya_i_samaya_svezhaya() {
+        let cands = vec![
+            copy_of_food("f1", "Творог обезжиренный", "2026-01-01T00:00:00Z"),
+            copy_of_food("f2", "Творог обезжиренный", "2026-06-01T00:00:00Z"),
+        ];
+        assert_eq!(superseded("Творог обезжиренный", &cands).map(|f| f.id.as_str()), Some("f2"));
+    }
+
+    #[test]
+    fn raznaya_eda_ne_vytesnyaetsya() {
+        // Десерт «Картошка» не должен архивировать картофель: это не копии одного
+        // продукта, а разная еда, и архивировать её было бы прямым вредом.
+        let cands = vec![copy_of_food("f1", "Картофель отварной", "2026-01-01T00:00:00Z")];
+        assert!(superseded("Десерт «Картошка»", &cands).is_none());
+    }
+
+    #[test]
+    fn arhivirovannuyu_kopiyu_ne_voskreshaem() {
+        let mut old = copy_of_food("f1", "Творог", "2026-01-01T00:00:00Z");
+        old.archived = true;
+        assert!(superseded("Творог", &[old]).is_none(), "архивная не вытесняется повторно");
+    }
+
+    #[test]
+    fn recept_ne_vytesnyaetsya() {
+        let mut r = copy_of_food("r1", "Творог", "2026-01-01T00:00:00Z");
+        r.is_recipe = true;
+        assert!(superseded("Творог", &[r]).is_none(), "рецепт это не копия продукта");
+    }
+
+    #[test]
+    fn fonovye_priznaki_perehodyat_v_novuyu_kopiyu() {
+        let mut prev = copy_of_food("f1", "Творог", "2026-01-01T00:00:00Z");
+        prev.is_milk_globule = Some(true);
+        prev.is_veg_fruit = Some(false);
+        prev.keywords = vec!["творог".into(), "молочное".into()];
+        prev.nutrients.insert("Calcium".into(), 120.0);
+
+        let fresh = Food { id: "f2".into(), name: "Творог".into(), kcal: 150.0, ..Food::default() };
+        let out = inherit_background(fresh, &prev);
+
+        assert_eq!(out.is_milk_globule, Some(true), "выясненное фоном не выясняем заново");
+        assert_eq!(out.is_veg_fruit, Some(false));
+        assert_eq!(out.nutrients.get("Calcium"), Some(&120.0));
+        assert_eq!(out.keywords, prev.keywords, "слова для поиска у одноимённой те же");
+        assert_eq!(out.kcal, 150.0, "КБЖУ НЕ наследуются — ради них копия и заводится");
+    }
+
+    // ── §6.6: неудача не прячется ──
+
+    #[test]
+    fn neudacha_lozhitsya_v_zapis_i_schitaetsya() {
+        let e = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
+        let once = after_failure(&e, "не прочёлся ни один снимок", "2026-09-04T10:00:00Z".into());
+        assert_eq!(once.recognition_error.as_deref(), Some("не прочёлся ни один снимок"));
+        assert_eq!(once.recognition_tries, 1);
+        let twice = after_failure(&once, "снова", "2026-09-04T11:00:00Z".into());
+        assert_eq!(twice.recognition_tries, 2);
+    }
+
+    #[test]
+    fn beznadyozhnuyu_zapis_ochered_bolshe_ne_beret() {
+        let mut hopeless = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
+        hopeless.recognition_tries = RECOGNITION_TRIES;
+        let fresh = DiaryEntry { id: "e2".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
+        let all = vec![hopeless, fresh];
+        let queue = awaiting_recognition(&all);
+        assert_eq!(queue.len(), 1, "безнадёжная выпадает из очереди");
+        assert_eq!(queue[0].id, "e2");
+    }
+
+    #[test]
+    fn poka_popytki_est_zapis_ostayotsya_v_ocheredi() {
+        let mut tried = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
+        tried.recognition_tries = RECOGNITION_TRIES - 1;
+        assert_eq!(awaiting_recognition(&[tried]).len(), 1);
+    }
 }
 
 // ── фоновая очередь ──────────────────────────────────────────────────────────
@@ -357,7 +556,15 @@ pub async fn run_queue() {
         }
         match recognize(&entry).await {
             Ok(_) => crate::services::sync::push_background(),
-            Err(e) => leptos::logging::warn!("запись {} не разобрана: {e}", entry.id),
+            Err(e) => {
+                // Неудача не прячется в консоль: она ложится в саму запись и
+                // показывается человеку (§6.6), а попытка идёт в счёт, чтобы
+                // безнадёжное не молотило вечно.
+                leptos::logging::warn!("запись {} не разобрана: {e}", entry.id);
+                let marked = after_failure(&entry, &e, local::now());
+                db::put("diary", &marked).await;
+                crate::services::sync::push_background();
+            }
         }
     }
     RUNNING.with(|r| r.set(false));
@@ -368,4 +575,5 @@ pub fn run_queue_background() {
     leptos::spawn_local(async {
         run_queue().await;
     });
+
 }

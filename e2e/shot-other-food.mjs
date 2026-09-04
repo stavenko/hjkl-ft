@@ -96,11 +96,35 @@ await page.waitForTimeout(2500);
 console.log('в дневнике строк:', await page.locator('[data-testid^="diary-"]').count());
 await page.screenshot({ path: OUT + 'other-food-6-diary.png' });
 
-// РАЗОБРАННАЯ запись. Настоящий разбор отсюда не запустить: токен ненастоящий, и
-// ai-воркер отвечает 401. Поэтому берём ТУ ЖЕ запись (её id и её снимки) и
-// подменяем её тем, чем она стала бы после разбора: kind=aggregate, позиции с
-// граммами, короткий лейбл. Продукты кладём рядом — по ним считаются КБЖУ.
-const pendingRow = await page.evaluate(async () => {
+// ── ВТОРАЯ запись через тот же интерфейс, с тремя снимками ──────────────────
+//
+// Нужна, чтобы в одном приёме пищи оказалось несколько фотографий: они лежат на
+// записях, а не на приёме, и увидеть их вместе можно только так.
+await page.getByTestId('meal-add').first().click();
+await page.getByTestId('diary-add-btn-other-food').waitFor({ state: 'visible', timeout: 15000 });
+await page.getByTestId('diary-add-btn-other-food').click();
+await page.getByTestId('other-food-panel').waitFor({ state: 'visible', timeout: 15000 });
+await page.setInputFiles('#other-food-photo-input', [
+  '../scripts/fixtures/food-fish.jpg',
+  '../scripts/fixtures/label-teos-1.jpg',
+  '../scripts/fixtures/label-kartoshka-1.jpg',
+]);
+await page.getByTestId('other-food-thumb').first().waitFor({ state: 'visible', timeout: 20000 });
+await page.waitForTimeout(1200);
+await page.getByTestId('other-food-description').fill('Скумбрия из духовки, творожок и немного варёной картошки');
+await page.getByTestId('other-food-add').click();
+await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 20000 });
+await page.waitForTimeout(2000);
+
+// ── Разбор первой записи + обычные записи из базы ───────────────────────────
+//
+// Настоящий разбор отсюда не запустить: токен ненастоящий, ai-воркер отвечает 401.
+// Поэтому первую запись подменяем тем, чем она стала бы после разбора. Вторая
+// остаётся нераспознанной — так на одном экране видно оба состояния сразу.
+//
+// Рядом кладём обычные записи, выбранные из базы, — тот путь никуда не делся, и
+// важно видеть, что оба вида строк уживаются в одном приёме.
+const rows = await page.evaluate(async () => {
   const names = await indexedDB.databases();
   const target = names.find((n) => /^hjkl-ft-/.test(n.name || ''));
   const db = await new Promise((res, rej) => {
@@ -108,13 +132,15 @@ const pendingRow = await page.evaluate(async () => {
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   });
-  const rows = await new Promise((res) => {
+  return await new Promise((res) => {
     const r = db.transaction('diary').objectStore('diary').getAll();
     r.onsuccess = () => res(r.result);
   });
-  return rows.find((e) => e.kind === 'pending') || null;
 });
-if (!pendingRow) throw new Error('нераспознанной записи в базе нет — подменять нечего');
+const pendings = rows.filter((e) => e.kind === 'pending').sort((a, b) =>
+  String(a.created_at).localeCompare(String(b.created_at)));
+if (pendings.length < 2) throw new Error(`ожидались две нераспознанные записи, а их ${pendings.length}`);
+const first = pendings[0];
 
 const nowIso = new Date().toISOString();
 await page.evaluate(({ row, now }) => {
@@ -124,29 +150,44 @@ await page.evaluate(({ row, now }) => {
     is_recipe: false, recipe_id: null, archived: false, is_restaurant: false,
     created_at: now, updated_at: now,
   });
+  const direct = (id, food_id, grams) => ({
+    id, food_id, date: row.date, time: null, grams, waste_grams: 0,
+    meal_label: row.meal_label, deleted: false, kind: 'direct',
+    description: null, images: [], items: [], label: null, recognized_at: null,
+    created_at: now, updated_at: now,
+  });
   localStorage.setItem('ft_test_seed', JSON.stringify({
     foods: [
       food('f-liver', 'Печень говяжья со сливками', 165, 17.4, 9.1, 3.2),
       food('f-cauli', 'Капуста цветная варёная', 29, 2.3, 0.3, 4.1),
       food('f-smetana', 'Сметана 20%', 206, 2.8, 20.0, 3.2),
+      food('f-plum', 'Слива', 49, 0.8, 0.3, 9.6),
+      food('f-apple', 'Яблоко', 47, 0.4, 0.4, 9.8),
+      food('f-cabbage', 'Капуста белокочанная', 28, 1.8, 0.1, 4.7),
     ],
-    diary: [{
-      ...row,
-      kind: 'aggregate',
-      label: 'Печень со сливками и цветная капуста',
-      items: [
-        { food_id: 'f-liver', grams: 300 },
-        { food_id: 'f-cauli', grams: 400 },
-        { food_id: 'f-smetana', grams: 30 },
-      ],
-      recognized_at: now,
-      updated_at: now,
-    }],
+    diary: [
+      {
+        ...row,
+        kind: 'aggregate',
+        label: 'Печень со сливками и цветная капуста',
+        items: [
+          { food_id: 'f-liver', grams: 300 },
+          { food_id: 'f-cauli', grams: 400 },
+          { food_id: 'f-smetana', grams: 30 },
+        ],
+        recognized_at: now,
+        updated_at: now,
+      },
+      direct('d-plum', 'f-plum', 120),
+      direct('d-apple', 'f-apple', 180),
+      direct('d-cabbage', 'f-cabbage', 150),
+    ],
   }));
-}, { row: pendingRow, now: nowIso });
+}, { row: first, now: nowIso });
 await page.reload({ waitUntil: 'load' });
 await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 25000 });
 await page.waitForTimeout(2500);
-await page.screenshot({ path: OUT + 'other-food-7-recognised.png' });
+await page.screenshot({ path: OUT + 'other-food-7-recognised.png', fullPage: true });
 console.log('готово');
+
 await browser.close();

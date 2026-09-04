@@ -33,6 +33,11 @@ pub fn FoodPicker(
     /// Whether the new-food editor is shown. Owned by the caller so chrome can
     /// react (title swap, hide the search row, redirect tap-outside).
     show_editor: RwSignal<bool>,
+    /// Открыт ли экран «Другая еда». Как и `show_editor`, принадлежит ЗОВУЩЕМУ:
+    /// страница `/diary/add` держит строку поиска в своей липкой шапке и без этого
+    /// не знает, что её пора убрать. Не передали — заводим свой, и всё как было.
+    #[prop(optional)]
+    show_other: Option<RwSignal<bool>>,
     /// Optional externally-owned search query. Pass this together with
     /// `render_search_row=false` when the caller renders the search input itself
     /// (e.g. inside a sticky page header) — the picker then only filters by it.
@@ -48,7 +53,7 @@ pub fn FoodPicker(
     let lazy_on = move || {
         crate::services::features::is_on(crate::services::features::LAZY_FOOD)
     };
-    let show_other = create_rw_signal(false);
+    let show_other = show_other.unwrap_or_else(|| create_rw_signal(false));
 
     // Кнопка «завести еду» — ОДНА на обе ветки списка (пустой поиск и найденное).
     // Раньше их было две, и вторая, пустая, флага не знала: на свежем аккаунте, где

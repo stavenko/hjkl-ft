@@ -9,11 +9,46 @@
 //! сети; сети нет — запись остаётся нераспознанной и продолжает так выглядеть.
 //! Поэтому кнопка называется «Добавить», а не «Распознать»: она добавляет запись, а
 //! не запускает ожидание.
+//!
+//! Экран разделён на ДВЕ названные зоны — снимок и описание, — и каждая говорит, что
+//! от человека нужно. Без этого он не догадывается: снимает стол целиком вместо
+//! тарелки, а в описании пишет одно слово. Разделитель между зонами — волосяная
+//! линия, а не две карточки: у области снимка уже есть своя пунктирная рамка, и
+//! рамка вокруг рамки читается как вложенность, которой здесь нет.
+//!
+//! Строка поиска сюда не относится и на этом экране скрыта: искать по базе — шаг
+//! ДО, и он остался прежним. Поэтому `show_other` живёт у страницы (как и
+//! `show_editor`): спрятать свою шапку она может только зная, что открыто.
 
 use leptos::*;
 
 use crate::components::food_editor::file_to_jpeg_base64;
 use crate::services::{i18n::t, images, lazy_food};
+
+/// Тот же линейный значок камеры, что на кнопке снимка в форме продукта. Взят
+/// оттуда намеренно: «добавить снимок» в приложении выглядит одинаково везде, иначе
+/// человек не узнаёт действие, которое уже делал.
+fn camera_icon(size: u32) -> impl IntoView {
+    view! {
+        <svg xmlns="http://www.w3.org/2000/svg" width=size height=size
+            viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex: none;">
+            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+            <circle cx="12" cy="13" r="3"/>
+        </svg>
+    }
+}
+
+/// Заголовок зоны. Одна строка, один предмет — и место справа под ссылку, если она
+/// у зоны есть.
+fn zone_title(title: &'static str, aside: Option<View>) -> impl IntoView {
+    view! {
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+            <span class="is-size-6 has-text-weight-semibold">{move || t(title)}</span>
+            {aside}
+        </div>
+    }
+}
 
 #[component]
 pub fn OtherFoodPanel(
@@ -85,70 +120,133 @@ pub fn OtherFoodPanel(
     };
 
     view! {
-        <div attr:data-testid="other-food-panel" style="padding: 8px 0;">
+        <div attr:data-testid="other-food-panel"
+            style="display: flex; flex-direction: column; gap: 20px; padding: 4px 0 8px;">
             <input type="file" accept="image/*" multiple=true
                 id="other-food-photo-input" attr:data-testid="other-food-photo-input"
                 style="display: none;" on:change=on_files />
 
-            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;">
-                <For
-                    each=photo_list
-                    key=|(i, b64)| format!("{i}-{}", b64.len())
-                    children=move |(_, b64)| {
-                        // Удаляем ПО СОДЕРЖИМОМУ, а не по номеру: после первого
-                        // удаления номера сдвигаются, и по номеру ушёл бы не тот.
-                        let mine = b64.clone();
+            // ── Зона 1: снимок ──────────────────────────────────────────────
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                {zone_title("other_food.photo_title", Some(view! {
+                    // Ссылка ведёт в статью «Фото и распознавание» — она уже есть,
+                    // и её мы перепишем под этот путь отдельно.
+                    <a attr:data-testid="other-food-photo-how"
+                        href="/help/food-photo"
+                        class="is-size-7 has-text-link"
+                        style="flex: none; white-space: nowrap;"
+                    >{move || t("other_food.photo_how")}</a>
+                }.into_view()))}
+
+                <p class="help" style="margin-top: 0;">{move || t("other_food.photo_hint")}</p>
+
+                {move || {
+                    let shots = photo_list();
+                    if shots.is_empty() {
+                        // Снимков нет — кнопка занимает всю ширину и НАЗЫВАЕТ себя.
+                        // Одинокая плитка 56×56 со значком не читается: человек,
+                        // впервые открывший экран, не знает, что она делает.
                         view! {
-                            <div style="position: relative;">
-                                <img
-                                    attr:data-testid="other-food-thumb"
-                                    src=format!("data:image/jpeg;base64,{b64}")
-                                    style="width: 72px; height: 72px; object-fit: cover; border-radius: 6px;" />
-                                <button
-                                    attr:data-testid="other-food-thumb-remove"
-                                    class="delete is-small"
-                                    style="position: absolute; top: 2px; right: 2px;"
-                                    on:click=move |_| { let m = mine.clone(); photos.update(|v| v.retain(|x| x != &m)); }
-                                ></button>
+                            <label attr:for="other-food-photo-input"
+                                attr:data-testid="other-food-add-photo"
+                                style="display: flex; align-items: center; justify-content: center; gap: 10px; \
+                                       padding: 20px 12px; border: 1px dashed var(--bulma-border); border-radius: 10px; \
+                                       background: var(--bulma-scheme-main); color: var(--bulma-text-weak); cursor: pointer;"
+                            >
+                                {camera_icon(24)}
+                                <span class="is-size-6">{move || t("other_food.add_photo")}</span>
+                            </label>
+                        }.into_view()
+                    } else {
+                        // Снимки есть — они и есть содержание зоны, а кнопка
+                        // становится такой же плиткой в их ряду, как в форме
+                        // продукта: одинаковые края, один размер, одно место.
+                        view! {
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start;">
+                                <For
+                                    each=photo_list
+                                    key=|(i, b64)| format!("{i}-{}", b64.len())
+                                    children=move |(_, b64)| {
+                                        // Удаляем ПО СОДЕРЖИМОМУ, а не по номеру: после
+                                        // первого удаления номера сдвигаются, и по
+                                        // номеру ушёл бы не тот.
+                                        let mine = b64.clone();
+                                        view! {
+                                            <div style="position: relative; width: 56px; height: 56px;">
+                                                <img
+                                                    attr:data-testid="other-food-thumb"
+                                                    src=format!("data:image/jpeg;base64,{b64}")
+                                                    style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
+                                                <button type="button"
+                                                    attr:data-testid="other-food-thumb-remove"
+                                                    attr:aria-label=t("diary.delete")
+                                                    style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
+                                                    on:click=move |_| { let m = mine.clone(); photos.update(|v| v.retain(|x| x != &m)); }
+                                                >"\u{00d7}"</button>
+                                            </div>
+                                        }
+                                    }
+                                />
+                                <label attr:for="other-food-photo-input"
+                                    attr:data-testid="other-food-add-photo"
+                                    attr:aria-label=t("other_food.photo_more")
+                                    style="width: 56px; height: 56px; flex: none; display: flex; align-items: center; justify-content: center; \
+                                           border: 1px dashed var(--bulma-border); border-radius: 8px; \
+                                           background: var(--bulma-scheme-main); color: var(--bulma-text-weak); cursor: pointer;"
+                                >{camera_icon(24)}</label>
                             </div>
-                        }
+                        }.into_view()
                     }
-                />
-                <label attr:for="other-food-photo-input"
-                    attr:data-testid="other-food-add-photo"
-                    class="button is-light"
-                    style="width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; font-size: 24px;"
-                >"+"</label>
+                }}
+
+                {move || photo_error.get().map(|e| view! {
+                    <p class="help is-danger" attr:data-testid="other-food-photo-error">{e}</p>
+                })}
             </div>
 
-            {move || photo_error.get().map(|e| view! {
-                <p class="help is-danger" attr:data-testid="other-food-photo-error">{e}</p>
-            })}
+            <div style="border-bottom: 0.5px solid var(--bulma-border-weak);"></div>
 
-            <textarea
-                attr:data-testid="other-food-description"
-                class="textarea"
-                rows="3"
-                placeholder=move || t("other_food.description_placeholder")
-                prop:value=move || description.get()
-                on:input=move |ev| description.set(event_target_value(&ev))
-            ></textarea>
-
-            <div style="display: flex; gap: 8px; margin-top: 12px;">
-                <button
-                    attr:data-testid="other-food-add"
-                    class="button is-primary is-fullwidth"
-                    disabled=move || !can_add() || saving.get()
-                    on:click=add
-                >{move || t("other_food.add")}</button>
-                <button
-                    attr:data-testid="other-food-cancel"
-                    class="button is-light"
-                    on:click=move |_| on_cancel.call(())
-                >{move || t("common.cancel")}</button>
+            // ── Зона 2: описание ────────────────────────────────────────────
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                {zone_title("other_food.description_title", None)}
+                // Подсказка стоит НАД полем, а не внутри: она длинная, а placeholder
+                // исчезает от первой буквы — ровно когда человек ещё вспоминает,
+                // что писать.
+                <p class="help" style="margin-top: 0;">{move || t("other_food.description_hint")}</p>
+                <textarea
+                    attr:data-testid="other-food-description"
+                    class="textarea"
+                    rows="3"
+                    placeholder=move || t("other_food.description_placeholder")
+                    prop:value=move || description.get()
+                    on:input=move |ev| description.set(event_target_value(&ev))
+                ></textarea>
             </div>
 
-            <p class="help" style="margin-top: 8px;">{move || t("other_food.hint")}</p>
+            // ── Действия ────────────────────────────────────────────────────
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; gap: 8px;">
+                    <button
+                        attr:data-testid="other-food-add"
+                        // Заливку кнопка получает, только когда ей ЕСТЬ что добавить.
+                        // С постоянной заливкой она выглядит нажимаемой всегда, и
+                        // человек жмёт в пустоту, не понимая, чего от него хотят.
+                        class=move || if can_add() && !saving.get() {
+                            "button is-primary is-fullwidth"
+                        } else {
+                            "button is-fullwidth"
+                        }
+                        disabled=move || !can_add() || saving.get()
+                        on:click=add
+                    >{move || t("other_food.add")}</button>
+                    <button
+                        attr:data-testid="other-food-cancel"
+                        class="button is-light"
+                        on:click=move |_| on_cancel.call(())
+                    >{move || t("common.cancel")}</button>
+                </div>
+                <p class="help" style="margin-top: 0;">{move || t("other_food.hint")}</p>
+            </div>
         </div>
     }
 }

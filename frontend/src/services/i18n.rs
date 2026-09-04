@@ -582,7 +582,14 @@ fn en(key: &str) -> &'static str {
         "diary_add.nothing_found" => "Nothing found",
         "diary_add.new_food" => "New food",
         "diary_add.other_food" => "Other food",
-        "other_food.description_placeholder" => "What did you eat? Words alone are fine, no photos needed",
+        "other_food.photo_title" => "Photo",
+        "other_food.photo_hint" => "Photograph the food on the plate, or the product label",
+        "other_food.photo_how" => "How do I do that?",
+        "other_food.add_photo" => "Add a photo",
+        "other_food.photo_more" => "One more",
+        "other_food.description_title" => "Description",
+        "other_food.description_hint" => "Say what you ate: the product names and how much of each. Anything the photo doesn't show.",
+        "other_food.description_placeholder" => "For example: 150 g buckwheat and a cutlet",
         "other_food.add" => "Add",
         "other_food.hint" => "The entry appears in the diary right away and recognises itself once there is a network",
         "other_food.not_recognised" => "Not recognised yet",
@@ -1585,7 +1592,17 @@ fn ru(key: &str) -> &'static str {
         // не «Новая»: человек не заводит продукт в справочник, он записывает то, что
         // съел, и что из этого станет новым продуктом — наша забота.
         "diary_add.other_food" => "Другая еда",
-        "other_food.description_placeholder" => "Что вы съели? Можно словами и без фотографий",
+        // Две зоны экрана. Каждая называет СВОЙ предмет, а подсказка под ней говорит,
+        // что именно от человека нужно: снимок без объяснения выходит не тот (стол
+        // целиком вместо тарелки), а описание без объяснения выходит в одно слово.
+        "other_food.photo_title" => "Фотография",
+        "other_food.photo_hint" => "Сфотографируйте еду на тарелке или этикетку продукта",
+        "other_food.photo_how" => "Как это сделать?",
+        "other_food.add_photo" => "Добавить снимок",
+        "other_food.photo_more" => "Ещё снимок",
+        "other_food.description_title" => "Описание",
+        "other_food.description_hint" => "Опишите, что вы съели: наименования продуктов, их количество. Уточняющие комментарии к фотографии",
+        "other_food.description_placeholder" => "Например: гречка 150 г и котлета",
         "other_food.add" => "Добавить",
         // «Добавить», а не «Распознать»: запись попадает в дневник сразу, а разбор
         // идёт фоном и может подождать сети.

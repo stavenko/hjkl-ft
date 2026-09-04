@@ -52,6 +52,11 @@ pub fn DiaryAddPage() -> impl IntoView {
     let disabled_ids = Signal::derive(Vec::<String>::new);
 
     let show_editor = create_rw_signal(false);
+    // Экран «Другая еда» (за кураторским флагом). Живёт здесь, а не в выборе
+    // продукта, по той же причине, что и `show_editor`: строка поиска стоит в
+    // ЗДЕШНЕЙ липкой шапке, а на том экране искать нечего — поиск по базе это
+    // отдельный, прежний шаг.
+    let show_other = create_rw_signal(false);
     // Search query lives here (not inside FoodPicker) so the input can sit in the
     // sticky page header and stay pinned while the results scroll.
     let search = create_rw_signal(String::new());
@@ -113,7 +118,7 @@ pub fn DiaryAddPage() -> impl IntoView {
                 </div>
                 // Search input — hidden while the new-food editor is open (it has
                 // its own name field). Bound to the shared `search` signal.
-                <Show when=move || !show_editor.get()>
+                <Show when=move || !show_editor.get() && !show_other.get()>
                     <div style="display: flex; gap: 6px; align-items: center; margin-top: 8px;">
                         // UNCONTROLLED input: we do NOT reactively re-set `value` on
                         // every keystroke. A reactive `prop:value` fights the iOS
@@ -159,6 +164,7 @@ pub fn DiaryAddPage() -> impl IntoView {
                     on_pick=on_pick
                     on_food_created=on_food_created
                     show_editor=show_editor
+                    show_other=show_other
                     search=search
                     render_search_row=false
                 />

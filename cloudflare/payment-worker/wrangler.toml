@@ -62,6 +62,13 @@ service = "auth-worker-dev"
 binding = "SYNC_WORKER"
 service = "sync-worker-dev"
 
+# Журнал приложения тренировок — ОТДЕЛЬНЫЙ воркер с отдельной DO-неймспейсой,
+# поэтому и стирать его надо отдельно: обход по WIPE_TARGETS иначе оставил бы
+# тренировки после «забыть меня».
+[[services]]
+binding = "GYM_SYNC_WORKER"
+service = "gym-sync-worker-dev"
+
 [[services]]
 binding = "MAIN_FLOW"
 service = "main-flow-dev"
@@ -173,6 +180,10 @@ service = "auth-worker-prod"
 [[env.production.services]]
 binding = "SYNC_WORKER"
 service = "sync-worker-prod"
+
+[[env.production.services]]
+binding = "GYM_SYNC_WORKER"
+service = "gym-sync-worker-prod"
 
 [[env.production.services]]
 binding = "MAIN_FLOW"

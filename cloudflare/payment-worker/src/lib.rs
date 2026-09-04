@@ -1191,6 +1191,7 @@ async fn auth_internal(env: &Env, endpoint: &str, user_id: &str) -> Option<serde
 const WIPE_TARGETS: &[(&str, &str, &str)] = &[
     ("AUTH_WORKER", "auth-worker", "аккаунт, ключи и токены"),
     ("SYNC_WORKER", "sync-worker", "дневник (журнал синхронизации)"),
+    ("GYM_SYNC_WORKER", "gym-sync-worker", "журнал тренировок"),
     ("SUPPORT_WORKER", "support-worker", "переписка с поддержкой"),
     ("MAIN_FLOW", "main-flow", "push-подписки и расписание"),
     ("BUG_REPORT_WORKER", "bug-report-worker", "баг-репорты"),
@@ -1486,8 +1487,9 @@ async fn admin_user_wipe(env: &Env, body: &serde_json::Value) -> Result<Response
 
     // 3. Every other worker that owns per-user data.
     for (binding, host, label) in WIPE_TARGETS {
-        // sync-worker addresses its per-user DO from the query string.
-        let path = if *binding == "SYNC_WORKER" {
+        // Both sync workers address their per-user DO from the query string —
+        // gym-sync-worker is a copy of sync-worker and answers the same way.
+        let path = if binding.ends_with("SYNC_WORKER") {
             format!("/internal/user-wipe?user_id={user_id}")
         } else {
             "/internal/user-wipe".to_string()

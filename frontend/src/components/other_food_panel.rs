@@ -55,7 +55,7 @@ pub fn OtherFoodPanel(
     /// День, в который пишем.
     date: String,
     /// Приём пищи, если человек добавляет внутрь него.
-    #[prop(optional)]
+    #[prop(optional_no_strip)]
     meal_label: Option<String>,
     /// Запись создана — закрыть панель и обновить дневник.
     on_added: Callback<()>,

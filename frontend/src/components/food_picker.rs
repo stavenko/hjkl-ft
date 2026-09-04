@@ -38,6 +38,19 @@ pub fn FoodPicker(
     /// не знает, что её пора убрать. Не передали — заводим свой, и всё как было.
     #[prop(optional)]
     show_other: Option<RwSignal<bool>>,
+    /// День и приём пищи для записи «Другой еды» — то же, что зовущий кладёт
+    /// обычному выбору. Без них запись легла бы в СЕГОДНЯ и без приёма: человек,
+    /// открывший вчерашний ужин, получил бы её не там, где смотрел.
+    #[prop(optional)]
+    lazy_date: Option<String>,
+    #[prop(optional_no_strip)]
+    lazy_meal: Option<String>,
+    /// Запись «Другой еды» создана. Обычный выбор уводит зовущего в дневник
+    /// (`on_pick`), и этот путь обязан вести туда же — иначе человек нажал
+    /// «Добавить» и остался стоять там же, не понимая, случилось ли что-нибудь.
+    /// Не передали — просто закрываем панель, как было.
+    #[prop(optional)]
+    on_other_added: Option<Callback<()>>,
     /// Optional externally-owned search query. Pass this together with
     /// `render_search_row=false` when the caller renders the search input itself
     /// (e.g. inside a sticky page header) — the picker then only filters by it.
@@ -181,8 +194,12 @@ pub fn FoodPicker(
 
         {move || show_other.get().then(|| view! {
             <crate::components::other_food_panel::OtherFoodPanel
-                date=crate::services::local::today()
-                on_added=Callback::new(move |_| show_other.set(false))
+                date=lazy_date.clone().unwrap_or_else(crate::services::local::today)
+                meal_label=lazy_meal.clone()
+                on_added=Callback::new(move |_| {
+                    show_other.set(false);
+                    if let Some(cb) = on_other_added { cb.call(()); }
+                })
                 on_cancel=Callback::new(move |_| show_other.set(false))
             />
         })}

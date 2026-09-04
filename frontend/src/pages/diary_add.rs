@@ -80,6 +80,10 @@ pub fn DiaryAddPage() -> impl IntoView {
         q
     });
 
+    // Копии для «Другой еды»: замыкание `on_pick` ниже забирает оригиналы себе.
+    let lazy_date = on_date.clone().unwrap_or_else(local::today);
+    let lazy_meal = meal_label.clone();
+
     let on_pick = {
         let navigate = navigate.clone();
         Callback::new(move |(food, grams, waste, restaurant): (Food, f64, f64, bool)| {
@@ -165,6 +169,12 @@ pub fn DiaryAddPage() -> impl IntoView {
                     on_food_created=on_food_created
                     show_editor=show_editor
                     show_other=show_other
+                    lazy_date=lazy_date
+                    lazy_meal=lazy_meal
+                    on_other_added=Callback::new({
+                        let navigate = navigate.clone();
+                        move |_| navigate("/diary", Default::default())
+                    })
                     search=search
                     render_search_row=false
                 />

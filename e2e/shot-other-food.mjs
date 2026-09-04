@@ -85,5 +85,15 @@ await page.mouse.move(se.x - 70, se.y - 90, { steps: 12 });
 await page.waitForTimeout(300);
 await page.screenshot({ path: OUT + 'other-food-5-crop-drag.png' });
 await page.mouse.up();
+
+// Закрываем просмотр и добавляем запись: она обязана появиться в дневнике сразу,
+// нераспознанной, — разбор идёт фоном и требует сети.
+await page.getByTestId('photo-crop-cancel').click();
+await page.getByTestId('other-food-description').fill('Печень со сливками и цветная капуста, примерно по тарелке');
+await page.getByTestId('other-food-add').click();
+await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 20000 });
+await page.waitForTimeout(2500);
+console.log('в дневнике строк:', await page.locator('[data-testid^="diary-"]').count());
+await page.screenshot({ path: OUT + 'other-food-6-diary.png' });
 console.log('готово');
 await browser.close();

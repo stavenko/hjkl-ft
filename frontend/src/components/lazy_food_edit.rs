@@ -60,6 +60,15 @@ pub fn LazyFoodEdit(
     // Нижняя половина.
     let items = create_rw_signal(entry.items.clone());
 
+    // У РАЗОБРАННОЙ записи верх заперт. Любая правка снимков или описания отменяет
+    // разбор и отправляет запись в очередь заново — на это надо решиться, нажав
+    // «Изменить», а не задеть случайно, потянувшись поправить граммы.
+    //
+    // У нераспознанной терять нечего: разбора ещё не было, и зоны открыты сразу.
+    let recognised = entry.kind == DiaryEntryKind::Aggregate;
+    let photos_locked = create_rw_signal(recognised);
+    let description_locked = create_rw_signal(recognised);
+
     // `store_value`, а не обычные переменные: замыкание `top_changed` нужно и
     // обработчику сохранения, и разметке, а замыкание, захватившее String и Vec, не
     // копируется.
@@ -152,7 +161,9 @@ pub fn LazyFoodEdit(
             // Верхняя половина — тот же кусок, что и на добавлении
             // (`PhotoAndDescription`). Одинаковое дело должно выглядеть одинаково;
             // раньше здесь была своя разметка, и она отстала от добавления.
-            <PhotoAndDescription photos=photos description=description input_id="lazy-edit-photo-input" />
+            <PhotoAndDescription photos=photos description=description
+                input_id="lazy-edit-photo-input"
+                photos_locked=photos_locked description_locked=description_locked />
 
             // Предупреждение появляется, только когда верх ДЕЙСТВИТЕЛЬНО изменён:
             // висеть постоянно оно значило бы пугать человека, который зашёл

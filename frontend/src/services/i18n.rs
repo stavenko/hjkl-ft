@@ -597,6 +597,7 @@ fn en(key: &str) -> &'static str {
         "other_food.description_title" => "Description",
         "other_food.description_hint" => "Say what you ate: the product names and how much of each. Anything the photo doesn't show.",
         "other_food.description_placeholder" => "For example: 150 g buckwheat and a cutlet",
+        "other_food.description_empty" => "No description",
         "other_food.add" => "Add",
         "other_food.hint" => "The entry appears in the diary right away and recognises itself once there is a network",
         "other_food.not_recognised" => "Not recognised yet",
@@ -781,6 +782,7 @@ fn en(key: &str) -> &'static str {
         "common.back" => "Back",
         "common.cancel" => "Cancel",
         "common.save" => "Save",
+        "common.edit" => "Edit",
         "common.unit.kcal" => "kcal",
         "common.unit.g" => "g",
         "waste.not_whole" => "Didn't eat it whole",
@@ -1622,6 +1624,7 @@ fn ru(key: &str) -> &'static str {
         "other_food.description_title" => "Описание",
         "other_food.description_hint" => "Опишите, что вы съели: наименования продуктов, их количество. Уточняющие комментарии к фотографии",
         "other_food.description_placeholder" => "Например: гречка 150 г и котлета",
+        "other_food.description_empty" => "Описания не было",
         "other_food.add" => "Добавить",
         // «Добавить», а не «Распознать»: запись попадает в дневник сразу, а разбор
         // идёт фоном и может подождать сети.
@@ -1808,6 +1811,7 @@ fn ru(key: &str) -> &'static str {
         "common.back" => "Назад",
         "common.cancel" => "Отмена",
         "common.save" => "Сохранить",
+        "common.edit" => "Изменить",
         "common.unit.kcal" => "ккал",
         "common.unit.g" => "г",
         "waste.not_whole" => "Не съел целиком",

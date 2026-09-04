@@ -39,7 +39,22 @@ pub fn PhotoAndDescription(
     /// Свой идентификатор для `<input type=file>`: на одной странице этих форм
     /// может оказаться две, а `<label for>` найдёт первую попавшуюся.
     input_id: &'static str,
+    /// Заперты ли зоны. У РАЗОБРАННОЙ записи снимки и описание показываются, но не
+    /// правятся: правка любого из них отменяет разбор и отправляет запись в очередь
+    /// заново. Человек должен решиться на это сам, нажав «Изменить», а не задеть
+    /// случайно, потянувшись поправить граммы.
+    ///
+    /// Замки РАЗНЫЕ на зону: поправить описание, не трогая снимков, — обычное дело,
+    /// и заставлять открывать обе зоны разом незачем.
+    ///
+    /// Не передали — зоны открыты (так на добавлении: терять там нечего).
+    #[prop(optional)]
+    photos_locked: Option<RwSignal<bool>>,
+    #[prop(optional)]
+    description_locked: Option<RwSignal<bool>>,
 ) -> impl IntoView {
+    let photos_locked = photos_locked.unwrap_or_else(|| create_rw_signal(false));
+    let description_locked = description_locked.unwrap_or_else(|| create_rw_signal(false));
     let photo_error = create_rw_signal(Option::<String>::None);
     // Какой снимок открыт на просмотр. Держим САМ снимок, а не его номер: пока
     // просмотр открыт, список может измениться, и номер указал бы не на тот кадр.
@@ -80,18 +95,47 @@ pub fn PhotoAndDescription(
             <div style="display: flex; flex-direction: column; gap: 8px;">
                 <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
                     <span class="is-size-6 has-text-weight-semibold">{move || t("other_food.photo_title")}</span>
-                    // Ссылка ведёт в статью «Фото и распознавание» — она уже есть,
-                    // и её мы перепишем под этот путь отдельно.
-                    <a attr:data-testid="other-food-photo-how"
-                        href="/help/food-photo"
-                        class="is-size-7 has-text-link"
-                        style="flex: none; white-space: nowrap;"
-                    >{move || t("other_food.photo_how")}</a>
+                    {move || if photos_locked.get() {
+                        view! {
+                            <button type="button"
+                                attr:data-testid="other-food-photo-edit"
+                                class="is-size-7 has-text-link"
+                                style="flex: none; white-space: nowrap; background: none; border: none; cursor: pointer; padding: 0; font: inherit;"
+                                on:click=move |_| photos_locked.set(false)
+                            >{move || t("common.edit")}</button>
+                        }.into_view()
+                    } else {
+                        // Ссылка ведёт в статью «Фото и распознавание» — она уже есть,
+                        // и её мы перепишем под этот путь отдельно.
+                        view! {
+                            <a attr:data-testid="other-food-photo-how"
+                                href="/help/food-photo"
+                                class="is-size-7 has-text-link"
+                                style="flex: none; white-space: nowrap;"
+                            >{move || t("other_food.photo_how")}</a>
+                        }.into_view()
+                    }}
                 </div>
 
-                <p class="help" style="margin-top: 0;">{move || t("other_food.photo_hint")}</p>
+                // Подсказка — только когда зона открыта: запертой зоне объяснять,
+                // что снимать, незачем, снимок уже сделан.
+                {move || (!photos_locked.get()).then(|| view! {
+                    <p class="help" style="margin-top: 0;">{move || t("other_food.photo_hint")}</p>
+                })}
 
                 {move || {
+                    if photos_locked.get() {
+                        // Заперто: кадры показываем, трогать не даём.
+                        return view! {
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start;">
+                                {photo_list().into_iter().map(|(_, b64)| view! {
+                                    <img attr:data-testid="other-food-thumb-locked"
+                                        src=format!("data:image/jpeg;base64,{b64}")
+                                        style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
+                                }).collect_view()}
+                            </div>
+                        }.into_view();
+                    }
                     if photo_list().is_empty() {
                         // Снимков нет — кнопка занимает всю ширину и НАЗЫВАЕТ себя.
                         // Одинокая плитка 56×56 со значком не читается: человек,
@@ -156,19 +200,44 @@ pub fn PhotoAndDescription(
 
             // ── Зона 2: описание ────────────────────────────────────────────
             <div style="display: flex; flex-direction: column; gap: 8px;">
-                <span class="is-size-6 has-text-weight-semibold">{move || t("other_food.description_title")}</span>
-                // Подсказка стоит НАД полем, а не внутри: она длинная, а placeholder
-                // исчезает от первой буквы — ровно когда человек ещё вспоминает,
-                // что писать.
-                <p class="help" style="margin-top: 0;">{move || t("other_food.description_hint")}</p>
-                <textarea
-                    attr:data-testid="other-food-description"
-                    class="textarea"
-                    rows="3"
-                    placeholder=move || t("other_food.description_placeholder")
-                    prop:value=move || description.get()
-                    on:input=move |ev| description.set(event_target_value(&ev))
-                ></textarea>
+                <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                    <span class="is-size-6 has-text-weight-semibold">{move || t("other_food.description_title")}</span>
+                    {move || description_locked.get().then(|| view! {
+                        <button type="button"
+                            attr:data-testid="other-food-description-edit"
+                            class="is-size-7 has-text-link"
+                            style="flex: none; white-space: nowrap; background: none; border: none; cursor: pointer; padding: 0; font: inherit;"
+                            on:click=move |_| description_locked.set(false)
+                        >{move || t("common.edit")}</button>
+                    })}
+                </div>
+
+                {move || if description_locked.get() {
+                    // Заперто: показываем написанное как текст. Пустое описание —
+                    // говорим об этом прямо, иначе зона выглядит сломанной.
+                    let text = description.get();
+                    view! {
+                        <p attr:data-testid="other-food-description-locked"
+                            class=if text.trim().is_empty() { "is-size-6 has-text-grey-light" } else { "is-size-6" }
+                            style="margin: 0; white-space: pre-wrap; overflow-wrap: break-word;"
+                        >{if text.trim().is_empty() { t("other_food.description_empty").to_string() } else { text }}</p>
+                    }.into_view()
+                } else {
+                    view! {
+                        // Подсказка стоит НАД полем, а не внутри: она длинная, а
+                        // placeholder исчезает от первой буквы — ровно когда человек
+                        // ещё вспоминает, что писать.
+                        <p class="help" style="margin-top: 0;">{move || t("other_food.description_hint")}</p>
+                        <textarea
+                            attr:data-testid="other-food-description"
+                            class="textarea"
+                            rows="3"
+                            placeholder=move || t("other_food.description_placeholder")
+                            prop:value=move || description.get()
+                            on:input=move |ev| description.set(event_target_value(&ev))
+                        ></textarea>
+                    }.into_view()
+                }}
             </div>
 
             // Просмотр снимка поверх всего: обрезать или удалить.

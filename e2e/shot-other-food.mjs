@@ -207,6 +207,19 @@ async function openEdit(nth, out) {
 await openEdit(0, 'other-food-8-edit-recognised.png');
 await openEdit(1, 'other-food-9-edit-pending.png');
 
+// Та же правка разобранной, но с открытыми зонами: нажимаем «Изменить» на снимках
+// и на описании. Так видно, куда ведут кнопки на запертых зонах.
+await page.getByTestId('lazy-row-menu').nth(0).click();
+await page.getByTestId('lazy-row-edit').first().click();
+await page.getByTestId('lazy-food-edit').waitFor({ state: 'visible', timeout: 15000 });
+await page.getByTestId('other-food-photo-edit').click();
+await page.getByTestId('other-food-description-edit').click();
+await page.waitForTimeout(800);
+await page.screenshot({ path: OUT + 'other-food-11-edit-unlocked.png', fullPage: true });
+await page.getByTestId('lazy-edit-cancel').click();
+await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 15000 });
+await page.waitForTimeout(800);
+
 // Меню строки — оно теперь одно и то же у ленивой и у обычной; снимем открытым.
 await page.getByTestId('lazy-row-menu').first().click();
 await page.getByTestId('lazy-row-move').waitFor({ state: 'visible', timeout: 10000 });

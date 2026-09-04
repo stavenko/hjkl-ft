@@ -33,13 +33,21 @@ pub fn LazyDiaryRow(
     let e_delete = entry.clone();
     let e_badges = entry.clone();
 
-    let title = if pending {
-        // Нераспознанная не показывает описание вместо названия: обрывок чужого
-        // текста в строке дневника читается как неудача, а не как ожидание.
-        t("other_food.not_recognised").to_string()
-    } else {
-        entry.label.clone().unwrap_or_else(|| t("other_food.not_recognised").to_string())
-    };
+    // Нераспознанная показывает СЕБЯ: снимки и обрывок описания. Надписи «Ещё не
+    // распознано» здесь больше нет — она одинакова у всех таких записей и потому
+    // не помогает найти свою, а место занимает первым и самым крупным. Человек
+    // узнаёт запись по кадру и по собственным словам, а не по нашему сообщению
+    // о состоянии.
+    let title = (!pending)
+        .then(|| entry.label.clone())
+        .flatten()
+        .unwrap_or_default();
+    // Описание показываем всегда, когда оно есть: у нераспознанной оно вместо
+    // названия, у разобранной — под ним, как исходник, из которого её собрали.
+    let note = entry.description.clone().unwrap_or_default().trim().to_string();
+    let has_note = !note.is_empty();
+    // Ни кадров, ни слов — сказать про запись нечего, и молчать нельзя.
+    let mute = pending && !has_note && entry.images.is_empty();
 
     view! {
         <div
@@ -50,16 +58,43 @@ pub fn LazyDiaryRow(
             )
         >
             <div style="flex: 1; min-width: 0; overflow-wrap: break-word;">
-                <span
-                    attr:data-testid="lazy-row-title"
-                    class="is-size-6 has-text-weight-medium"
-                    style=if pending { "color: var(--bulma-text-weak);" } else { "" }
-                >{title}</span>
+                {(!title.is_empty()).then(|| view! {
+                    <span
+                        attr:data-testid="lazy-row-title"
+                        class="is-size-6 has-text-weight-medium"
+                    >{title.clone()}</span>
+                })}
 
-                {(!entry.images.is_empty()).then(|| view! {
-                    <div style="margin-top: 4px;">
-                        <EntryThumbnails hashes=entry.images.clone() />
+                // Снимки и слова — рядом, одной строкой: так это и лежало на экране
+                // добавления, и так человек это помнит.
+                {(!entry.images.is_empty() || has_note).then(|| view! {
+                    <div style=format!("display: flex; align-items: flex-start; gap: 8px; min-width: 0;{}",
+                                       if title.is_empty() { "" } else { " margin-top: 4px;" })>
+                        {(!entry.images.is_empty()).then(|| view! {
+                            <div style="flex: none;">
+                                <EntryThumbnails hashes=entry.images.clone() />
+                            </div>
+                        })}
+                        {has_note.then(|| view! {
+                            // Ровно две строки, дальше многоточие: это НАПОМИНАНИЕ,
+                            // а не текст для чтения, и разрастаться на полэкрана ему
+                            // незачем.
+                            <p
+                                attr:data-testid="lazy-row-note"
+                                class="is-size-7"
+                                style="margin: 0; min-width: 0; flex: 1; line-height: 1.25; color: var(--bulma-text-weak); \
+                                       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;"
+                            >{note.clone()}</p>
+                        })}
                     </div>
+                })}
+
+                // Ни кадров, ни слов не бывает почти никогда (добавить пустую запись
+                // нельзя), но если такое случилось — строка не должна быть пустой.
+                {mute.then(|| view! {
+                    <span attr:data-testid="lazy-row-title" class="is-size-6 has-text-weight-medium"
+                        style="color: var(--bulma-text-weak);"
+                    >{move || t("other_food.not_recognised")}</span>
                 })}
 
                 // КБЖУ есть только у разобранной: у нераспознанной их не существует,

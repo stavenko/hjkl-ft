@@ -302,11 +302,13 @@ pub fn EntryThumbnails(hashes: Vec<String>) -> impl IntoView {
         }
         srcs.set(out);
     });
+    // 44, а не 32: рядом с ними в строке дневника стоят две строчки описания той
+    // же высоты, и кадр должен читаться, а не намекать на себя.
     view! {
         <div style="display: flex; gap: 4px;">
             <For each=move || srcs.get() key=|s| s.clone() children=move |src| view! {
                 <img attr:data-testid="entry-thumb" src=src
-                    style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px;" />
+                    style="width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid var(--bulma-border-weak);" />
             } />
         </div>
     }

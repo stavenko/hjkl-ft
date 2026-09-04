@@ -108,12 +108,11 @@ cd cloudflare/<worker> && npx wrangler deploy --env production
 
 Воркеры: `ai-worker`, `auth-worker`, `bug-report-worker`, `main-flow` (push/reminders), `ocr-queue`, `payment-worker`, `receipt-worker`, `support-worker`, `sync-worker`, `telegram-worker`.
 
-- **`gym-sync-worker` — ПОКА НЕ КАТИТЬ.** Журнал синхронизации приложения
-  тренировок (`gym-sync.renorma.app`): код готов и повторяет `sync-worker`, но
-  первая версия приложения в него ещё не пишет, а стирание аккаунта до него не
-  доходит — payment-worker ходит в `sync-worker` по service-binding'у, и второй
-  такой привязки к `gym-sync-worker` ещё нет. Заводить её надо ОДНОВРЕМЕННО с
-  первой записью данных, иначе «забыть меня» оставит хвост.
+- **`gym-sync-worker`** — журнал синхронизации приложения тренировок
+  (`gym-sync.renorma.app`), копия `sync-worker` со своей DO-неймспейсой. Выкачен
+  вместе с привязкой `GYM_SYNC_WORKER` в payment-worker: в одиночку его катить
+  было нельзя — обход `WIPE_TARGETS` его бы не знал, и «забыть меня» оставило бы
+  журнал тренировок. Приложение в него пока не пишет, но стирание уже доходит.
 
 - **`lava-mock` — только dev** (нет `[env.production]`): мок lava.top, в прод не катить (money-safety).
 - **`payment-worker` prod — деньги.** Катить осознанно.

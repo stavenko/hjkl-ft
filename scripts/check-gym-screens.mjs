@@ -281,13 +281,51 @@ const AS_PWA = `${SUBSCRIBED}
 
 const shown = (page, id) => page.getByTestId(id).isVisible().catch(() => false);
 
+// Сколько картинок под этим селектором ДОГРУЗИЛОСЬ.
+//
+// Ждать обязательно, а не мерить сразу: `naturalWidth` равен нулю не только у
+// битой картинки, но и у ещё не пришедшей. Над локальным `dist` разницы нет —
+// файл рядом, — а по BASE картинка идёт по сети, и мгновенный замер объявлял
+// живые гифки битыми. Ждём `complete` у всех, потом считаем.
+async function loadedImages(page, selector, timeout = 20000) {
+  await page
+    .waitForFunction(
+      (sel) => {
+        const all = [...document.querySelectorAll(sel)];
+        return all.length > 0 && all.every((i) => i.complete);
+      },
+      selector,
+      { timeout },
+    )
+    .catch(() => {});
+  return page.evaluate(
+    (sel) => [...document.querySelectorAll(sel)].filter((i) => i.naturalWidth > 0).length,
+    selector,
+  );
+}
+
 // ── 1. Тупиковые браузеры — ДО входа ──
 {
   console.log("1. Mi Browser — одна кнопка в Chrome");
   const { ctx, page, errors } = await open(UAS.mi);
-  check(await shown(page, "install-chrome-handoff"), "показан экран ухода в Chrome");
+
+  // Экранов ухода в Chrome ДВА, и который из них увидят, зависит от того, стоит
+  // ли перед приложением воркер Pages:
+  //   * на выложенном сайте `pwa-worker.js` перехватывает саму навигацию и
+  //     отдаёт свою страницу (`pwa-mi-page`) ещё до первого байта приложения —
+  //     до Rust дело не доходит вовсе, и это ровно то, чего мы добивались;
+  //   * над локальным `dist` воркера нет, страницу отдаёт приложение, и
+  //     срабатывает его собственный экран (`install-chrome-handoff`).
+  // Проверять надо не то, КТО отдал страницу, а что человек видит одну кнопку и
+  // она уводит intent'ом в Chrome. Ждать здесь только Rust-экран значит объявить
+  // выложенный сайт сломанным именно за то, что он работает правильно.
+  const byWorker = await shown(page, "pwa-mi-page");
+  check(byWorker || (await shown(page, "install-chrome-handoff")),
+    `показан экран ухода в Chrome (${byWorker ? "от воркера Pages" : "от приложения"})`);
   check(!(await shown(page, "gym-login")), "вход НЕ предлагается");
-  const href = await page.getByTestId("install-btn-open-chrome").getAttribute("href");
+  const href = await page
+    .getByTestId(byWorker ? "pwa-btn-open-chrome" : "install-btn-open-chrome")
+    .getAttribute("href");
   check(/^intent:\/\/.*package=com\.android\.chrome/.test(href || ""), "кнопка ведёт intent'ом в Chrome");
   check(errors.length === 0, `без ошибок исполнения${errors.length ? `: ${errors[0]}` : ""}`);
   await ctx.close();
@@ -297,8 +335,7 @@ const shown = (page, id) => page.getByTestId(id).isVisible().catch(() => false);
   const { ctx, page } = await open(UAS.yandex);
   check(await shown(page, "install-yandex"), "показан яндексовский экран");
   check(!(await shown(page, "install-btn-open-chrome")), "кнопки intent'а тут НЕТ (оттуда не работает)");
-  const gifs = await page.evaluate(() =>
-    [...document.querySelectorAll('img[src^="/onboard-img/"]')].filter((i) => i.naturalWidth > 0).length);
+  const gifs = await loadedImages(page, 'img[src^="/onboard-img/"]');
   check(gifs === 2, `обе гифки загрузились (${gifs}/2)`);
   await ctx.close();
 }
@@ -335,8 +372,7 @@ const shown = (page, id) => page.getByTestId(id).isVisible().catch(() => false);
   console.log("\n6. Android с подпиской — инструкция по установке");
   const { ctx, page } = await open(UAS.chrome, SUBSCRIBED);
   check(await shown(page, "install-steps"), "показаны шаги установки");
-  const shots = await page.evaluate(() =>
-    [...document.querySelectorAll(".step-shot")].filter((i) => i.naturalWidth > 0).length);
+  const shots = await loadedImages(page, ".step-shot");
   check(shots > 0, `снимки шагов загрузились (${shots})`);
   await ctx.close();
 }

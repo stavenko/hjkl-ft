@@ -66,6 +66,9 @@ pub fn OtherFoodPanel(
     let description = create_rw_signal(String::new());
     let saving = create_rw_signal(false);
     let photo_error = create_rw_signal(Option::<String>::None);
+    // Какой снимок открыт на просмотр. Держим САМ снимок, а не его номер: пока
+    // просмотр открыт, список может измениться, и номер указал бы не на тот кадр.
+    let viewing = create_rw_signal(Option::<String>::None);
 
     let on_files = move |ev: leptos::ev::Event| {
         let input: web_sys::HtmlInputElement = event_target(&ev);
@@ -172,18 +175,21 @@ pub fn OtherFoodPanel(
                                         // номеру ушёл бы не тот.
                                         let mine = b64.clone();
                                         view! {
-                                            <div style="position: relative; width: 56px; height: 56px;">
+                                            // Нажатие ОТКРЫВАЕТ снимок, а не удаляет его. Крестика
+                                            // на миниатюре больше нет: он налезал на соседнюю (56 px
+                                            // в ряд через 8, а сам 20 и вынесен наружу), а главное —
+                                            // удалять вслепую по ноготку неправильно. Удаление
+                                            // переехало в просмотр, где видно, что удаляешь.
+                                            <button type="button"
+                                                attr:data-testid="other-food-thumb"
+                                                attr:aria-label=t("other_food.open_photo")
+                                                style="width: 56px; height: 56px; padding: 0; border: 1px solid var(--bulma-border-weak); border-radius: 8px; overflow: hidden; cursor: pointer; background: none;"
+                                                on:click=move |_| viewing.set(Some(mine.clone()))
+                                            >
                                                 <img
-                                                    attr:data-testid="other-food-thumb"
                                                     src=format!("data:image/jpeg;base64,{b64}")
-                                                    style="width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--bulma-border-weak);" />
-                                                <button type="button"
-                                                    attr:data-testid="other-food-thumb-remove"
-                                                    attr:aria-label=t("diary.delete")
-                                                    style="position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; line-height: 1; border: none; border-radius: 50%; background: var(--bulma-danger); color: var(--bulma-danger-invert); font-size: 13px; cursor: pointer;"
-                                                    on:click=move |_| { let m = mine.clone(); photos.update(|v| v.retain(|x| x != &m)); }
-                                                >"\u{00d7}"</button>
-                                            </div>
+                                                    style="width: 100%; height: 100%; object-fit: cover; display: block;" />
+                                            </button>
                                         }
                                     }
                                 />
@@ -222,6 +228,35 @@ pub fn OtherFoodPanel(
                     on:input=move |ev| description.set(event_target_value(&ev))
                 ></textarea>
             </div>
+
+            // Просмотр снимка поверх всего: обрезать или удалить.
+            {move || viewing.get().map(|shot| {
+                let opened = shot.clone();
+                let for_done = shot.clone();
+                let for_delete = shot.clone();
+                view! {
+                    <crate::components::photo_crop::PhotoCrop
+                        src=opened
+                        on_done=Callback::new(move |cut: String| {
+                            // Заменяем НА МЕСТЕ, чтобы порядок снимков не менялся:
+                            // человек снимал тарелку и этикетку в своём порядке.
+                            let was = for_done.clone();
+                            photos.update(|v| {
+                                if let Some(slot) = v.iter_mut().find(|x| **x == was) {
+                                    *slot = cut.clone();
+                                }
+                            });
+                            viewing.set(None);
+                        })
+                        on_delete=Callback::new(move |_| {
+                            let was = for_delete.clone();
+                            photos.update(|v| v.retain(|x| *x != was));
+                            viewing.set(None);
+                        })
+                        on_cancel=Callback::new(move |_| viewing.set(None))
+                    />
+                }
+            })}
 
             // ── Действия ────────────────────────────────────────────────────
             <div style="display: flex; flex-direction: column; gap: 8px;">

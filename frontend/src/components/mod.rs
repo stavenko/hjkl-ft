@@ -6,6 +6,7 @@ pub mod photo_description;
 pub mod pwa_icons;
 pub mod food_picker;
 pub mod food_picker_modal;
+pub mod food_badges;
 pub mod food_editor;
 pub mod food_list_item;
 pub mod food_modal;

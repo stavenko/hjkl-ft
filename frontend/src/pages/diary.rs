@@ -490,44 +490,17 @@ pub fn DiaryPage() -> impl IntoView {
                                             // wraps), tight gap; overflow hidden so a
                                             // rare extra (custom) badge clips instead
                                             // of dropping to a second line.
-                                            <div style="display: flex; flex-wrap: nowrap; gap: 4px; margin-top: 4px; min-width: 0; overflow: hidden;">
+                                            // Пилюли КБЖУ — из общего места
+                                            // (`components::food_badges`): те же самые
+                                            // позиции человек видит в правке разобранной
+                                            // записи, и выглядеть они обязаны одинаково.
+                                            <div style=crate::components::food_badges::BADGE_ROW>
                                                 {move || {
                                                     let fs = foods();
-                                                    let food = fs.iter().find(|f| f.id == fid2);
-                                                    let factor = (g - w).max(0.0) / 100.0;
-                                                    let mut badges = Vec::new();
-                                                    use crate::services::i18n;
-                                                    if let Some(f) = food {
-                                                        // Calories: drop the wide «ккал» unit (the К label already
-                                                        // means calories) so all four badges fit on one line; keep
-                                                        // «г» on the macros.
-                                                        badges.push((i18n::nutrient_badge("Calories"), f.effective_kcal() * factor, ""));
-                                                        badges.push((i18n::nutrient_badge("Protein"), f.protein * factor, i18n::unit_label("g")));
-                                                        badges.push((i18n::nutrient_badge("Fat"), f.fat * factor, i18n::unit_label("g")));
-                                                        badges.push((i18n::nutrient_badge("Carbs"), f.carbs * factor, i18n::unit_label("g")));
-                                                    }
-                                                    // Compact pill (tighter padding than
-                                                    // Bulma's tag, no wrap, no shrink) so
-                                                    // all four fit on one line inside the
-                                                    // meal panel. Custom-nutrient badges
-                                                    // (e.g. calcium) are intentionally NOT
-                                                    // shown here — a 5th pill doesn't fit the
-                                                    // single-line row and just clips.
-                                                    let badge_view = |(l, v, u): &(&str, f64, &str)| {
-                                                        let u = u.to_string();
-                                                        view! {
-                                                            <span class="tag is-small"
-                                                                style="white-space: nowrap; flex-shrink: 0; margin: 0; padding-left: 6px; padding-right: 6px;">
-                                                                {format!("{} {:.0}", l, v)}
-                                                                {(!u.is_empty()).then(|| view! {
-                                                                    <span class="has-text-grey-light" style="margin-left: 2px;">{u}</span>
-                                                                })}
-                                                            </span>
-                                                        }.into_view()
-                                                    };
-                                                    badges.iter()
-                                                        .map(|b| badge_view(b))
-                                                        .collect::<Vec<_>>()
+                                                    fs.iter().find(|f| f.id == fid2).map(|food| {
+                                                        crate::components::food_badges::nutrient_badges(
+                                                            food, (g - w).max(0.0) / 100.0)
+                                                    })
                                                 }}
                                             </div>
                                         </div>

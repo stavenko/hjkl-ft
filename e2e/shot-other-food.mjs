@@ -205,6 +205,25 @@ async function openEdit(nth, out) {
   await page.waitForTimeout(800);
 }
 await openEdit(0, 'other-food-8-edit-recognised.png');
+
+// Позиции правятся так же, как в дневнике: граммы ссылкой открывают окно веса,
+// кебаб даёт «Удалить».
+await page.getByTestId('lazy-row-menu').nth(0).click();
+await page.getByTestId('lazy-row-edit').first().click();
+await page.getByTestId('lazy-food-edit').waitFor({ state: 'visible', timeout: 15000 });
+await page.getByTestId('lazy-edit-grams').first().click();
+await page.locator('.modal.is-active').waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(600);
+await page.screenshot({ path: OUT + 'other-food-13-item-weight.png', fullPage: true });
+await page.locator('.modal.is-active .delete').first().click();
+await page.waitForTimeout(400);
+await page.getByTestId('lazy-edit-item-menu').first().click();
+await page.getByTestId('lazy-edit-item-remove').waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(400);
+await page.screenshot({ path: OUT + 'other-food-14-item-menu.png', fullPage: true });
+await page.getByTestId('lazy-edit-cancel').click();
+await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 15000 });
+await page.waitForTimeout(800);
 await openEdit(1, 'other-food-9-edit-pending.png');
 
 // Та же правка разобранной, но с открытыми зонами: нажимаем «Изменить» на снимках

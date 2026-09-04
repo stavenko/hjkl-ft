@@ -18,6 +18,9 @@
 use api_types::{DiaryEntry, DiaryEntryKind, DiaryFoodItem, Food};
 use leptos::*;
 
+use crate::components::food_badges::{nutrient_badges, BADGE_ROW};
+use crate::components::food_weight_modal::FoodWeightModal;
+use crate::components::kebab::{kebab_icon, ITEM_CLASS, ITEM_STYLE, KEBAB_CLASS, KEBAB_STYLE, MENU_STYLE};
 use crate::components::photo_description::PhotoAndDescription;
 use crate::services::{db, i18n::t, images, lazy_food, local};
 
@@ -186,6 +189,11 @@ pub fn LazyFoodEdit(
         top_locked.set(true);
     };
 
+    // Какая позиция правит вес (её номер) и у какой открыто меню. По одной за раз:
+    // это список, а не таблица, и два открытых меню друг другу мешают.
+    let weighing = create_rw_signal(None::<usize>);
+    let menu_for = create_rw_signal(None::<usize>);
+
     let rows = move || -> Vec<(usize, DiaryFoodItem)> { items.get().into_iter().enumerate().collect() };
 
     view! {
@@ -221,28 +229,91 @@ pub fn LazyFoodEdit(
                     </p>
                 })}
 
+                // Строка позиции — как в дневнике: название, пилюли КБЖУ, граммы
+                // ссылкой справа и кебаб. Это одна и та же еда, и человек не должен
+                // заново разбираться, что здесь на что похоже.
                 <For each=rows key=|(_, it)| it.food_id.clone() children=move |(idx, it)| {
-                let fid = it.food_id.clone();
-                let fid_for_name = fid.clone();
-                view! {
-                    <div attr:data-testid="lazy-edit-item"
-                        style="display: flex; align-items: center; gap: 8px; padding: 4px 0;">
-                        <span style="flex: 1; min-width: 0;">
-                            {move || foods.get().iter().find(|f| f.id == fid_for_name)
-                                .map(|f| f.name.clone())
-                                .unwrap_or_else(|| t("lazy_edit.unknown_food").to_string())}
-                        </span>
-                        <input attr:data-testid="lazy-edit-grams" class="input is-small" style="width: 5.5rem;"
-                            type="number" inputmode="numeric"
-                            prop:value=move || items.get().get(idx).map(|i| i.grams).unwrap_or(0.0)
-                            on:input=move |ev| {
-                                let v = event_target_value(&ev).parse::<f64>().unwrap_or(0.0);
-                                items.update(|list| if let Some(i) = list.get_mut(idx) { i.grams = v.max(0.0); });
-                            } />
-                        <button attr:data-testid="lazy-edit-item-remove" class="delete"
-                            on:click=move |_| { let f = fid.clone(); items.update(|l| l.retain(|i| i.food_id != f)); }
-                        ></button>
-                    </div>
+                    let fid = it.food_id.clone();
+                    let fid_name = fid.clone();
+                    let fid_style = fid.clone();
+                    let fid_badges = fid.clone();
+                    let fid_del = fid.clone();
+                    let fid_weigh = fid.clone();
+                    let food_of = move |id: &str| foods.get().into_iter().find(|f| f.id == id);
+                    let grams_of = move || items.get().get(idx).map(|i| i.grams).unwrap_or(0.0);
+                    view! {
+                        <div attr:data-testid="lazy-edit-item"
+                            style="display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--bulma-border-weak);">
+                            <div style="flex: 1; min-width: 0; overflow-wrap: break-word;">
+                                <span class="is-size-6 has-text-weight-medium"
+                                    style=move || if food_of(&fid_style).is_some_and(|f| f.is_restaurant) {
+                                        crate::components::food_list_item::RESTAURANT_NAME_STYLE
+                                    } else { "" }
+                                >
+                                    {move || food_of(&fid_name).map(|f| f.name)
+                                        .unwrap_or_else(|| t("lazy_edit.unknown_food").to_string())}
+                                </span>
+                                <div style=BADGE_ROW>
+                                    {move || food_of(&fid_badges).map(|f| nutrient_badges(&f, grams_of() / 100.0))}
+                                </div>
+                            </div>
+
+                            <div style="flex-shrink: 0; margin-left: 1rem; display: flex; align-items: center; gap: 0.75rem;">
+                                // Граммы — та же ссылка, что в дневнике, и открывает то
+                                // же окно веса.
+                                <button attr:data-testid="lazy-edit-grams"
+                                    class="button is-ghost is-small has-text-link"
+                                    style="height: auto; text-decoration: none;"
+                                    on:click=move |_| weighing.set(Some(idx))
+                                >
+                                    <span class="is-size-7">{move || format!("{:.0}{}", grams_of(), t("common.unit.g"))}</span>
+                                </button>
+
+                                <div style="position: relative;">
+                                    <button attr:data-testid="lazy-edit-item-menu"
+                                        class=KEBAB_CLASS style=KEBAB_STYLE
+                                        on:click=move |_| menu_for.update(|m| {
+                                            if *m == Some(idx) { *m = None } else { *m = Some(idx) }
+                                        })
+                                    >{kebab_icon()}</button>
+                                    {move || (menu_for.get() == Some(idx)).then(|| {
+                                        let f = fid_del.clone();
+                                        view! {
+                                            <div style=MENU_STYLE>
+                                                <button attr:data-testid="lazy-edit-item-remove"
+                                                    class=format!("{ITEM_CLASS} has-text-danger") style=ITEM_STYLE
+                                                    on:click=move |_| {
+                                                        let f = f.clone();
+                                                        menu_for.set(None);
+                                                        items.update(|l| l.retain(|i| i.food_id != f));
+                                                    }
+                                                >{move || t("diary.delete")}</button>
+                                            </div>
+                                        }
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+
+                        // Окно веса — то же самое, что правит граммы в дневнике. Полей
+                        // «несъеденное» и «ресторанная еда» здесь нет: позиция хранит
+                        // только еду и граммы, и предлагать остальное значило бы врать.
+                        {move || (weighing.get() == Some(idx))
+                            .then(|| food_of(&fid_weigh))
+                            .flatten()
+                            .map(|food| view! {
+                                <FoodWeightModal
+                                    food=food
+                                    initial_grams=grams_of()
+                                    allow_details=false
+                                    submit_label=t("weight.save")
+                                    on_save=Callback::new(move |(g, _waste, _rest): (f64, f64, bool)| {
+                                        items.update(|l| if let Some(i) = l.get_mut(idx) { i.grams = g.max(0.0); });
+                                        weighing.set(None);
+                                    })
+                                    on_close=Callback::new(move |_| weighing.set(None))
+                                />
+                            })}
                     }
                 } />
             })}

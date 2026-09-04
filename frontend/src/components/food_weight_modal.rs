@@ -12,6 +12,13 @@ pub fn FoodWeightModal(
     initial_waste: f64,
     #[prop(default = false)]
     initial_restaurant: bool,
+    /// Показывать ли поля «несъеденное» и «ресторанная еда».
+    ///
+    /// Позиции разобранной записи (`DiaryFoodItem`) хранят только еду и граммы —
+    /// ни отходов, ни признака ресторана у них нет. Предлагать их там значило бы
+    /// врать: человек ввёл бы отходы, а они молча исчезли бы при сохранении.
+    #[prop(default = true)]
+    allow_details: bool,
     submit_label: &'static str,
     on_save: Callback<(f64, f64, bool)>,
     on_close: Callback<()>,
@@ -147,9 +154,10 @@ pub fn FoodWeightModal(
                             }
                         })}
 
-                        <WasteField grams=Signal::derive(current_val) waste=waste />
-
-                        <RestaurantField value=restaurant />
+                        {allow_details.then(|| view! {
+                            <WasteField grams=Signal::derive(current_val) waste=waste />
+                            <RestaurantField value=restaurant />
+                        })}
 
                         <div class="field is-grouped is-grouped-right mt-4">
                             <div class="control">

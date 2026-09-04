@@ -58,5 +58,16 @@ await btn.click();
 await page.getByTestId('other-food-panel').waitFor({ state: 'visible', timeout: 15000 });
 await page.waitForTimeout(800);
 await page.screenshot({ path: OUT + 'other-food-2-panel.png' });
+
+// Со снимками: кнопка становится плиткой в их ряду. Кадры настоящие — те же, на
+// которых мерили распознавание (тарелка и этикетка: два разных случая сразу).
+await page.setInputFiles('#other-food-photo-input', [
+  '../scripts/fixtures/food-liver-cauliflower.jpg',
+  '../scripts/fixtures/label-smetana-1.jpg',
+]);
+await page.getByTestId('other-food-thumb').first().waitFor({ state: 'visible', timeout: 20000 });
+await page.waitForTimeout(1200);
+console.log('снимков:', await page.getByTestId('other-food-thumb').count());
+await page.screenshot({ path: OUT + 'other-food-3-with-photos.png' });
 console.log('готово');
 await browser.close();

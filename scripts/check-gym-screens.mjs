@@ -162,7 +162,48 @@ if (!BASE) {
 }
 console.log(`адрес: ${BASE}\n`);
 
-const b = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+// ── Окружение агента: две поправки, обе обязательные ────────────────────────
+//
+// Те же две, что в e2e/playwright.config.ts ветки claude/food-logging-process —
+// там они выяснены замерами. Когда та ветка вольётся, это место надо свести с
+// ней, а не держать вторую редакцию правил.
+//
+// Браузер из образа: в контейнере агента лежит своя сборка Chromium, а
+// `playwright install` в этом образе запускать нельзя.
+//
+// Наружу — только через прокси и только по TLS 1.2. Приветствие TLS 1.3 у
+// Chromium весит около 1750 байт, не влезает в один TCP-сегмент, и релей
+// агентского прокси на нём разваливается: замерено 1784 B отправлено, 39 B
+// получено, обрыв ровно через 6 секунд, и так для ЛЮБОГО узла. У curl
+// приветствие втрое короче, поэтому curl через тот же прокси ходит и по 1.3 —
+// отсюда обманчивое «сеть есть, а у браузера её нет». Ограничение версии
+// проверку сертификатов НЕ ослабляет: 1.2 проверяет цепочку так же.
+const IMAGE_CHROMIUM = "/opt/pw-browsers/chromium";
+const imageBrowser = fs.existsSync(IMAGE_CHROMIUM) ? IMAGE_CHROMIUM : undefined;
+const proxyServer = process.env.HTTPS_PROXY || process.env.https_proxy;
+const b = await chromium.launch({
+  ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH }
+      : imageBrowser ? { executablePath: imageBrowser } : {}),
+  ...(proxyServer
+    ? {
+        // Свой сервер и заглушки живут на 127.0.0.1 — через прокси их гнать
+        // незачем и нельзя: он туда не ходит.
+        proxy: { server: proxyServer, bypass: "127.0.0.1,localhost" },
+        args: [
+          "--ssl-version-max=tls1.2",
+          // Браузер в прогоне не должен ходить к Google за обновлениями и
+          // телеметрией: наружу это всё равно не уходит, но забивает журнал
+          // прокси отказами, среди которых потом не видно настоящих.
+          "--disable-background-networking",
+          "--disable-component-update",
+          "--disable-extensions",
+          "--disable-sync",
+          "--no-default-browser-check",
+          "--no-first-run",
+        ],
+      }
+    : {}),
+});
 
 async function open(ua, seed, opts = {}) {
   const desktop = ua === UAS.desktop;

@@ -18,7 +18,7 @@
 use api_types::{DiaryEntry, DiaryEntryKind, DiaryFoodItem, Food};
 use leptos::*;
 
-use crate::components::food_editor::file_to_jpeg_base64;
+use crate::components::photo_description::PhotoAndDescription;
 use crate::services::{db, i18n::t, images, lazy_food, local};
 
 #[component]
@@ -29,11 +29,34 @@ pub fn LazyFoodEdit(
     on_saved: Callback<()>,
     on_cancel: Callback<()>,
 ) -> impl IntoView {
-    // Верхняя половина. Картинки держим ХЭШАМИ, а не содержимым: пока человек их не
-    // трогал, перекладывать мегабайты незачем.
-    let image_hashes = create_rw_signal(entry.images.clone());
-    let new_photos = create_rw_signal(Vec::<String>::new());
+    // Верхняя половина. Снимки держим ОДНИМ списком base64 — тем же, каким их
+    // видит форма добавления, — и потому обе пользуются общим `PhotoAndDescription`.
+    //
+    // Раньше здесь было два списка: хэши прежних снимков и base64 новых, «чтобы не
+    // перекладывать мегабайты». Стоило это дорого: прежние снимки нельзя было ни
+    // открыть, ни обрезать — только удалить, — и разметка расходилась с добавлением.
+    // А экономии почти нет: снимки уже сжаты до 1536 и 0.85, их единицы, и дневник
+    // всё равно распаковывает их для миниатюр.
+    //
+    // Обратно они кладутся тем же `images::put`: он адресует по содержимому, так что
+    // нетронутый снимок получит прежний хэш и второй копии не возникнет.
+    let photos = create_rw_signal(Vec::<String>::new());
     let description = create_rw_signal(entry.description.clone().unwrap_or_default());
+    // Пока снимки достаются из базы, форму показывать можно — их место просто пусто.
+    let loading_photos = create_rw_signal(!entry.images.is_empty());
+    {
+        let hashes = entry.images.clone();
+        spawn_local(async move {
+            let mut out = Vec::new();
+            for h in &hashes {
+                if let Some(b64) = images::get(h).await {
+                    out.push(b64);
+                }
+            }
+            photos.set(out);
+            loading_photos.set(false);
+        });
+    }
     // Нижняя половина.
     let items = create_rw_signal(entry.items.clone());
 
@@ -41,34 +64,36 @@ pub fn LazyFoodEdit(
     // обработчику сохранения, и разметке, а замыкание, захватившее String и Vec, не
     // копируется.
     let was_description = store_value(entry.description.clone().unwrap_or_default());
-    let was_images = store_value(entry.images.clone());
+    // Сравниваем по ЧИСЛУ и содержимому кадров, а не по хэшам: обрезка меняет
+    // содержимое, и запись обязана уйти на разбор заново — иначе список продуктов
+    // остался бы от кадра, которого больше нет.
+    let was_count = store_value(entry.images.len());
     let saving = create_rw_signal(false);
-    let photo_error = create_rw_signal(Option::<String>::None);
+    // Обрезали ли какой-нибудь кадр. Число снимков при обрезке не меняется, а
+    // содержимое — да, и по одному счёту такую правку не поймать.
+    let photos_touched = create_rw_signal(false);
+    create_effect(move |prev: Option<Vec<String>>| {
+        let now = photos.get();
+        if let Some(p) = prev {
+            if !p.is_empty() && p != now && !loading_photos.get_untracked() {
+                photos_touched.set(true);
+            }
+        }
+        now
+    });
 
     // Тронул ли человек верхнюю половину. Считается СРАВНЕНИЕМ с тем, что было, а не
     // флажком «поле получало фокус»: заглянуть в описание и выйти, ничего не изменив,
     // не должно стирать распознавание.
     let top_changed = move || {
+        if loading_photos.get() {
+            // Снимки ещё не достали — сравнивать не с чем, и объявлять запись
+            // изменённой нельзя: она бы уехала на разбор от одного открытия формы.
+            return false;
+        }
         description.get().trim() != was_description.get_value().trim()
-            || image_hashes.get() != was_images.get_value()
-            || !new_photos.get().is_empty()
-    };
-
-    let on_files = move |ev: leptos::ev::Event| {
-        let input: web_sys::HtmlInputElement = event_target(&ev);
-        let Some(files) = input.files().filter(|f| f.length() > 0) else { return };
-        spawn_local(async move {
-            let mut added = Vec::new();
-            for i in 0..files.length() {
-                let Some(file) = files.get(i) else { continue };
-                match file_to_jpeg_base64(&file).await {
-                    Ok(b64) => added.push(b64),
-                    Err(e) => photo_error.set(Some(e)),
-                }
-            }
-            new_photos.update(|v| v.extend(added));
-            input.set_value("");
-        });
+            || photos.get().len() != was_count.get_value()
+            || photos_touched.get()
     };
 
     let entry_for_save = entry.clone();
@@ -80,8 +105,10 @@ pub fn LazyFoodEdit(
         let base = entry_for_save.clone();
         let reset = top_changed();
         spawn_local(async move {
-            let mut hashes = image_hashes.get_untracked();
-            for b64 in new_photos.get_untracked() {
+            // Кладём ВСЕ кадры: `images::put` адресует по содержимому, поэтому
+            // нетронутый снимок получает прежний хэш, а обрезанный — новый.
+            let mut hashes = Vec::new();
+            for b64 in photos.get_untracked() {
                 hashes.push(images::put(&b64).await);
             }
             let updated = if reset {
@@ -118,55 +145,14 @@ pub fn LazyFoodEdit(
         });
     };
 
-    let thumbs = move || -> Vec<(usize, String)> { new_photos.get().into_iter().enumerate().collect() };
     let rows = move || -> Vec<(usize, DiaryFoodItem)> { items.get().into_iter().enumerate().collect() };
 
     view! {
         <div attr:data-testid="lazy-food-edit" style="padding: 8px 0;">
-            // ── верхняя половина ──
-            <p class="is-size-7 has-text-weight-semibold">{move || t("lazy_edit.top_title")}</p>
-            <input type="file" accept="image/*" multiple=true
-                id="lazy-edit-photo-input" attr:data-testid="lazy-edit-photo-input"
-                style="display: none;" on:change=on_files />
-
-            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0;">
-                <For each=move || image_hashes.get() key=|h| h.clone() children=move |hash| {
-                    let mine = hash.clone();
-                    view! {
-                        <div style="position: relative;">
-                            <crate::components::other_food_panel::EntryThumbnails hashes=vec![hash.clone()] />
-                            <button attr:data-testid="lazy-edit-thumb-remove" class="delete is-small"
-                                style="position: absolute; top: -4px; right: -4px;"
-                                on:click=move |_| { let m = mine.clone(); image_hashes.update(|v| v.retain(|x| x != &m)); }
-                            ></button>
-                        </div>
-                    }
-                } />
-                <For each=thumbs key=|(i, b)| format!("{i}-{}", b.len()) children=move |(_, b64)| {
-                    let mine = b64.clone();
-                    view! {
-                        <div style="position: relative;">
-                            <img attr:data-testid="lazy-edit-new-thumb"
-                                src=format!("data:image/jpeg;base64,{b64}")
-                                style="width: 48px; height: 48px; object-fit: cover; border-radius: 4px;" />
-                            <button class="delete is-small" style="position: absolute; top: -4px; right: -4px;"
-                                on:click=move |_| { let m = mine.clone(); new_photos.update(|v| v.retain(|x| x != &m)); }
-                            ></button>
-                        </div>
-                    }
-                } />
-                <label attr:for="lazy-edit-photo-input" attr:data-testid="lazy-edit-add-photo"
-                    class="button is-light is-small"
-                    style="width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;"
-                >"+"</label>
-            </div>
-
-            {move || photo_error.get().map(|e| view! { <p class="help is-danger">{e}</p> })}
-
-            <textarea attr:data-testid="lazy-edit-description" class="textarea" rows="3"
-                prop:value=move || description.get()
-                on:input=move |ev| description.set(event_target_value(&ev))
-            ></textarea>
+            // Верхняя половина — тот же кусок, что и на добавлении
+            // (`PhotoAndDescription`). Одинаковое дело должно выглядеть одинаково;
+            // раньше здесь была своя разметка, и она отстала от добавления.
+            <PhotoAndDescription photos=photos description=description input_id="lazy-edit-photo-input" />
 
             // Предупреждение появляется, только когда верх ДЕЙСТВИТЕЛЬНО изменён:
             // висеть постоянно оно значило бы пугать человека, который зашёл
@@ -213,8 +199,11 @@ pub fn LazyFoodEdit(
             } />
 
             <div style="display: flex; gap: 8px; margin-top: 16px;">
+                // Пока снимки достаются из базы, сохранять НЕЛЬЗЯ: список кадров
+                // ещё пуст, и сохранение стёрло бы их все. Ждать недолго — это
+                // чтение из локальной базы, — а цена ошибки чужие фотографии.
                 <button attr:data-testid="lazy-edit-save" class="button is-primary is-fullwidth"
-                    disabled=move || saving.get() on:click=save
+                    disabled=move || saving.get() || loading_photos.get() on:click=save
                 >{move || t("common.save")}</button>
                 <button attr:data-testid="lazy-edit-cancel" class="button is-light"
                     on:click=move |_| on_cancel.call(())

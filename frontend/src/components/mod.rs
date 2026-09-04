@@ -2,6 +2,7 @@ pub mod code_auth;
 pub mod add_ingredient_modal;
 pub mod kebab;
 pub mod photo_crop;
+pub mod photo_description;
 pub mod pwa_icons;
 pub mod food_picker;
 pub mod food_picker_modal;

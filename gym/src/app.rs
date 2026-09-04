@@ -80,6 +80,14 @@ fn after_subscription() -> View {
 
 #[component]
 pub fn App() -> impl IntoView {
+    // Приложение запустили с иконки — оно принесло свой аккаунт в адресе.
+    // Держим ссылку на манифест персональной, иначе переустановка поверх
+    // потеряла бы `start_url` (а с ним и единственный способ узнать аккаунт
+    // на iOS, где сессия установленному приложению не достаётся).
+    if let Some(uid) = platform::param_user_id().or_else(auth::get_user_id) {
+        platform::set_manifest_user(&uid);
+    }
+
     let view = create_rw_signal(initial_view());
 
     // Обновление ДО приложения применяется САМО. Единственная кнопка «Обновить»
@@ -138,7 +146,15 @@ pub fn App() -> impl IntoView {
                     // Вошли — дальше решает подписка, а не мы. Кэш при входе
                     // стёрт (аккаунт мог смениться), поэтому статус спрашивается
                     // живым запросом, а не берётся с прошлого раза.
-                    <Login on_done=Callback::new(move |_| view.set(View::Checking)) />
+                    <Login on_done=Callback::new(move |_| {
+                        // Манифест перенацеливается ЗДЕСЬ, до экрана установки:
+                        // снимок, который браузер делает при «Добавить на экран
+                        // Домой», обязан быть уже персональным.
+                        if let Some(uid) = auth::get_user_id() {
+                            platform::set_manifest_user(&uid);
+                        }
+                        view.set(View::Checking);
+                    }) />
                 }.into_view(),
 
                 View::Checking => view! {
@@ -169,6 +185,24 @@ pub fn App() -> impl IntoView {
 /// Вход. Главное действие — ВОЙТИ существующим ключом: в проде это тот же
 /// паскей, что и в приложении питания, и человек приходит сюда уже с ним.
 ///
+/// Но паскей — не единственный путь, и это не украшение. Установленное
+/// приложение на iOS живёт в отдельном хранилище: сессии в нём нет, а ключ может
+/// не сработать — не синхронизировалась связка, сменился телефон, отказала
+/// система. С одним путём такой человек упирается в экран, с которого нет
+/// выхода. Поэтому здесь их три:
+///
+///   1. ПАСКЕЙ — главный, кнопкой;
+///   2. КОД в Telegram — но только если мы знаем, ЧЕЙ это аккаунт: установленное
+///      приложение приносит `?u=` в адресе (см. pwa-worker.js). На устройстве,
+///      где паскея не бывает вовсе (Android без платформенного
+///      аутентификатора), этот путь становится главным сразу;
+///   3. ФРАЗА восстановления — работает всегда и без `?u=`, потому что сама себя
+///      и опознаёт.
+///
+/// Прежде чем предложить код, спрашиваем `account_state`: он единственный
+/// отличает «оплатил, но не может войти» от «здесь платить не начинали».
+/// Второму код слать бессмысленно — ему надо сказать про подписку.
+///
 /// Создание нового ключа спрятано за ссылкой намеренно. Поставь его кнопкой —
 /// и пришедший из приложения питания заведёт вторым нажатием второй аккаунт:
 /// пустой, без подписки, и с ним он упрётся в блокирующий экран, не поняв,
@@ -177,8 +211,32 @@ pub fn App() -> impl IntoView {
 fn Login(on_done: Callback<()>) -> impl IntoView {
     let busy = create_rw_signal(false);
     let error = create_rw_signal(None::<String>);
-    let registering = create_rw_signal(false);
+    let pane = create_rw_signal(LoginPane::Key);
     let name = create_rw_signal(String::new());
+    let phrase = create_rw_signal(String::new());
+    let code = create_rw_signal(String::new());
+
+    // Чей это значок на домашнем экране. Из адреса (единственный источник на
+    // iOS) или из localStorage — на Android он общий у вкладки и приложения.
+    let known_user = store_value(platform::param_user_id().or_else(auth::get_user_id));
+    let has_user = known_user.get_value().is_some();
+
+    // Устройство, на котором паскея не бывает вовсе, и аккаунт нам известен —
+    // незачем предлагать кнопку, которая заведомо не сработает: сразу код.
+    if has_user {
+        create_effect(move |_| {
+            spawn_local(async move {
+                if auth::passkey_unavailable().await && pane.get_untracked() == LoginPane::Key {
+                    pane.set(LoginPane::Code);
+                }
+            });
+        });
+    }
+
+    let finish = move || {
+        subscription::forget(); // аккаунт мог смениться — прошлый ответ не про него
+        on_done.call(());
+    };
 
     let sign_in = move |_| {
         if busy.get_untracked() {
@@ -188,15 +246,24 @@ fn Login(on_done: Callback<()>) -> impl IntoView {
         error.set(None);
         spawn_local(async move {
             match auth::authenticate().await {
-                Ok(_) => {
-                    // Аккаунт мог смениться — прошлый ответ о подписке к нему
-                    // отношения не имеет.
-                    subscription::forget();
-                    on_done.call(());
-                }
+                Ok(_) => finish(),
                 Err(e) => {
                     error.set(Some(e));
                     busy.set(false);
+                    // Ключ не сработал. Предлагать обходной путь можно, только
+                    // если мы знаем аккаунт И он оплачен: иначе код слать некуда
+                    // и незачем.
+                    if let Some(uid) = known_user.get_value() {
+                        spawn_local(async move {
+                            match subscription::account_state(&uid).await {
+                                Ok(st) if st.active => pane.set(LoginPane::CodeOffer),
+                                Ok(_) => pane.set(LoginPane::NoAccount),
+                                // Не выяснили — молчим. Обещать код, который
+                                // может не дойти, хуже, чем не обещать.
+                                Err(e) => leptos::logging::warn!("account_state: {e}"),
+                            }
+                        });
+                    }
                 }
             }
         });
@@ -215,10 +282,7 @@ fn Login(on_done: Callback<()>) -> impl IntoView {
         error.set(None);
         spawn_local(async move {
             match auth::register(&display).await {
-                Ok(_) => {
-                    subscription::forget();
-                    on_done.call(());
-                }
+                Ok(_) => finish(),
                 Err(e) => {
                     error.set(Some(e));
                     busy.set(false);
@@ -227,27 +291,183 @@ fn Login(on_done: Callback<()>) -> impl IntoView {
         });
     };
 
-    // Настоящая <form>: на телефоне это даёт кнопку «Go» на клавиатуре, и имя
-    // отправляется, не убирая её.
-    let submit = move |ev: leptos::ev::SubmitEvent| {
-        ev.prevent_default();
-        create();
+    let by_phrase = move |_| {
+        let p = phrase.get_untracked().trim().to_string();
+        if p.is_empty() || busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match auth::login_with_phrase(&p).await {
+                Ok(_) => finish(),
+                Err(e) => {
+                    // Статус переводим в человеческие слова: «HTTP 401» ничего
+                    // не объясняет тому, кто просто ввёл фразу.
+                    error.set(Some(
+                        if e.contains("429") { t("login.phrase_too_often") }
+                        else if e.contains("401") { t("login.phrase_invalid") }
+                        else { t("login.phrase_failed") }.to_string(),
+                    ));
+                    busy.set(false);
+                }
+            }
+        });
     };
+
+    let sent = create_rw_signal(false);
+    let send_code = move |_| {
+        let Some(uid) = known_user.get_value() else { return };
+        if busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match auth::code_request(&uid).await {
+                Ok(()) => sent.set(true),
+                Err(e) => error.set(Some(
+                    if e.contains("429") { t("login.code_too_often").to_string() } else { e },
+                )),
+            }
+            busy.set(false);
+        });
+    };
+
+    let check_code = move |_| {
+        let Some(uid) = known_user.get_value() else { return };
+        let c = code.get_untracked().trim().to_string();
+        if c.is_empty() || busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match auth::code_verify(&uid, &c).await {
+                Ok(_) => finish(),
+                Err(e) => {
+                    error.set(Some(if e.contains("401") || e.contains("400") {
+                        t("login.code_invalid").to_string()
+                    } else {
+                        e
+                    }));
+                    busy.set(false);
+                }
+            }
+        });
+    };
+
+    // Настоящая <form>: на телефоне это даёт кнопку «Go» на клавиатуре.
+    let submit_name = move |ev: leptos::ev::SubmitEvent| { ev.prevent_default(); create(); };
 
     view! {
         <div class="screen screen--center">
             <div class="center">
                 <img src="/icons/icon-192.png" alt="" class="applogo" />
                 <p class="h1">{move || t("login.title")}</p>
-                <p class="sub">{move || t("login.sub")}</p>
+                <p class="sub">{move || match pane.get() {
+                    LoginPane::Phrase => t("login.phrase_sub"),
+                    LoginPane::Code | LoginPane::CodeOffer => t("login.code_sub"),
+                    LoginPane::NoAccount => t("login.no_account_sub"),
+                    _ => t("login.sub"),
+                }}</p>
 
                 {move || error.get().map(|e| view! {
-                    <div class="banner" attr:role="alert">{e}</div>
+                    <div class="banner" attr:role="alert" attr:data-testid="login-error">{e}</div>
                 })}
 
-                {move || if registering.get() {
-                    view! {
-                        <form on:submit=submit>
+                {move || match pane.get() {
+                    // ── Ключ: главный путь ──
+                    LoginPane::Key => view! {
+                        <>
+                            <button class="btn btn--primary btn--block"
+                                prop:disabled=move || busy.get() on:click=sign_in
+                                attr:data-testid="gym-login">
+                                {move || if busy.get() { t("login.working") } else { t("login.enter") }}
+                            </button>
+                            <LoginAlt pane=pane has_user=has_user busy=busy error=error />
+                        </>
+                    }.into_view(),
+
+                    // ── Ключ не сработал, аккаунт известен и оплачен ──
+                    LoginPane::CodeOffer => view! {
+                        <>
+                            <div class="banner banner--warn" attr:data-testid="login-code-offer">
+                                {move || t("login.code_offer")}
+                            </div>
+                            <button class="btn btn--primary btn--block"
+                                prop:disabled=move || busy.get()
+                                on:click=move |_| pane.set(LoginPane::Code)
+                                attr:data-testid="login-btn-goto-code">
+                                {move || t("login.code_goto")}
+                            </button>
+                            <LoginAlt pane=pane has_user=has_user busy=busy error=error />
+                        </>
+                    }.into_view(),
+
+                    // ── Аккаунт известен, но подписки на нём не было ──
+                    LoginPane::NoAccount => view! {
+                        <div attr:data-testid="login-no-account">
+                            <div class="banner banner--warn">{move || t("login.no_account")}</div>
+                            <button class="btn btn--block"
+                                on:click=move |_| { error.set(None); pane.set(LoginPane::Key); }>
+                                {move || t("set.back")}
+                            </button>
+                        </div>
+                    }.into_view(),
+
+                    // ── Код в Telegram ──
+                    LoginPane::Code => view! {
+                        <div attr:data-testid="login-code">
+                            {move || if sent.get() {
+                                view! {
+                                    <>
+                                        <input class="field" attr:type="text"
+                                            attr:inputmode="numeric" attr:autocomplete="one-time-code"
+                                            attr:enterkeyhint="go" attr:data-testid="login-code-input"
+                                            prop:value=move || code.get()
+                                            on:input=move |ev| code.set(event_target_value(&ev)) />
+                                        <button class="btn btn--primary btn--block" style="margin-top: 14px;"
+                                            prop:disabled=move || busy.get() on:click=check_code
+                                            attr:data-testid="login-btn-code-verify">
+                                            {move || t("login.code_verify")}
+                                        </button>
+                                    </>
+                                }.into_view()
+                            } else {
+                                view! {
+                                    <button class="btn btn--primary btn--block"
+                                        prop:disabled=move || busy.get() on:click=send_code
+                                        attr:data-testid="login-btn-code-send">
+                                        {move || if busy.get() { t("login.code_sending") } else { t("login.code_send") }}
+                                    </button>
+                                }.into_view()
+                            }}
+                            <LoginAlt pane=pane has_user=has_user busy=busy error=error />
+                        </div>
+                    }.into_view(),
+
+                    // ── Фраза восстановления ──
+                    LoginPane::Phrase => view! {
+                        <div attr:data-testid="login-phrase">
+                            <input class="field" attr:type="text" attr:autocomplete="off"
+                                attr:autocapitalize="none" attr:spellcheck="false"
+                                attr:enterkeyhint="go" attr:data-testid="login-phrase-input"
+                                attr:placeholder=t("login.phrase_placeholder")
+                                prop:value=move || phrase.get()
+                                on:input=move |ev| phrase.set(event_target_value(&ev)) />
+                            <button class="btn btn--primary btn--block" style="margin-top: 14px;"
+                                prop:disabled=move || busy.get() on:click=by_phrase
+                                attr:data-testid="login-btn-phrase">
+                                {move || t("login.phrase_enter")}
+                            </button>
+                            <LoginAlt pane=pane has_user=has_user busy=busy error=error />
+                        </div>
+                    }.into_view(),
+
+                    // ── Завести новый ключ ──
+                    LoginPane::Register => view! {
+                        <form on:submit=submit_name>
                             <label class="label" attr:for="gym-name">{move || t("login.name")}</label>
                             <input class="field" attr:id="gym-name" attr:type="text"
                                 attr:autocomplete="name" attr:autocapitalize="words"
@@ -261,39 +481,77 @@ fn Login(on_done: Callback<()>) -> impl IntoView {
                                 attr:data-testid="gym-register">
                                 {move || t("login.create")}
                             </button>
-                            <p class="alt">
-                                <button class="linkbtn" attr:type="button"
-                                    prop:disabled=move || busy.get()
-                                    on:click=move |_| { error.set(None); registering.set(false); }>
-                                    {move || t("login.back")}
-                                </button>
-                            </p>
+                            <LoginAlt pane=pane has_user=has_user busy=busy error=error />
                         </form>
-                    }.into_view()
-                } else {
-                    view! {
-                        <>
-                            <button class="btn btn--primary btn--block"
-                                prop:disabled=move || busy.get() on:click=sign_in
-                                attr:data-testid="gym-login">
-                                {move || if busy.get() { t("login.working") } else { t("login.enter") }}
-                            </button>
-                            <p class="alt">
-                                {move || t("login.no_key")}
-                                <button class="linkbtn" attr:type="button"
-                                    prop:disabled=move || busy.get()
-                                    on:click=move |_| { error.set(None); registering.set(true); }
-                                    attr:data-testid="gym-go-register">
-                                    {move || t("login.register")}
-                                </button>
-                            </p>
-                        </>
-                    }.into_view()
+                    }.into_view(),
                 }}
 
                 <LangSwitch />
             </div>
         </div>
+    }
+}
+
+/// Какой путь входа показан сейчас.
+#[derive(Clone, Copy, PartialEq)]
+enum LoginPane {
+    /// Ключ — главный путь.
+    Key,
+    /// Ключ не сработал, аккаунт известен и оплачен: предлагаем код.
+    CodeOffer,
+    /// Аккаунт известен, но подписки на нём не было — код тут не поможет.
+    NoAccount,
+    Code,
+    Phrase,
+    Register,
+}
+
+/// Строка «а если не получилось» под главной кнопкой.
+///
+/// Собрана отдельно, потому что повторяется на каждом пути и обязана вести
+/// ОБРАТНО тоже: человек, забредший в код без телефона под рукой, должен уметь
+/// вернуться к ключу, а не перезагружать страницу.
+#[component]
+fn LoginAlt(
+    pane: RwSignal<LoginPane>,
+    has_user: bool,
+    busy: RwSignal<bool>,
+    error: RwSignal<Option<String>>,
+) -> impl IntoView {
+    let go = move |to: LoginPane| {
+        move |_| {
+            error.set(None);
+            pane.set(to);
+        }
+    };
+    view! {
+        <p class="alt" style="flex-wrap: wrap;">
+            {move || (pane.get() != LoginPane::Key).then(|| view! {
+                <button class="linkbtn" attr:type="button" prop:disabled=move || busy.get()
+                    attr:data-testid="login-alt-key" on:click=go(LoginPane::Key)>
+                    {move || t("login.alt_key")}
+                </button>
+            })}
+            // Код требует знать аккаунт: без него слать некуда.
+            {move || (has_user && !matches!(pane.get(), LoginPane::Code | LoginPane::CodeOffer)).then(|| view! {
+                <button class="linkbtn" attr:type="button" prop:disabled=move || busy.get()
+                    attr:data-testid="login-alt-code" on:click=go(LoginPane::Code)>
+                    {move || t("login.alt_code")}
+                </button>
+            })}
+            {move || (pane.get() != LoginPane::Phrase).then(|| view! {
+                <button class="linkbtn" attr:type="button" prop:disabled=move || busy.get()
+                    attr:data-testid="login-alt-phrase" on:click=go(LoginPane::Phrase)>
+                    {move || t("login.alt_phrase")}
+                </button>
+            })}
+            {move || (pane.get() != LoginPane::Register).then(|| view! {
+                <button class="linkbtn" attr:type="button" prop:disabled=move || busy.get()
+                    attr:data-testid="gym-go-register" on:click=go(LoginPane::Register)>
+                    {move || t("login.register")}
+                </button>
+            })}
+        </p>
     }
 }
 

@@ -112,6 +112,53 @@ pub async fn status() -> Result<Status, StatusError> {
     Ok(s)
 }
 
+/// Состояние аккаунта, известное БЕЗ входа — по одному user_id.
+///
+/// Установленное приложение знает свой user_id (он в `start_url` манифеста), но
+/// войти по ключу может не получиться. Это единственный способ различить
+/// «оплатил, но не может войти» и «здесь платить ещё не начинали»: первому
+/// предлагаем вход по коду, второго отправляем туда, где оформляют подписку.
+/// Ручка неавторизованная — токена-то как раз и нет.
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub struct AccountState {
+    /// Тот же признак доступа, по которому пускают остальные воркеры.
+    pub active: bool,
+    /// Доходил ли человек до работающего приложения.
+    #[serde(default)]
+    pub entered: bool,
+}
+
+pub async fn account_state(user_id: &str) -> Result<AccountState, String> {
+    let base = &config::get().payment_base_url;
+    if base.is_empty() {
+        return Err("payment_base_url не сконфигурирован".to_string());
+    }
+    let url = format!("{base}/account/state");
+    let body = serde_json::json!({ "userId": user_id }).to_string();
+
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    opts.set_body(&JsValue::from_str(&body));
+    let headers = web_sys::Headers::new().map_err(|e| format!("{e:?}"))?;
+    headers.set("Content-Type", "application/json").map_err(|e| format!("{e:?}"))?;
+    opts.set_headers(&headers);
+
+    let request = web_sys::Request::new_with_str_and_init(&url, &opts).map_err(|e| format!("{e:?}"))?;
+    let window = web_sys::window().expect("no window");
+    let resp_val = JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|e: JsValue| format!("{e:?}"))?;
+    let resp: web_sys::Response = resp_val.dyn_into().map_err(|_| "not a Response".to_string())?;
+    let text = JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    let text = text.as_string().ok_or("response not string")?;
+    if !resp.ok() {
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+    serde_json::from_str(&text).map_err(|e| format!("parse error: {e}"))
+}
+
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok()?
 }

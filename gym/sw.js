@@ -11,7 +11,7 @@ var CACHE_NAME = 'gym-v1';
 // Оболочка с постоянными именами — прекэшируется на install, чтобы приложение
 // открылось офлайн даже после единственного короткого сеанса в сети (iOS капризен
 // к ленивому кэшированию на лету).
-var SHELL = ['/', '/init.js', '/manifest.webmanifest', '/config/frontend.toml',
+var SHELL = ['/', '/init.js', '/manifest.json', '/config/frontend.toml',
              '/icons/icon-192.png', '/icons/favicon.png',
              '/fonts/golos-latin.woff2', '/fonts/golos-cyrillic.woff2'];
 
@@ -90,7 +90,7 @@ self.addEventListener('fetch', function (event) {
     if (event.request.mode === 'navigate'
         || url.pathname === '/init.js'
         || url.pathname === '/config/frontend.toml'
-        || url.pathname === '/manifest.webmanifest') {
+        || url.pathname === '/manifest.json') {
         // Офлайн-подстраховка: точный закэшированный ответ, иначе оболочка «/» —
         // приложение одностраничное, index.html отрисует нужный экран сам.
         var fallback = function () {

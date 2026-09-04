@@ -87,17 +87,52 @@ if (!BASE) {
     process.exit(2);
   }
   server = http.createServer((req, res) => {
-    const url = decodeURIComponent(req.url.split("?")[0]);
+    const [rawPath, rawQuery] = req.url.split("?");
+    const url = decodeURIComponent(rawPath);
+    const u = new URLSearchParams(rawQuery || "").get("u") || "";
+
+    // Персональный манифест — как его отдаёт gym/pwa-worker.js. Локальный
+    // сервер обязан это уметь: иначе прогон проверял бы приложение без той
+    // половины, ради которой воркер и заведён.
+    if (url === "/manifest.json") {
+      const body = JSON.stringify({
+        name: "re:Norma — тренировки",
+        start_url: u ? `/?u=${encodeURIComponent(u)}` : "/",
+        id: u ? `/app-${u}` : "/",
+        scope: "/",
+        display: "standalone",
+      });
+      res.writeHead(200, {
+        "Content-Type": "application/manifest+json",
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": CSP,
+      });
+      res.end(body);
+      return;
+    }
+
     let file = path.join(DIST, url);
     // Одностраничное приложение: всё неизвестное — на index.html (как _redirects).
     if (!file.startsWith(DIST) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       file = path.join(DIST, "index.html");
     }
+    let body = fs.readFileSync(file);
+    // Та же подстановка, что делает HTMLRewriter в воркере: ?u= попадает в
+    // ссылку на манифест ДО запуска wasm — браузер снимает манифест при
+    // установке, и снимок обязан быть уже персональным.
+    if (u && path.extname(file) === ".html") {
+      body = Buffer.from(
+        body.toString().replace(
+          /(<link rel="manifest" href=")[^"]*(")/,
+          `$1/manifest.json?u=${encodeURIComponent(u)}$2`,
+        ),
+      );
+    }
     res.writeHead(200, {
       "Content-Type": MIME[path.extname(file)] || "application/octet-stream",
       "Content-Security-Policy": CSP,
     });
-    res.end(fs.readFileSync(file));
+    res.end(body);
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   BASE = `http://127.0.0.1:${server.address().port}`;
@@ -140,7 +175,7 @@ async function open(ua, seed, opts = {}) {
     content: `document.addEventListener('securitypolicyviolation',
       function (e) { (window.__csp = window.__csp || []).push(e.violatedDirective + ' ' + e.blockedURI); });`,
   });
-  await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/${opts.query || ""}`, { waitUntil: "domcontentloaded" });
   // Ждём именно появления разметки, а не «сколько-нибудь секунд»: wasm грузится
   // по-разному, и глухая пауза либо врёт, либо тормозит прогон.
   await page.waitForSelector("[data-testid]", { timeout: 20000 }).catch(() => {});
@@ -356,6 +391,74 @@ const shown = (page, id) => page.getByTestId(id).isVisible().catch(() => false);
   );
   await ctx.setOffline(false);
   await ctx.close();
+}
+
+// ── 7. Персональный манифест и запасные пути входа ──
+//
+// Ровно та половина, без которой установленное приложение на iOS становится
+// тупиком: своё хранилище, сессии нет, ключ не сработал — и деться некуда.
+{
+  console.log("\n15. Манифест уносит аккаунт в start_url");
+  // Никого не знаем — ссылка общая: установка без входа тоже обязана работать.
+  const { ctx, page } = await open(UAS.ios);
+  const before = await page.getAttribute('link[rel="manifest"]', "href");
+  check(before === "/manifest.json", `без аккаунта манифест общий (${before})`);
+  await ctx.close();
+}
+{
+  // Сессия есть (Android делит localStorage со вкладкой) — приложение само
+  // перенацеливает ссылку, не дожидаясь ?u=.
+  const { ctx, page } = await open(UAS.ios, SUBSCRIBED);
+  const href = await page.getAttribute('link[rel="manifest"]', "href");
+  check(href === "/manifest.json?u=u-abc123def456", `по сессии ссылка персональная (${href})`);
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open(UAS.ios, SUBSCRIBED, { query: "?u=u-abc123def456" });
+  // Воркер вписал ?u= в разметку ещё до запуска wasm — именно этот снимок
+  // браузер забирает при «Добавить на экран Домой».
+  const href = await page.getAttribute('link[rel="manifest"]', "href");
+  check(href === "/manifest.json?u=u-abc123def456", `ссылка персональная (${href})`);
+  const m = await page.evaluate(async (h) => (await fetch(h)).json(), href);
+  check(m.start_url === "/?u=u-abc123def456", `start_url несёт аккаунт (${m.start_url})`);
+  check(m.id === "/app-u-abc123def456", `у установки свой id (${m.id})`);
+  await ctx.close();
+}
+{
+  console.log("\n16. Запасные пути входа");
+  // Без сессии и без ?u= код предлагать некому — слать некуда.
+  const a = await open(UAS.ios);
+  check(await shown(a.page, "gym-login"), "ключ — главный путь");
+  check(await shown(a.page, "login-alt-phrase"), "фраза восстановления предложена");
+  check(!(await shown(a.page, "login-alt-code")), "кода НЕТ: аккаунт неизвестен");
+  await a.ctx.close();
+
+  // Установленное приложение принесло аккаунт — код появляется запасным путём.
+  // UA здесь iOS: там паскей есть всегда, поэтому главным остаётся ключ.
+  const b2 = await open(UAS.ios, null, { query: "?u=u-abc123def456" });
+  check(await shown(b2.page, "gym-login"), "ключ по-прежнему главный");
+  check(await shown(b2.page, "login-alt-code"), "с ?u= код предложен");
+  await b2.page.getByTestId("login-alt-code").click();
+  check(await shown(b2.page, "login-code"), "экран кода открывается");
+  await b2.page.getByTestId("login-alt-key").click();
+  check(await shown(b2.page, "gym-login"), "и с него есть дорога обратно к ключу");
+  await b2.ctx.close();
+
+  // Устройство, где паскея не бывает (Android без платформенного
+  // аутентификатора), да ещё и с известным аккаунтом: код открывается СРАЗУ.
+  // Показывать там кнопку «Войти ключом» значило бы вести в заведомую стену.
+  const d = await open(UAS.chrome, null, { query: "?u=u-abc123def456" });
+  check(await shown(d.page, "login-code"), "без паскея код открыт сразу");
+  check(!(await shown(d.page, "gym-login")), "кнопки ключа там нет");
+  check(await shown(d.page, "login-alt-key"), "но вернуться к ключу можно");
+  await d.ctx.close();
+
+  // Фраза доступна всегда — она сама себя опознаёт, аккаунт знать не надо.
+  const c = await open(UAS.ios);
+  await c.page.getByTestId("login-alt-phrase").click();
+  check(await shown(c.page, "login-phrase-input"), "поле фразы открылось");
+  check(await shown(c.page, "login-btn-phrase"), "и кнопка входа по ней");
+  await c.ctx.close();
 }
 
 await b.close();

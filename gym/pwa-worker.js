@@ -1,12 +1,26 @@
 // Воркер Cloudflare Pages в advanced-режиме (кладётся как dist/_worker.js).
 //
-// Перенесён из приложения худеющего (frontend/pwa-worker.js); от него оставлено
-// то, что имеет смысл здесь. Персонального манифеста тут НЕТ и не нужно: в
-// приложение тренировок не ведёт ссылка с `?u=<user_id>` — сюда приходят своим
-// ключом, а не по приглашению бота.
+// Перенесён из приложения худеющего (frontend/pwa-worker.js). Две работы.
 //
-// Остаётся одна работа: браузеры, из которых человека уводят в Chrome, получают
-// СВОЮ страницу прямо отсюда, а не экран внутри приложения.
+// ПЕРВАЯ — персональный манифест. Установленное приложение уносит в своём
+// `start_url` несекретный идентификатор аккаунта: `/?u=<user_id>`.
+//
+// Соблазн был решить, что залу это не нужно: вход здесь по discoverable-паскею,
+// а тот сам покажет список ключей, и спрашивать «кто вы» не надо. Рассуждение
+// неверное, и приложение питания уже за него платило. Ключ МОЖЕТ не сработать:
+// не синхронизировалась связка, человек сменил телефон, система отказала. А у
+// установленного приложения на iOS своё хранилище — сессии в нём нет. Без
+// идентификатора в `start_url` такой человек упирается в экран входа, с
+// которого нет выхода вообще: ни кода прислать некуда, ни даже сказать ему,
+// оплачено у него или нет (см. account_state).
+//
+// Идентификатор попадает сюда так: человек входит ключом во вкладке, приложение
+// переставляет `<link rel="manifest">` на `/manifest.json?u=<его id>`, и снимок
+// манифеста, который браузер делает при установке, забирает `start_url` уже с
+// ним. Ссылка бота, как в питании, для этого не нужна.
+//
+// ВТОРАЯ — браузеры, из которых человека уводят в Chrome: они получают СВОЮ
+// страницу прямо отсюда, а не экран внутри приложения.
 //
 // Mi Browser (Xiaomi): ключ доступа там создать нельзя — `PublicKeyCredential`
 // отсутствует вовсе (замерено пробником на Redmi, Android 15, MiuiBrowser 14.60).
@@ -23,6 +37,31 @@
 // сервис-воркер, живущий с прошлых визитов, отдаст навигацию из кэша, сюда
 // управление не попадёт, и показать что-то осмысленное должно само приложение.
 // Текст в двух местах — плата за это; он короткий и меняется вместе.
+// Манифест собирается ЗДЕСЬ, а не берётся из статики: он зависит от `?u=`.
+// Пустой `?u` отдаёт обычный манифест (start_url "/"), чтобы установка без
+// входа тоже работала.
+function manifest(u) {
+  return {
+    name: "re:Norma — тренировки",
+    short_name: "re:Norma зал",
+    description: "Тренировки re:Norma: вход тем же ключом, что и в приложение питания.",
+    start_url: u ? `/?u=${encodeURIComponent(u)}` : "/",
+    // Свой `id` на аккаунт: установка под конкретного человека — отдельное
+    // приложение, а не переустановка поверх чужого.
+    id: u ? `/app-${u}` : "/",
+    scope: "/",
+    display: "standalone",
+    orientation: "portrait",
+    background_color: "#0E1116",
+    theme_color: "#0E1116",
+    icons: [
+      { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+    ],
+  };
+}
+
 const MI_TITLE = "Тренировки re:Norma работают в браузере Chrome.";
 const MI_BUTTON = "Открыть в Chrome";
 
@@ -92,7 +131,43 @@ export default {
       });
     }
 
+    if (url.pathname === "/manifest.json") {
+      const u = url.searchParams.get("u") || "";
+      return new Response(JSON.stringify(manifest(u)), {
+        headers: {
+          "Content-Type": "application/manifest+json",
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    const res = await env.ASSETS.fetch(request);
+
+    // `?u=` подставляется в <link rel="manifest"> ПРЯМО В ОТДАВАЕМОЙ РАЗМЕТКЕ,
+    // до того, как запустится wasm. Иначе браузер, снимая манифест в момент
+    // «Добавить на экран Домой», прочитает ссылку без идентификатора, и
+    // установленное приложение потеряет аккаунт (start_url свалится в "/").
+    const u = url.searchParams.get("u") || "";
+    const ct = res.headers.get("Content-Type") || "";
+    if (u && ct.includes("text/html")) {
+      const rewritten = new HTMLRewriter()
+        .on('link[rel="manifest"]', {
+          element(el) {
+            el.setAttribute("href", `/manifest.json?u=${encodeURIComponent(u)}`);
+          },
+        })
+        .transform(res);
+      // Ответ персональный — общему кэшу его отдавать чужому человеку нельзя.
+      const headers = new Headers(rewritten.headers);
+      headers.set("Cache-Control", "no-store");
+      return new Response(rewritten.body, {
+        status: rewritten.status,
+        statusText: rewritten.statusText,
+        headers,
+      });
+    }
+
     // Всё остальное — статике (SPA-фолбэк держат Pages/_redirects).
-    return env.ASSETS.fetch(request);
+    return res;
   },
 };

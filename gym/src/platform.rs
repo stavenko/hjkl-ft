@@ -64,6 +64,34 @@ pub fn dismiss_pwa_prompt() {
     }
 }
 
+// ── Аккаунт, который принесло с собой установленное приложение ───────────────
+
+/// `?u=<user_id>` из адреса — несекретный идентификатор аккаунта, который
+/// установленное приложение уносит в своём `start_url` (см. pwa-worker.js).
+///
+/// Он единственный способ узнать, ЧЕЙ это значок на домашнем экране, когда
+/// сессии нет: на iOS у установленного приложения своё хранилище, и localStorage
+/// вкладки ему недоступен.
+pub fn param_user_id() -> Option<String> {
+    let search = web_sys::window()?.location().search().ok()?;
+    let params = web_sys::UrlSearchParams::new_with_str(&search).ok()?;
+    params.get("u").filter(|s| !s.is_empty())
+}
+
+/// Перенацелить `<link rel="manifest">` на манифест ЭТОГО человека.
+///
+/// Зовётся сразу после входа — до того, как человеку покажут инструкцию по
+/// установке. Браузер снимает манифест в момент «Добавить на экран Домой», и
+/// снимок обязан быть уже персональным: иначе установленное приложение
+/// запустится по `start_url = "/"`, без аккаунта, и на iOS ему неоткуда будет
+/// узнать, кто им пользуется.
+pub fn set_manifest_user(user_id: &str) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    if let Ok(Some(link)) = doc.query_selector("link[rel=manifest]") {
+        let _ = link.set_attribute("href", &format!("/manifest.json?u={user_id}"));
+    }
+}
+
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok()?
 }

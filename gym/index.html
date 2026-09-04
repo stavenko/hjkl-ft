@@ -9,7 +9,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="re:Norma зал" />
     <title>re:Norma — тренировки</title>
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Манифест ДИНАМИЧЕСКИЙ: воркер Pages перехватывает /manifest.json и
+         подставляет в start_url аккаунт (см. pwa-worker.js). Статический файл
+         рядом — запасной, для локального trunk serve без воркера. -->
+    <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
@@ -24,7 +27,7 @@
          неизбежно отстала бы. Пути в разметке — тоже те же, `/onboard-img/…`,
          на них завязаны прогоны scripts/check-yandex-screen.mjs. -->
     <link data-trunk rel="copy-dir" href="../frontend/onboard-img" />
-    <link data-trunk rel="copy-file" href="manifest.webmanifest" />
+    <link data-trunk rel="copy-file" href="manifest.json" />
     <link data-trunk rel="copy-file" href="_redirects" />
     <link data-trunk rel="copy-file" href="_headers" />
     <link data-trunk rel="copy-file" href="sw.js" />

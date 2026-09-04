@@ -70,6 +70,19 @@ pub fn has_live_session() -> bool {
     }
 }
 
+/// `sub` (user_id) из полезной нагрузки токена — без проверки подписи.
+///
+/// Нужен там, где сервер отдаёт только токен: вход по фразе восстановления.
+/// Подпись проверяет сервер, здесь мы лишь читаем, чей это токен.
+fn extract_sub(token: &str) -> Option<String> {
+    let payload_b64 = token.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64)
+        .ok()?;
+    let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    claims.get("sub").and_then(|v| v.as_str()).map(String::from)
+}
+
 pub fn logout() {
     let s = storage();
     let _ = s.remove_item(KEY_USER_ID);
@@ -362,6 +375,113 @@ async fn request_auth(
         return Err(format!("HTTP {}: {}", resp.status(), text));
     }
     serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+// ── Запасные пути входа ─────────────────────────────────────────────────────
+//
+// Паскей — главный путь, но НЕ единственный, и это не роскошь. Установленное
+// приложение на iOS живёт в отдельном хранилище: сессии там нет, а ключ может не
+// сработать — не синхронизировалась связка, человек сменил телефон, система
+// отказала. Без второго пути он упирается в экран входа, с которого нет выхода
+// ВООБЩЕ. Приложение питания уже проходило это; здесь те же два пути.
+
+/// Вход фразой восстановления — без имени пользователя.
+///
+/// Ошибка несёт HTTP-статус: 401 — фраза не подошла, 429 — слишком часто.
+pub async fn login_with_phrase(phrase: &str) -> Result<String, String> {
+    let fingerprint = generate_fingerprint();
+    let resp = post_json(
+        "/recovery/phrase/login",
+        &serde_json::json!({ "phrase": phrase, "fingerprint": fingerprint }),
+    )
+    .await?;
+    let token = resp
+        .get("token")
+        .and_then(|v| v.as_str())
+        .ok_or("сервер не вернул токен")?;
+    let user_id = extract_sub(token).ok_or("в токене нет sub")?;
+    establish_session(&user_id, token);
+    Ok(user_id)
+}
+
+/// Попросить auth-worker прислать одноразовый код в Telegram этого аккаунта.
+///
+/// `user_id` — несекретный идентификатор, который установленное приложение
+/// приносит в своём `start_url`. 429 означает, что кулдаун ещё не вышел.
+pub async fn code_request(user_id: &str) -> Result<(), String> {
+    post_json("/code/request", &serde_json::json!({ "userId": user_id })).await?;
+    Ok(())
+}
+
+/// Проверить код из Telegram и завести сессию.
+pub async fn code_verify(user_id: &str, code: &str) -> Result<String, String> {
+    let resp = post_json(
+        "/code/verify",
+        &serde_json::json!({ "userId": user_id, "code": code }),
+    )
+    .await?;
+    let uid = resp
+        .get("userId")
+        .and_then(|v| v.as_str())
+        .ok_or("сервер не вернул userId")?;
+    let token = resp
+        .get("token")
+        .and_then(|v| v.as_str())
+        .ok_or("сервер не вернул токен")?;
+    establish_session(uid, token);
+    Ok(uid.to_string())
+}
+
+/// Можно ли на этом устройстве вообще завести/предъявить паскей.
+///
+/// Истина ТОЛЬКО когда устройство на Android и ключ там невозможен: нет
+/// `PublicKeyCredential` вовсе, нет `navigator.credentials.create` (так ведёт
+/// себя Яндекс.Браузер — интерфейс объявлен, вызова нет) или нет платформенного
+/// аутентификатора. iOS и настольные всегда возвращают ложь: там паскей есть.
+/// Перенесено из приложения худеющего вместе с замерами на живых устройствах.
+pub async fn passkey_unavailable() -> bool {
+    let Some(win) = web_sys::window() else { return false };
+    let ua = win.navigator().user_agent().unwrap_or_default();
+    if !ua.contains("Android") {
+        return false;
+    }
+    let pkc = match js_sys::Reflect::get(&win, &JsValue::from_str("PublicKeyCredential")) {
+        Ok(v) if !v.is_undefined() && !v.is_null() => v,
+        _ => return true, // интерфейса нет — ключ невозможен
+    };
+    // Мало объявленного интерфейса: нужен сам вызов. Яндекс.Браузер (26.6,
+    // Android 15) объявляет `PublicKeyCredential` и даже отвечает `true` на
+    // IUVPAA, но `navigator.credentials` у него нет вовсе, и обращение к
+    // `credentials.create` роняет TypeError.
+    let creds = js_sys::Reflect::get(win.navigator().as_ref(), &JsValue::from_str("credentials"));
+    let create_fn = match creds {
+        Ok(c) if !c.is_undefined() && !c.is_null() => {
+            js_sys::Reflect::get(&c, &JsValue::from_str("create")).ok()
+        }
+        _ => None,
+    };
+    if !matches!(create_fn, Some(ref f) if f.is_function()) {
+        return true;
+    }
+    let f = match js_sys::Reflect::get(
+        &pkc,
+        &JsValue::from_str("isUserVerifyingPlatformAuthenticatorAvailable"),
+    ) {
+        Ok(v) => v,
+        _ => return false, // не выяснили — не запрещаем
+    };
+    let func: js_sys::Function = match f.dyn_into() {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let promise: js_sys::Promise = match func.call0(&pkc).and_then(|p| p.dyn_into()) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    match JsFuture::from(promise).await {
+        Ok(v) => !v.as_bool().unwrap_or(false),
+        Err(_) => false,
+    }
 }
 
 // ── Ключ на ЭТОМ устройстве ─────────────────────────────────────────────────

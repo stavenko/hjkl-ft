@@ -72,6 +72,17 @@ const MIME = {
   ".svg": "image/svg+xml", ".woff2": "font/woff2",
   ".webmanifest": "application/manifest+json",
 };
+// Подмена сборки: сервер по требованию начинает отдавать «новый выкат».
+//
+// Настоящая сборка отличается от прежней штампом в двух местах сразу:
+// `__APP_VERSION__` в /init.js (что ЗАПУЩЕНО) и `v` в /version.json (что
+// ВЫЛОЖЕНО). Здесь они переставляются оба — пересобирать wasm ради этого не
+// надо, а проверяется всё, что важно: заметит ли приложение расхождение и
+// доедет ли до него новый init.js через сервис-воркер. Именно последнее и
+// ломается незаметно: начни воркер отдавать init.js из кэша — обновление
+// перестанет доезжать, а подменой одного /version.json этого не поймать.
+const deployed = { version: null };
+
 let server = null;
 let BASE = process.env.BASE;
 if (!BASE) {
@@ -131,6 +142,23 @@ if (!BASE) {
         .replace(/^payment_base_url = .*$/m, `payment_base_url = "${process.env.PAYMENT_BASE}"`);
       res.writeHead(200, { "Content-Type": "text/plain", "Content-Security-Policy": CSP });
       res.end(cfg);
+      return;
+    }
+
+    // Притворяемся новым выкатом: те же два файла, что и правда меняются.
+    if (deployed.version && (url === "/version.json" || url === "/init.js")) {
+      const body =
+        url === "/version.json"
+          ? JSON.stringify({ v: deployed.version })
+          : fs
+              .readFileSync(path.join(DIST, "init.js"), "utf8")
+              .replace(/__APP_VERSION__="[^"]*"/, `__APP_VERSION__="${deployed.version}"`);
+      res.writeHead(200, {
+        "Content-Type": url === "/init.js" ? "text/javascript" : "application/json",
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": CSP,
+      });
+      res.end(body);
       return;
     }
 
@@ -605,6 +633,74 @@ const shown = (page, id) => page.getByTestId(id).isVisible().catch(() => false);
     check(errors.length === 0, `без ошибок исполнения${errors.length ? `: ${errors[0]}` : ""}`);
     await ctx.close();
   }
+}
+
+// ── 9. Обновление доезжает НА САМОМ ДЕЛЕ ──
+//
+// Группа 12 выше подменяет /version.json и проверяет «флаг → интерфейс». Здесь —
+// весь путь целиком: приложение работает на сборке A, выкатывается сборка B,
+// приложение это замечает при возвращении на передний план, человек жмёт
+// «Обновить» — и после перезагрузки работает УЖЕ B.
+//
+// Главное здесь — последний шаг. Сервис-воркер держит init.js сеть-вперёд ровно
+// затем, чтобы обновление доезжало; начни он отдавать его из кэша, приложение
+// осталось бы на старой сборке навсегда, а проверка №12 всё равно была бы
+// зелёной. Поэтому воркеру дают взять страницу под контроль ДО подмены.
+if (!process.env.BASE) {
+  console.log("\n18. Обновление доезжает: сборка A → сборка B");
+  const { ctx, page, errors } = await open(UAS.ios, AS_PWA);
+
+  const versionA = await page.evaluate(() => globalThis.__APP_VERSION__ || "");
+  check(!!versionA, `запущена сборка A (${versionA})`);
+  check(!(await shown(page, "tab-update-dot")), "обновления пока нет");
+
+  // Ждём, пока воркер возьмёт страницу под контроль и прекэширует init.js:
+  // иначе последний шаг проверял бы не то (успел ли кэш, а не пробивает ли его
+  // сеть-вперёд).
+  await page.evaluate(async () => {
+    await navigator.serviceWorker?.ready?.catch(() => {});
+    for (let i = 0; i < 60 && !navigator.serviceWorker?.controller; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  });
+  await page.waitForTimeout(1200);
+  const cachedInit = await page.evaluate(async () => {
+    const c = await caches.open("gym-v1");
+    return !!(await c.match("/init.js"));
+  });
+  check(cachedInit, "старый init.js лежит в кэше воркера");
+
+  // ── Выкатываем сборку B ──
+  deployed.version = "b0b0b0b0b0b0";
+
+  // Приложение проверяет обновление при возвращении на передний план.
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  const noticed = await page
+    .getByTestId("tab-update-dot")
+    .waitFor({ timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+  check(noticed, "приложение заметило новую сборку при возвращении");
+
+  await page.getByTestId("tab-settings").click();
+  check(await shown(page, "set-btn-update"), "в настройках появилась кнопка «Обновить»");
+
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "domcontentloaded" }).catch(() => {}),
+    page.getByTestId("set-btn-update").click(),
+  ]);
+  await page.waitForSelector("[data-testid]", { timeout: 20000 }).catch(() => {});
+
+  const versionB = await page.evaluate(() => globalThis.__APP_VERSION__ || "");
+  check(
+    versionB === deployed.version,
+    `после «Обновить» работает сборка B (${versionB || "—"}) — кэш воркера её не заслонил`,
+  );
+  check(!(await shown(page, "tab-update-dot")), "точка обновления погасла");
+  check(errors.length === 0, `без ошибок исполнения${errors.length ? `: ${errors[0]}` : ""}`);
+
+  deployed.version = null; // вернуть сервер к сборке A
+  await ctx.close();
 }
 
 await b.close();

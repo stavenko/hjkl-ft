@@ -281,6 +281,44 @@ await page.getByTestId('lazy-row-menu').first().click();
 await page.getByTestId('lazy-row-move').waitFor({ state: 'visible', timeout: 10000 });
 await page.waitForTimeout(400);
 await page.screenshot({ path: OUT + 'other-food-10-menu.png' });
+
+// КОПИЯ разобранной записи: своя, с теми же позициями, и вес в ней правится
+// независимо от источника.
+await page.getByTestId('lazy-row-duplicate').click();
+await page.getByTestId('diary-move-sheet').waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
+await page.locator('.modal.is-active button:has-text("Обед")').first().click();
+await page.waitForTimeout(2500);
+const copies = await page.getByTestId('diary-row-aggregate').count();
+console.log('разобранных строк после копии:', copies);
+if (copies !== 2) throw new Error(`копия не появилась: разобранных строк ${copies}`);
+await page.screenshot({ path: OUT + 'other-food-16-copied.png', fullPage: true });
+
+// Правим вес в КОПИИ и убеждаемся, что источник не поехал.
+const before = (await page.locator('[data-testid="diary-row-aggregate"]').first().innerText());
+// Кебаб именно КОПИИ: она вторая разобранная строка, и её меню надо искать
+// внутри её же строки, а не по общему счёту — между ними стоит нераспознанная.
+const copyRow = page.getByTestId('diary-row-aggregate').nth(1);
+await copyRow.getByTestId('lazy-row-menu').click();
+await page.getByTestId('lazy-row-edit').first().click();
+await page.getByTestId('lazy-food-edit').waitFor({ state: 'visible', timeout: 15000 });
+await page.getByTestId('lazy-edit-grams').first().click();
+await page.locator('.modal.is-active input').first().fill('100');
+await page.locator('.modal.is-active button:has-text("Сохранить")').first().click();
+await page.getByTestId('lazy-edit-save').click();
+await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 15000 });
+await page.waitForTimeout(2000);
+const after = (await page.locator('[data-testid="diary-row-aggregate"]').first().innerText());
+if (before !== after) throw new Error(`источник изменился вслед за копией:\n${before}\n---\n${after}`);
+console.log('источник не поехал вслед за копией');
+await page.screenshot({ path: OUT + 'other-food-17-copy-independent.png', fullPage: true });
+
+// УДАЛЕНИЕ разобранной записи целиком — раньше его в меню не было вовсе.
+await page.getByTestId('diary-row-aggregate').nth(1).getByTestId('lazy-row-menu').click();
+await page.getByTestId('lazy-row-delete').first().click();
+await page.waitForTimeout(2000);
+const left = await page.getByTestId('diary-row-aggregate').count();
+console.log('разобранных строк после удаления копии:', left);
+if (left !== 1) throw new Error(`удаление не сработало: осталось ${left}`);
 console.log('готово');
 
 await browser.close();

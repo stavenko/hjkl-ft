@@ -5,9 +5,11 @@
 //! нераспознанной записи не применимо. Вплести её туда значило бы обвешать каждую
 //! ветку проверками «а есть ли у нас вообще еда».
 //!
-//! Меню разное, и это из диктовки: у нераспознанной — удалить и изменить, у
-//! разобранной — только изменить. Разобранную не удаляют потому, что удалять её
-//! незачем: если человек хочет от неё избавиться, он правит содержимое.
+//! Меню ОДИНАКОВОЕ у обеих форм и совпадает с обычной строкой дневника:
+//! дублировать, перенести, изменить, удалить. Раньше разобранную нельзя было ни
+//! удалить, ни скопировать — это оказалось неверно: съеденное удаляют целиком, а не
+//! выскабливают по позиции, и повторить вчерашний обед хочется так же, как повторяют
+//! обычную еду.
 
 use api_types::{DiaryEntry, DiaryEntryKind, Food};
 use leptos::*;
@@ -23,8 +25,10 @@ pub fn LazyDiaryRow(
     foods: Signal<Vec<Food>>,
     /// Открыть форму правки этой записи.
     on_edit: Callback<DiaryEntry>,
-    /// Удалить запись. Зовётся только у нераспознанной.
+    /// Удалить запись целиком.
     on_delete: Callback<DiaryEntry>,
+    /// Скопировать запись в выбранный приём — тем же окном, что и у обычной строки.
+    on_duplicate: Callback<DiaryEntry>,
     /// Перенести запись в другой приём пищи — тем же окном выбора, что и у обычной
     /// строки. Держит его страница: окно одно на весь дневник.
     on_move: Callback<DiaryEntry>,
@@ -36,6 +40,7 @@ pub fn LazyDiaryRow(
     let e_edit = entry.clone();
     let e_delete = entry.clone();
     let e_move = entry.clone();
+    let e_dup = entry.clone();
     let e_badges = entry.clone();
 
     // Нераспознанная показывает СЕБЯ: снимки и обрывок описания. Надписи «Ещё не
@@ -142,8 +147,16 @@ pub fn LazyDiaryRow(
                     let e1 = e_edit.clone();
                     let e2 = e_delete.clone();
                     let e3 = e_move.clone();
+                    let e4 = e_dup.clone();
+                    // Порядок тот же, что в обычной строке: человек ищет пункт по
+                    // месту, а не перечитывает список каждый раз.
                     view! {
                         <div style=MENU_STYLE>
+                            <button
+                                attr:data-testid="lazy-row-duplicate"
+                                class=ITEM_CLASS style=ITEM_STYLE
+                                on:click=move |_| { menu_open.set(false); on_duplicate.call(e4.clone()); }
+                            >{move || t("diary.duplicate")}</button>
                             <button
                                 attr:data-testid="lazy-row-move"
                                 class=ITEM_CLASS style=ITEM_STYLE
@@ -154,16 +167,11 @@ pub fn LazyDiaryRow(
                                 class=ITEM_CLASS style=ITEM_STYLE
                                 on:click=move |_| { menu_open.set(false); on_edit.call(e1.clone()); }
                             >{move || t("diary.edit")}</button>
-                            {pending.then(|| {
-                                let e2 = e2.clone();
-                                view! {
-                                    <button
-                                        attr:data-testid="lazy-row-delete"
-                                        class=format!("{ITEM_CLASS} has-text-danger") style=ITEM_STYLE
-                                        on:click=move |_| { menu_open.set(false); on_delete.call(e2.clone()); }
-                                    >{move || t("diary.delete")}</button>
-                                }
-                            })}
+                            <button
+                                attr:data-testid="lazy-row-delete"
+                                class=format!("{ITEM_CLASS} has-text-danger") style=ITEM_STYLE
+                                on:click=move |_| { menu_open.set(false); on_delete.call(e2.clone()); }
+                            >{move || t("diary.delete")}</button>
                         </div>
                     }
                 })}

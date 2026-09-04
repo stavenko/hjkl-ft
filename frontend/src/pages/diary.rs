@@ -464,6 +464,7 @@ pub fn DiaryPage() -> impl IntoView {
                                         on_edit=Callback::new(move |e: DiaryEntry| editing_lazy.set(Some(e)))
                                         on_delete=Callback::new(move |e: DiaryEntry| delete_entry(e.id.clone()))
                                         on_move=Callback::new(move |e: DiaryEntry| move_target.set(Some(e.id.clone())))
+                                        on_duplicate=Callback::new(move |e: DiaryEntry| dup_target.set(Some(e.id.clone())))
                                     />
                                 }.into_view();
                             }
@@ -861,6 +862,12 @@ pub fn DiaryPage() -> impl IntoView {
                                         local::duplicate_diary_entry(&eid, Some(key.to_string()), None).await;
                                         invalidate();
                                         sync::push_background();
+                                        // Копия НЕРАСПОЗНАННОЙ записи так и осталась
+                                        // нераспознанной — её надо поставить в очередь,
+                                        // иначе она провисит так навсегда. Разобранной
+                                        // копии проход ничего не сделает: ответ у неё
+                                        // уже есть.
+                                        crate::services::lazy_food::run_queue_background();
                                     });
                                 }
                             >{move || t(i18n_key)}</button>

@@ -1054,25 +1054,53 @@ pub async fn duplicate_diary_entry(
     let src: DiaryEntry = db::get("diary", entry_id).await?;
     let date = on_date.unwrap_or_else(|| src.date.clone());
     let past = date != today();
-    let entry = DiaryEntry {
-        id: new_id(),
-        food_id: src.food_id.clone(),
-        date,
-        time: (!past).then(time_now),
-        grams: src.grams,
-        waste_grams: src.waste_grams,
-        // Target meal chosen in the duplicate dialog; falls back to the source's.
-        meal_label: meal_label.or_else(|| src.meal_label.clone()),
-        created_at: now(),
-        updated_at: now(),
-        ..DiaryEntry::direct()
-    };
+    let entry = copy_of(src, meal_label, date, new_id(), now(), (!past).then(time_now));
     db::put("diary", &entry).await;
     if past {
         crate::services::indicators::invalidate_day(&entry.date).await;
     }
-    crate::services::classify::enqueue(entry.food_id.clone());
+    if !entry.food_id.is_empty() {
+        crate::services::classify::enqueue(entry.food_id.clone());
+    }
     Some(entry)
+}
+
+/// Чистая часть дублирования — чтобы её можно было проверить без базы.
+///
+/// Копия несёт СВОЙ идентификатор и своё время, а всё остальное берёт у источника:
+/// еду с граммами у обычной записи, снимки, описание и разобранные позиции у
+/// ленивой. Прежде здесь стояло `..DiaryEntry::direct()`, и ленивая копия выходила
+/// пустой — из неё исчезали и позиции, и фотографии.
+///
+/// Позиции копируются ПО ЗНАЧЕНИЮ, и это ровно то, что нужно: у копии свой список,
+/// и вес в ней правится независимо от источника. Снимки — хэши, и делить их с
+/// источником правильно: хранилище картинок адресует по содержимому, одна
+/// фотография в двух записях лежит один раз, а обрезка в копии заведёт новый хэш и
+/// оригинала не тронет.
+///
+/// Разобранная копия остаётся разобранной: заново спрашивать модель не о чем, ответ
+/// уже есть. Но `recognized_at` ставится НОВЫЙ — от него считается недельный срок
+/// хранения картинок, и у копии он свой.
+fn copy_of(
+    src: DiaryEntry,
+    meal_label: Option<String>,
+    date: String,
+    id: String,
+    at: String,
+    time: Option<String>,
+) -> DiaryEntry {
+    let recognized_at = src.recognized_at.as_ref().map(|_| at.clone());
+    DiaryEntry {
+        id,
+        date,
+        time,
+        // Приём выбран в окне дублирования; не выбрали — берём у источника.
+        meal_label: meal_label.or(src.meal_label),
+        created_at: at.clone(),
+        updated_at: at,
+        recognized_at,
+        ..src
+    }
 }
 
 /// Перенести запись в другой приём пищи.
@@ -2835,5 +2863,97 @@ mod recipe_tests {
         assert_eq!(out.images, src.images);
         assert_eq!(out.items, src.items);
         assert_eq!(out.label, src.label);
+    }
+
+    // ── копия записи ──
+
+    #[test]
+    fn kopiya_obychnoj_zapisi_beret_edu_i_grammy() {
+        let src = DiaryEntry {
+            id: "e1".into(),
+            food_id: "f1".into(),
+            date: "2026-09-04".into(),
+            grams: 150.0,
+            meal_label: Some("breakfast".into()),
+            created_at: "2026-09-04T08:00:00Z".into(),
+            updated_at: "2026-09-04T08:00:00Z".into(),
+            ..DiaryEntry::direct()
+        };
+        let out = copy_of(src.clone(), Some("dinner".into()), src.date.clone(),
+                          "e2".into(), "2026-09-04T19:00:00Z".into(), Some("19:00".into()));
+        assert_eq!(out.id, "e2", "у копии свой идентификатор");
+        assert_eq!(out.food_id, "f1");
+        assert_eq!(out.grams, 150.0);
+        assert_eq!(out.meal_label.as_deref(), Some("dinner"));
+        assert_eq!(out.created_at, "2026-09-04T19:00:00Z", "копия создана сейчас, а не тогда");
+    }
+
+    #[test]
+    fn kopiya_lenivoj_zapisi_ne_vyhodit_pustoj() {
+        // Раньше копия собиралась через `DiaryEntry::direct()` и теряла всё, чем
+        // ленивая запись и жива: снимки, описание, разобранные позиции.
+        let src = DiaryEntry {
+            id: "e1".into(),
+            date: "2026-09-04".into(),
+            meal_label: Some("breakfast".into()),
+            kind: api_types::DiaryEntryKind::Aggregate,
+            description: Some("печень и капуста".into()),
+            images: vec!["h1".into(), "h2".into()],
+            items: vec![
+                api_types::DiaryFoodItem { food_id: "f-liver".into(), grams: 300.0 },
+                api_types::DiaryFoodItem { food_id: "f-cauli".into(), grams: 400.0 },
+            ],
+            label: Some("Печень со сливками".into()),
+            recognized_at: Some("2026-09-04T08:30:00Z".into()),
+            created_at: "2026-09-04T08:00:00Z".into(),
+            updated_at: "2026-09-04T08:00:00Z".into(),
+            ..DiaryEntry::direct()
+        };
+        let out = copy_of(src.clone(), Some("dinner".into()), src.date.clone(),
+                          "e2".into(), "2026-09-04T19:00:00Z".into(), Some("19:00".into()));
+        assert_eq!(out.kind, api_types::DiaryEntryKind::Aggregate, "копия остаётся разобранной");
+        assert_eq!(out.items, src.items, "позиции на месте");
+        assert_eq!(out.images, src.images, "снимки на месте");
+        assert_eq!(out.description, src.description);
+        assert_eq!(out.label, src.label);
+        // Срок хранения картинок считается от разбора — у копии он свой.
+        assert_eq!(out.recognized_at.as_deref(), Some("2026-09-04T19:00:00Z"));
+    }
+
+    #[test]
+    fn ves_v_kopii_pravitsya_nezavisimo_ot_istochnika() {
+        let src = DiaryEntry {
+            id: "e1".into(),
+            kind: api_types::DiaryEntryKind::Aggregate,
+            items: vec![api_types::DiaryFoodItem { food_id: "f-liver".into(), grams: 300.0 }],
+            date: "2026-09-04".into(),
+            created_at: "2026-09-04T08:00:00Z".into(),
+            updated_at: "2026-09-04T08:00:00Z".into(),
+            ..DiaryEntry::direct()
+        };
+        let mut out = copy_of(src.clone(), None, src.date.clone(),
+                              "e2".into(), "2026-09-04T19:00:00Z".into(), None);
+        out.items[0].grams = 120.0;
+        assert_eq!(out.items[0].grams, 120.0);
+        assert_eq!(src.items[0].grams, 300.0, "источник не должен измениться");
+    }
+
+    #[test]
+    fn nerazpoznannaya_kopiya_ostayotsya_nerazpoznannoj() {
+        // Разбора не было — и у копии его нет: `recognized_at` не выдумывается.
+        let src = DiaryEntry {
+            id: "e1".into(),
+            kind: api_types::DiaryEntryKind::Pending,
+            images: vec!["h1".into()],
+            description: Some("что-то съел".into()),
+            date: "2026-09-04".into(),
+            created_at: "2026-09-04T08:00:00Z".into(),
+            updated_at: "2026-09-04T08:00:00Z".into(),
+            ..DiaryEntry::direct()
+        };
+        let out = copy_of(src, None, "2026-09-04".into(), "e2".into(),
+                          "2026-09-04T19:00:00Z".into(), None);
+        assert_eq!(out.kind, api_types::DiaryEntryKind::Pending);
+        assert!(out.recognized_at.is_none(), "разбора не было — отметке взяться неоткуда");
     }
 }

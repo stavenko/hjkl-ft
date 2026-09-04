@@ -95,5 +95,58 @@ await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 
 await page.waitForTimeout(2500);
 console.log('в дневнике строк:', await page.locator('[data-testid^="diary-"]').count());
 await page.screenshot({ path: OUT + 'other-food-6-diary.png' });
+
+// РАЗОБРАННАЯ запись. Настоящий разбор отсюда не запустить: токен ненастоящий, и
+// ai-воркер отвечает 401. Поэтому берём ТУ ЖЕ запись (её id и её снимки) и
+// подменяем её тем, чем она стала бы после разбора: kind=aggregate, позиции с
+// граммами, короткий лейбл. Продукты кладём рядом — по ним считаются КБЖУ.
+const pendingRow = await page.evaluate(async () => {
+  const names = await indexedDB.databases();
+  const target = names.find((n) => /^hjkl-ft-/.test(n.name || ''));
+  const db = await new Promise((res, rej) => {
+    const r = indexedDB.open(target.name);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  const rows = await new Promise((res) => {
+    const r = db.transaction('diary').objectStore('diary').getAll();
+    r.onsuccess = () => res(r.result);
+  });
+  return rows.find((e) => e.kind === 'pending') || null;
+});
+if (!pendingRow) throw new Error('нераспознанной записи в базе нет — подменять нечего');
+
+const nowIso = new Date().toISOString();
+await page.evaluate(({ row, now }) => {
+  const food = (id, name, kcal, p, f, c) => ({
+    id, name, kcal, protein: p, fat: f, carbs: c,
+    nutrients: {}, keywords: [], package_weight: null,
+    is_recipe: false, recipe_id: null, archived: false, is_restaurant: false,
+    created_at: now, updated_at: now,
+  });
+  localStorage.setItem('ft_test_seed', JSON.stringify({
+    foods: [
+      food('f-liver', 'Печень говяжья со сливками', 165, 17.4, 9.1, 3.2),
+      food('f-cauli', 'Капуста цветная варёная', 29, 2.3, 0.3, 4.1),
+      food('f-smetana', 'Сметана 20%', 206, 2.8, 20.0, 3.2),
+    ],
+    diary: [{
+      ...row,
+      kind: 'aggregate',
+      label: 'Печень со сливками и цветная капуста',
+      items: [
+        { food_id: 'f-liver', grams: 300 },
+        { food_id: 'f-cauli', grams: 400 },
+        { food_id: 'f-smetana', grams: 30 },
+      ],
+      recognized_at: now,
+      updated_at: now,
+    }],
+  }));
+}, { row: pendingRow, now: nowIso });
+await page.reload({ waitUntil: 'load' });
+await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 25000 });
+await page.waitForTimeout(2500);
+await page.screenshot({ path: OUT + 'other-food-7-recognised.png' });
 console.log('готово');
 await browser.close();

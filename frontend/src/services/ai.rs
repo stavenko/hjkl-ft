@@ -316,10 +316,14 @@ where
 /// rejected answer costs one attempt like any other failure — the model gets
 /// another go instead of the caller storing a number nobody stands behind.
 ///
-/// EVERY failure mode is retryable here: a dropped fetch, an empty content stream,
-/// malformed JSON, a failed check. This used to be three hand-copied loops that
-/// disagreed with each other — in two of them an `execute` error escaped the loop
-/// through `?` and failed the whole call on the first hiccup.
+/// Retryable failure modes: a dropped fetch, an empty content stream, malformed
+/// JSON, a failed check. This used to be three hand-copied loops that disagreed with
+/// each other — in two of them an `execute` error escaped the loop through `?` and
+/// failed the whole call on the first hiccup.
+///
+/// НЕ повторяется ответ, который не изменится: 401, 403, 400 и прочие 4xx, кроме
+/// 408 и 429 (`errors::worth_retrying`). Раньше повторялось всё подряд, и один
+/// протухший ключ стоил трёх запросов на каждый разбор.
 pub async fn generate_validated<T>(
     prompt: String,
     on_token: impl Fn(AiPhase) + Clone + 'static,
@@ -343,6 +347,9 @@ where
             Ok(r) => r,
             Err(e) => {
                 last_err = format!("LLM execute error: {e:?}");
+                if !crate::services::errors::worth_retrying(&last_err) {
+                    break;
+                }
                 continue;
             }
         };
@@ -371,6 +378,11 @@ where
             Ok(o) => o,
             Err(e) => {
                 last_err = format!("LLM output error: {e:?}");
+                // Повтор ТОЛЬКО если ответ может выйти другим. Три захода на 401 —
+                // это три оплаченных запроса и один и тот же ответ (§6.6).
+                if !crate::services::errors::worth_retrying(&last_err) {
+                    break;
+                }
                 continue;
             }
         };

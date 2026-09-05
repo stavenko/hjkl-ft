@@ -8,7 +8,7 @@ use api_types::*;
 use crate::components::food_weight_modal::FoodWeightModal;
 use crate::components::food_edit_modal::FoodEditModal;
 use crate::services::sticky::{sticky, sticky_keyed};
-use crate::services::{local, sync};
+use crate::services::{db, local, sync};
 use crate::services::i18n::t;
 
 // Process-lifetime caches so navigating back to the diary paints the last-known
@@ -168,7 +168,21 @@ pub fn DiaryPage() -> impl IntoView {
     }
 
     // Version counter: bump after any write → all resources re-read from IndexedDB
-    let version = create_rw_signal(0u32);
+    let own_writes = create_rw_signal(0u32);
+
+    // ЧУЖИЕ записи в базу — тоже повод перечитать. Своего счётчика мало: разбор
+    // ленивой записи заканчивается В ФОНЕ, уже после того как страница отрисована,
+    // и человек, оставшийся на дневнике, не увидел бы ни разобравшейся записи, ни
+    // сообщения о неудаче до тех пор, пока не уйдёт со страницы и не вернётся. Это
+    // ровно тот случай, ради которого возможность и делалась: сфотографировал и
+    // занимаешься своим делом. Счётчики базы поднимает `db::put`, кто бы ни писал, —
+    // фон, синхронизация или сама страница.
+    //
+    // `foods` здесь не для порядка: разбор ЗАВОДИТ новую еду, и без него строка
+    // обновилась бы, а названия в ней остались бы от старого списка.
+    let db_diary = db::version("diary");
+    let db_foods = db::version("foods");
+    let version = Signal::derive(move || own_writes.get() + db_diary.get() + db_foods.get());
 
     let editing = create_rw_signal(None::<(String, Food, f64, f64, bool)>);
     let menu_open = create_rw_signal(None::<String>);
@@ -234,7 +248,7 @@ pub fn DiaryPage() -> impl IntoView {
             .unwrap_or_default()
     };
 
-    let invalidate = move || version.update(|v| *v += 1);
+    let invalidate = move || own_writes.update(|v| *v += 1);
 
     // Какую ленивую запись сейчас правим. Форма одна на обе формы записи: у
     // нераспознанной нижняя половина просто пуста.

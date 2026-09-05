@@ -81,13 +81,9 @@ pub enum Failure {
 
 /// Код ответа из технической причины: `HTTP 401: …`, `stream HTTP 503`.
 ///
-/// Чистая функция, потому что от неё зависит, повторять запрос или нет, — а такое
-/// правило проверяется тестом, а не ожиданием следующего сбоя.
-pub fn http_status(cause: &str) -> Option<u16> {
-    let at = cause.find("HTTP ")? + "HTTP ".len();
-    let digits: String = cause[at..].chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse().ok()
-}
+/// Живёт в `errors`, а не здесь: по нему же решается, повторять ли ЛЮБОЙ запрос к
+/// модели, а не только разбор еды. Две копии этого правила однажды разошлись бы.
+pub use crate::services::errors::http_status;
 
 impl Failure {
     /// Стоит ли пробовать ещё раз. ТОЛЬКО 5xx.

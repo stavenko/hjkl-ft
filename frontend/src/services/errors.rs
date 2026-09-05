@@ -212,6 +212,36 @@ pub fn clear() {
     }
 }
 
+/// Код ответа из технической причины: `HTTP 401: …`, `stream HTTP 503`.
+///
+/// Чистая функция, потому что от неё зависит, повторять запрос или нет, — а такое
+/// правило проверяется тестом, а не ожиданием следующего сбоя.
+pub fn http_status(cause: &str) -> Option<u16> {
+    let at = cause.find("HTTP ")? + "HTTP ".len();
+    let digits: String = cause[at..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+/// Есть ли смысл повторять запрос, сорвавшийся с такой причиной.
+///
+/// Правило одно на всех, кто ходит к модели, и живёт ЗДЕСЬ, а не у каждого
+/// вызывающего: три захода на протухший ключ — это три оплаченных запроса,
+/// три записи в журнале и ни одного шанса на другой ответ.
+///
+/// - **Код есть и он 4xx** — не повторяем. 401 и 403 не изменятся от настойчивости,
+///   400 и 404 тем более. Исключения два: 408 (таймаут) и 429 (слишком часто) — оба
+///   про «сейчас», а не про «вообще».
+/// - **Код есть и он 5xx** — повторяем: сервер прилёг, это проходит само.
+/// - **Кода нет** — повторяем. Оборванный поток, пропавшая сеть, пустой ответ,
+///   неразобранный JSON: всё это на втором заходе часто получается.
+pub fn worth_retrying(cause: &str) -> bool {
+    match http_status(cause) {
+        Some(408) | Some(429) => true,
+        Some(s) if (400..500).contains(&s) => false,
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +275,32 @@ mod tests {
         // Одна поломка на сотне продуктов обязана сложиться в один код.
         assert_eq!(code_of("food.iron|timeout"), code_of("food.iron|timeout"));
         assert_ne!(code_of("food.iron|timeout"), code_of("food.iron|bad json"));
+    }
+
+    #[test]
+    fn kod_otveta_vychityvaetsya_iz_prichiny() {
+        assert_eq!(http_status("LLM output error: ModelExecution(\"HTTP 401: nope\")"), Some(401));
+        assert_eq!(http_status("stream HTTP 503"), Some(503));
+        assert_eq!(http_status("сеть пропала"), None);
+    }
+
+    #[test]
+    fn na_chetyresta_pervuyu_ne_dolbimsya() {
+        // Ровно то, ради чего правило и заведено: протухший ключ не лечится повтором.
+        assert!(!worth_retrying("HTTP 401: Unauthorized"));
+        assert!(!worth_retrying("HTTP 403: Forbidden"));
+        assert!(!worth_retrying("HTTP 400: bad request"));
+    }
+
+    #[test]
+    fn to_chto_prohodit_samo_povtoryaem() {
+        assert!(worth_retrying("HTTP 500: oops"));
+        assert!(worth_retrying("HTTP 503: down"));
+        // «Слишком часто» и «не успел» — про сейчас, а не про вообще.
+        assert!(worth_retrying("HTTP 429: slow down"));
+        assert!(worth_retrying("HTTP 408: timeout"));
+        // Кода нет — модель сморозила чушь или оборвалась сеть; второй заход помогает.
+        assert!(worth_retrying("parse error: expected value"));
+        assert!(worth_retrying("model returned an empty response"));
     }
 }

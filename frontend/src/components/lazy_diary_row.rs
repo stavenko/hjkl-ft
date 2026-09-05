@@ -61,8 +61,10 @@ pub fn LazyDiaryRow(
     // Разбор не удался — говорим об этом прямо (§6.6). Пока попытки не кончились,
     // причина всё равно показывается: человек вправе знать, что происходит, и
     // поправить снимки, не дожидаясь третьего провала.
+    // Сообщение уже говорит всё, что нужно: и что случилось, и что делать. Отдельной
+    // строки «попытки кончились» нет — она была бы вторым голосом об одном и том же,
+    // а при техническом сбое ещё и неверным советом «поправьте снимки».
     let failure = pending.then(|| entry.recognition_error.clone()).flatten();
-    let gave_up = pending && entry.recognition_tries >= crate::services::lazy_food::RECOGNITION_TRIES;
 
     view! {
         <div
@@ -109,14 +111,11 @@ pub fn LazyDiaryRow(
                 // Причина неудачи — под кадрами и описанием, а не вместо них: снимки
                 // человек узнаёт, а сообщение читает.
                 {failure.clone().map(|reason| view! {
+                    // `pre-wrap`: у технического сбоя фраза в три строки — что
+                    // случилось, код, и что мы уже знаем.
                     <p attr:data-testid="lazy-row-error" class="is-size-7 has-text-danger"
-                        style="margin: 4px 0 0; line-height: 1.25;">
+                        style="margin: 4px 0 0; line-height: 1.25; white-space: pre-wrap;">
                         {reason}
-                        {gave_up.then(|| view! {
-                            <span attr:data-testid="lazy-row-gave-up" style="display: block; margin-top: 3px;">
-                                {move || t("lazy_food.err.gave_up")}
-                            </span>
-                        })}
                     </p>
                 })}
 

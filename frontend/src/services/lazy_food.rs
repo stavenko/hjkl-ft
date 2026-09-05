@@ -24,28 +24,66 @@ pub fn awaiting_recognition(entries: &[DiaryEntry]) -> Vec<&DiaryEntry> {
     entries
         .iter()
         .filter(|e| {
-            !e.deleted && e.kind == DiaryEntryKind::Pending && e.recognition_tries < RECOGNITION_TRIES
+            !e.deleted && e.kind == DiaryEntryKind::Pending && e.recognition_tries < TRIES_ON_5XX
         })
         .collect()
 }
 
-/// Сколько раз пробуем разобрать запись, прежде чем оставить её в покое.
+/// Сколько раз пробуем ПРИ 5xx, прежде чем оставить запись в покое.
 ///
-/// Три, а не «пока не выйдет»: неудача бывает от сети и от смазанного кадра. Первая
-/// пройдёт сама, вторая не пройдёт никогда, и различить их изнутри нечем. Три
-/// попытки покрывают случайное и не жгут запросы вечно на безнадёжном.
+/// Только при 5xx. Сервер прилёг — это пройдёт само, и вторая попытка имеет смысл.
+/// Долбиться в 401 смысла нет никакого: ответ не изменится ни на второй раз, ни на
+/// двадцатый, а запросы будут гореть.
 ///
 /// Счётчик обнуляется, когда человек правит снимки или описание: это уже другой
 /// вопрос к модели, и отвечать на него надо заново.
-pub const RECOGNITION_TRIES: u32 = 3;
+pub const TRIES_ON_5XX: u32 = 3;
 
-/// Запись после неудачного разбора: причина словами и попытка в счёт.
+/// Чем кончился неудавшийся разбор.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Failure {
+    /// Человек может поправить сам: нечего разбирать, ни один кадр не прочёлся, еды
+    /// не нашлось. Строка уже готова к показу.
+    Actionable(String),
+    /// Сбой на нашей стороне. Внутри — сырая причина: она уходит в телеметрию, а
+    /// человеку показывается фраза с кодом.
+    Technical(String),
+}
+
+/// Код ответа из технической причины: `HTTP 401: …`, `stream HTTP 503`.
+///
+/// Чистая функция, потому что от неё зависит, повторять запрос или нет, — а такое
+/// правило проверяется тестом, а не ожиданием следующего сбоя.
+pub fn http_status(cause: &str) -> Option<u16> {
+    let at = cause.find("HTTP ")? + "HTTP ".len();
+    let digits: String = cause[at..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+impl Failure {
+    /// Стоит ли пробовать ещё раз. ТОЛЬКО 5xx.
+    pub fn retryable(&self) -> bool {
+        match self {
+            Failure::Actionable(_) => false,
+            Failure::Technical(cause) => {
+                http_status(cause).is_some_and(|s| (500..600).contains(&s))
+            }
+        }
+    }
+}
+
+/// Запись после неудачного разбора.
+///
+/// `retry_allowed` — можно ли пробовать ещё. Нельзя — счётчик выводится за предел, и
+/// очередь эту запись больше не возьмёт. Это честнее отдельного флага: «попыток не
+/// осталось» и «повторять незачем» для очереди одно и то же.
 ///
 /// Чистая функция — чтобы правило проверялось тестом, а не тремя провалами подряд.
-pub fn after_failure(entry: &DiaryEntry, reason: &str, at: String) -> DiaryEntry {
+pub fn after_failure(entry: &DiaryEntry, message: &str, retry_allowed: bool, at: String) -> DiaryEntry {
+    let tries = entry.recognition_tries.saturating_add(1);
     DiaryEntry {
-        recognition_error: Some(reason.to_string()),
-        recognition_tries: entry.recognition_tries.saturating_add(1),
+        recognition_error: Some(message.to_string()),
+        recognition_tries: if retry_allowed { tries } else { TRIES_ON_5XX },
         updated_at: at,
         ..entry.clone()
     }
@@ -233,7 +271,7 @@ pub async fn resolve_item(item: &ai::MergedItem, index: &food_search::Index, foo
 /// кадре не отменяет остальные: у человека может быть три снимка, из которых один
 /// смазан. Ни одного разобранного кадра и пустое описание — разбирать нечего, и
 /// запись остаётся нераспознанной до следующей попытки.
-pub async fn recognize(entry: &DiaryEntry) -> Result<DiaryEntry, String> {
+pub async fn recognize(entry: &DiaryEntry) -> Result<DiaryEntry, Failure> {
     let mut frames = Vec::new();
     let mut unread = 0usize;
     for hash in &entry.images {
@@ -250,13 +288,13 @@ pub async fn recognize(entry: &DiaryEntry) -> Result<DiaryEntry, String> {
     }
     let description = entry.description.clone().unwrap_or_default();
     if frames.is_empty() && description.trim().is_empty() {
-        return Err(if unread > 0 {
+        return Err(Failure::Actionable(if unread > 0 {
             // Снимки были, но ни один не прочёлся, и слов человек не написал.
             // Подставить справочные значения нельзя — их не из чего брать.
             t("lazy_food.err.no_frames_read").to_string()
         } else {
             t("lazy_food.err.nothing_to_read").to_string()
-        });
+        }));
     }
 
     // Сбой модели или сети НЕ уходит человеку как есть: в записи должно оказаться
@@ -264,13 +302,12 @@ pub async fn recognize(entry: &DiaryEntry) -> Result<DiaryEntry, String> {
     // Подробность нужна нам и живёт в консоли; человеку нужно, что делать дальше.
     let merged = match ai::merge_into_items(&frames, &description, |_| {}).await {
         Ok(m) => m,
-        Err(e) => {
-            leptos::logging::warn!("разбор списка не удался: {e}");
-            return Err(t("lazy_food.err.model_failed").to_string());
-        }
+        // Сырую причину НЕ показываем — она уходит в телеметрию, а человеку
+        // достаётся фраза с кодом. Решение, повторять ли, принимается по ней же.
+        Err(e) => return Err(Failure::Technical(e)),
     };
     if merged.items.is_empty() {
-        return Err(t("lazy_food.err.empty_list").to_string());
+        return Err(Failure::Actionable(t("lazy_food.err.empty_list").to_string()));
     }
 
     // Сопоставляем ТОЛЬКО с неархивированными копиями (§6.4): архивированную не
@@ -488,31 +525,57 @@ mod tests {
     // ── §6.6: неудача не прячется ──
 
     #[test]
-    fn neudacha_lozhitsya_v_zapis_i_schitaetsya() {
+    fn kod_otveta_vychityvaetsya_iz_prichiny() {
+        assert_eq!(http_status("HTTP 401: {\"error\":\"Unauthorized\"}"), Some(401));
+        assert_eq!(http_status("stream HTTP 503"), Some(503));
+        assert_eq!(http_status("LLM output error: ModelExecution(\"HTTP 500: …\")"), Some(500));
+        assert_eq!(http_status("сеть отвалилась"), None, "кода нет — и выдумывать нечего");
+    }
+
+    #[test]
+    fn povtoryaem_tolko_pyatisotye() {
+        // Сервер прилёг — пройдёт само, вторая попытка имеет смысл.
+        assert!(Failure::Technical("HTTP 500: сервер".into()).retryable());
+        assert!(Failure::Technical("stream HTTP 503".into()).retryable());
+        // А это не изменится ни на второй раз, ни на двадцатый.
+        assert!(!Failure::Technical("HTTP 401: Unauthorized".into()).retryable());
+        assert!(!Failure::Technical("HTTP 403: Forbidden".into()).retryable());
+        assert!(!Failure::Technical("HTTP 429: Too Many Requests".into()).retryable());
+        // Без кода повторять тоже незачем: мы не знаем, что чинить.
+        assert!(!Failure::Technical("ответ не разобрался".into()).retryable());
+        // То, что человек правит сам, повтором не лечится вовсе.
+        assert!(!Failure::Actionable("опишите словами".into()).retryable());
+    }
+
+    #[test]
+    fn neudacha_lozhitsya_v_zapis() {
         let e = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
-        let once = after_failure(&e, "не прочёлся ни один снимок", "2026-09-04T10:00:00Z".into());
+        let once = after_failure(&e, "не прочёлся ни один снимок", true, "2026-09-04T10:00:00Z".into());
         assert_eq!(once.recognition_error.as_deref(), Some("не прочёлся ни один снимок"));
         assert_eq!(once.recognition_tries, 1);
-        let twice = after_failure(&once, "снова", "2026-09-04T11:00:00Z".into());
-        assert_eq!(twice.recognition_tries, 2);
     }
 
     #[test]
-    fn beznadyozhnuyu_zapis_ochered_bolshe_ne_beret() {
-        let mut hopeless = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
-        hopeless.recognition_tries = RECOGNITION_TRIES;
-        let fresh = DiaryEntry { id: "e2".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
-        let all = vec![hopeless, fresh];
-        let queue = awaiting_recognition(&all);
-        assert_eq!(queue.len(), 1, "безнадёжная выпадает из очереди");
-        assert_eq!(queue[0].id, "e2");
+    fn bez_prava_na_povtor_zapis_srazu_vypadaet_iz_ocheredi() {
+        // 401 не должен получить ни второй попытки, ни третьей: счётчик сразу
+        // выводится за предел.
+        let e = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
+        let out = after_failure(&e, "технический сбой", false, "2026-09-04T10:00:00Z".into());
+        assert_eq!(out.recognition_tries, TRIES_ON_5XX);
+        assert!(awaiting_recognition(&[out]).is_empty(), "очередь её больше не берёт");
     }
 
     #[test]
-    fn poka_popytki_est_zapis_ostayotsya_v_ocheredi() {
-        let mut tried = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
-        tried.recognition_tries = RECOGNITION_TRIES - 1;
-        assert_eq!(awaiting_recognition(&[tried]).len(), 1);
+    fn pyatisotaya_poluchaet_svoi_tri_popytki() {
+        let mut e = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
+        for expected in 1..TRIES_ON_5XX {
+            e = after_failure(&e, "сервис недоступен", true, "2026-09-04T10:00:00Z".into());
+            assert_eq!(e.recognition_tries, expected);
+            assert_eq!(awaiting_recognition(&[e.clone()]).len(), 1, "попытки ещё есть");
+        }
+        // Последняя: права на повтор уже нет, и запись выпадает.
+        let last = after_failure(&e, "сервис недоступен", false, "2026-09-04T10:00:00Z".into());
+        assert!(awaiting_recognition(&[last]).is_empty());
     }
 }
 
@@ -556,12 +619,23 @@ pub async fn run_queue() {
         }
         match recognize(&entry).await {
             Ok(_) => crate::services::sync::push_background(),
-            Err(e) => {
-                // Неудача не прячется в консоль: она ложится в саму запись и
-                // показывается человеку (§6.6), а попытка идёт в счёт, чтобы
-                // безнадёжное не молотило вечно.
-                leptos::logging::warn!("запись {} не разобрана: {e}", entry.id);
-                let marked = after_failure(&entry, &e, local::now());
+            Err(failure) => {
+                // Повторяем ТОЛЬКО 5xx и только пока не вышли попытки: 401 не
+                // изменится ни на второй раз, ни на двадцатый.
+                let retry = failure.retryable() && entry.recognition_tries + 1 < TRIES_ON_5XX;
+                let message = match &failure {
+                    Failure::Actionable(m) => {
+                        leptos::logging::warn!("запись {} не разобрана: {m}", entry.id);
+                        m.clone()
+                    }
+                    Failure::Technical(cause) => {
+                        // Причина целиком уходит в телеметрию и в консоль; человеку
+                        // достаётся фраза с кодом.
+                        leptos::logging::warn!("запись {} — технический сбой: {cause}", entry.id);
+                        crate::services::errors::recognition_failed(cause)
+                    }
+                };
+                let marked = after_failure(&entry, &message, retry, local::now());
                 db::put("diary", &marked).await;
                 crate::services::sync::push_background();
             }

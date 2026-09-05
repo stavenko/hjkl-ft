@@ -327,7 +327,7 @@ if (left !== 1) throw new Error(`удаление не сработало: ос�
 const pendingRow = pendings[1];
 await page.evaluate(({ row }) => {
   localStorage.setItem('ft_test_seed', JSON.stringify({
-    diary: [{ ...row, recognition_error: 'Не удалось прочесть ни один снимок. Опишите словами, что вы съели, или переснимите', recognition_tries: 3 }],
+    diary: [{ ...row, recognition_error: 'Произошёл технический сбой при распознавании еды.\nКод ошибки: A1B2C3\nНаши инженеры уже знают.', recognition_tries: 3 }],
   }));
 }, { row: pendingRow });
 await page.reload({ waitUntil: 'load' });
@@ -335,10 +335,11 @@ await page.getByTestId('meal-add').first().waitFor({ state: 'visible', timeout: 
 await page.waitForTimeout(2000);
 const errText = await page.getByTestId('lazy-row-error').first().innerText();
 console.log('строка о неудаче:', errText.replace(/\s+/g, ' ').slice(0, 120));
-if (!errText.includes('прочесть')) throw new Error('причина неудачи не показана');
-if (await page.getByTestId('lazy-row-gave-up').count() === 0) {
-  throw new Error('после исчерпания попыток об этом не сказано');
+if (!errText.includes('Код ошибки')) throw new Error('код ошибки не показан');
+if (errText.includes('HTTP') || errText.includes('ModelExecution')) {
+  throw new Error(`человеку уехала техническая строка: ${errText}`);
 }
+
 await page.screenshot({ path: OUT + 'other-food-18-failure.png', fullPage: true });
 console.log('готово');
 

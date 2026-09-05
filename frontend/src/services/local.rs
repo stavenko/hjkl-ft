@@ -185,7 +185,11 @@ pub(crate) fn live_image_hashes(
 pub async fn sweep_images() -> usize {
     let entries: Vec<DiaryEntry> = db::list_all("diary").await;
     let live = live_image_hashes(&entries, chrono::Utc::now());
-    crate::services::images::prune(&live).await
+    let gone = crate::services::images::prune(&live).await;
+    // Кэш шагов разбора чистится ТЕМ ЖЕ проходом и по тому же сроку: прочтение
+    // кадра переживать сам кадр незачем — перечитать его всё равно будет нечем.
+    crate::services::ai_steps::sweep(chrono::Utc::now(), IMAGE_KEEP_DAYS).await;
+    gone
 }
 
 /// All distinct dates with at least one non-deleted diary entry.

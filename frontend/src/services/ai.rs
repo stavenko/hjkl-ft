@@ -3849,7 +3849,10 @@ pub(crate) fn prompt_dump() -> serde_json::Value {
 /// Кадров у одного продукта бывает несколько — название на одном, таблица на
 /// другом, масса на третьем, — и каждый разбирается порознь. Поэтому пустое поле
 /// здесь нормальный ответ, а не провал: сводит кадры второй проход.
-#[derive(Debug, Clone, Deserialize)]
+/// `Serialize` здесь не для отправки — ответы модели мы только читаем. Он нужен,
+/// чтобы прочтение кадра легло в кэш шагов (`ai_steps`) и завтрашняя попытка не
+/// оплачивала его второй раз.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PhotoRead {
     #[serde(default)]
     pub what_is_on_the_photo: String,
@@ -3874,7 +3877,7 @@ pub struct PhotoRead {
     pub all_text_verbatim: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PhotoFood {
     #[serde(default)]
     pub name: String,
@@ -4084,7 +4087,7 @@ pub async fn read_regions(
 /// Откуда взялись граммы. Объявляется ДО самих граммов: сначала правило, потом
 /// число по нему. Порядок полей в этом файле не украшение — перестановка одного
 /// поля однажды стоила трёх верных ответов из двадцати.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct MergedItem {
     /// Название продукта по-русски. Если оно напечатано на упаковке — бери
     /// напечатанное, вместе с видом продукта (не «Картошка», а «Десерт «Картошка»»).
@@ -4116,7 +4119,7 @@ pub struct MergedItem {
     pub carbs_per_100g: Option<f64>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct MergedItems {
     /// ПО-РУССКИ, одним-двумя предложениями: какие кадры относятся к одному и тому же
     /// продукту и почему; если кадров нет — почему список получился таким из описания.

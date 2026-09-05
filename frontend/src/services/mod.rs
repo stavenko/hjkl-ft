@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod ai_steps;
 pub mod api;
 pub mod app_flags;
 pub mod bug_report;

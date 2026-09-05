@@ -13,6 +13,7 @@
 
 use api_types::{DiaryEntry, DiaryEntryKind, DiaryFoodItem, Food};
 
+use crate::services::ai_steps::{self, Retry};
 use crate::services::{ai, db, food_search, i18n::t, images, local};
 
 /// Записи, которые ждут разбора. Чистая функция: очередь — это не отдельное
@@ -76,7 +77,13 @@ pub enum Failure {
     Actionable(String),
     /// Сбой на нашей стороне. Внутри — сырая причина: она уходит в телеметрию, а
     /// человеку показывается фраза с кодом.
-    Technical(String),
+    Technical {
+        cause: String,
+        /// Когда возвращаться. Считается НЕ здесь, а на шагах конвейера
+        /// (`ai_steps::Retry::worst`): у записи из трёх снимков может сорваться
+        /// каждый по-своему, и ждать надо по самому тяжёлому.
+        retry: Retry,
+    },
 }
 
 /// Код ответа из технической причины: `HTTP 401: …`, `stream HTTP 503`.
@@ -86,15 +93,41 @@ pub enum Failure {
 pub use crate::services::errors::http_status;
 
 impl Failure {
-    /// Стоит ли пробовать ещё раз. ТОЛЬКО 5xx.
+    /// Брать ли эту запись в очередь на следующем же проходе.
+    ///
+    /// Раньше правило выводилось из текста причины прямо здесь и расходилось с
+    /// таким же правилом слоем ниже. Теперь политика приезжает готовой с того
+    /// шага, который её и определил.
     pub fn retryable(&self) -> bool {
-        match self {
-            Failure::Actionable(_) => false,
-            Failure::Technical(cause) => {
-                http_status(cause).is_some_and(|s| (500..600).contains(&s))
-            }
-        }
+        matches!(self, Failure::Technical { retry: Retry::Now, .. })
     }
+
+    /// Технический сбой возвращается сам (сразу или через сутки); ожидание
+    /// человека — нет.
+    pub fn technical(&self) -> bool {
+        matches!(self, Failure::Technical { .. })
+    }
+}
+
+/// Собрать отказ записи из того, чем кончились её шаги.
+///
+/// Чистая функция, и это ровно то правило, ради которого затевался кэш шагов:
+/// запись собирается, ТОЛЬКО если удались все шаги, а ждёт она по самому тяжёлому
+/// из блокирующих. Проверяется тестом, а не наблюдением за живой очередью.
+pub fn blocked_by(steps: &[ai_steps::Failed], human_message: &str) -> Option<Failure> {
+    let worst = Retry::worst(steps.iter().map(|f| f.retry))?;
+    if worst == Retry::Human {
+        return Some(Failure::Actionable(human_message.to_string()));
+    }
+    // Причина берётся у САМОГО ТЯЖЁЛОГО шага: именно он держит запись, и именно
+    // его код должен оказаться в сводке и в строке у человека.
+    let cause = steps
+        .iter()
+        .filter(|f| f.retry == worst)
+        .map(|f| f.cause.clone())
+        .next()
+        .unwrap_or_default();
+    Some(Failure::Technical { cause, retry: worst })
 }
 
 /// Запись после неудачного разбора.
@@ -241,19 +274,51 @@ pub fn inherit_background(mut fresh: Food, prev: &Food) -> Food {
     fresh
 }
 
-/// Завести новую еду по разобранной позиции, вытеснив прежнюю одноимённую копию.
+/// Чем кончилось сопоставление позиции с базой человека.
+///
+/// Новая еда возвращается ГОТОВОЙ, но ещё НЕ записанной. Раньше `create_food`
+/// писала её в базу тут же, посреди цикла, и оборвавшийся разбор оставлял еду
+/// заведённой при нераспознанной записи: удалит человек запись — еда останется у
+/// него в списке навсегда, никем не съеденная. Теперь пишется всё разом и только
+/// когда собралась вся запись.
+pub enum Resolved {
+    /// Нашлась в базе.
+    Existing(String),
+    /// Такой нет; вот новая и `id` той одноимённой, которую она вытесняет.
+    New { food: Food, supersedes: Option<String> },
+}
+
+impl Resolved {
+    pub fn food_id(&self) -> String {
+        match self {
+            Resolved::Existing(id) => id.clone(),
+            Resolved::New { food, .. } => food.id.clone(),
+        }
+    }
+}
+
+/// Собрать новую еду по разобранной позиции — НЕ записывая её.
 ///
 /// Ключевые слова размечаются ЗДЕСЬ, при заведении, а не при каждом поиске: это
 /// разовая работа на продукт, и только благодаря ей потом находится «ракушки» по
-/// слову «макароны». Разметка не удалась — заводим без неё: еда всё равно найдётся
-/// по названию, а слова допишет следующая попытка.
+/// слову «макароны». Шаг кэшируется по НАЗВАНИЮ: одно и то же слово размечается
+/// один раз на всю жизнь базы, сколько бы записей его ни принесло.
 ///
-/// Прежняя одноимённая копия АРХИВИРУЕТСЯ (§6.4): в поиске должна оставаться одна,
-/// иначе у человека копятся «Творог», «Творог», «Творог». Из дневника она никуда не
-/// девается — прошлые записи продолжают считаться по тем цифрам, что были тогда.
-pub async fn create_food(item: &ai::MergedItem, candidates: &[Food]) -> Food {
+/// Сорвалась разметка — сорвалась вся позиция, и запись ждёт. Заводить еду без
+/// слов поиска нельзя: она не найдётся в следующий раз и заведётся второй копией,
+/// а это тихая порча, которую потом никто не свяжет с сегодняшним сбоем.
+///
+/// Вытесняемая одноимённая копия только НАЗЫВАЕТСЯ здесь (§6.4), архивируется она
+/// вместе с общей записью — по той же причине, что и еда не пишется.
+pub async fn build_food(
+    item: &ai::MergedItem,
+    candidates: &[Food],
+) -> Result<Resolved, ai_steps::Failed> {
     let prev = superseded(&item.name, candidates).cloned();
-    let keywords = ai::keywords_for(&item.name, |_| {}).await.unwrap_or_default();
+    let keywords = ai_steps::run("food.keywords", &[&item.name], || {
+        ai::keywords_for(&item.name, |_| {})
+    })
+    .await?;
     let mut food = Food {
         id: local::new_id(),
         name: item.name.clone(),
@@ -269,80 +334,149 @@ pub async fn create_food(item: &ai::MergedItem, candidates: &[Food]) -> Food {
     if let Some(prev) = &prev {
         food = inherit_background(food, prev);
     }
-    db::put("foods", &food).await;
-    if let Some(prev) = prev {
-        local::archive_food(&prev.id, true).await;
-    }
-    food
+    Ok(Resolved::New { food, supersedes: prev.map(|p| p.id) })
+}
+
+/// Ключ шага выбора: от чего зависит ответ модели, то и входит.
+///
+/// Отдельной чистой функцией — потому что забытая часть ключа означает чужой ответ
+/// на изменившийся вход, и ловится это только тестом.
+pub fn pick_key_parts(name: &str, seen: &food_search::SeenNutrition, survivors: &[&Food]) -> Vec<String> {
+    let num = |v: Option<f64>| v.map(|x| format!("{x}")).unwrap_or_else(|| "-".into());
+    let mut ids: Vec<String> = survivors.iter().map(|f| f.id.clone()).collect();
+    // Порядок кандидатов приходит из поиска и может дрогнуть от посторонней
+    // причины; ответ модели от него не зависит, а ключ зависел бы.
+    ids.sort();
+    let mut parts = vec![
+        name.to_string(),
+        num(seen.kcal),
+        num(seen.protein),
+        num(seen.fat),
+        num(seen.carbs),
+    ];
+    parts.extend(ids);
+    parts
 }
 
 /// Сопоставить одну позицию с базой человека: отбор кандидатов, арифметика, при
-/// необходимости — модель. Возвращает `id` еды, готовой лечь в запись.
-pub async fn resolve_item(item: &ai::MergedItem, index: &food_search::Index, foods: &[Food]) -> String {
+/// необходимости — модель.
+///
+/// Сбой модели БОЛЬШЕ НЕ ведёт к заведению копии. Раньше и отказ модели, и её сбой
+/// шли в одно место — заводили новую еду; на протухшем ключе это множило список
+/// человека копиями при каждой суточной попытке. Отказ (модель посмотрела и
+/// сказала «не то») по-прежнему заводит копию: это ответ. Сбой — не ответ, и
+/// позиция ждёт вместе со всей записью.
+pub async fn resolve_item(
+    item: &ai::MergedItem,
+    index: &food_search::Index,
+    foods: &[Food],
+) -> Result<Resolved, ai_steps::Failed> {
     let seen = seen_of(item);
     let ids = index.candidates(&item.name, &[]);
     let candidates: Vec<Food> = foods.iter().filter(|f| ids.contains(&f.id)).cloned().collect();
 
     match resolve_locally(&item.name, &seen, &candidates) {
-        Some(Resolution::Existing(id)) => return id,
-        Some(Resolution::New) => return create_food(item, &candidates).await.id,
+        Some(Resolution::Existing(id)) => return Ok(Resolved::Existing(id)),
+        Some(Resolution::New) => return build_food(item, &candidates).await,
         None => {}
     }
     let survivors = food_search::survivors(&seen, &candidates);
-    match ai::pick_same_food(&item.name, &seen, &survivors, |_| {}).await {
-        Ok(Some(id)) => id,
-        // И отказ модели, и её сбой ведут в одно место: заводим новую копию. Это
-        // хуже, чем найти существующую, но несравнимо лучше, чем приписать еде
-        // чужие нутриенты.
-        _ => create_food(item, &candidates).await.id,
+    let parts = pick_key_parts(&item.name, &seen, &survivors);
+    let refs: Vec<&str> = parts.iter().map(String::as_str).collect();
+    let picked: Option<String> = ai_steps::run("food.pick", &refs, || {
+        ai::pick_same_food(&item.name, &seen, &survivors, |_| {})
+    })
+    .await?;
+    match picked {
+        Some(id) => Ok(Resolved::Existing(id)),
+        // Модель посмотрела и сказала «не то». Завести копию хуже, чем найти
+        // существующую, но несравнимо лучше, чем приписать еде чужие нутриенты.
+        None => build_food(item, &candidates).await,
     }
 }
 
 /// Разобрать одну нераспознанную запись и превратить её в агрегатор.
 ///
-/// Кадры разбираются ПО ОДНОМУ — в этом весь смысл первого прохода, и сбой на одном
-/// кадре не отменяет остальные: у человека может быть три снимка, из которых один
-/// смазан. Ни одного разобранного кадра и пустое описание — разбирать нечего, и
-/// запись остаётся нераспознанной до следующей попытки.
+/// # Цепочка, а не запрос
+///
+/// Шагов здесь N+1+M: каждый снимок читается отдельно (в этом весь смысл первого
+/// прохода — название снято на одном кадре, таблица на другом), прочитанное
+/// сводится в список, каждая позиция ищется в базе, ненайденная заводится новой
+/// едой с разметкой слов. Каждый шаг идёт через кэш (`ai_steps`) и адресуется
+/// хэшем СВОЕГО входа. Поэтому упавшая на середине цепочка назавтра дочитывается
+/// с места обрыва, а не оплачивается заново, и поэтому же правка снимков или
+/// описания человеком спрашивает модель заново сама собой: сменился вход —
+/// сменился ключ.
+///
+/// # Всё или ничего
+///
+/// Запись становится разобранной, ТОЛЬКО если удались все шаги. Ни один частичный
+/// результат в дневник не попадает, и записи в базу (новая еда, архивация
+/// вытесненной копии, сама запись) идут одним куском в самом конце.
+///
+/// Раньше не так было в обе стороны, и обе были неправы. Кадр, не прочитанный
+/// из-за нашего сбоя, просто не попадал в список: если человек при этом что-то
+/// написал, разбор шёл по одним словам, а этикетку молча теряли — ровно то, что
+/// §6.6 запрещает первой строкой. А если не написал, ему говорили «переснимите» и
+/// хоронили запись навсегда, хотя переснимать было нечего: лежал наш ключ.
 pub async fn recognize(entry: &DiaryEntry) -> Result<DiaryEntry, Failure> {
-    let mut frames = Vec::new();
-    let mut unread = 0usize;
+    let description = entry.description.clone().unwrap_or_default();
+    let described = !description.trim().is_empty();
+
+    // Ни снимков, ни слов — разбирать нечего, и это единственный случай, когда
+    // никакие шаги не нужны вовсе.
+    if entry.images.is_empty() && !described {
+        return Err(Failure::Actionable(t("lazy_food.err.nothing_to_read").to_string()));
+    }
+
+    // ── Шаг на снимок ────────────────────────────────────────────────────────
+    let mut frames = Vec::with_capacity(entry.images.len());
+    let mut blockers: Vec<ai_steps::Failed> = Vec::new();
     for hash in &entry.images {
-        let Some(image) = images::get(hash).await else { continue };
-        match ai::read_photo(&image, |_, _, _| {}).await {
+        let Some(image) = images::get(hash).await else {
+            // Снимка уже нет: картинки живут неделю (`local::IMAGE_KEEP_DAYS`).
+            // Прочесть его не сможем ни сейчас, ни завтра — это к человеку.
+            let failed = ai_steps::Failed {
+                cause: format!("снимок {hash} стёрт по сроку хранения"),
+                retry: Retry::Human,
+            };
+            ai_steps::remember_failure("photo.read", &[hash], &failed).await;
+            blockers.push(failed);
+            continue;
+        };
+        match ai_steps::run("photo.read", &[hash], || ai::read_photo(&image, |_, _, _| {})).await {
             Ok(read) => frames.push((hash.clone(), read)),
-            Err(e) => {
-                // Не только в консоль: непрочитанный кадр это то, о чём человек
-                // должен узнать (§6.6). Считаем их и скажем словами ниже.
-                leptos::logging::warn!("кадр {hash} не разобран: {e}");
-                unread += 1;
+            Err(failed) => {
+                leptos::logging::warn!("кадр {hash} не разобран: {}", failed.cause);
+                blockers.push(failed);
             }
         }
     }
-    let description = entry.description.clone().unwrap_or_default();
-    if frames.is_empty() && description.trim().is_empty() {
-        return Err(Failure::Actionable(if unread > 0 {
-            // Снимки были, но ни один не прочёлся, и слов человек не написал.
-            // Подставить справочные значения нельзя — их не из чего брать.
-            t("lazy_food.err.no_frames_read").to_string()
-        } else {
-            t("lazy_food.err.nothing_to_read").to_string()
-        }));
+    if let Some(failure) = blocked_by(&blockers, t("lazy_food.err.no_frames_read")) {
+        return Err(failure);
     }
 
-    // Сбой модели или сети НЕ уходит человеку как есть: в записи должно оказаться
-    // объяснение словами, а не «LLM output error: ModelExecution("HTTP 401: …")».
-    // Подробность нужна нам и живёт в консоли; человеку нужно, что делать дальше.
-    let merged = match ai::merge_into_items(&frames, &description, |_| {}).await {
-        Ok(m) => m,
-        // Сырую причину НЕ показываем — она уходит в телеметрию, а человеку
-        // достаётся фраза с кодом. Решение, повторять ли, принимается по ней же.
-        Err(e) => return Err(Failure::Technical(e)),
-    };
+    // ── Шаг сведения ─────────────────────────────────────────────────────────
+    // В ключ входят кадры (их хэши — а прочтение у хэша одно) и описание: ровно
+    // то, из чего собирается список.
+    let mut parts: Vec<&str> = entry.images.iter().map(String::as_str).collect();
+    parts.push(&description);
+    let merged: ai::MergedItems =
+        ai_steps::run("food.merge", &parts, || ai::merge_into_items(&frames, &description, |_| {}))
+            .await
+            .map_err(|f| Failure::Technical { cause: f.cause, retry: f.retry })?;
     if merged.items.is_empty() {
+        // Модель ответила, и ответ её — «еды тут нет». Это не сбой, а результат, и
+        // ждёт он человека. Кладём в кэш, чтобы завтра не спрашивать снова.
+        let failed = ai_steps::Failed {
+            cause: "модель не нашла еды ни на кадрах, ни в словах".to_string(),
+            retry: Retry::Human,
+        };
+        ai_steps::remember_failure("food.merge", &parts, &failed).await;
         return Err(Failure::Actionable(t("lazy_food.err.empty_list").to_string()));
     }
 
+    // ── Шаг на позицию ───────────────────────────────────────────────────────
     // Сопоставляем ТОЛЬКО с неархивированными копиями (§6.4): архивированную не
     // воскрешаем — если совпадение нашлось бы с ней, заводим новую. Рецепты тоже
     // мимо: рецепт это не сырой продукт из справочника.
@@ -352,9 +486,31 @@ pub async fn recognize(entry: &DiaryEntry) -> Result<DiaryEntry, Failure> {
         .filter(|f| !f.archived && !f.is_recipe)
         .collect();
     let index = food_search::Index::build(&foods);
-    let mut items = Vec::with_capacity(merged.items.len());
+    let mut resolved = Vec::with_capacity(merged.items.len());
+    let mut item_blockers: Vec<ai_steps::Failed> = Vec::new();
     for it in &merged.items {
-        items.push(DiaryFoodItem { food_id: resolve_item(it, &index, &foods).await, grams: it.grams });
+        match resolve_item(it, &index, &foods).await {
+            Ok(r) => resolved.push((r, it.grams)),
+            Err(failed) => {
+                leptos::logging::warn!("позиция «{}» не сопоставлена: {}", it.name, failed.cause);
+                item_blockers.push(failed);
+            }
+        }
+    }
+    if let Some(failure) = blocked_by(&item_blockers, t("lazy_food.err.empty_list")) {
+        return Err(failure);
+    }
+
+    // ── Всё удалось: только теперь пишем ─────────────────────────────────────
+    let mut items = Vec::with_capacity(resolved.len());
+    for (r, grams) in resolved {
+        if let Resolved::New { food, supersedes } = &r {
+            db::put("foods", food).await;
+            if let Some(prev) = supersedes {
+                local::archive_food(prev, true).await;
+            }
+        }
+        items.push(DiaryFoodItem { food_id: r.food_id(), grams });
     }
 
     let done = DiaryEntry {
@@ -594,19 +750,46 @@ mod tests {
         assert_eq!(http_status("сеть отвалилась"), None, "кода нет — и выдумывать нечего");
     }
 
+    fn tech(cause: &str, retry: Retry) -> Failure {
+        Failure::Technical { cause: cause.into(), retry }
+    }
+
     #[test]
-    fn povtoryaem_tolko_pyatisotye() {
-        // Сервер прилёг — пройдёт само, вторая попытка имеет смысл.
-        assert!(Failure::Technical("HTTP 500: сервер".into()).retryable());
-        assert!(Failure::Technical("stream HTTP 503".into()).retryable());
-        // А это не изменится ни на второй раз, ни на двадцатый.
-        assert!(!Failure::Technical("HTTP 401: Unauthorized".into()).retryable());
-        assert!(!Failure::Technical("HTTP 403: Forbidden".into()).retryable());
-        assert!(!Failure::Technical("HTTP 429: Too Many Requests".into()).retryable());
-        // Без кода повторять тоже незачем: мы не знаем, что чинить.
-        assert!(!Failure::Technical("ответ не разобрался".into()).retryable());
+    fn podryad_probuem_tolko_to_chto_prosit_sejchas() {
+        // Политика теперь приезжает с того шага, который её и определил, а не
+        // вычитывается из текста причины во второй раз.
+        assert!(tech("HTTP 500: сервер", Retry::Now).retryable());
+        assert!(!tech("HTTP 401: Unauthorized", Retry::AfterDay).retryable());
         // То, что человек правит сам, повтором не лечится вовсе.
         assert!(!Failure::Actionable("опишите словами".into()).retryable());
+        // Технический сбой возвращается сам; ожидание человека — нет.
+        assert!(tech("HTTP 401", Retry::AfterDay).technical());
+        assert!(!Failure::Actionable("переснимите".into()).technical());
+    }
+
+    #[test]
+    fn zapis_ne_sobiraetsya_poka_hot_odin_shag_lezhit() {
+        // Главное правило кэша шагов: частичный результат в дневник не попадает.
+        let now = ai_steps::Failed { cause: "HTTP 500".into(), retry: Retry::Now };
+        let day = ai_steps::Failed { cause: "HTTP 401".into(), retry: Retry::AfterDay };
+        let human = ai_steps::Failed { cause: "снимок стёрт".into(), retry: Retry::Human };
+
+        // Все шаги удались — записи ничто не держит.
+        assert_eq!(blocked_by(&[], "переснимите"), None);
+
+        // Один просит сейчас, другой через сутки: раньше суток запись всё равно не
+        // соберётся, и трогать её раньше значит жечь запросы впустую.
+        assert_eq!(
+            blocked_by(&[now.clone(), day.clone()], "переснимите"),
+            Some(tech("HTTP 401", Retry::AfterDay)),
+            "причина берётся у самого тяжёлого шага, а не у первого попавшегося"
+        );
+
+        // Ждём человека — значит ждём человека, что бы ни просили остальные.
+        assert_eq!(
+            blocked_by(&[now, day, human], "переснимите"),
+            Some(Failure::Actionable("переснимите".into()))
+        );
     }
 
     #[test]
@@ -686,22 +869,23 @@ pub async fn run_queue() {
         match recognize(&entry).await {
             Ok(_) => crate::services::sync::push_background(),
             Err(failure) => {
-                // Повторяем ТОЛЬКО 5xx и только пока не вышли попытки: 401 не
-                // изменится ни на второй раз, ни на двадцатый.
+                // Пробуем подряд, только пока шаги просят «сейчас» и не вышли
+                // попытки. Просят «через сутки» — запись выпадает из очереди до
+                // завтра; ждут человека — до его правки.
                 let retry = failure.retryable() && entry.recognition_tries + 1 < TRIES_ON_5XX;
                 let message = match &failure {
                     Failure::Actionable(m) => {
                         leptos::logging::warn!("запись {} не разобрана: {m}", entry.id);
                         m.clone()
                     }
-                    Failure::Technical(cause) => {
+                    Failure::Technical { cause, .. } => {
                         // Причина целиком уходит в телеметрию и в консоль; человеку
                         // достаётся фраза с кодом.
                         leptos::logging::warn!("запись {} — технический сбой: {cause}", entry.id);
                         crate::services::errors::recognition_failed(cause)
                     }
                 };
-                let technical = matches!(failure, Failure::Technical(_));
+                let technical = failure.technical();
                 let marked = after_failure(&entry, &message, retry, technical, local::now());
                 db::put("diary", &marked).await;
                 crate::services::sync::push_background();

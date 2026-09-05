@@ -98,13 +98,17 @@ fn bump(store_name: &str) {
     });
 }
 
+/// 25: добавлен store `ai_steps` — кэш шагов разбора по хэшу входа
+/// (см. `services::ai_steps`). Упавшая цепочка дочитывается с места обрыва, а не
+/// оплачивается заново.
+///
 /// 24: добавлен store `images` — единое хранилище картинок по хэшу содержимого
 /// (см. `services::images`). Запись дневника держит хэши, а не сами байты.
 ///
 /// 23: снят store `curator_plankas`. Планка живёт в одном месте — в истории
 /// (`planka_history`), и отдельное кураторское хранилище стало лишним. Store не
 /// объявлен в билдере ниже, и `idb` удалит его при открытии сам.
-const DB_VERSION: u32 = 24;
+const DB_VERSION: u32 = 25;
 
 /// Every object store, in a single list. `_sync_meta` carries sync cursors and
 /// `app_flags` holds per-user UI flags (onboarding/subscription); neither is
@@ -115,7 +119,7 @@ const ALL_STORES: &[&str] = &[
     "goals", "food_drafts", "weight_entries", "step_entries",
     "progress_photos", "summaries", "chat", "profile", "deletions", "_sync_meta",
     "app_flags", "planka_history", "food_probe",
-    "support_msgs", "support_outbox", "support_meta", "images",
+    "support_msgs", "support_outbox", "support_meta", "images", "ai_steps",
 ];
 
 /// Per-user database name. Each account gets its own IndexedDB so a different
@@ -258,6 +262,14 @@ fn builder(name: &str) -> rexie::RexieBuilder {
             ObjectStore::new("images")
                 .key_path("hash")
                 .add_index(rexie::Index::new("created_at", "created_at")),
+        )
+        // Кэш шагов разбора. НЕ синкается по той же причине, что и картинки: это
+        // кэш, а не данные человека, — посчитать его заново на другом устройстве
+        // дешевле, чем гонять по сети, и терять его не жалко.
+        .add_object_store(
+            ObjectStore::new("ai_steps")
+                .key_path("key")
+                .add_index(rexie::Index::new("at", "at")),
         )
 }
 

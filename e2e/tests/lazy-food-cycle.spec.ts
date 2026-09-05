@@ -135,6 +135,107 @@ async function storeRows(page: Page, store: string): Promise<Record<string, unkn
   }, store);
 }
 
+/**
+ * КЭШ ШАГОВ: упавшая на середине цепочка дочитывается с места обрыва.
+ *
+ * Разбор одной записи — это N+1+M обращений к модели: снимок читается отдельно от
+ * снимка, потом прочитанное сводится в список, потом каждая позиция ищется в базе.
+ * Пока результаты шагов жили в памяти одного прохода, сбой на последнем шаге
+ * выбрасывал все предыдущие, и следующая попытка платила за них заново — у записи
+ * с тремя снимками это три обращения к vision-модели в сутки впустую, пока сбой не
+ * починят.
+ *
+ * Проверяется это ровно так, как и стоит проверять экономию: СЧЁТОМ ЗАПРОСОВ.
+ * Снимок читается успешно, сведение падает; страница перезагружается, разбор идёт
+ * снова. Прочтение кадра обязано остаться ОДНИМ на оба захода — оно лежит в базе,
+ * а не в памяти вкладки, — а сведение обязано случиться повторно, иначе испытание
+ * ничего не доказывает: одного захода не было бы вовсе.
+ */
+test('прочитанный кадр не перечитывается после сбоя на следующем шаге', async ({ page }) => {
+  let reads = 0;
+  let merges = 0;
+  await page.route('**/ai-worker-dev.vg-stavenko.workers.dev/**', async (route: Route) => {
+    if (!route.request().url().endsWith('/chat/completions')) return route.continue();
+    const body = route.request().postData() ?? '';
+
+    if (body.includes('Разбери ЭТОТ ОДИН снимок')) {
+      reads += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: sse({
+          what_is_on_the_photo: 'этикетка творога',
+          photo_kind: 'label',
+          foods_on_the_photo: [],
+          product_name_printed: 'Творог 5%',
+          kcal_per_100g_printed: 121,
+        }),
+      });
+    }
+    if (body.includes('Собери из всего этого')) {
+      merges += 1;
+      // 500, а не 401: «сервер прилёг» очередь берёт снова, и второй заход
+      // случится — без него сравнивать было бы нечего.
+      return route.fulfill({ status: 500, contentType: 'text/plain', body: 'сервер прилёг' });
+    }
+    return route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse({ id: null }) });
+  });
+
+  const now = new Date().toISOString();
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // Картинка кладётся в свой store и адресуется хэшем — записи достаётся строка,
+  // а не мегабайт base64 (`services::images`). Хэш здесь любой: приложение берёт
+  // его как ключ, а не пересчитывает.
+  const hash = 'e2e0000000000000000000000000000000000000000000000000000000cache1';
+  await signInSeeded(page, {
+    app_flags: [{ key: 'feature.lazy_food', value: 'true', updated_at: now }],
+    images: [{
+      hash,
+      data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      created_at: now,
+    }],
+    diary: [{
+      id: 'e2e-cache-1', food_id: '', date: today, time: null, grams: 0, waste_grams: 0,
+      meal_label: 'Завтрак', deleted: false, kind: 'pending',
+      description: '', images: [hash], items: [], label: null, recognized_at: null,
+      recognition_error: null, recognition_tries: 0, retry_after_wait: false,
+      created_at: now, updated_at: now,
+    }],
+  });
+
+  /** Дождаться, пока запросы перестанут идти: очередь проходит по записи не один
+   *  раз за запуск, и мерить надо устоявшееся число, а не первое попавшееся. */
+  const settle = async () => {
+    let last = -1;
+    for (let i = 0; i < 30 && last !== reads + merges; i += 1) {
+      last = reads + merges;
+      await page.waitForTimeout(1_000);
+    }
+  };
+
+  await page.getByTestId('nav-diary').click();
+  await expect(page.getByTestId('diary-row-pending')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => merges, { timeout: 20_000 }).toBeGreaterThan(0);
+  await settle();
+  const readsAfterFirst = reads;
+  const mergesAfterFirst = merges;
+  // Один снимок — одно прочтение, сколько бы раз очередь ни бралась за запись.
+  expect(readsAfterFirst, 'кадр прочитан не один раз за первый запуск').toBe(1);
+
+  // Второй заход: то же устройство, та же база, новый запуск приложения.
+  await page.reload();
+  await page.getByTestId('nav-diary').waitFor({ state: 'visible', timeout: 20_000 });
+  await expect.poll(() => merges, { timeout: 25_000 }).toBeGreaterThan(mergesAfterFirst);
+  await settle();
+
+  // Сведение спрашивалось снова — значит второй заход действительно был, и
+  // сравнивать есть что.
+  expect(merges).toBeGreaterThan(mergesAfterFirst);
+  // А кадр — нет: его прочтение лежит в базе, а не в памяти вкладки.
+  expect(reads, `кадр перечитан ${reads} раз(а) вместо ${readsAfterFirst}`).toBe(readsAfterFirst);
+});
+
 test.describe('ленивая запись: круг целиком', () => {
   test('описание разбирается, знакомая еда находится, незнакомая заводится', async ({ page }) => {
     await stubModel(page, {

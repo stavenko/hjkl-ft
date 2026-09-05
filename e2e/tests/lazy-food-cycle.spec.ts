@@ -301,3 +301,184 @@ test.describe('ленивая запись: круг целиком', () => {
     expect(calls(), 'на 401 ушло больше одного захода за разбором').toBe(1);
   });
 });
+
+/**
+ * СБОЙ ПОСРЕДИ КОНВЕЙЕРА — три случая, и каждый воспроизводит поломку, которая
+ * доживала до живого человека.
+ *
+ * Отдельно от проверок выше, потому что проверяют они разное. Там — что удачный
+ * круг проходит целиком и что прочитанное не перечитывается. Здесь — что
+ * НЕДОДЕЛАННЫЙ круг никуда не просачивается: ни в дневник частичным списком, ни
+ * в список продуктов заведённой едой, ни в строку неверным советом человеку.
+ *
+ * Все три падают на прежнем коде, и в этом их смысл: без них починка держалась бы
+ * на чистых функциях (`blocked_by`), а сам конвейер оставался бы непроверенным.
+ */
+
+/** Двухкадровая запись со снимками, отличимыми по содержимому. */
+async function seedTwoPhotos(page: Page, description: string): Promise<void> {
+  const now = new Date().toISOString();
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  await signInSeeded(page, {
+    app_flags: [{ key: 'feature.lazy_food', value: 'true', updated_at: now }],
+    images: [
+      { hash: 'aaa1', data: 'QUFBMQ==', created_at: now },
+      { hash: 'bbb2', data: 'QkJCMg==', created_at: now },
+    ],
+    diary: [{
+      id: 'e2e-half-1', food_id: '', date: today, time: null, grams: 0, waste_grams: 0,
+      meal_label: 'Завтрак', deleted: false, kind: 'pending',
+      description, images: ['aaa1', 'bbb2'], items: [], label: null, recognized_at: null,
+      recognition_error: null, recognition_tries: 0, retry_after_wait: false,
+      created_at: now, updated_at: now,
+    }],
+  });
+  await page.getByTestId('nav-diary').click();
+}
+
+/** Строка дневника прямо из базы: заведение еды и признаки повтора экрану не видны. */
+async function diaryRow(page: Page, id: string): Promise<Record<string, unknown>> {
+  const rows = await storeRows(page, 'diary');
+  const row = rows.find((r) => r.id === id);
+  if (!row) throw new Error(`записи ${id} нет в базе`);
+  return row;
+}
+
+/** Дождаться, пока запросы к модели перестанут идти. */
+async function settleCalls(page: Page, count: () => number): Promise<void> {
+  let last = -1;
+  for (let i = 0; i < 25 && last !== count(); i += 1) {
+    last = count();
+    await page.waitForTimeout(1_000);
+  }
+}
+
+test('кадр не прочёлся — список НЕ собирается по одним словам', async ({ page }) => {
+  // Прежний код здесь молча терял этикетку: непрочитанный кадр просто выпадал, а
+  // описание оставалось, и список собирался по нему одному. Человеку об этом не
+  // говорили ни слова — ровно то, что §6.6 запрещает первой строкой.
+  let merges = 0;
+  let reads = 0;
+  await page.route('**/ai-worker-dev.vg-stavenko.workers.dev/**', async (route: Route) => {
+    if (!route.request().url().endsWith('/chat/completions')) return route.continue();
+    const body = route.request().postData() ?? '';
+    if (body.includes('Разбери ЭТОТ ОДИН снимок')) {
+      reads += 1;
+      // Первый кадр читается, второй лежит. Отличаем по самой картинке.
+      if (body.includes('QkJCMg==')) {
+        return route.fulfill({ status: 500, contentType: 'text/plain', body: 'кадр не дался' });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: sse({ what_is_on_the_photo: 'творог', photo_kind: 'label', foods_on_the_photo: [] }),
+      });
+    }
+    if (body.includes('Собери из всего этого')) {
+      merges += 1;
+      return route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse({ how_frames_group: '', items: [] }) });
+    }
+    return route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse({ id: null }) });
+  });
+
+  await seedTwoPhotos(page, 'Творог и ложка мёда');
+  await expect(page.getByTestId('diary-row-pending')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => reads, { timeout: 20_000 }).toBeGreaterThan(0);
+  await settleCalls(page, () => reads + merges);
+
+  // ГЛАВНОЕ: до сведения дело не дошло вовсе. Собрать список по словам, потеряв
+  // непрочитанную этикетку, — это и была поломка.
+  expect(merges, 'список собрали, потеряв непрочитанный кадр').toBe(0);
+  await expect(page.getByTestId('diary-row-aggregate')).toHaveCount(0);
+
+  // Запись ждёт нас, а не человека: сбой технический, и вернуться к ней надо.
+  const row = await diaryRow(page, 'e2e-half-1');
+  expect(row.kind).toBe('pending');
+  expect(String(row.recognition_error ?? '')).toContain('Код ошибки');
+});
+
+test('все кадры не прочлись — это наш сбой, а не «переснимите»', async ({ page }) => {
+  // Прежний код на этом месте говорил «не удалось прочесть ни один снимок,
+  // переснимите» и хоронил запись НАВСЕГДА: суточный повтор её не касался. А
+  // переснимать было нечего — лежал наш ключ, и после пересъёмки повторялось
+  // ровно то же самое.
+  await page.route('**/ai-worker-dev.vg-stavenko.workers.dev/**', async (route: Route) => {
+    if (!route.request().url().endsWith('/chat/completions')) return route.continue();
+    const body = route.request().postData() ?? '';
+    if (body.includes('Разбери ЭТОТ ОДИН снимок')) {
+      return route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"Unauthorized"}' });
+    }
+    return route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse({ id: null }) });
+  });
+
+  // Без описания: именно тут прежний код и советовал переснять.
+  await seedTwoPhotos(page, '');
+  await expect(page.getByTestId('diary-row-pending')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => String((await diaryRow(page, 'e2e-half-1')).recognition_error ?? ''), {
+    timeout: 25_000,
+  }).not.toBe('');
+
+  const row = await diaryRow(page, 'e2e-half-1');
+  const message = String(row.recognition_error);
+  // Человеку — фраза с кодом, а не совет переснимать то, что снято нормально.
+  expect(message).toContain('Код ошибки');
+  expect(message, 'человеку советуют переснять из-за нашего ключа').not.toContain('переснимите');
+  // И запись НЕ похоронена: технический сбой возвращается через сутки (§6.6).
+  expect(row.retry_after_wait, 'запись выпала из очереди навсегда').toBe(true);
+});
+
+test('сбой после разбора списка не оставляет заведённой еды', async ({ page }) => {
+  // Прежний код писал новую еду в базу посреди цикла. Оборвался разбор — еда
+  // осталась заведённой при нераспознанной записи, и если человек эту запись
+  // удалит, продукт останется у него в списке навсегда, никем не съеденный.
+  await page.route('**/ai-worker-dev.vg-stavenko.workers.dev/**', async (route: Route) => {
+    if (!route.request().url().endsWith('/chat/completions')) return route.continue();
+    const body = route.request().postData() ?? '';
+    if (body.includes('Собери из всего этого')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: sse({
+          how_frames_group: 'из описания',
+          items: [{
+            name: 'Мёд гречишный', from_frames: null, where_grams_came_from: 'user_text',
+            grams: 20, kcal_per_100g: 329, protein_per_100g: 0.8,
+            fat_per_100g: 0, carbs_per_100g: 81.5,
+          }],
+        }),
+      });
+    }
+    // Разметка слов — последний шаг заведения еды, и он падает.
+    if (body.includes('По каким словам')) {
+      return route.fulfill({ status: 500, contentType: 'text/plain', body: 'прилёг' });
+    }
+    return route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse({ id: null }) });
+  });
+
+  const now = new Date().toISOString();
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  await signInSeeded(page, {
+    app_flags: [{ key: 'feature.lazy_food', value: 'true', updated_at: now }],
+    diary: [{
+      id: 'e2e-orphan-1', food_id: '', date: today, time: null, grams: 0, waste_grams: 0,
+      meal_label: 'Завтрак', deleted: false, kind: 'pending',
+      description: 'Ложка гречишного мёда', images: [], items: [], label: null,
+      recognized_at: null, recognition_error: null, recognition_tries: 0,
+      retry_after_wait: false, created_at: now, updated_at: now,
+    }],
+  });
+  await page.getByTestId('nav-diary').click();
+  await expect(page.getByTestId('diary-row-pending')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => String((await diaryRow(page, 'e2e-orphan-1')).recognition_error ?? ''), {
+    timeout: 25_000,
+  }).not.toBe('');
+
+  // Запись не собралась — и еды в базе не завелось.
+  const foods = await storeRows(page, 'foods');
+  const names = foods.map((f) => f.name);
+  expect(names, `в базе осталась еда от недоделанного разбора: ${names.join(', ')}`)
+    .not.toContain('Мёд гречишный');
+  expect((await diaryRow(page, 'e2e-orphan-1')).kind).toBe('pending');
+});

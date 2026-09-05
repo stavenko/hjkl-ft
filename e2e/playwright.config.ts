@@ -30,7 +30,11 @@ const launchOptions = {
 };
 
 const shared = {
-  baseURL: 'https://renorma-fit-dev.pages.dev',
+  // Обычно испытания идут по выкладке dev. Переопределяется переменной, и это не
+  // роскошь: чтобы убедиться, что испытание на починенную поломку действительно
+  // её ловит, нужно прогнать его по сборке С поломкой — а такую сборку катят на
+  // превью-адрес, не трогая dev.
+  baseURL: process.env.E2E_BASE_URL || 'https://renorma-fit-dev.pages.dev',
   browserName: 'chromium' as const,
   serviceWorkers: 'block' as const,
   ...(proxyServer ? { proxy: { server: proxyServer } } : {}),

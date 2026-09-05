@@ -34,6 +34,14 @@ use crate::services::db;
 
 /// Домен, на котором засев разрешён. Захардкожен намеренно: список из настроек
 /// можно подменить, а строку в коде — только новой сборкой.
+///
+/// Разрешён он сам и его ПОДДОМЕНЫ: превью-выкладки того же дев-проекта
+/// (`<id>.renorma-fit-dev.pages.dev`, `<ветка>.renorma-fit-dev.pages.dev`)
+/// раздаются Cloudflare автоматически и от dev ничем не отличаются. Нужны они
+/// ровно для одного: убедиться, что испытание на починенную поломку действительно
+/// её ловит, — а для этого его надо прогнать по сборке С поломкой, не выкладывая
+/// такую сборку на dev. Прод (`fit.renorma.app`) — другое имя целиком, и под это
+/// правило не попадает никаким боком.
 const TEST_HOST: &str = "renorma-fit-dev.pages.dev";
 
 /// Ключ в localStorage, куда испытание кладёт данные.
@@ -62,7 +70,17 @@ pub fn pending() -> bool {
 fn on_test_host() -> bool {
     web_sys::window()
         .and_then(|w| w.location().hostname().ok())
-        .is_some_and(|h| h == TEST_HOST)
+        .is_some_and(|h| seedable_host(&h))
+}
+
+/// Тот самый домен или его поддомен — и ничто другое.
+///
+/// Отдельной чистой функцией, потому что это ЗАТВОР: ошибка здесь открыла бы
+/// засев там, где его быть не должно, и заметить это без теста было бы нечем.
+/// Проверка идёт по границе точки, а не по «оканчивается на»: `evil-renorma-fit-dev.pages.dev`
+/// оканчивается ровно так же, а к нам отношения не имеет.
+pub fn seedable_host(host: &str) -> bool {
+    host == TEST_HOST || host.strip_suffix(TEST_HOST).is_some_and(|p| p.ends_with('.'))
 }
 
 fn storage() -> Option<web_sys::Storage> {
@@ -157,5 +175,25 @@ mod tests {
     fn test_host_zahardkozhen_i_ne_boevoj() {
         assert_eq!(TEST_HOST, "renorma-fit-dev.pages.dev");
         assert!(!TEST_HOST.contains("renorma.app"), "боевой домен здесь стоять не должен");
+    }
+
+
+    #[test]
+    fn zasev_otkryt_na_deve_i_ego_predprosmotrah() {
+        assert!(seedable_host("renorma-fit-dev.pages.dev"));
+        assert!(seedable_host("a4a45767.renorma-fit-dev.pages.dev"));
+        assert!(seedable_host("regression-check.renorma-fit-dev.pages.dev"));
+    }
+
+    #[test]
+    fn i_zakryt_vezde_eshchyo() {
+        // Прод — первым делом: ради этого затвор и стоит.
+        assert!(!seedable_host("fit.renorma.app"));
+        assert!(!seedable_host("renorma.app"));
+        // Похожее имя без границы по точке — чужой домен, как бы он ни кончался.
+        assert!(!seedable_host("evil-renorma-fit-dev.pages.dev"));
+        // И приставка вместо суффикса тоже не считается.
+        assert!(!seedable_host("renorma-fit-dev.pages.dev.evil.com"));
+        assert!(!seedable_host("localhost"));
     }
 }

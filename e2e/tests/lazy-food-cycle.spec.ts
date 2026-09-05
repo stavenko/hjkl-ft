@@ -432,9 +432,11 @@ test('сбой после разбора списка не оставляет з
   // Прежний код писал новую еду в базу посреди цикла. Оборвался разбор — еда
   // осталась заведённой при нераспознанной записи, и если человек эту запись
   // удалит, продукт останется у него в списке навсегда, никем не съеденный.
+  let calls = 0;
   await page.route('**/ai-worker-dev.vg-stavenko.workers.dev/**', async (route: Route) => {
     if (!route.request().url().endsWith('/chat/completions')) return route.continue();
     const body = route.request().postData() ?? '';
+    calls += 1;
     if (body.includes('Собери из всего этого')) {
       return route.fulfill({
         status: 200,
@@ -471,14 +473,19 @@ test('сбой после разбора списка не оставляет з
   });
   await page.getByTestId('nav-diary').click();
   await expect(page.getByTestId('diary-row-pending')).toBeVisible({ timeout: 15_000 });
-  await expect.poll(async () => String((await diaryRow(page, 'e2e-orphan-1')).recognition_error ?? ''), {
-    timeout: 25_000,
-  }).not.toBe('');
+  // Ждём, пока разбор отработает, ПО ЗАПРОСАМ, а не по появлению ошибки в записи:
+  // на сломанном коде ошибки не будет вовсе (разметку слов там глотали молча), и
+  // ожидание ошибки выродилось бы в таймаут вместо разговора по существу.
+  await expect.poll(() => calls, { timeout: 20_000 }).toBeGreaterThan(1);
+  await settleCalls(page, () => calls);
 
-  // Запись не собралась — и еды в базе не завелось.
-  const foods = await storeRows(page, 'foods');
-  const names = foods.map((f) => f.name);
-  expect(names, `в базе осталась еда от недоделанного разбора: ${names.join(', ')}`)
+  // ГЛАВНОЕ: разбор не доделан — значит и еды заводиться не должно.
+  const names = (await storeRows(page, 'foods')).map((f) => f.name);
+  expect(names, `в базе осталась еда от недоделанного разбора: [${names.join(', ')}]`)
     .not.toContain('Мёд гречишный');
-  expect((await diaryRow(page, 'e2e-orphan-1')).kind).toBe('pending');
+  // И запись не собралась: показать её разобранной, потеряв слова поиска у
+  // продукта, значило бы тихо испортить базу — в следующий раз он не найдётся и
+  // заведётся второй копией.
+  expect((await diaryRow(page, 'e2e-orphan-1')).kind, 'запись собралась при недоделанном шаге')
+    .toBe('pending');
 });

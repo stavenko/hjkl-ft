@@ -2360,6 +2360,12 @@ mod tests {
         for f in &files {
             let Ok(text) = std::fs::read_to_string(f) else { continue };
             for (i, _) in text.match_indices("t(\"") {
+                // Именно вызов `t(`, а не хвост чужого имени. Без этой проверки
+                // сюда попадал `seedable_host("fit.renorma.app")` — имя кончается
+                // на «t», и домен из него объявлялся непереведённым ключом.
+                if text[..i].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                    continue;
+                }
                 let rest = &text[i + 3..];
                 let Some(end) = rest.find('"') else { continue };
                 let key = &rest[..end];

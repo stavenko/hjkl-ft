@@ -79,7 +79,9 @@ fn gauge_label(key: &str) -> &'static str {
 async fn calorie_hint_text(planka: Option<f64>) -> String {
     let avg = local::avg_daily_kcal(7).await;
     let entries = local::list_weight_entries().await;
-    let trend = weight_trend::weight_trend(&entries, weight_trend::DEFAULT_WINDOW_DAYS);
+    // Окно РЕШЕНИЯ, а не окно виджета: текст объясняет, почему планка там, где
+    // она есть, и должен считать тем же, чем считалась она.
+    let trend = weight_trend::weight_trend(&entries, local::DECISION_WINDOW_DAYS);
     let weight_kg = entries
         .iter()
         .max_by(|a, b| a.date.cmp(&b.date))

@@ -223,9 +223,9 @@ pub async fn daily_kcal_totals(window_days: i64) -> Vec<f64> {
 // худеющего, и кураторское — куратор обязан увидеть число до отправки. Реэкспорт
 // оставлен, чтобы вызывающие места не менялись.
 pub use plankas::{
-    adherence, calorie_planka, calorie_planka_weekly, comfort_band_kg_per_week, next_steps_planka,
-    pace, planka_factor, steps_planka_for_avg, trend_window_days, Adherence, Pace,
-    STEPS_PLANKA_MAX,
+    adherence, calorie_planka, calorie_planka_weekly, check_evidence, comfort_band_kg_per_week,
+    next_steps_planka, pace, planka_factor, steps_planka_for_avg, Adherence, NoDecision, Pace,
+    DECISION_WINDOW_DAYS, DIARY_MIN_DAYS, STEPS_PLANKA_MAX,
 };
 
 
@@ -236,10 +236,18 @@ pub use plankas::{
 /// `None` when there are no logged days yet. Single source of truth so the widget's
 /// displayed figure and the value it accepts cannot drift apart.
 pub async fn calorie_planka_suggestion() -> Option<f64> {
-    use crate::services::weight_trend::{self, DEFAULT_WINDOW_DAYS};
+    use crate::services::weight_trend;
     let avg = avg_daily_kcal(7).await?;
     let entries = list_weight_entries().await;
-    let trend = weight_trend::weight_trend(&entries, DEFAULT_WINDOW_DAYS);
+    // Веса может не хватать: первая планка ставится после недели наблюдений (это
+    // мало), а пересчёт при смене цели может застать человека с давно брошенными
+    // весами. Тогда поправку по тренду не берём вовсе — планка равна среднему
+    // потреблению. Это честнее, чем сдвинуть её на 5 % по замерам месячной
+    // давности, и ровно то, чем первая планка и задумана: калибровка по факту.
+    if check_evidence(today_date(), &entries, None).is_err() {
+        return Some((avg / 50.0).round() * 50.0);
+    }
+    let trend = weight_trend::weight_trend(&entries, DECISION_WINDOW_DAYS);
     // Latest weigh-in — for the %-of-body-weight loss rate.
     let weight_kg = entries
         .iter()

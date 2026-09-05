@@ -249,24 +249,30 @@ async fn recompute_calorie_planka(force: bool) {
         return;
     }
 
-    // Съеденное за неделю нужно дважды: как признак, что человек вообще вёл
-    // дневник (иначе пересчитывать нечего), и как ИСПОЛНЕНИЕ планки — оно решает,
-    // можно ли двигать её в ту сторону, куда зовёт вес.
-    let avg = local::avg_daily_kcal(7).await;
-    if avg.is_none() {
+    // ── На чём позволительно решать ──────────────────────────────────────────
+    //
+    // Обе стороны или ничего: и что происходит с весом, и исполнялась ли планка.
+    // Не хватает любой — ОТКЛАДЫВАЕМ, и это принципиально не то же самое, что
+    // «пропустить неделю»: якорь остаётся на месте, и пересчёт случится сам на
+    // ближайшем запуске, как только данные появятся. Разбор каждого условия — в
+    // доке к `plankas::check_evidence`.
+    let entries = local::list_weight_entries().await;
+    // Дни с записями — они же и есть среднее: одно чтение дневника на оба вопроса.
+    let logged = local::daily_kcal_totals(7).await;
+    if let Err(why) = local::check_evidence(today, &entries, Some(logged.len())) {
         // Срок вышел, а пересчёта не будет. Молчать об этом нельзя: снаружи это
         // выглядит как «планка просто не пересчиталась», и разобраться потом не по
         // чему. В журнал ошибок — чтобы человек увидел это в приложении.
-        super::errors::record_kind(
-            "planka.calories",
-            "Планка по калориям",
-            &format!(
-                "пересчёт отложен: срок вышел ({waited} дн. с {anchor}), но за последние 7 \
-                 завершённых дней в дневнике нет ни одной записи"
-            ),
-        );
+        //
+        // Текст БЕЗ меняющихся чисел: журнал дедуплицирует записи по совпадению
+        // строки, и «прошло 9 дн.» внутри плодило бы по записи на каждый запуск.
+        leptos::logging::log!("планка калорий: {why:?} (срок вышел {waited} дн. с {anchor})");
+        super::errors::record_kind("planka.calories", "Планка по калориям", why.reason());
         return;
     }
+    // Гейт выше уже потребовал `DIARY_MIN_DAYS` дней с записями, значит список не
+    // пуст и деление безопасно.
+    let avg = logged.iter().sum::<f64>() / logged.len() as f64;
 
     // Base the new planka on the PREVIOUS planka (`goal.amount`), nudged by AT MOST
     // ±5% from the weight trend — NOT on raw average intake. This keeps the planka
@@ -277,41 +283,27 @@ async fn recompute_calorie_planka(force: bool) {
     // Отталкиваемся от ДЕЙСТВУЮЩЕЙ планки, а не от записи в goals: планка живёт в
     // истории, и следующий шаг обязан идти от того числа, что действует сейчас, —
     // хоть от нашего прошлого, хоть от кураторского, оставшегося после отвязки.
-    let entries = local::list_weight_entries().await;
     let weight_kg = entries
         .iter()
         .max_by(|a, b| a.date.cmp(&b.date))
         .map(|e| e.weight_kg)
         .unwrap_or(0.0);
-    // Окно тренда обрезается по последней СМЕНЕ планки: дни, прожитые при прежней,
-    // мы уже один раз зачли, и второй зачёт разгоняет планку по кругу (разбор — в
-    // доке к `plankas::trend_window_days`). История хранит только изменения, так
-    // что её последняя запись и есть тот день.
-    let changed_on = local::planka_history(local::PLANKA_CALORIES)
-        .await
-        .last()
-        .map(|e| e.date.clone());
-    let window = local::trend_window_days(changed_on.as_deref(), &entries);
-    leptos::logging::log!(
-        "планка калорий: окно тренда {window} дн. (последняя смена планки {})",
-        changed_on.as_deref().unwrap_or("—")
-    );
-    let trend = weight_trend::weight_trend(&entries, window);
+    // Планка судится по 28 дням, а не по 14, которые показывает виджет веса: на
+    // четырнадцати наклон гуляет вместе с водой, и правило разворачивает планку
+    // каждую вторую неделю. Разбор с замерами — в доке к `DECISION_WINDOW_DAYS`.
+    let trend = weight_trend::weight_trend(&entries, local::DECISION_WINDOW_DAYS);
     // Порог тот же, по которому день считается зелёным: держаться планки и значит
     // попадать в этот коридор.
-    let adherence = local::adherence(
-        avg.unwrap_or(previous),
-        previous,
-        crate::services::indicators::CALORIE_BAND_KCAL,
-    );
+    let adherence =
+        local::adherence(avg, previous, crate::services::indicators::CALORIE_BAND_KCAL);
     // Куда звал бы вес, если бы исполнение не держало планку. Нужно письму: без
     // этого «планка не изменилась» не отличить от «мы придержали её намеренно».
     let wanted = local::calorie_planka(previous, &trend, weight_kg);
     let new_planka = local::calorie_planka_weekly(previous, &trend, weight_kg, adherence);
     leptos::logging::log!(
-        "планка калорий: съедено в среднем {:.0} при планке {:.0} → {adherence:?}; новая {new_planka:.0}",
-        avg.unwrap_or(0.0),
-        previous
+        "планка калорий: съедено в среднем {avg:.0} за {} дн. при планке {previous:.0} → \
+         {adherence:?}; новая {new_planka:.0}",
+        logged.len()
     );
 
     // Apply the new planka (syncs like any goal edit). `set_calorie_goal` also
@@ -324,9 +316,7 @@ async fn recompute_calorie_planka(force: bool) {
     add(Letter {
         id: format!("planka-{}", today.format("%Y-%m-%d")),
         created_at: chrono::Local::now().to_rfc3339(),
-        body: planka_letter_body(
-            &trend, weight_kg, previous, new_planka, wanted, adherence, window,
-        ),
+        body: planka_letter_body(&trend, weight_kg, previous, new_planka, wanted, adherence),
         read: false,
         action: None,
         action_done: false,
@@ -485,9 +475,6 @@ fn planka_letter_body(
     // Куда звал расчёт по весу ДО того, как исполнение придержало планку.
     wanted: f64,
     adherence: crate::services::local::Adherence,
-    // Ширина окна тренда. Меньше полной — значит планку меняли на прошлой неделе,
-    // и эта неделя уходит на то, чтобы посмотреть, что правка дала.
-    trend_window_days: i64,
 ) -> String {
     let mut out = String::from("Недельное обновление планки\n\n");
     out.push_str(&weight_verdict(trend, weight_kg));
@@ -529,17 +516,6 @@ fn planka_letter_body(
                  следовать вашей планке.\n\n\
                  На ближайшую неделю она остаётся прежней — {planka_i} калорий."
             )),
-            // Планку меняли на прошлой неделе, и вес ещё не успел на это ответить.
-            // Сказать «менять питание не нужно» здесь было бы неправдой: мы не
-            // решили, что всё хорошо, — мы ждём ответа на прошлую правку.
-            _ if trend_window_days < crate::services::weight_trend::DEFAULT_WINDOW_DAYS => {
-                out.push_str(&format!(
-                    "Планку мы меняли неделю назад, и вес пока отвечает на ту правку — \
-                     двигать её снова, не дождавшись ответа, значит гнать цифру по кругу. \
-                     Эта неделя уходит на наблюдение.\n\n\
-                     Планка остаётся прежней — {planka_i} калорий."
-                ))
-            }
             _ => out.push_str(&format!(
                 "А поэтому менять питание не нужно. На ближайшую неделю ваша планка \
                  остаётся прежней — {planka_i} калорий."
@@ -686,50 +662,48 @@ mod tests {
         }
     }
 
-    /// Полное окно тренда — «планку на прошлой неделе не трогали».
-    const FULL: i64 = crate::services::weight_trend::DEFAULT_WINDOW_DAYS;
 
     #[test]
     fn calorie_letter_states_the_weight_verdict() {
         // 90 кг: комфортная полоса 0.27…0.63 кг/нед.
-        let fast = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget, FULL);
+        let fast = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget);
         assert!(fast.starts_with("Недельное обновление планки"), "{fast}");
         assert!(fast.contains("уверенно снижается — и делает это слишком быстро"), "{fast}");
 
-        let slow = planka_letter_body(&est(Direction::Down, -0.1, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget, FULL);
+        let slow = planka_letter_body(&est(Direction::Down, -0.1, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
         assert!(slow.contains("уверенно снижается — но слишком медленно"), "{slow}");
 
-        let comfy = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, FULL);
+        let comfy = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
         assert!(comfy.contains("в комфортном темпе"), "{comfy}");
 
-        let flat = planka_letter_body(&est(Direction::Down, -0.05, 0.5), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget, FULL);
+        let flat = planka_letter_body(&est(Direction::Down, -0.05, 0.5), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
         assert!(flat.contains("Ваш вес стоит на месте."), "{flat}");
 
-        let unsure = planka_letter_body(&est(Direction::Down, -0.3, 0.7), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, FULL);
+        let unsure = planka_letter_body(&est(Direction::Down, -0.3, 0.7), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
         assert!(unsure.contains("Кажется, ваш вес снижается, но пока неуверенно."), "{unsure}");
 
-        let few = planka_letter_body(&WeightTrend::Insufficient { days: 1 }, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, FULL);
+        let few = planka_letter_body(&WeightTrend::Insufficient { days: 1 }, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
         assert!(few.contains("Взвешиваний пока слишком мало"), "{few}");
     }
 
     #[test]
     fn calorie_letter_advice_follows_the_direction() {
         // Планка выросла — зовём есть БОЛЬШЕ и подсказываем, чем добрать.
-        let up = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget, FULL);
+        let up = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget);
         assert!(up.contains("чуть более калорийно"), "{up}");
         assert!(up.contains("ваша планка 2650 калорий"), "{up}");
         assert!(up.contains("конфетки, орешки"), "{up}");
         assert!(!up.contains("калорийной плотностью"), "{up}");
 
         // Планка упала — зовём есть МЕНЬШЕ и напоминаем про плотность.
-        let down = planka_letter_body(&est(Direction::Up, 0.4, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget, FULL);
+        let down = planka_letter_body(&est(Direction::Up, 0.4, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
         assert!(down.contains("чуть менее калорийно"), "{down}");
         assert!(down.contains("ваша планка 2400 калорий"), "{down}");
         assert!(down.contains("низкой калорийной плотностью"), "{down}");
         assert!(!down.contains("конфетки"), "{down}");
 
         // Планка не изменилась — не зовём ни туда, ни сюда.
-        let hold = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, FULL);
+        let hold = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
         assert!(hold.contains("менять питание не нужно"), "{hold}");
         assert!(hold.contains("остаётся прежней — 2500 калорий"), "{hold}");
         assert!(!hold.contains("калорийно."), "{hold}");
@@ -743,20 +717,10 @@ mod tests {
         // −0.75 кг/нед при 85 кг выше комфортной полосы ТОЧЕЧНО, но погрешность
         // 0.19 не даёт этого утверждать. Планка стоит — и письмо это признаёт.
         let noisy = est_se(Direction::Down, -0.75, 0.99, 0.19);
-        let body = planka_letter_body(&noisy, 85.0, 2800.0, 2800.0, 2800.0, Adherence::OnTarget, FULL);
+        let body = planka_letter_body(&noisy, 85.0, 2800.0, 2800.0, 2800.0, Adherence::OnTarget);
         assert!(body.contains("в пределах погрешности взвешиваний"), "{body}");
         assert!(!body.contains("слишком быстро"), "{body}");
         assert!(body.contains("остаётся прежней — 2800 калорий"), "{body}");
-    }
-
-    /// Неделя наблюдения после правки называется своим именем, а не «всё хорошо».
-    #[test]
-    fn calorie_letter_names_the_settling_week() {
-        let t = est(Direction::Down, -0.5, 0.99);
-        let body = planka_letter_body(&t, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, 7);
-        assert!(body.contains("вес пока отвечает на ту правку"), "{body}");
-        assert!(body.contains("остаётся прежней — 2500 калорий"), "{body}");
-        assert!(!body.contains("менять питание не нужно"), "{body}");
     }
 
     #[test]

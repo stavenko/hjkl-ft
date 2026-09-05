@@ -317,7 +317,7 @@ async fn recompute_calorie_planka(force: bool) {
     add(Letter {
         id: format!("planka-{}", today.format("%Y-%m-%d")),
         created_at: chrono::Local::now().to_rfc3339(),
-        body: planka_letter_body(&trend, weight_kg, previous, new_planka, wanted, adherence),
+        body: planka_letter_body(&trend, weight_kg, previous, new_planka, wanted, adherence, goal),
         read: false,
         action: None,
         action_done: false,
@@ -464,10 +464,9 @@ fn steps_letter_body(
 
 /// Текст недельного письма о планке по калориям.
 ///
-/// Сначала — что происходит с весом: направление (стоит / снижается / растёт),
-/// насколько мы в этом уверены и, для уверенного снижения, темп относительно
-/// комфортной полосы. Потом — куда двинулась планка и почему. И, в зависимости
-/// от направления сдвига, короткая подсказка, чем этот сдвиг закрывать.
+/// Сначала — что происходит с весом за срок, по которому судится планка. Потом —
+/// куда она двинулась и что с этим делать. И то и другое СВОЁ на каждую цель
+/// курса: см. блок «Слова о весе» ниже.
 fn planka_letter_body(
     trend: &crate::services::weight_trend::WeightTrend,
     weight_kg: f64,
@@ -476,31 +475,29 @@ fn planka_letter_body(
     // Куда звал расчёт по весу ДО того, как исполнение придержало планку.
     wanted: f64,
     adherence: crate::services::local::Adherence,
+    // Цель курса приходит параметром, а не читается из профиля: тексты у трёх
+    // целей разные, и проверить все три можно только так.
+    goal: plankas::Goal,
 ) -> String {
     let mut out = String::from("Недельное обновление планки\n\n");
-    out.push_str(&weight_verdict(trend, weight_kg));
+    out.push_str(&weight_verdict(trend, weight_kg, goal));
     out.push_str("\n\n");
 
     let planka_i = planka as i64;
     if planka > old_planka + 0.5 {
-        out.push_str(&format!(
-            "А поэтому вам необходимо начать питаться чуть более калорийно. \
-             На ближайшую неделю ваша планка {planka_i} калорий.\n\n\
-             Если не знаете, чем заполнить внезапное увеличение, попробуйте небольшие \
-             конфетки, орешки."
-        ));
+        out.push_str(&format!("{}\n\nНа ближайшую неделю ваша планка {planka_i} калорий.\n\n{}",
+            raised_why(goal), raised_how(goal)));
     } else if planka < old_planka - 0.5 {
-        out.push_str(&format!(
-            "А поэтому вам необходимо начать питаться чуть менее калорийно. \
-             На ближайшую неделю ваша планка {planka_i} калорий.\n\n\
-             Напоминаем, что необходимо использовать еду с низкой калорийной плотностью. \
-             Больше белка, больше растительности, меньше ультрапереработанных продуктов."
-        ));
+        out.push_str(&format!("{}\n\nНа ближайшую неделю ваша планка {planka_i} калорий.\n\n{}",
+            lowered_why(goal), lowered_how(goal)));
     } else {
         // Планка не сдвинулась. Причин ДВЕ, и человеку они видятся по-разному: либо
         // всё идёт как надо, либо расчёт звал её сдвинуть, а мы придержали, потому
         // что прошлую неделю человек планку не выполнял. Второе надо назвать прямо —
         // иначе письмо читается как «ничего не произошло».
+        //
+        // Обе стопорные ветки от цели НЕ зависят: они про исполнение планки, а не
+        // про вес, и звучат одинаково хоть на похудении, хоть на наборе.
         use crate::services::local::Adherence;
         let held_up = wanted > old_planka + 0.5;
         let held_down = wanted < old_planka - 0.5;
@@ -518,103 +515,200 @@ fn planka_letter_body(
                  На ближайшую неделю она остаётся прежней — {planka_i} калорий."
             )),
             _ => out.push_str(&format!(
-                "А поэтому менять питание не нужно. На ближайшую неделю ваша планка \
-                 остаётся прежней — {planka_i} калорий."
+                "{}\n\nНа ближайшую неделю ваша планка остаётся прежней — {planka_i} калорий.",
+                held_why(goal)
             )),
         }
     }
     out
 }
 
-/// Что происходит с весом — с НАЗВАННЫМ сроком, направлением и положением
-/// относительно целевой полосы.
-///
-/// Срок называется вслух и берётся из константы. Панель веса показывает тренд за
-/// 14 дней, планка судится по 28 — на одних и тех же данных это разные числа
-/// (у живого пользователя −0.99 и −0.58 кг/нед в один день), и рядом они читаются
-/// как противоречие, пока не сказано, что они про разные сроки.
-///
-/// Положение относительно полосы берётся у `local::pace` — у ТОЙ ЖЕ функции, что
-/// двигает планку. Своя копия правила здесь однажды уже была, и после перехода на
-/// значимость она сделала бы письмо самопротиворечивым: «снижается слишком
-/// быстро» рядом с «менять питание не нужно».
-fn weight_verdict(t: &crate::services::weight_trend::WeightTrend, weight_kg: f64) -> String {
-    use crate::services::local::Pace;
-    use crate::services::profile::planka_goal;
-    use crate::services::weight_trend::{Direction, WeightTrend, CONFIDENT, WEAK};
-    use plankas::Goal;
+// ── Слова о весе — СВОИ на каждую цель ───────────────────────────────────────
+//
+// Не один текст с подставленным словом, а три отдельных набора, и это не
+// украшательство. Одно и то же движение веса при разных целях — разные новости:
+// «вес стоит на месте» худеющему значит «дефицита нет», удерживающему — «всё
+// получилось», набирающему — «набора не происходит». Общая формулировка,
+// покрывающая все три, неизбежно получается такой, что не говорит ничего.
+//
+// Тексты собраны здесь, рядом, по одному блоку на цель — чтобы их можно было
+// прочесть тремя колонками и увидеть, что ни один случай не забыт и тон не
+// разъехался.
 
-    let goal = planka_goal();
-    let window = window_phrase();
-    // Где вес относительно ЦЕЛЕВОЙ полосы — и что это значит при этой цели.
-    // «Ниже полосы» у похудения и у набора — совсем разные новости, поэтому текст
-    // выбирается парой, а не одним только положением.
-    let band_clause = || -> Option<&'static str> {
-        match (goal, crate::services::local::pace(t, weight_kg, goal)?) {
-            (Goal::Lose, Pace::BelowBand) => Some("и делает это быстрее комфортного"),
-            (Goal::Lose, Pace::AboveBand) => Some("но медленнее, чем нужно"),
-            (Goal::Lose, Pace::InBand) => Some(in_band_clause(t, weight_kg, "и делает это в комфортном темпе")),
-            (Goal::Maintain, Pace::BelowBand) => Some("и уходит вниз заметнее, чем нужно для удержания"),
-            (Goal::Maintain, Pace::AboveBand) => Some("и уходит вверх заметнее, чем нужно для удержания"),
-            (Goal::Maintain, Pace::InBand) => Some(in_band_clause(t, weight_kg, "и держится там, где надо")),
-            (Goal::Gain, Pace::BelowBand) => Some("а набора пока не видно"),
-            // Верхней границы у набора нет: слишком быстрый набор — не повод для
-            // правки, и говорить о нём как о проблеме нельзя.
-            (Goal::Gain, _) => Some(in_band_clause(t, weight_kg, "и набор идёт")),
-        }
-    };
-    match *t {
-        WeightTrend::Insufficient { .. } => format!(
-            "{window} взвешиваний слишком мало, чтобы понять, что происходит с вашим весом."
-        ),
-        WeightTrend::Tentative { direction, .. } => {
-            let d = match direction {
-                Direction::Down => "снижается",
-                Direction::Up => "растёт",
+/// Что мы можем сказать о весе. То же самое, по чему принято решение о планке:
+/// вопрос один и тот же при любой цели — с какой стороны ЦЕЛЕВОЙ полосы вес, —
+/// а вот ответ на человеческом языке у каждой цели свой.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WeightRead {
+    /// Взвешиваний слишком мало либо вес неизвестен.
+    Unknown,
+    /// Значимо ниже полосы.
+    Below,
+    /// Значимо выше полосы.
+    Above,
+    /// Не отличается от полосы. `certain` — точечная оценка ВНУТРИ полосы (можно
+    /// утверждать); иначе оценка снаружи, но погрешность накрывает границу, и
+    /// честное слово здесь — «погрешность», а не «в порядке».
+    InBand { certain: bool },
+}
+
+fn weight_read(
+    t: &crate::services::weight_trend::WeightTrend,
+    weight_kg: f64,
+    goal: plankas::Goal,
+) -> WeightRead {
+    use crate::services::local::Pace;
+    use crate::services::weight_trend::WeightTrend;
+    match crate::services::local::pace(t, weight_kg, goal) {
+        None => WeightRead::Unknown,
+        Some(Pace::BelowBand) => WeightRead::Below,
+        Some(Pace::AboveBand) => WeightRead::Above,
+        Some(Pace::InBand) => {
+            let WeightTrend::Estimated { slope_kg_per_week: b, .. } = *t else {
+                return WeightRead::Unknown;
             };
-            format!("{window} ваш вес, кажется, {d}, но данных пока мало, чтобы утверждать это уверенно.")
-        }
-        WeightTrend::Estimated { direction, confidence, .. } => {
-            if confidence >= CONFIDENT {
-                let d = match direction {
-                    Direction::Down => "уверенно снижается",
-                    Direction::Up => "уверенно растёт",
-                };
-                match band_clause() {
-                    Some(c) => format!("{window} ваш вес {d} — {c}."),
-                    None => format!("{window} ваш вес {d}."),
-                }
-            } else if confidence >= WEAK {
-                let d = match direction {
-                    Direction::Down => "снижается",
-                    Direction::Up => "растёт",
-                };
-                format!("{window} ваш вес, кажется, {d}, но пока неуверенно.")
-            } else {
-                format!("{window} ваш вес стоит на месте.")
-            }
+            let inside = crate::services::local::target_band(goal, weight_kg)
+                .map(|band| {
+                    !band.lo.is_some_and(|lo| b < lo) && !band.hi.is_some_and(|hi| b > hi)
+                })
+                .unwrap_or(false);
+            WeightRead::InBand { certain: inside }
         }
     }
 }
 
-/// «Не отличается от полосы» — это ДВА разных сообщения, и путать их нельзя:
-/// темп внутри полосы мы утверждаем, темп снаружи, но неотличимый от неё, —
-/// называем тем, чем он является, погрешностью.
-fn in_band_clause(
+/// Что происходит с весом — с НАЗВАННЫМ сроком и словами своей цели.
+///
+/// Срок называется вслух и берётся из константы: панель веса показывает тренд за
+/// 14 дней, планка судится по 28, и на одних и тех же данных это разные числа
+/// (у живого пользователя −0.99 и −0.58 кг/нед в один день). Рядом они читаются
+/// как противоречие, пока не сказано, что они про разные сроки.
+///
+/// Положение относительно полосы берётся у `local::pace` — у ТОЙ ЖЕ функции, что
+/// двигает планку. Своя копия правила здесь однажды уже была, и после перехода на
+/// значимость она сделала бы письмо самопротиворечивым.
+fn weight_verdict(
     t: &crate::services::weight_trend::WeightTrend,
     weight_kg: f64,
-    inside: &'static str,
-) -> &'static str {
-    use crate::services::weight_trend::WeightTrend;
-    let WeightTrend::Estimated { slope_kg_per_week, .. } = *t else { return inside };
-    let goal = crate::services::profile::planka_goal();
-    let Some(band) = crate::services::local::target_band(goal, weight_kg) else { return inside };
-    let below = band.lo.is_some_and(|lo| slope_kg_per_week < lo);
-    let above = band.hi.is_some_and(|hi| slope_kg_per_week > hi);
-    if below || above {
-        "и пока это в пределах погрешности взвешиваний"
-    } else {
-        inside
+    goal: plankas::Goal,
+) -> String {
+    use plankas::Goal;
+    use WeightRead::{Above, Below, InBand, Unknown};
+    let read = weight_read(t, weight_kg, goal);
+    let phrase = match goal {
+        // ── Похудение ────────────────────────────────────────────────────────
+        Goal::Lose => match read {
+            Unknown => "взвешиваний слишком мало, чтобы понять, что происходит с вашим весом",
+            Below => "ваш вес уверенно снижается — и делает это быстрее комфортного",
+            Above => "ваш вес снижается медленнее, чем нужно, или не снижается вовсе",
+            InBand { certain: true } => "ваш вес уверенно снижается в комфортном темпе",
+            InBand { certain: false } => {
+                "разброс взвешиваний пока не даёт сказать, комфортен ваш темп снижения или нет"
+            }
+        },
+        // ── Удержание ────────────────────────────────────────────────────────
+        Goal::Maintain => match read {
+            Unknown => "взвешиваний слишком мало, чтобы понять, держится ли ваш вес",
+            Below => "ваш вес уверенно уходит вниз — а вы держите его, а не снижаете",
+            Above => "ваш вес уверенно растёт — а вы его держите",
+            InBand { certain: true } => "ваш вес держится там, где надо",
+            InBand { certain: false } => {
+                "ваш вес держится — по крайней мере, разброс взвешиваний не даёт \
+                 утверждать обратное"
+            }
+        },
+        // ── Набор ────────────────────────────────────────────────────────────
+        //
+        // У набора нет случая «слишком быстро»: верхней границы у полосы нет
+        // (решение заказчика), поэтому `Above` недостижим. Ветка оставлена, чтобы
+        // появление границы не прошло молча.
+        Goal::Gain => match read {
+            Unknown => "взвешиваний слишком мало, чтобы понять, идёт ли набор",
+            Below => "набора не видно: вес стоит или растёт слишком слабо",
+            Above => "ваш вес растёт очень быстро",
+            InBand { certain: true } => "ваш вес растёт — набор идёт",
+            InBand { certain: false } => {
+                "вес, похоже, растёт, но разброс взвешиваний пока не даёт сказать этого уверенно"
+            }
+        },
+    };
+    format!("{} {phrase}.", window_phrase())
+}
+
+/// Почему планка ПОДНЯЛАСЬ.
+fn raised_why(goal: plankas::Goal) -> &'static str {
+    match goal {
+        plankas::Goal::Lose => {
+            "А поэтому вам необходимо начать питаться чуть более калорийно: слишком быстрое \
+             снижение веса съедает мышцы, а не только жир."
+        }
+        plankas::Goal::Maintain => {
+            "А поэтому вам необходимо начать питаться чуть более калорийно — иначе вес \
+             продолжит уходить вниз, а вы его держите."
+        }
+        plankas::Goal::Gain => {
+            "А поэтому вам необходимо начать питаться чуть более калорийно: без прибавки \
+             набору неоткуда взяться."
+        }
+    }
+}
+
+/// Чем ПОДНЯТУЮ планку закрывать.
+fn raised_how(goal: plankas::Goal) -> &'static str {
+    match goal {
+        plankas::Goal::Lose | plankas::Goal::Maintain => {
+            "Если не знаете, чем заполнить внезапное увеличение, попробуйте небольшие \
+             конфетки, орешки."
+        }
+        // На наборе прибавка приходит каждую неделю, и закрывать её лучше едой, а
+        // не сладким: иначе вместе с весом растёт только жир.
+        plankas::Goal::Gain => {
+            "Закрывать прибавку лучше плотной едой, а не сладким: орехи, крупы, масло в \
+             готовке, лишняя порция за ужином. И держите белок — он решает, чем именно \
+             прирастёт вес."
+        }
+    }
+}
+
+/// Почему планка ОПУСТИЛАСЬ.
+fn lowered_why(goal: plankas::Goal) -> &'static str {
+    match goal {
+        plankas::Goal::Lose => {
+            "А поэтому вам необходимо начать питаться чуть менее калорийно: снижения нет, \
+             значит дефицита пока тоже нет."
+        }
+        plankas::Goal::Maintain => {
+            "А поэтому вам необходимо начать питаться чуть менее калорийно — иначе вес \
+             продолжит расти, а вы его держите."
+        }
+        // Недостижимо: у полосы набора нет верхней границы, значит `AboveBand` не
+        // возникает и планка вниз не идёт. Текст на случай, если границу заведут.
+        plankas::Goal::Gain => {
+            "А поэтому вам необходимо начать питаться чуть менее калорийно: вес растёт \
+             быстрее, чем нужно для набора."
+        }
+    }
+}
+
+/// Чем ОПУЩЕННУЮ планку держать.
+fn lowered_how(goal: plankas::Goal) -> &'static str {
+    match goal {
+        plankas::Goal::Lose | plankas::Goal::Maintain => {
+            "Напоминаем, что необходимо использовать еду с низкой калорийной плотностью. \
+             Больше белка, больше растительности, меньше ультрапереработанных продуктов."
+        }
+        plankas::Goal::Gain => {
+            "Убавляйте за счёт сладкого и жирного, а не за счёт белка и еды."
+        }
+    }
+}
+
+/// Почему планка ОСТАЛАСЬ прежней (и это не стопор по исполнению).
+fn held_why(goal: plankas::Goal) -> &'static str {
+    match goal {
+        plankas::Goal::Lose => "А поэтому менять питание не нужно — вы снижаетесь как надо.",
+        plankas::Goal::Maintain => "А поэтому менять питание не нужно — вес держится.",
+        plankas::Goal::Gain => "А поэтому менять питание не нужно — набор идёт как надо.",
     }
 }
 
@@ -703,6 +797,7 @@ mod tests {
 
     use crate::services::local::Adherence;
     use crate::services::weight_trend::{Direction, WeightTrend};
+    use plankas::Goal;
 
     /// Оценка тренда с ЯВНОЙ погрешностью: от неё зависит и вердикт письма, и
     /// шаг планки. По умолчанию берём узкую — тесты про тексты, а не про шум.
@@ -725,24 +820,33 @@ mod tests {
     /// 90 кг: полоса 0.27…0.63 кг/нед.
     #[test]
     fn calorie_letter_states_the_weight_verdict() {
-        let fast = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget);
+        let fast = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget, Goal::Lose);
         assert!(fast.starts_with("Недельное обновление планки"), "{fast}");
         assert!(fast.contains("уверенно снижается — и делает это быстрее комфортного"), "{fast}");
 
-        let slow = planka_letter_body(&est(Direction::Down, -0.1, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
-        assert!(slow.contains("уверенно снижается — но медленнее, чем нужно"), "{slow}");
+        let slow = planka_letter_body(&est(Direction::Down, -0.1, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget, Goal::Lose);
+        assert!(slow.contains("снижается медленнее, чем нужно"), "{slow}");
 
-        let comfy = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
+        let comfy = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, Goal::Lose);
         assert!(comfy.contains("в комфортном темпе"), "{comfy}");
 
-        let flat = planka_letter_body(&est(Direction::Down, -0.05, 0.5), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
-        assert!(flat.contains("ваш вес стоит на месте."), "{flat}");
+        // Вес стоит — при цели «похудение» это «не снижается вовсе», а не
+        // безоценочное «стоит на месте»: последнее ничего человеку не говорит.
+        let flat = planka_letter_body(&est(Direction::Down, -0.05, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget, Goal::Lose);
+        assert!(flat.contains("не снижается вовсе"), "{flat}");
 
-        let unsure = planka_letter_body(&est(Direction::Down, -0.3, 0.7), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
-        assert!(unsure.contains("ваш вес, кажется, снижается, но пока неуверенно."), "{unsure}");
+        // Шумная неделя: точечная оценка вне полосы, но погрешность её накрывает.
+        // Письмо называет это погрешностью, а не темпом.
+        let unsure = planka_letter_body(&est_se(Direction::Down, -0.9, 0.9, 0.45), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, Goal::Lose);
+        assert!(unsure.contains("не даёт сказать, комфортен ваш темп"), "{unsure}");
 
-        let few = planka_letter_body(&WeightTrend::Insufficient { days: 1 }, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
+        let few = planka_letter_body(&WeightTrend::Insufficient { days: 1 }, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, Goal::Lose);
         assert!(few.contains("взвешиваний слишком мало"), "{few}");
+        let two = planka_letter_body(
+            &WeightTrend::Tentative { direction: Direction::Down, slope_kg_per_week: -0.5, days: 2 },
+            90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, Goal::Lose,
+        );
+        assert!(two.contains("взвешиваний слишком мало"), "{two}");
     }
 
     /// СРОК НАЗЫВАЕТСЯ. Панель веса судит по 14 дням, планка — по 28, и на одних
@@ -758,8 +862,95 @@ mod tests {
             WeightTrend::Insufficient { days: 1 },
             WeightTrend::Tentative { direction: Direction::Down, slope_kg_per_week: -0.5, days: 2 },
         ] {
-            let body = planka_letter_body(&t, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
-            assert!(body.contains(&format!("За последние {n} дней")), "{body}");
+            for g in [Goal::Lose, Goal::Maintain, Goal::Gain] {
+                let body = planka_letter_body(&t, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, g);
+                assert!(body.contains(&format!("За последние {n} дней")), "{g:?}: {body}");
+            }
+        }
+    }
+
+    /// ТРИ НАБОРА ТЕКСТОВ, а не один с подставленным словом. Одно и то же
+    /// движение веса при разных целях — разные новости, и письмо обязано это
+    /// говорить. Здесь один и тот же ровно стоящий вес проверяется на всех трёх.
+    #[test]
+    fn verdikt_svoj_na_kazhduyu_cel() {
+        // 85 кг, вес стоит намертво: −0.02 кг/нед при узкой погрешности.
+        let flat = est_se(Direction::Down, -0.02, 0.9, 0.02);
+
+        let lose = weight_verdict(&flat, 85.0, Goal::Lose);
+        assert!(lose.contains("не снижается вовсе"), "{lose}");
+
+        let hold = weight_verdict(&flat, 85.0, Goal::Maintain);
+        assert!(hold.contains("держится там, где надо"), "{hold}");
+
+        let gain = weight_verdict(&flat, 85.0, Goal::Gain);
+        assert!(gain.contains("набора не видно"), "{gain}");
+
+        // Ни один из трёх не повторяет другого.
+        assert_ne!(lose, hold);
+        assert_ne!(hold, gain);
+        assert_ne!(lose, gain);
+    }
+
+    /// Уверенный набор: у похудения это провал, у удержания — тоже, у набора —
+    /// ровно то, что нужно. И никакого «слишком быстро» на наборе быть не может:
+    /// верхней границы у полосы нет.
+    #[test]
+    fn rastushchij_ves_chitaetsya_po_celi() {
+        let rising = est_se(Direction::Up, 0.5, 0.99, 0.03);
+        let lose = weight_verdict(&rising, 85.0, Goal::Lose);
+        let hold = weight_verdict(&rising, 85.0, Goal::Maintain);
+        let gain = weight_verdict(&rising, 85.0, Goal::Gain);
+        assert!(lose.contains("не снижается вовсе"), "{lose}");
+        assert!(hold.contains("уверенно растёт"), "{hold}");
+        assert!(gain.contains("набор идёт"), "{gain}");
+        assert!(!gain.contains("очень быстро"), "{gain}");
+    }
+
+    /// Совет тоже свой: чем закрывать поднятую планку на наборе и на похудении —
+    /// разные вещи.
+    #[test]
+    fn sovet_svoj_na_kazhduyu_cel() {
+        let flat = est_se(Direction::Down, -0.02, 0.9, 0.02);
+        let body = |g| planka_letter_body(&flat, 85.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget, g);
+
+        let lose = body(Goal::Lose);
+        assert!(lose.contains("съедает мышцы"), "{lose}");
+        assert!(lose.contains("конфетки, орешки"), "{lose}");
+
+        let gain = body(Goal::Gain);
+        assert!(gain.contains("набору неоткуда взяться"), "{gain}");
+        assert!(gain.contains("плотной едой, а не сладким"), "{gain}");
+        assert!(!gain.contains("конфетки"), "{gain}");
+
+        let hold = body(Goal::Maintain);
+        assert!(hold.contains("вес продолжит уходить вниз"), "{hold}");
+    }
+
+    /// «Планка не сдвинулась» тоже объясняется по-разному.
+    #[test]
+    fn uderzhanie_planki_obyasnyaetsya_po_celi() {
+        let ok_lose = est_se(Direction::Down, -0.4, 0.99, 0.03); // в полосе похудения
+        let b = planka_letter_body(&ok_lose, 85.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, Goal::Lose);
+        assert!(b.contains("вы снижаетесь как надо"), "{b}");
+
+        let ok_hold = est_se(Direction::Down, -0.02, 0.9, 0.02);
+        let b = planka_letter_body(&ok_hold, 85.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, Goal::Maintain);
+        assert!(b.contains("вес держится"), "{b}");
+
+        let ok_gain = est_se(Direction::Up, 0.4, 0.99, 0.03);
+        let b = planka_letter_body(&ok_gain, 85.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, Goal::Gain);
+        assert!(b.contains("набор идёт как надо"), "{b}");
+    }
+
+    /// Стопор по исполнению от цели НЕ зависит: он про планку против съеденного,
+    /// а не про вес, и звучит одинаково при любой цели.
+    #[test]
+    fn stopor_zvuchit_odinakovo_pri_lyuboj_celi() {
+        let fast = est_se(Direction::Down, -1.2, 0.99, 0.03);
+        for g in [Goal::Lose, Goal::Maintain, Goal::Gain] {
+            let b = planka_letter_body(&fast, 85.0, 2500.0, 2500.0, 2650.0, Adherence::Under, g);
+            assert!(b.contains("из-за того, что вы недоедали"), "{g:?}: {b}");
         }
     }
 
@@ -778,21 +969,21 @@ mod tests {
     #[test]
     fn calorie_letter_advice_follows_the_direction() {
         // Планка выросла — зовём есть БОЛЬШЕ и подсказываем, чем добрать.
-        let up = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget);
+        let up = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget, Goal::Lose);
         assert!(up.contains("чуть более калорийно"), "{up}");
         assert!(up.contains("ваша планка 2650 калорий"), "{up}");
         assert!(up.contains("конфетки, орешки"), "{up}");
         assert!(!up.contains("калорийной плотностью"), "{up}");
 
         // Планка упала — зовём есть МЕНЬШЕ и напоминаем про плотность.
-        let down = planka_letter_body(&est(Direction::Up, 0.4, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
+        let down = planka_letter_body(&est(Direction::Up, 0.4, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget, Goal::Lose);
         assert!(down.contains("чуть менее калорийно"), "{down}");
         assert!(down.contains("ваша планка 2400 калорий"), "{down}");
         assert!(down.contains("низкой калорийной плотностью"), "{down}");
         assert!(!down.contains("конфетки"), "{down}");
 
         // Планка не изменилась — не зовём ни туда, ни сюда.
-        let hold = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
+        let hold = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, Goal::Lose);
         assert!(hold.contains("менять питание не нужно"), "{hold}");
         assert!(hold.contains("остаётся прежней — 2500 калорий"), "{hold}");
         assert!(!hold.contains("калорийно."), "{hold}");
@@ -806,8 +997,8 @@ mod tests {
         // −0.75 кг/нед при 85 кг выше комфортной полосы ТОЧЕЧНО, но погрешность
         // 0.19 не даёт этого утверждать. Планка стоит — и письмо это признаёт.
         let noisy = est_se(Direction::Down, -0.75, 0.99, 0.19);
-        let body = planka_letter_body(&noisy, 85.0, 2800.0, 2800.0, 2800.0, Adherence::OnTarget);
-        assert!(body.contains("в пределах погрешности взвешиваний"), "{body}");
+        let body = planka_letter_body(&noisy, 85.0, 2800.0, 2800.0, 2800.0, Adherence::OnTarget, Goal::Lose);
+        assert!(body.contains("не даёт сказать, комфортен ваш темп"), "{body}");
         assert!(!body.contains("быстрее комфортного"), "{body}");
         assert!(body.contains("остаётся прежней — 2800 калорий"), "{body}");
     }

@@ -129,6 +129,7 @@ pub fn last_weight_kg() -> Option<f64> {
 /// действующей калорийной планки — той же, что вернёт [`current`].
 pub fn snapshot() -> Snapshot {
     Snapshot {
+        goal: profile::planka_goal(),
         sex: profile::get_sex(),
         age_years: profile::get_age_years(),
         height_cm: profile::get_height_cm(),

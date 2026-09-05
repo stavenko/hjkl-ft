@@ -223,8 +223,9 @@ pub async fn daily_kcal_totals(window_days: i64) -> Vec<f64> {
 // худеющего, и кураторское — куратор обязан увидеть число до отправки. Реэкспорт
 // оставлен, чтобы вызывающие места не менялись.
 pub use plankas::{
-    adherence, calorie_planka, calorie_planka_weekly, next_steps_planka, planka_factor,
-    steps_planka_for_avg, Adherence, STEPS_PLANKA_MAX,
+    adherence, calorie_planka, calorie_planka_weekly, comfort_band_kg_per_week, next_steps_planka,
+    pace, planka_factor, steps_planka_for_avg, trend_window_days, Adherence, Pace,
+    STEPS_PLANKA_MAX,
 };
 
 

@@ -147,7 +147,7 @@ async fn build_weight() -> Value {
         WeightTrend::Tentative { direction, slope_kg_per_week, days } => {
             (Some(slope_kg_per_week), None, Some(dir_str(direction)), days)
         }
-        WeightTrend::Estimated { direction, slope_kg_per_week, confidence, days } => (
+        WeightTrend::Estimated { direction, slope_kg_per_week, confidence, days, .. } => (
             Some(slope_kg_per_week),
             Some(confidence),
             Some(dir_str(direction)),
@@ -512,7 +512,7 @@ pub async fn build_report(from: Option<String>, to: String) -> Value {
         WeightTrend::Tentative { direction, slope_kg_per_week, days } => {
             (Some(slope_kg_per_week), None, Some(dir_str(direction)), days)
         }
-        WeightTrend::Estimated { direction, slope_kg_per_week, confidence, days } => (
+        WeightTrend::Estimated { direction, slope_kg_per_week, confidence, days, .. } => (
             Some(slope_kg_per_week),
             Some(confidence),
             Some(dir_str(direction)),

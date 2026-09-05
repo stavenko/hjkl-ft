@@ -291,7 +291,21 @@ impl Report {
             previous,
             &self.weight_entries(),
             self.avg_kcal_7d,
+            self.calories_changed_on(),
         ))
+    }
+
+    /// День последней смены калорийной планки — по истории планок из отчёта.
+    ///
+    /// `None`, если история пуста ИЛИ последняя смена случилась раньше начала
+    /// присланного периода. И то и другое означает одно: за окно тренда планку не
+    /// трогали, окно можно брать целиком.
+    fn calories_changed_on(&self) -> Option<&str> {
+        self.plankas
+            .get("calories")?
+            .iter()
+            .map(|p| p.date.as_str())
+            .max()
     }
 }
 

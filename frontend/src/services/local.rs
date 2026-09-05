@@ -223,8 +223,8 @@ pub async fn daily_kcal_totals(window_days: i64) -> Vec<f64> {
 // худеющего, и кураторское — куратор обязан увидеть число до отправки. Реэкспорт
 // оставлен, чтобы вызывающие места не менялись.
 pub use plankas::{
-    adherence, calorie_planka, calorie_planka_weekly, check_evidence, comfort_band_kg_per_week,
-    next_steps_planka, pace, planka_factor, steps_planka_for_avg, Adherence, NoDecision, Pace,
+    adherence, calorie_planka, calorie_planka_weekly, check_evidence, next_steps_planka, pace,
+    planka_factor, steps_planka_for_avg, target_band, Adherence, NoDecision, Pace, TargetBand,
     DECISION_WINDOW_DAYS, DIARY_MIN_DAYS, STEPS_PLANKA_MAX,
 };
 
@@ -254,7 +254,7 @@ pub async fn calorie_planka_suggestion() -> Option<f64> {
         .max_by(|a, b| a.date.cmp(&b.date))
         .map(|e| e.weight_kg)
         .unwrap_or(0.0);
-    Some(calorie_planka(avg, &trend, weight_kg))
+    Some(calorie_planka(avg, &trend, weight_kg, crate::services::profile::planka_goal()))
 }
 
 /// ДЕЙСТВУЮЩАЯ суточная планка по калориям.

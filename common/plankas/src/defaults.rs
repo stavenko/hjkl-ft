@@ -115,6 +115,9 @@ impl Kind {
 /// пришли эти пять чисел.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Snapshot {
+    /// Цель курса. Не `Option`: у неё всегда есть значение — на незаполненном
+    /// профиле это похудение, ровно как отвечает `profile::get_goal`.
+    pub goal: crate::Goal,
     pub sex: Option<Sex>,
     pub age_years: Option<i32>,
     pub height_cm: Option<f64>,
@@ -278,6 +281,7 @@ mod tests {
 
     fn adult() -> Snapshot {
         Snapshot {
+            goal: crate::Goal::Lose,
             sex: Some(Sex::Female),
             age_years: Some(35),
             height_cm: Some(165.0),

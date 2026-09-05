@@ -57,7 +57,9 @@ pub fn WeightPanel(
         WeightUnit::Lbs => t("weight.unit_lbs"),
     };
 
-    // 14-day trend summary shown under the chart.
+    // Сводка тренда под графиком. Окно НАЗЫВАЕТСЯ явно и берётся из константы:
+    // планка судится по другому окну (`DECISION_WINDOW_DAYS`), и два числа рядом
+    // читались бы как противоречие, пока не сказано, что они про разные сроки.
     let trend_text = move || {
         let u = unit.get();
         let ul = unit_label();
@@ -167,7 +169,7 @@ pub fn WeightPanel(
                     )
                 }></div>
                 <p style="margin-top: 10px; text-align: center;">
-                    <span class="is-size-7 has-text-grey">{move || format!("{}: ", t("weight.trend.title"))}</span>
+                    <span class="is-size-7 has-text-grey">{move || format!("{} · {} {}: ", t("weight.trend.title"), DEFAULT_WINDOW_DAYS, t("weight.trend.days"))}</span>
                     <span class="is-size-7 has-text-weight-semibold" style:color=trend_color>{trend_text}</span>
                 </p>
                 {cycle_view}

@@ -190,6 +190,19 @@ pub fn get_goal() -> CourseGoal {
     })
 }
 
+/// Цель курса в том виде, в каком её читают правила планок.
+///
+/// Отдельный тип у `plankas` не дублирование, а условие переносимости: полосу, к
+/// которой правило ведёт вес, считает и кураторское приложение, а `CourseGoal`
+/// живёт здесь и туда не поедет.
+pub fn planka_goal() -> plankas::Goal {
+    match get_goal() {
+        CourseGoal::Lose => plankas::Goal::Lose,
+        CourseGoal::Maintain => plankas::Goal::Maintain,
+        CourseGoal::Gain => plankas::Goal::Gain,
+    }
+}
+
 /// Store the course goal. A CHANGE flags the calorie planka as needing a recompute
 /// (the old planka was derived for the previous goal).
 pub fn set_goal(goal: CourseGoal) {

@@ -298,8 +298,9 @@ async fn recompute_calorie_planka(force: bool) {
         local::adherence(avg, previous, crate::services::indicators::CALORIE_BAND_KCAL);
     // Куда звал бы вес, если бы исполнение не держало планку. Нужно письму: без
     // этого «планка не изменилась» не отличить от «мы придержали её намеренно».
-    let wanted = local::calorie_planka(previous, &trend, weight_kg);
-    let new_planka = local::calorie_planka_weekly(previous, &trend, weight_kg, adherence);
+    let goal = crate::services::profile::planka_goal();
+    let wanted = local::calorie_planka(previous, &trend, weight_kg, goal);
+    let new_planka = local::calorie_planka_weekly(previous, &trend, weight_kg, adherence, goal);
     leptos::logging::log!(
         "планка калорий: съедено в среднем {avg:.0} за {} дн. при планке {previous:.0} → \
          {adherence:?}; новая {new_planka:.0}",
@@ -525,60 +526,117 @@ fn planka_letter_body(
     out
 }
 
-/// Что происходит с весом, одним предложением: направление + уверенность, а для
-/// уверенного снижения ещё и темп относительно комфортной полосы (0.3–0.7 %
-/// массы тела в неделю — та же полоса, по которой двигается планка).
+/// Что происходит с весом — с НАЗВАННЫМ сроком, направлением и положением
+/// относительно целевой полосы.
 ///
-/// Темп берётся у `local::pace` — у ТОЙ ЖЕ функции, что решает, двигать ли планку.
-/// Своя копия правила здесь однажды уже была, и после перехода на значимость она
-/// сделала бы письмо самопротиворечивым: «снижается слишком быстро» рядом с
-/// «менять питание не нужно».
+/// Срок называется вслух и берётся из константы. Панель веса показывает тренд за
+/// 14 дней, планка судится по 28 — на одних и тех же данных это разные числа
+/// (у живого пользователя −0.99 и −0.58 кг/нед в один день), и рядом они читаются
+/// как противоречие, пока не сказано, что они про разные сроки.
+///
+/// Положение относительно полосы берётся у `local::pace` — у ТОЙ ЖЕ функции, что
+/// двигает планку. Своя копия правила здесь однажды уже была, и после перехода на
+/// значимость она сделала бы письмо самопротиворечивым: «снижается слишком
+/// быстро» рядом с «менять питание не нужно».
 fn weight_verdict(t: &crate::services::weight_trend::WeightTrend, weight_kg: f64) -> String {
     use crate::services::local::Pace;
+    use crate::services::profile::planka_goal;
     use crate::services::weight_trend::{Direction, WeightTrend, CONFIDENT, WEAK};
-    let pace = |slope_wk: f64| -> Option<&'static str> {
-        match crate::services::local::pace(t, weight_kg)? {
-            Pace::Fast => Some("и делает это слишком быстро"),
-            Pace::Slow => Some("но слишком медленно"),
-            // «Не отличается от полосы» — это ДВА разных сообщения, и путать их
-            // нельзя: темп внутри полосы мы утверждаем, темп снаружи, но не
-            // отличимый от неё, — называем тем, чем он является, погрешностью.
-            Pace::Comfortable => {
-                let (lo, hi) = crate::services::local::comfort_band_kg_per_week(weight_kg)?;
-                if (lo..=hi).contains(&slope_wk.abs()) {
-                    Some("и делает это в комфортном темпе")
-                } else {
-                    Some("и пока это в пределах погрешности взвешиваний")
-                }
-            }
+    use plankas::Goal;
+
+    let goal = planka_goal();
+    let window = window_phrase();
+    // Где вес относительно ЦЕЛЕВОЙ полосы — и что это значит при этой цели.
+    // «Ниже полосы» у похудения и у набора — совсем разные новости, поэтому текст
+    // выбирается парой, а не одним только положением.
+    let band_clause = || -> Option<&'static str> {
+        match (goal, crate::services::local::pace(t, weight_kg, goal)?) {
+            (Goal::Lose, Pace::BelowBand) => Some("и делает это быстрее комфортного"),
+            (Goal::Lose, Pace::AboveBand) => Some("но медленнее, чем нужно"),
+            (Goal::Lose, Pace::InBand) => Some(in_band_clause(t, weight_kg, "и делает это в комфортном темпе")),
+            (Goal::Maintain, Pace::BelowBand) => Some("и уходит вниз заметнее, чем нужно для удержания"),
+            (Goal::Maintain, Pace::AboveBand) => Some("и уходит вверх заметнее, чем нужно для удержания"),
+            (Goal::Maintain, Pace::InBand) => Some(in_band_clause(t, weight_kg, "и держится там, где надо")),
+            (Goal::Gain, Pace::BelowBand) => Some("а набора пока не видно"),
+            // Верхней границы у набора нет: слишком быстрый набор — не повод для
+            // правки, и говорить о нём как о проблеме нельзя.
+            (Goal::Gain, _) => Some(in_band_clause(t, weight_kg, "и набор идёт")),
         }
     };
     match *t {
-        WeightTrend::Insufficient { .. } => {
-            "Взвешиваний пока слишком мало, чтобы понять, что происходит с вашим весом.".to_string()
+        WeightTrend::Insufficient { .. } => format!(
+            "{window} взвешиваний слишком мало, чтобы понять, что происходит с вашим весом."
+        ),
+        WeightTrend::Tentative { direction, .. } => {
+            let d = match direction {
+                Direction::Down => "снижается",
+                Direction::Up => "растёт",
+            };
+            format!("{window} ваш вес, кажется, {d}, но данных пока мало, чтобы утверждать это уверенно.")
         }
-        WeightTrend::Tentative { direction, .. } => match direction {
-            Direction::Down => "Кажется, ваш вес снижается, но данных пока мало, чтобы утверждать это уверенно.".to_string(),
-            Direction::Up => "Кажется, ваш вес растёт, но данных пока мало, чтобы утверждать это уверенно.".to_string(),
-        },
-        WeightTrend::Estimated { direction, confidence, slope_kg_per_week, .. } => {
+        WeightTrend::Estimated { direction, confidence, .. } => {
             if confidence >= CONFIDENT {
-                match direction {
-                    Direction::Down => match pace(slope_kg_per_week) {
-                        Some(p) => format!("Ваш вес уверенно снижается — {p}."),
-                        None => "Ваш вес уверенно снижается.".to_string(),
-                    },
-                    Direction::Up => "Ваш вес уверенно растёт.".to_string(),
+                let d = match direction {
+                    Direction::Down => "уверенно снижается",
+                    Direction::Up => "уверенно растёт",
+                };
+                match band_clause() {
+                    Some(c) => format!("{window} ваш вес {d} — {c}."),
+                    None => format!("{window} ваш вес {d}."),
                 }
             } else if confidence >= WEAK {
-                match direction {
-                    Direction::Down => "Кажется, ваш вес снижается, но пока неуверенно.".to_string(),
-                    Direction::Up => "Кажется, ваш вес растёт, но пока неуверенно.".to_string(),
-                }
+                let d = match direction {
+                    Direction::Down => "снижается",
+                    Direction::Up => "растёт",
+                };
+                format!("{window} ваш вес, кажется, {d}, но пока неуверенно.")
             } else {
-                "Ваш вес стоит на месте.".to_string()
+                format!("{window} ваш вес стоит на месте.")
             }
         }
+    }
+}
+
+/// «Не отличается от полосы» — это ДВА разных сообщения, и путать их нельзя:
+/// темп внутри полосы мы утверждаем, темп снаружи, но неотличимый от неё, —
+/// называем тем, чем он является, погрешностью.
+fn in_band_clause(
+    t: &crate::services::weight_trend::WeightTrend,
+    weight_kg: f64,
+    inside: &'static str,
+) -> &'static str {
+    use crate::services::weight_trend::WeightTrend;
+    let WeightTrend::Estimated { slope_kg_per_week, .. } = *t else { return inside };
+    let goal = crate::services::profile::planka_goal();
+    let Some(band) = crate::services::local::target_band(goal, weight_kg) else { return inside };
+    let below = band.lo.is_some_and(|lo| slope_kg_per_week < lo);
+    let above = band.hi.is_some_and(|hi| slope_kg_per_week > hi);
+    if below || above {
+        "и пока это в пределах погрешности взвешиваний"
+    } else {
+        inside
+    }
+}
+
+/// «За последние 28 дней» — срок, по которому судится планка, словами и из
+/// константы, чтобы текст не разошёлся с расчётом.
+fn window_phrase() -> String {
+    let n = crate::services::local::DECISION_WINDOW_DAYS;
+    format!("За последние {n} {}", plural_days(n))
+}
+
+/// Русское склонение «день/дня/дней».
+fn plural_days(n: i64) -> &'static str {
+    let n100 = n % 100;
+    let n10 = n % 10;
+    if (11..=14).contains(&n100) {
+        "дней"
+    } else if n10 == 1 {
+        "день"
+    } else if (2..=4).contains(&n10) {
+        "дня"
+    } else {
+        "дней"
     }
 }
 
@@ -663,27 +721,58 @@ mod tests {
     }
 
 
+    /// Вердикт письма — при цели по умолчанию (похудение; профиль в тестах пуст).
+    /// 90 кг: полоса 0.27…0.63 кг/нед.
     #[test]
     fn calorie_letter_states_the_weight_verdict() {
-        // 90 кг: комфортная полоса 0.27…0.63 кг/нед.
         let fast = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget);
         assert!(fast.starts_with("Недельное обновление планки"), "{fast}");
-        assert!(fast.contains("уверенно снижается — и делает это слишком быстро"), "{fast}");
+        assert!(fast.contains("уверенно снижается — и делает это быстрее комфортного"), "{fast}");
 
         let slow = planka_letter_body(&est(Direction::Down, -0.1, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
-        assert!(slow.contains("уверенно снижается — но слишком медленно"), "{slow}");
+        assert!(slow.contains("уверенно снижается — но медленнее, чем нужно"), "{slow}");
 
         let comfy = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
         assert!(comfy.contains("в комфортном темпе"), "{comfy}");
 
         let flat = planka_letter_body(&est(Direction::Down, -0.05, 0.5), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
-        assert!(flat.contains("Ваш вес стоит на месте."), "{flat}");
+        assert!(flat.contains("ваш вес стоит на месте."), "{flat}");
 
         let unsure = planka_letter_body(&est(Direction::Down, -0.3, 0.7), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
-        assert!(unsure.contains("Кажется, ваш вес снижается, но пока неуверенно."), "{unsure}");
+        assert!(unsure.contains("ваш вес, кажется, снижается, но пока неуверенно."), "{unsure}");
 
         let few = planka_letter_body(&WeightTrend::Insufficient { days: 1 }, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
-        assert!(few.contains("Взвешиваний пока слишком мало"), "{few}");
+        assert!(few.contains("взвешиваний слишком мало"), "{few}");
+    }
+
+    /// СРОК НАЗЫВАЕТСЯ. Панель веса судит по 14 дням, планка — по 28, и на одних
+    /// и тех же данных это разные числа. Пока срок не назван, они читаются как
+    /// противоречие. Число берётся из константы — разойтись с расчётом не может.
+    #[test]
+    fn calorie_letter_names_its_window() {
+        let n = crate::services::local::DECISION_WINDOW_DAYS;
+        for t in [
+            est(Direction::Down, -1.2, 0.99),
+            est(Direction::Down, -0.05, 0.5),
+            est(Direction::Down, -0.3, 0.7),
+            WeightTrend::Insufficient { days: 1 },
+            WeightTrend::Tentative { direction: Direction::Down, slope_kg_per_week: -0.5, days: 2 },
+        ] {
+            let body = planka_letter_body(&t, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
+            assert!(body.contains(&format!("За последние {n} дней")), "{body}");
+        }
+    }
+
+    /// Склонение срока — на случай, если окно однажды станет не 28.
+    #[test]
+    fn sklonenie_sroka() {
+        assert_eq!(plural_days(1), "день");
+        assert_eq!(plural_days(3), "дня");
+        assert_eq!(plural_days(5), "дней");
+        assert_eq!(plural_days(11), "дней");
+        assert_eq!(plural_days(14), "дней");
+        assert_eq!(plural_days(21), "день");
+        assert_eq!(plural_days(28), "дней");
     }
 
     #[test]
@@ -719,7 +808,7 @@ mod tests {
         let noisy = est_se(Direction::Down, -0.75, 0.99, 0.19);
         let body = planka_letter_body(&noisy, 85.0, 2800.0, 2800.0, 2800.0, Adherence::OnTarget);
         assert!(body.contains("в пределах погрешности взвешиваний"), "{body}");
-        assert!(!body.contains("слишком быстро"), "{body}");
+        assert!(!body.contains("быстрее комфортного"), "{body}");
         assert!(body.contains("остаётся прежней — 2800 калорий"), "{body}");
     }
 

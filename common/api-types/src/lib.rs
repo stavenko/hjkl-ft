@@ -420,6 +420,14 @@ pub struct DiaryEntry {
     /// обнулится, — либо оставит как есть.
     #[serde(default)]
     pub recognition_tries: u32,
+    /// Вернуть ли запись в очередь через сутки после исчерпания попыток.
+    ///
+    /// Истина у ТЕХНИЧЕСКОГО сбоя: за сутки может выйти новая сборка, починиться
+    /// воркер, кончиться сбой у провайдера. Ложь у того, что ждёт человека
+    /// (переснять, дописать): за нас никто не переснимет, и через сутки ответ будет
+    /// тот же — повтор только сжёг бы запрос.
+    #[serde(default)]
+    pub retry_after_wait: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -447,6 +455,7 @@ impl DiaryEntry {
             recognized_at: None,
             recognition_error: None,
             recognition_tries: 0,
+            retry_after_wait: false,
             created_at: String::new(),
             updated_at: String::new(),
         }

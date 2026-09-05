@@ -374,6 +374,29 @@ async fn record_event(mut req: Request, env: &Env, user_id: &str) -> Result<Resp
         return Ok(error_response("missing code/kind", 400));
     }
 
+    // ТЕХНИЧЕСКИЙ СБОЙ РАСПОЗНАВАНИЯ — в DO и в лог воркера, а не только в
+    // аналитику. По датасету аналитики алерт не повесить, он для запросов
+    // постфактум; по строке в Workers Logs — можно. В DO — чтобы было что сложить в
+    // суточную сводку в Telegram.
+    if kind == RECOGNITION_FAIL {
+        if let Ok(stub) = bug_stub(env) {
+            let row = serde_json::json!({
+                "code": code,
+                "cause": field(&body, "cause"),
+                "user": user_id,
+            });
+            if let Err(e) = do_post(&stub, "/recognition-fail", &row).await {
+                console_error!("recognition-fail не записан: {e}");
+            }
+        }
+        console_error!(
+            "{RECOGNITION_ALERT_PREFIX} код {code} — {} (user {user_id}, {}, {})",
+            field(&body, "cause"),
+            field(&body, "platform"),
+            field(&body, "build"),
+        );
+    }
+
     let dataset = match env.analytics_engine(EVENT_DATASET) {
         Ok(d) => d,
         Err(e) => {
@@ -424,6 +447,12 @@ async fn send_unknown_digest(env: &Env) -> Result<()> {
     let body: serde_json::Value = resp.json().await?;
     let foods = body.get("foods").and_then(|v| v.as_array()).cloned().unwrap_or_default();
 
+    // Технические сбои распознавания — тем же сообщением, а не отдельным: два
+    // оповещения в сутки об одном и том же деле читаются хуже одного.
+    let mut fresp = do_get(&stub, "/recognition-digest?hours=24").await?;
+    let fbody: serde_json::Value = fresp.json().await?;
+    let fails = fbody.get("fails").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+
     // ОТКУДА ПРИЛЕТЕЛО. Прод и дев шлют в один и тот же чат, и без пометки сводки
     // неразличимы: имена в них бывают одни и те же — на деве их набивают замеры.
     let where_from = env
@@ -435,20 +464,48 @@ async fn send_unknown_digest(env: &Env) -> Result<()> {
     // ПУСТАЯ СВОДКА ТОЖЕ УХОДИТ. Молчание двусмысленно: то ли еда вся опозналась,
     // то ли отвалился крон, воркер или бот, — а разница между этими случаями
     // ровно противоположная.
-    if foods.is_empty() {
-        let text = format!("{mark} За последние сутки не было неудачных попыток опознать еду.");
+    if foods.is_empty() && fails.is_empty() {
+        let text = format!(
+            "{mark} За последние сутки не было ни неудачных попыток опознать еду, ни сбоев распознавания."
+        );
         return send_telegram(&token, &chat_id, &text).await;
     }
 
-    let mut lines = vec![format!("{mark} Не опознано за сутки: {} продукт(ов)", foods.len())];
-    for f in foods.iter().take(20) {
-        let subject = f.get("subject").and_then(|v| v.as_str()).unwrap_or("?");
-        let people = f.get("people").and_then(|v| v.as_i64()).unwrap_or(0);
-        let n = f.get("n").and_then(|v| v.as_i64()).unwrap_or(0);
-        lines.push(format!("• {subject} — {people} чел., {n} раз"));
+    let mut lines = Vec::new();
+
+    // СБОИ ИДУТ ПЕРВЫМИ. Неопознанная еда — повод пополнить словарь, дело
+    // неспешное. Технический сбой — это сломанное у живых людей прямо сейчас, и
+    // читать про него надо в первой строке, а не пролистав двадцать названий.
+    if !fails.is_empty() {
+        lines.push(format!(
+            "{mark} \u{26a0}\u{fe0f} Сбои распознавания еды за сутки: {} вид(ов)",
+            fails.len()
+        ));
+        for f in fails.iter().take(10) {
+            let code = f.get("code").and_then(|v| v.as_str()).unwrap_or("?");
+            let people = f.get("people").and_then(|v| v.as_i64()).unwrap_or(0);
+            let n = f.get("n").and_then(|v| v.as_i64()).unwrap_or(0);
+            let cause = f.get("cause").and_then(|v| v.as_str()).unwrap_or("");
+            let cause: String = cause.chars().take(120).collect();
+            lines.push(format!("• {code} — {people} чел., {n} раз: {cause}"));
+        }
+        if !foods.is_empty() {
+            lines.push(String::new());
+        }
     }
-    lines.push(String::new());
-    lines.push("Каждое имя — повод пополнить словарь редких имён.".to_string());
+
+    if !foods.is_empty() {
+        let head = if fails.is_empty() { format!("{mark} ") } else { String::new() };
+        lines.push(format!("{head}Не опознано за сутки: {} продукт(ов)", foods.len()));
+        for f in foods.iter().take(20) {
+            let subject = f.get("subject").and_then(|v| v.as_str()).unwrap_or("?");
+            let people = f.get("people").and_then(|v| v.as_i64()).unwrap_or(0);
+            let n = f.get("n").and_then(|v| v.as_i64()).unwrap_or(0);
+            lines.push(format!("• {subject} — {people} чел., {n} раз"));
+        }
+        lines.push(String::new());
+        lines.push("Каждое имя — повод пополнить словарь редких имён.".to_string());
+    }
 
     send_telegram(&token, &chat_id, &lines.join("\n")).await
 }
@@ -519,6 +576,14 @@ const DETECTION_DATASET: &str = "CLIENT_DETECTIONS";
 /// Вид определения, которым клиент сообщает: продукт опознать не удалось.
 /// Совпадает со строкой в `flags_pipeline::classify_all` — менять только вместе.
 const UNRECOGNISED_FOOD: &str = "identity.unknown";
+
+/// Вид события, которым клиент сообщает о ТЕХНИЧЕСКОМ сбое распознавания еды.
+/// Совпадает со строкой в `errors::recognition_failed` — менять только вместе.
+const RECOGNITION_FAIL: &str = "lazy_food.recognize";
+
+/// Начало строки в логе для сбоев распознавания. УСТОЙЧИВОЕ: на нём стоит правило
+/// оповещения, как и на `ALERT_PREFIX`.
+const RECOGNITION_ALERT_PREFIX: &str = "ALERT recognition-failed:";
 
 /// Начало строки в логе, на которое настроено оповещение в Cloudflare.
 /// УСТОЙЧИВОЕ: правило алерта ищет ровно эту подстроку.

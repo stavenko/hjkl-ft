@@ -64,6 +64,19 @@ impl BugReportDO {
             )",
             None,
         )?;
+        // Технические сбои распознавания еды — для суточной сводки в Telegram.
+        // Отдельной таблицей, а не запросом к аналитике: её читают только снаружи и
+        // по отдельному токену, а крону нужен ответ прямо здесь.
+        self.state.storage().sql().exec(
+            "CREATE TABLE IF NOT EXISTS recognition_fail (
+                id        TEXT PRIMARY KEY,
+                code      TEXT NOT NULL,
+                cause     TEXT NOT NULL,
+                user      TEXT NOT NULL,
+                seen_at   INTEGER NOT NULL
+            )",
+            None,
+        )?;
         Ok(())
     }
 
@@ -138,6 +151,52 @@ impl BugReportDO {
     /// Сводка за последние `hours` часов: продукт, сколько раз и у скольких РАЗНЫХ
     /// людей. Людей считаем отдельно: один человек, добавивший продукт трижды, — не то
     /// же, что трое, споткнувшихся об одно имя, и пополнять словарь стоит по второму.
+    fn add_recognition_fail(&self, b: &serde_json::Value) -> Result<Response> {
+        let code = Self::str_or_default(b, "code", "?");
+        let cause = Self::str_or_default(b, "cause", "");
+        let user = Self::str_or_default(b, "user", "?");
+        self.state.storage().sql().exec(
+            "INSERT INTO recognition_fail (id, code, cause, user, seen_at) VALUES (?, ?, ?, ?, ?)",
+            Some(vec![
+                uuid_v4().into(),
+                code.into(),
+                cause.chars().take(300).collect::<String>().into(),
+                user.into(),
+                (Date::now().as_millis() as i64).into(),
+            ]),
+        )?;
+        Response::from_json(&serde_json::json!({ "ok": true }))
+    }
+
+    /// Сводка технических сбоев распознавания — по КОДУ, а не по причине.
+    ///
+    /// Код устойчив: один и тот же сбой всегда даёт один и тот же код, поэтому
+    /// строки складываются. Причина берётся любая из группы — она нужна, чтобы
+    /// понять, о чём речь, не открывая аналитику.
+    fn recognition_digest(&self, hours: i64) -> Result<Response> {
+        let since = Date::now().as_millis() as i64 - hours * 3_600_000;
+        let rows: Vec<serde_json::Value> = self
+            .state
+            .storage()
+            .sql()
+            .exec(
+                "SELECT code, COUNT(*) AS n, COUNT(DISTINCT user) AS people, MAX(cause) AS cause
+                   FROM recognition_fail
+                  WHERE seen_at > ?
+                  GROUP BY code
+                  ORDER BY people DESC, n DESC
+                  LIMIT 20",
+                Some(vec![since.into()]),
+            )?
+            .to_array::<serde_json::Value>()?;
+        let cutoff = Date::now().as_millis() as i64 - 30 * 24 * 3_600_000;
+        self.state.storage().sql().exec(
+            "DELETE FROM recognition_fail WHERE seen_at < ?",
+            Some(vec![cutoff.into()]),
+        )?;
+        Response::from_json(&serde_json::json!({ "fails": rows }))
+    }
+
     fn unknown_digest(&self, hours: i64) -> Result<Response> {
         let since = Date::now().as_millis() as i64 - hours * 3_600_000;
         let rows: Vec<serde_json::Value> = self
@@ -201,6 +260,18 @@ impl DurableObject for BugReportDO {
                 let b: serde_json::Value = req.json().await?;
                 self.add_unknown(&b)
             }
+            (Method::Post, "/recognition-fail") => {
+                let b: serde_json::Value = req.json().await?;
+                self.add_recognition_fail(&b)
+            }
+            (Method::Get, "/recognition-digest") => {
+                let hours = url
+                    .query_pairs()
+                    .find(|(k, _)| k == "hours")
+                    .and_then(|(_, v)| v.parse::<i64>().ok())
+                    .unwrap_or(24);
+                self.recognition_digest(hours)
+            }
             (Method::Get, "/unknown-digest") => {
                 let hours = url
                     .query_pairs()
@@ -222,6 +293,10 @@ impl DurableObject for BugReportDO {
                 )?;
                 self.state.storage().sql().exec(
                     "DELETE FROM unknown_food WHERE user = ?",
+                    Some(vec![user.into()]),
+                )?;
+                self.state.storage().sql().exec(
+                    "DELETE FROM recognition_fail WHERE user = ?",
                     Some(vec![user.into()]),
                 )?;
                 Response::from_json(&serde_json::json!({ "ok": true }))

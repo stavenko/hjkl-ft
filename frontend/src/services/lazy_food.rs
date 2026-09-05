@@ -20,13 +20,42 @@ use crate::services::{ai, db, food_search, i18n::t, images, local};
 ///
 /// Удалённые пропускаются: человек мог стереть запись, пока она стояла в очереди, и
 /// распознавать её незачем.
-pub fn awaiting_recognition(entries: &[DiaryEntry]) -> Vec<&DiaryEntry> {
+pub fn awaiting_recognition(entries: &[DiaryEntry], now: chrono::DateTime<chrono::Utc>) -> Vec<&DiaryEntry> {
     entries
         .iter()
-        .filter(|e| {
-            !e.deleted && e.kind == DiaryEntryKind::Pending && e.recognition_tries < TRIES_ON_5XX
-        })
+        .filter(|e| !e.deleted && e.kind == DiaryEntryKind::Pending && may_try(e, now))
         .collect()
+}
+
+/// Сколько ждать после исчерпания попыток, прежде чем пробовать снова.
+///
+/// Сутки, и по той же причине, что у нутриентов (`food_probe::RETRY_AFTER_MS`): за
+/// сутки меняется то, что может изменить исход — выходит новая сборка, чинится
+/// воркер, кончается сбой у провайдера. Чаще бессмысленно, реже — запись висит
+/// нераспознанной дольше, чем нужно.
+pub const RETRY_AFTER_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Можно ли брать запись в разбор сейчас.
+///
+/// Попытки не вышли — берём. Вышли — берём, если с последней прошли сутки, и это
+/// касается ЛЮБОГО технического сбоя, а не только 5xx: 401 через сутки не изменится,
+/// если протух ключ, но изменится, если за эти сутки починили воркер. Хоронить
+/// запись насовсем из-за одной неудачи неправильно.
+///
+/// Записи, которые ждут ЧЕЛОВЕКА (переснять, дописать), суточный повтор не трогает:
+/// за нас никто не переснимет, и через сутки ответ будет тот же. Их признак —
+/// счётчик выведен за предел, а `recognized_at` пуст: см. `after_failure`.
+pub fn may_try(entry: &DiaryEntry, now: chrono::DateTime<chrono::Utc>) -> bool {
+    if entry.recognition_tries < TRIES_ON_5XX {
+        return true;
+    }
+    if !entry.retry_after_wait {
+        return false;
+    }
+    entry
+        .updated_at
+        .parse::<chrono::DateTime<chrono::FixedOffset>>()
+        .is_ok_and(|at| (now - at.with_timezone(&chrono::Utc)).num_milliseconds() >= RETRY_AFTER_MS)
 }
 
 /// Сколько раз пробуем ПРИ 5xx, прежде чем оставить запись в покое.
@@ -79,11 +108,19 @@ impl Failure {
 /// осталось» и «повторять незачем» для очереди одно и то же.
 ///
 /// Чистая функция — чтобы правило проверялось тестом, а не тремя провалами подряд.
-pub fn after_failure(entry: &DiaryEntry, message: &str, retry_allowed: bool, at: String) -> DiaryEntry {
+pub fn after_failure(
+    entry: &DiaryEntry,
+    message: &str,
+    retry_allowed: bool,
+    technical: bool,
+    at: String,
+) -> DiaryEntry {
     let tries = entry.recognition_tries.saturating_add(1);
     DiaryEntry {
         recognition_error: Some(message.to_string()),
         recognition_tries: if retry_allowed { tries } else { TRIES_ON_5XX },
+        // Технический сбой вернётся через сутки; то, что ждёт человека, — нет.
+        retry_after_wait: technical,
         updated_at: at,
         ..entry.clone()
     }
@@ -332,6 +369,7 @@ pub async fn recognize(entry: &DiaryEntry) -> Result<DiaryEntry, Failure> {
         // Разобралось — прежняя неудача больше не про эту запись.
         recognition_error: None,
         recognition_tries: 0,
+        retry_after_wait: false,
         updated_at: local::now(),
         ..entry.clone()
     };
@@ -387,7 +425,7 @@ mod tests {
             DiaryEntry { id: "c".into(), kind: DiaryEntryKind::Aggregate, ..DiaryEntry::direct() },
             DiaryEntry { id: "d".into(), deleted: true, ..pending("d") },
         ];
-        let ids: Vec<&str> = awaiting_recognition(&entries).iter().map(|e| e.id.as_str()).collect();
+        let ids: Vec<&str> = awaiting_recognition(&entries, now()).iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, vec!["a"], "стёртая запись в очередь не возвращается");
     }
 
@@ -524,6 +562,34 @@ mod tests {
 
     // ── §6.6: неудача не прячется ──
 
+    /// «Сейчас» для проверок очереди. Записи в них свежие, и сутки ещё не прошли.
+    fn now() -> chrono::DateTime<chrono::Utc> {
+        "2026-09-05T10:00:00Z".parse().unwrap()
+    }
+
+    /// Запись, неудача которой случилась `hours` часов назад.
+    fn failed_hours_ago(hours: i64, technical: bool) -> DiaryEntry {
+        let at = now() - chrono::Duration::hours(hours);
+        let e = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
+        after_failure(&e, "сбой", false, technical, at.to_rfc3339())
+    }
+
+    #[test]
+    fn tehnicheskij_sboj_vozvrashchaetsya_cherez_sutki() {
+        // Через двадцать три часа ещё рано — сутки не прошли.
+        assert!(awaiting_recognition(&[failed_hours_ago(23, true)], now()).is_empty());
+        // Через двадцать пять — пробуем снова: могла выйти новая сборка или
+        // починиться воркер.
+        assert_eq!(awaiting_recognition(&[failed_hours_ago(25, true)], now()).len(), 1);
+    }
+
+    #[test]
+    fn ozhidanie_cheloveka_sutkami_ne_lechitsya() {
+        // За нас никто не переснимет: и через сутки, и через месяц ответ тот же.
+        assert!(awaiting_recognition(&[failed_hours_ago(25, false)], now()).is_empty());
+        assert!(awaiting_recognition(&[failed_hours_ago(24 * 30, false)], now()).is_empty());
+    }
+
     #[test]
     fn kod_otveta_vychityvaetsya_iz_prichiny() {
         assert_eq!(http_status("HTTP 401: {\"error\":\"Unauthorized\"}"), Some(401));
@@ -550,7 +616,7 @@ mod tests {
     #[test]
     fn neudacha_lozhitsya_v_zapis() {
         let e = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
-        let once = after_failure(&e, "не прочёлся ни один снимок", true, "2026-09-04T10:00:00Z".into());
+        let once = after_failure(&e, "не прочёлся ни один снимок", true, true, now().to_rfc3339());
         assert_eq!(once.recognition_error.as_deref(), Some("не прочёлся ни один снимок"));
         assert_eq!(once.recognition_tries, 1);
     }
@@ -560,22 +626,25 @@ mod tests {
         // 401 не должен получить ни второй попытки, ни третьей: счётчик сразу
         // выводится за предел.
         let e = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
-        let out = after_failure(&e, "технический сбой", false, "2026-09-04T10:00:00Z".into());
+        let out = after_failure(&e, "технический сбой", false, true, now().to_rfc3339());
         assert_eq!(out.recognition_tries, TRIES_ON_5XX);
-        assert!(awaiting_recognition(&[out]).is_empty(), "очередь её больше не берёт");
+        assert!(
+            awaiting_recognition(&[out], now()).is_empty(),
+            "сейчас очередь её не берёт — вернётся только через сутки"
+        );
     }
 
     #[test]
     fn pyatisotaya_poluchaet_svoi_tri_popytki() {
         let mut e = DiaryEntry { id: "e1".into(), kind: DiaryEntryKind::Pending, ..DiaryEntry::direct() };
         for expected in 1..TRIES_ON_5XX {
-            e = after_failure(&e, "сервис недоступен", true, "2026-09-04T10:00:00Z".into());
+            e = after_failure(&e, "сервис недоступен", true, true, now().to_rfc3339());
             assert_eq!(e.recognition_tries, expected);
-            assert_eq!(awaiting_recognition(&[e.clone()]).len(), 1, "попытки ещё есть");
+            assert_eq!(awaiting_recognition(&[e.clone()], now()).len(), 1, "попытки ещё есть");
         }
         // Последняя: права на повтор уже нет, и запись выпадает.
-        let last = after_failure(&e, "сервис недоступен", false, "2026-09-04T10:00:00Z".into());
-        assert!(awaiting_recognition(&[last]).is_empty());
+        let last = after_failure(&e, "сервис недоступен", false, true, now().to_rfc3339());
+        assert!(awaiting_recognition(&[last], now()).is_empty());
     }
 }
 
@@ -610,7 +679,8 @@ pub async fn run_queue() {
         return;
     }
     let entries: Vec<DiaryEntry> = db::list_all::<DiaryEntry>("diary").await;
-    let queue: Vec<DiaryEntry> = awaiting_recognition(&entries).into_iter().cloned().collect();
+    let queue: Vec<DiaryEntry> =
+        awaiting_recognition(&entries, chrono::Utc::now()).into_iter().cloned().collect();
     for entry in queue {
         // Сеть могла пропасть посреди очереди — тогда останавливаемся и оставляем
         // остальное на следующий раз, а не молотим впустую по одной ошибке.
@@ -635,7 +705,8 @@ pub async fn run_queue() {
                         crate::services::errors::recognition_failed(cause)
                     }
                 };
-                let marked = after_failure(&entry, &message, retry, local::now());
+                let technical = matches!(failure, Failure::Technical(_));
+                let marked = after_failure(&entry, &message, retry, technical, local::now());
                 db::put("diary", &marked).await;
                 crate::services::sync::push_background();
             }

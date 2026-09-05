@@ -58,14 +58,17 @@ pub struct Suggestion {
 ///
 /// `previous` — планка, от которой отталкиваемся (действующая). `avg_kcal_7d` —
 /// сколько человек ел на самом деле; без него исполнение неизвестно, и стопор не
-/// срабатывает ни в какую сторону.
+/// срабатывает ни в какую сторону. `planka_changed_on` — день последней смены
+/// планки: окно тренда за него не заходит (см. [`trend_window_days`]).
 pub fn suggest(
     s: &Snapshot,
     previous: f64,
     weight: &[api_types::WeightEntry],
     avg_kcal_7d: Option<f64>,
+    planka_changed_on: Option<&str>,
 ) -> Suggestion {
-    let trend = weight_trend::weight_trend(weight, DEFAULT_WINDOW_DAYS);
+    let window = trend_window_days(planka_changed_on, weight);
+    let trend = weight_trend::weight_trend(weight, window);
     let weight_kg = s.weight_kg.unwrap_or(0.0);
     let adh = adherence(avg_kcal_7d.unwrap_or(previous), previous, CALORIE_BAND_KCAL);
     let calories = calorie_planka_weekly(previous, &trend, weight_kg, adh);
@@ -85,14 +88,14 @@ pub fn suggest(
 //   • WEEKLY recompute — base = the PREVIOUS planka (`letters::maybe_recompute…`),
 //     so the target moves at most ±5%/week and a low-intake week (e.g. anxiety
 //     undereating) can NOT ratchet it down; only a confirmed weight trend moves it.
-// The step is cut ONLY when justified — so a slow, comfortable weight loss is
-// never disrupted by a premature reduction:
-//   • confident loss, rate inside the comfortable band → HOLD;
-//   • confident loss but too SLOW → −5% (gently speed up toward the band);
-//   • confident loss but too FAST → +5% (protect comfort / muscle);
-//   • probably-but-not-confidently losing → HOLD, gather another week;
-//   • flat / gaining → −5% (induce a deficit);
-//   • no usable trend yet (week 1 / too few weigh-ins) → HOLD (baseline = average).
+//
+// Куда двигать — решает ОДНА величина: темп снижения против комфортной полосы
+// (0.3–0.7 % массы тела в неделю). Значимо быстрее полосы → +5 % (беречь мышцы),
+// значимо медленнее → −5 % (создать дефицит), иначе → держим. «Стоит» и «растёт»
+// отдельными случаями не нужны: и то и другое значимо медленнее полосы.
+//
+// Ключевое слово здесь — ЗНАЧИМО, и оно появилось не из любви к статистике.
+// См. `pace`.
 //
 // И ПОВЕРХ ЭТОГО — второй контур, `calorie_planka_weekly`: шаг, к которому зовёт
 // вес, разрешается только если человек планку ИСПОЛНЯЛ. Один лишь вес образует
@@ -106,41 +109,130 @@ const COMFORT_LOSS_MAX: f64 = 0.007; // 0.7 %/week
 /// The largest single-step planka change per weekly recompute.
 const PLANKA_STEP: f64 = 0.05; // ±5 %
 
+/// Темп снижения веса против комфортной полосы — то единственное, что решает,
+/// куда двигать планку.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pace {
+    /// Значимо быстрее верхней границы полосы.
+    Fast,
+    /// Значимо медленнее нижней границы — сюда же попадают «стоит» и «растёт».
+    Slow,
+    /// Всё остальное: либо темп в полосе, либо данные не позволяют отличить его
+    /// от полосы. Решение одно и то же — не трогать планку.
+    Comfortable,
+}
+
+/// Как темп снижения соотносится с комфортной полосой — С ОГЛЯДКОЙ НА
+/// ПОГРЕШНОСТЬ САМОЙ ОЦЕНКИ.
+///
+/// # Зачем оглядка
+///
+/// Полоса узкая: при 85 кг это 0.26–0.60 кг в неделю, ширина — треть килограмма.
+/// Погрешность наклона по четырнадцати взвешиваниям на бытовых весах — те же
+/// 0.2 кг/нед. То есть полоса УЖЕ, чем погрешность числа, которое с ней
+/// сравнивают, и сравнение точечной оценки с границей — подбрасывание монеты.
+///
+/// Живой случай (85 кг, ежедневные взвешивания). 29 августа то же самое окно в
+/// 14 дней дало −0.21 кг/нед — на волосок ниже нижней границы, планку срезали на
+/// 5 %. Через три дня то же окно (11 дней из 14 — те же самые!) дало −0.75 кг/нед,
+/// выше верхней границы, планку подняли на 5 %. Дальше это повторялось каждую
+/// неделю: 2650 → 2800 → 2950 → 2800 → 2950. Человек видит дребезжание и не
+/// понимает, чему верить; вес при этом всё время снижался ровно.
+///
+/// Ни один из тех двух шагов не был обоснован: погрешность в обоих случаях
+/// накрывала всю полосу целиком. Поэтому граница сравнивается не с точкой, а с
+/// распределением: двигаем планку, только если ВЕРОЯТНОСТЬ того, что истинный
+/// темп вне полосы, дошла до `CONFIDENT` — той же планки уверенности, по которой
+/// мы уже решаем, снижается ли вес вообще. Неуверенность теперь означает
+/// «держим», а не «шагнём наугад».
+///
+/// На тех же данных: 29.08 → P(медленнее) = 0.58, держим; 01.09 → P(быстрее) =
+/// 0.79, держим; 05.09 → P(быстрее) = 0.98, поднимаем. Дребезжания нет, а
+/// настоящий сигнал проходит.
+///
+/// `None` — судить не по чему: окно меньше трёх дней взвешиваний либо вес
+/// неизвестен. Вызывающий держит планку.
+pub fn pace(trend: &crate::weight_trend::WeightTrend, weight_kg: f64) -> Option<Pace> {
+    use crate::weight_trend::CONFIDENT;
+    if weight_kg <= 0.0 {
+        return None;
+    }
+    // Границы полосы в кг/нед и со ЗНАКОМ: снижение — это отрицательный наклон.
+    let fast = -COMFORT_LOSS_MAX * weight_kg;
+    let slow = -COMFORT_LOSS_MIN * weight_kg;
+    let p_fast = trend.p_slope_below(fast)?; // P(истинный наклон ниже быстрой границы)
+    let p_slow = 1.0 - trend.p_slope_below(slow)?; // P(истинный наклон выше медленной)
+    if p_fast >= CONFIDENT {
+        Some(Pace::Fast)
+    } else if p_slow >= CONFIDENT {
+        Some(Pace::Slow)
+    } else {
+        Some(Pace::Comfortable)
+    }
+}
+
+/// Комфортная полоса в кг/нед для этого веса — те самые границы, с которыми
+/// сравнивается наклон, только положительные (сколько килограммов в неделю).
+///
+/// Публична ради письма: оно рассказывает человеку, где лежит его темп, и вторая
+/// копия этих двух констант разошлась бы с первой. `None` — вес неизвестен.
+pub fn comfort_band_kg_per_week(weight_kg: f64) -> Option<(f64, f64)> {
+    if weight_kg <= 0.0 {
+        return None;
+    }
+    Some((COMFORT_LOSS_MIN * weight_kg, COMFORT_LOSS_MAX * weight_kg))
+}
+
 /// Multiplier applied to the average intake, chosen from the weight trend +
 /// current body weight. Pure (no I/O) so it is unit-tested. See the block comment.
 pub fn planka_factor(trend: &crate::weight_trend::WeightTrend, weight_kg: f64) -> f64 {
-    use crate::weight_trend::{Direction, WeightTrend, CONFIDENT, WEAK};
-    // `p_down` = probability the weight is genuinely FALLING; `slope_wk` in kg/week.
-    let (p_down, slope_wk) = match *trend {
-        WeightTrend::Estimated { direction, confidence, slope_kg_per_week, .. } => {
-            let p = match direction {
-                Direction::Down => confidence,
-                Direction::Up => 1.0 - confidence,
-            };
-            (p, slope_kg_per_week)
-        }
-        // < 3 distinct weigh-days: a sign exists but no confidence — HOLD, never cut on noise.
-        WeightTrend::Tentative { .. } | WeightTrend::Insufficient { .. } => return 1.0,
-    };
-
-    if p_down >= CONFIDENT {
-        // Confidently losing → steer toward the comfortable-rate band.
-        if weight_kg <= 0.0 {
-            return 1.0;
-        }
-        let rate = slope_wk.abs() / weight_kg; // fraction of body weight lost per week
-        if rate < COMFORT_LOSS_MIN {
-            1.0 - PLANKA_STEP // too slow → gentle cut
-        } else if rate > COMFORT_LOSS_MAX {
-            1.0 + PLANKA_STEP // too fast → ease up
-        } else {
-            1.0 // comfortable → hold
-        }
-    } else if p_down >= WEAK {
-        1.0 // probably losing but not confirmed → HOLD, wait another week (don't cut prematurely)
-    } else {
-        1.0 - PLANKA_STEP // flat / gaining → induce a deficit
+    match pace(trend, weight_kg) {
+        Some(Pace::Fast) => 1.0 + PLANKA_STEP, // худеет быстрее комфортного → поднимаем
+        Some(Pace::Slow) => 1.0 - PLANKA_STEP, // медленнее (или стоит, или растёт) → срезаем
+        Some(Pace::Comfortable) | None => 1.0,
     }
+}
+
+// ── Окно тренда: только те дни, что вес прожил при ДЕЙСТВУЮЩЕЙ планке ────────
+//
+// Пересчёт идёт раз в 7 дней, а окно тренда — 14. Значит после каждого сдвига
+// планки половина окна относится к ПРЕЖНЕЙ, и следующий сдвиг делается по
+// данным, которые уже были один раз учтены. Отсюда разгон: 2500 → 2650 → 2800 →
+// 2950 за три недели подряд — планка успевает шагнуть трижды по одному и тому же
+// свидетельству, потому что вес просто не успевает ответить на первый шаг.
+//
+// Лечится тем же способом, каким лечится любое двойное зачитывание: не смотреть
+// дальше собственной последней правки. Окно обрезается по дню, когда планка
+// менялась в последний раз, — и обрезанное окно само себя тормозит, потому что
+// SE наклона растёт как `window^-1.5`: семь дней вместо четырнадцати — это втрое
+// более широкая погрешность, и `pace` на ней почти никогда не значим. Через
+// неделю окно снова полное — и целиком из дней, прожитых при новой планке.
+//
+// Отдельного правила «не чаще раза в две недели» не нужно: сильный сигнал
+// (вес поехал вверх) пробьётся и через семь дней, слабый подождёт. Тормоз ровно
+// такой, каких данных заслуживает.
+
+/// Ширина окна тренда для пересчёта планки: не больше [`DEFAULT_WINDOW_DAYS`] и
+/// не дальше последнего ИЗМЕНЕНИЯ планки.
+///
+/// `planka_changed_on` — дата последней смены планки (`YYYY-MM-DD`); `None` (не
+/// менялась, либо смена старше присланной истории) → полное окно. Отсчёт идёт от
+/// последнего ВЗВЕШИВАНИЯ, а не от календарного сегодня: окно тренда закреплено
+/// за ним же, и функция остаётся чистой.
+pub fn trend_window_days(
+    planka_changed_on: Option<&str>,
+    entries: &[api_types::WeightEntry],
+) -> i64 {
+    use crate::weight_trend::DEFAULT_WINDOW_DAYS;
+    let parse = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok();
+    let Some(changed) = planka_changed_on.and_then(parse) else {
+        return DEFAULT_WINDOW_DAYS;
+    };
+    let Some(latest) = entries.iter().filter_map(|e| parse(&e.date)).max() else {
+        return DEFAULT_WINDOW_DAYS;
+    };
+    // +1: день самой правки уже прожит при новой планке, он в окно входит.
+    ((latest - changed).num_days() + 1).clamp(1, DEFAULT_WINDOW_DAYS)
 }
 
 /// The daily calorie planka: the average intake nudged by [`planka_factor`] and
@@ -465,7 +557,7 @@ mod suggest_tests {
         let trend = weight_trend::weight_trend(&w, DEFAULT_WINDOW_DAYS);
         let adh = adherence(1900.0, 2000.0, CALORIE_BAND_KCAL);
         let expected = calorie_planka_weekly(2000.0, &trend, 70.0, adh);
-        assert_eq!(suggest(&person(), 2000.0, &w, Some(1900.0)).calories, expected);
+        assert_eq!(suggest(&person(), 2000.0, &w, Some(1900.0), None).calories, expected);
     }
 
     /// Белок считается от НОВОЙ калорийности, а не от прежней: отправляются они
@@ -473,9 +565,86 @@ mod suggest_tests {
     #[test]
     fn belok_schitaetsya_ot_novoj_kalorijnosti() {
         let s = person();
-        let sg = suggest(&s, 2000.0, &[], Some(2000.0));
+        let sg = suggest(&s, 2000.0, &[], Some(2000.0), None);
         let after = Snapshot { kcal_planka: Some(sg.calories), ..s };
         assert_eq!(sg.protein, default_for(Kind::Protein, &after));
+    }
+
+    /// Окно тренда не заходит за день последней смены планки — иначе куратор
+    /// увидел бы предложение, посчитанное по весу, прожитому при ПРЕЖНЕЙ планке.
+    #[test]
+    fn okno_ne_zahodit_za_smenu_planki() {
+        let w: Vec<_> = (1..=14)
+            .map(|i| weigh(&format!("2026-03-{i:02}"), 71.0 - i as f64 * 0.05))
+            .collect();
+        // Планка сменилась 2026-03-08, последнее взвешивание — 2026-03-14: 7 дней.
+        assert_eq!(trend_window_days(Some("2026-03-08"), &w), 7);
+        // Ничего не меняли — полное окно.
+        assert_eq!(trend_window_days(None, &w), DEFAULT_WINDOW_DAYS);
+        // Смена давняя — тоже полное, окно не растягивается.
+        assert_eq!(trend_window_days(Some("2026-01-01"), &w), DEFAULT_WINDOW_DAYS);
+        // Смена сегодня — один день, тренда не будет вовсе.
+        assert_eq!(trend_window_days(Some("2026-03-14"), &w), 1);
+        // И предложение считается ИМЕННО по обрезанному окну.
+        let short = weight_trend::weight_trend(&w, 7);
+        let adh = adherence(1900.0, 2000.0, CALORIE_BAND_KCAL);
+        assert_eq!(
+            suggest(&person(), 2000.0, &w, Some(1900.0), Some("2026-03-08")).calories,
+            calorie_planka_weekly(2000.0, &short, 70.0, adh)
+        );
+    }
+
+    /// Ряд взвешиваний из живого случая, на котором планка задребезжала:
+    /// 85–87 кг, ежедневные утренние взвешивания, ровное снижение.
+    fn drebezg_series() -> Vec<api_types::WeightEntry> {
+        [
+            ("2026-08-16", 86.2), ("2026-08-17", 87.5), ("2026-08-18", 86.2),
+            ("2026-08-19", 86.7), ("2026-08-20", 87.0), ("2026-08-21", 86.6),
+            ("2026-08-22", 86.6), ("2026-08-23", 86.6), ("2026-08-24", 87.1),
+            ("2026-08-25", 87.1), ("2026-08-26", 86.1), ("2026-08-27", 86.8),
+            ("2026-08-28", 86.3), ("2026-08-29", 85.9), ("2026-08-30", 85.9),
+            ("2026-08-31", 85.9), ("2026-09-01", 85.0), ("2026-09-02", 85.4),
+            ("2026-09-03", 86.0), ("2026-09-04", 85.4), ("2026-09-05", 85.0),
+        ]
+        .iter()
+        .map(|(d, kg)| weigh(d, *kg))
+        .collect()
+    }
+
+    /// РЕГРЕССИЯ на живых данных. Прежнее правило сравнивало точечную оценку с
+    /// границей полосы и на этом ряду дало −5 % 29 августа и +5 % 1 сентября —
+    /// по окнам, совпадающим на 11 дней из 14. Планка пошла 2800 → 2950 → 2800.
+    ///
+    /// Теперь 29-е держит (погрешность накрывает полосу целиком), а 5-е поднимает
+    /// (сигнал вырос до значимого). Ни одного разворота.
+    #[test]
+    fn drebezg_ne_povtoryaetsya() {
+        let all = drebezg_series();
+        let upto = |d: &str| -> Vec<_> {
+            all.iter().filter(|e| e.date.as_str() <= d).cloned().collect()
+        };
+
+        // 29.08 — точечная оценка НИЖЕ полосы (то самое основание для среза).
+        let t29 = weight_trend::weight_trend(&upto("2026-08-29"), DEFAULT_WINDOW_DAYS);
+        let WeightTrend::Estimated { slope_kg_per_week: s29, .. } = t29 else {
+            panic!("ожидали оценку, получили {t29:?}");
+        };
+        assert!(s29.abs() / 85.9 < 0.003, "темп {} — ожидали ниже полосы", s29.abs() / 85.9);
+        // …но значимости нет, и планка стоит.
+        assert_eq!(pace(&t29, 85.9), Some(Pace::Comfortable));
+        assert_eq!(planka_factor(&t29, 85.9), 1.0);
+
+        // 05.09 — снижение стало быстрым и уже значимо: планка растёт.
+        let t5 = weight_trend::weight_trend(&upto("2026-09-05"), DEFAULT_WINDOW_DAYS);
+        assert_eq!(pace(&t5, 85.0), Some(Pace::Fast));
+        assert!(planka_factor(&t5, 85.0) > 1.0);
+
+        // И второй контур: неделей раньше окно обрезано последней сменой планки —
+        // семь дней вместо четырнадцати, погрешность втрое шире, шага нет.
+        let w7 = trend_window_days(Some("2026-08-30"), &upto("2026-09-05"));
+        assert_eq!(w7, 7);
+        let t7 = weight_trend::weight_trend(&upto("2026-09-05"), w7);
+        assert_eq!(planka_factor(&t7, 85.0), 1.0);
     }
 
     /// Без данных о съеденном стопор не срабатывает ни в какую сторону: неизвестное
@@ -483,8 +652,8 @@ mod suggest_tests {
     #[test]
     fn bez_sedennogo_stopor_ne_srabatyvaet() {
         let s = person();
-        let no_data = suggest(&s, 2000.0, &[], None);
-        let on_target = suggest(&s, 2000.0, &[], Some(2000.0));
+        let no_data = suggest(&s, 2000.0, &[], None, None);
+        let on_target = suggest(&s, 2000.0, &[], Some(2000.0), None);
         assert_eq!(no_data.calories, on_target.calories);
     }
 }
@@ -492,32 +661,39 @@ mod suggest_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        adherence, calorie_planka, calorie_planka_weekly, next_steps_planka, planka_factor,
-        steps_planka_for_avg, Adherence, IndicatorState, PLANKA_STEP, STEPS_PLANKA_MAX,
+        adherence, calorie_planka, calorie_planka_weekly, next_steps_planka, pace, planka_factor,
+        steps_planka_for_avg, Adherence, IndicatorState, Pace, PLANKA_STEP, STEPS_PLANKA_MAX,
     };
     use crate::weight_trend::{Direction, WeightTrend};
 
+    /// Готовая оценка тренда. Погрешность задаётся ЯВНО: с появлением `pace` она
+    /// такой же участник решения, как и сам наклон, и прятать её за «правдоподобным
+    /// значением по умолчанию» значило бы не проверять главного.
+    fn est(slope_wk: f64, se_wk: f64) -> WeightTrend {
+        WeightTrend::Estimated {
+            direction: if slope_wk < 0.0 { Direction::Down } else { Direction::Up },
+            slope_kg_per_week: slope_wk,
+            // Уверенность в ЗНАКЕ здесь уже никем не читается (её место занял
+            // `p_slope_below`), но поле обязано остаться правдоподобным.
+            confidence: 0.9,
+            slope_se_kg_per_week: se_wk,
+            days: 14,
+        }
+    }
+
+    /// Погрешность, при которой решает наклон, а не шум: вдесятеро уже полосы.
+    const TIGHT: f64 = 0.03;
 
     // ── Исполнение планки как стопор недельного пересчёта ────────────────────
 
     /// Уверенное быстрое похудение — тот случай, когда правило зовёт ПОДНЯТЬ планку.
     fn losing_fast() -> WeightTrend {
-        WeightTrend::Estimated {
-            direction: Direction::Down,
-            confidence: 0.99,
-            slope_kg_per_week: -1.2, // при 80 кг это 1.5 %/нед — сильно выше комфортных 0.7
-            days: 14,
-        }
+        est(-1.2, TIGHT) // при 80 кг это 1.5 %/нед — сильно выше комфортных 0.7
     }
 
     /// Вес стоит — правило зовёт ОПУСТИТЬ планку.
     fn flat() -> WeightTrend {
-        WeightTrend::Estimated {
-            direction: Direction::Up,
-            confidence: 0.9,
-            slope_kg_per_week: 0.05,
-            days: 14,
-        }
+        est(0.05, TIGHT)
     }
 
     #[test]
@@ -558,11 +734,6 @@ mod tests {
         let base = 2400.0;
         assert!(calorie_planka_weekly(base, &flat(), 80.0, Adherence::Under) < base);
         assert!(calorie_planka_weekly(base, &losing_fast(), 80.0, Adherence::Over) > base);
-    }
-
-
-    fn estimated(dir: Direction, slope_wk: f64, conf: f64) -> WeightTrend {
-        WeightTrend::Estimated { direction: dir, slope_kg_per_week: slope_wk, confidence: conf, days: 14 }
     }
 
     #[test]
@@ -612,35 +783,51 @@ mod tests {
         assert_eq!(next_steps_planka(16200, Green), 16200);
     }
 
+    /// Полоса — про ТЕМП, и при точной оценке правило то же, что и раньше:
+    /// 90 кг → комфортные 0.27..0.63 кг/нед.
     #[test]
-    fn planka_factor_confident_loss_steers_to_comfort_band() {
-        // 90 kg → comfortable 0.3..0.7 %/wk = 0.27..0.63 kg/wk.
-        // In band (0.5 kg/wk) → hold.
-        assert_eq!(planka_factor(&estimated(Direction::Down, -0.5, 0.9), 90.0), 1.0);
-        // Too slow (0.1 kg/wk ≈ 0.11 %) → gentle cut.
-        assert_eq!(planka_factor(&estimated(Direction::Down, -0.1, 0.9), 90.0), 1.0 - PLANKA_STEP);
-        // Too fast (1.0 kg/wk ≈ 1.11 %) → ease up.
-        assert_eq!(planka_factor(&estimated(Direction::Down, -1.0, 0.9), 90.0), 1.0 + PLANKA_STEP);
+    fn tochnaya_ocenka_vedet_k_polose() {
+        // В полосе (0.5 кг/нед) → держим.
+        assert_eq!(planka_factor(&est(-0.5, TIGHT), 90.0), 1.0);
+        // Слишком медленно (0.1 кг/нед) → мягко срезаем.
+        assert_eq!(planka_factor(&est(-0.1, TIGHT), 90.0), 1.0 - PLANKA_STEP);
+        // Слишком быстро (1.0 кг/нед) → приподнимаем.
+        assert_eq!(planka_factor(&est(-1.0, TIGHT), 90.0), 1.0 + PLANKA_STEP);
+        // Вес стоит и вес растёт — оба «значимо медленнее полосы», отдельных
+        // случаев для них не нужно.
+        assert_eq!(planka_factor(&est(0.0, TIGHT), 90.0), 1.0 - PLANKA_STEP);
+        assert_eq!(planka_factor(&est(0.4, TIGHT), 90.0), 1.0 - PLANKA_STEP);
     }
 
+    /// СУТЬ ФИКСА. Тот же наклон, что срезал бы планку при точной оценке, но
+    /// погрешность соизмерима с полосой — значит про темп не известно ничего, и
+    /// планка стоит. Именно на этом месте она дребезжала.
     #[test]
-    fn planka_factor_weak_signal_holds_no_premature_cut() {
-        // Probably losing (0.71) but not confident → HOLD (this user's case).
-        assert_eq!(planka_factor(&estimated(Direction::Down, -0.2, 0.71), 90.0), 1.0);
-        // Just over the WEAK threshold (0.66) → still holds.
-        assert_eq!(planka_factor(&estimated(Direction::Down, -0.1, 0.66), 90.0), 1.0);
+    fn shirokaya_pogreshnost_derzhit_planku() {
+        // −0.21 кг/нед при 86 кг — на волосок ниже полосы (0.26..0.60).
+        // При точной оценке это срез.
+        assert_eq!(planka_factor(&est(-0.21, TIGHT), 86.0), 1.0 - PLANKA_STEP);
+        // С реальной погрешностью бытовых весов (0.21 кг/нед) — держим.
+        assert_eq!(planka_factor(&est(-0.21, 0.21), 86.0), 1.0);
+        assert_eq!(pace(&est(-0.21, 0.21), 86.0), Some(Pace::Comfortable));
+        // И зеркально: −0.75 кг/нед выше полосы, но погрешность 0.19 не даёт
+        // назвать это «слишком быстро» — на следующей неделе как раз и вышел бы
+        // обратный шаг.
+        assert_eq!(planka_factor(&est(-0.75, 0.19), 85.0), 1.0);
+        // А настоящий сигнал через ту же погрешность проходит.
+        assert_eq!(planka_factor(&est(-0.99, 0.17), 85.0), 1.0 + PLANKA_STEP);
     }
 
+    /// Шум вокруг нуля больше НЕ повод срезать планку: «неизвестно» — это не
+    /// «стоит на месте». Настоящее плато при ежедневных взвешиваниях даёт узкую
+    /// погрешность и срезается как прежде.
     #[test]
-    fn planka_factor_flat_or_gaining_cuts() {
-        // Down but low confidence (p_down 0.55 < WEAK) → plateau-ish → cut.
-        assert_eq!(planka_factor(&estimated(Direction::Down, -0.05, 0.55), 90.0), 1.0 - PLANKA_STEP);
-        // Confident gain (up 0.9 → p_down 0.1) → cut.
-        assert_eq!(planka_factor(&estimated(Direction::Up, 0.4, 0.9), 90.0), 1.0 - PLANKA_STEP);
-        // Weakly gaining (up 0.7 → p_down 0.3) → cut.
-        assert_eq!(planka_factor(&estimated(Direction::Up, 0.2, 0.7), 90.0), 1.0 - PLANKA_STEP);
+    fn shum_ne_prinimaetsya_za_plato() {
+        assert_eq!(planka_factor(&est(-0.05, 0.4), 90.0), 1.0);
+        assert_eq!(planka_factor(&est(-0.05, 0.1), 90.0), 1.0 - PLANKA_STEP);
     }
 
+    /// Без оценки (меньше трёх дней взвешиваний) и без веса судить не по чему.
     #[test]
     fn planka_factor_no_trend_holds() {
         assert_eq!(planka_factor(&WeightTrend::Insufficient { days: 1 }, 90.0), 1.0);
@@ -651,16 +838,18 @@ mod tests {
             ),
             1.0
         );
+        assert_eq!(pace(&est(-1.0, TIGHT), 0.0), None);
+        assert_eq!(planka_factor(&est(-1.0, TIGHT), 0.0), 1.0);
     }
 
     #[test]
     fn calorie_planka_rounds_to_50() {
-        // Hold (weak down) → avg unchanged, rounded to 50.
-        let hold = estimated(Direction::Down, -0.2, 0.71);
+        // Hold (темп в полосе) → avg unchanged, rounded to 50.
+        let hold = est(-0.4, TIGHT);
         assert_eq!(calorie_planka(2600.0, &hold, 90.0), 2600.0);
         assert_eq!(calorie_planka(2490.0, &hold, 90.0), 2500.0); // 49.8 -> 50
         // Cut (plateau) → avg*0.95, rounded to 50.
-        let cut = estimated(Direction::Down, -0.05, 0.55);
+        let cut = est(-0.05, TIGHT);
         assert_eq!(calorie_planka(2600.0, &cut, 90.0), 2450.0); // 2470 -> 49.4 -> 2450
         assert_eq!(calorie_planka(2000.0, &cut, 90.0), 1900.0);
     }

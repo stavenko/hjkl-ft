@@ -190,7 +190,7 @@ pub async fn recompute_calorie_planka_now() {
 
 async fn recompute_calorie_planka(force: bool) {
     use crate::services::local;
-    use crate::services::weight_trend::{self, DEFAULT_WINDOW_DAYS};
+    use crate::services::weight_trend;
 
     // Человека ведёт куратор — приложение планки не двигает. Одно условие на всё:
     // не «куратор запретил эту планку», а «за планки теперь отвечает он».
@@ -283,7 +283,20 @@ async fn recompute_calorie_planka(force: bool) {
         .max_by(|a, b| a.date.cmp(&b.date))
         .map(|e| e.weight_kg)
         .unwrap_or(0.0);
-    let trend = weight_trend::weight_trend(&entries, DEFAULT_WINDOW_DAYS);
+    // Окно тренда обрезается по последней СМЕНЕ планки: дни, прожитые при прежней,
+    // мы уже один раз зачли, и второй зачёт разгоняет планку по кругу (разбор — в
+    // доке к `plankas::trend_window_days`). История хранит только изменения, так
+    // что её последняя запись и есть тот день.
+    let changed_on = local::planka_history(local::PLANKA_CALORIES)
+        .await
+        .last()
+        .map(|e| e.date.clone());
+    let window = local::trend_window_days(changed_on.as_deref(), &entries);
+    leptos::logging::log!(
+        "планка калорий: окно тренда {window} дн. (последняя смена планки {})",
+        changed_on.as_deref().unwrap_or("—")
+    );
+    let trend = weight_trend::weight_trend(&entries, window);
     // Порог тот же, по которому день считается зелёным: держаться планки и значит
     // попадать в этот коридор.
     let adherence = local::adherence(
@@ -311,7 +324,9 @@ async fn recompute_calorie_planka(force: bool) {
     add(Letter {
         id: format!("planka-{}", today.format("%Y-%m-%d")),
         created_at: chrono::Local::now().to_rfc3339(),
-        body: planka_letter_body(&trend, weight_kg, previous, new_planka, wanted, adherence),
+        body: planka_letter_body(
+            &trend, weight_kg, previous, new_planka, wanted, adherence, window,
+        ),
         read: false,
         action: None,
         action_done: false,
@@ -470,6 +485,9 @@ fn planka_letter_body(
     // Куда звал расчёт по весу ДО того, как исполнение придержало планку.
     wanted: f64,
     adherence: crate::services::local::Adherence,
+    // Ширина окна тренда. Меньше полной — значит планку меняли на прошлой неделе,
+    // и эта неделя уходит на то, чтобы посмотреть, что правка дала.
+    trend_window_days: i64,
 ) -> String {
     let mut out = String::from("Недельное обновление планки\n\n");
     out.push_str(&weight_verdict(trend, weight_kg));
@@ -511,6 +529,17 @@ fn planka_letter_body(
                  следовать вашей планке.\n\n\
                  На ближайшую неделю она остаётся прежней — {planka_i} калорий."
             )),
+            // Планку меняли на прошлой неделе, и вес ещё не успел на это ответить.
+            // Сказать «менять питание не нужно» здесь было бы неправдой: мы не
+            // решили, что всё хорошо, — мы ждём ответа на прошлую правку.
+            _ if trend_window_days < crate::services::weight_trend::DEFAULT_WINDOW_DAYS => {
+                out.push_str(&format!(
+                    "Планку мы меняли неделю назад, и вес пока отвечает на ту правку — \
+                     двигать её снова, не дождавшись ответа, значит гнать цифру по кругу. \
+                     Эта неделя уходит на наблюдение.\n\n\
+                     Планка остаётся прежней — {planka_i} калорий."
+                ))
+            }
             _ => out.push_str(&format!(
                 "А поэтому менять питание не нужно. На ближайшую неделю ваша планка \
                  остаётся прежней — {planka_i} калорий."
@@ -523,22 +552,29 @@ fn planka_letter_body(
 /// Что происходит с весом, одним предложением: направление + уверенность, а для
 /// уверенного снижения ещё и темп относительно комфортной полосы (0.3–0.7 %
 /// массы тела в неделю — та же полоса, по которой двигается планка).
+///
+/// Темп берётся у `local::pace` — у ТОЙ ЖЕ функции, что решает, двигать ли планку.
+/// Своя копия правила здесь однажды уже была, и после перехода на значимость она
+/// сделала бы письмо самопротиворечивым: «снижается слишком быстро» рядом с
+/// «менять питание не нужно».
 fn weight_verdict(t: &crate::services::weight_trend::WeightTrend, weight_kg: f64) -> String {
+    use crate::services::local::Pace;
     use crate::services::weight_trend::{Direction, WeightTrend, CONFIDENT, WEAK};
-    // Темп в долях массы тела за неделю; границы — из `local::planka_factor`.
-    const COMFORT_MIN: f64 = 0.003;
-    const COMFORT_MAX: f64 = 0.007;
     let pace = |slope_wk: f64| -> Option<&'static str> {
-        if weight_kg <= 0.0 {
-            return None;
-        }
-        let rate = slope_wk.abs() / weight_kg;
-        if rate > COMFORT_MAX {
-            Some("и делает это слишком быстро")
-        } else if rate < COMFORT_MIN {
-            Some("но слишком медленно")
-        } else {
-            Some("и делает это в комфортном темпе")
+        match crate::services::local::pace(t, weight_kg)? {
+            Pace::Fast => Some("и делает это слишком быстро"),
+            Pace::Slow => Some("но слишком медленно"),
+            // «Не отличается от полосы» — это ДВА разных сообщения, и путать их
+            // нельзя: темп внутри полосы мы утверждаем, темп снаружи, но не
+            // отличимый от неё, — называем тем, чем он является, погрешностью.
+            Pace::Comfortable => {
+                let (lo, hi) = crate::services::local::comfort_band_kg_per_week(weight_kg)?;
+                if (lo..=hi).contains(&slope_wk.abs()) {
+                    Some("и делает это в комфортном темпе")
+                } else {
+                    Some("и пока это в пределах погрешности взвешиваний")
+                }
+            }
         }
     };
     match *t {
@@ -634,54 +670,93 @@ mod tests {
     use crate::services::local::Adherence;
     use crate::services::weight_trend::{Direction, WeightTrend};
 
+    /// Оценка тренда с ЯВНОЙ погрешностью: от неё зависит и вердикт письма, и
+    /// шаг планки. По умолчанию берём узкую — тесты про тексты, а не про шум.
     fn est(dir: Direction, slope_wk: f64, conf: f64) -> WeightTrend {
-        WeightTrend::Estimated { direction: dir, slope_kg_per_week: slope_wk, confidence: conf, days: 14 }
+        est_se(dir, slope_wk, conf, 0.03)
     }
+
+    fn est_se(dir: Direction, slope_wk: f64, conf: f64, se_wk: f64) -> WeightTrend {
+        WeightTrend::Estimated {
+            direction: dir,
+            slope_kg_per_week: slope_wk,
+            confidence: conf,
+            slope_se_kg_per_week: se_wk,
+            days: 14,
+        }
+    }
+
+    /// Полное окно тренда — «планку на прошлой неделе не трогали».
+    const FULL: i64 = crate::services::weight_trend::DEFAULT_WINDOW_DAYS;
 
     #[test]
     fn calorie_letter_states_the_weight_verdict() {
         // 90 кг: комфортная полоса 0.27…0.63 кг/нед.
-        let fast = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget);
+        let fast = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget, FULL);
         assert!(fast.starts_with("Недельное обновление планки"), "{fast}");
         assert!(fast.contains("уверенно снижается — и делает это слишком быстро"), "{fast}");
 
-        let slow = planka_letter_body(&est(Direction::Down, -0.1, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
+        let slow = planka_letter_body(&est(Direction::Down, -0.1, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget, FULL);
         assert!(slow.contains("уверенно снижается — но слишком медленно"), "{slow}");
 
-        let comfy = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
+        let comfy = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, FULL);
         assert!(comfy.contains("в комфортном темпе"), "{comfy}");
 
-        let flat = planka_letter_body(&est(Direction::Down, -0.05, 0.5), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
+        let flat = planka_letter_body(&est(Direction::Down, -0.05, 0.5), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget, FULL);
         assert!(flat.contains("Ваш вес стоит на месте."), "{flat}");
 
-        let unsure = planka_letter_body(&est(Direction::Down, -0.3, 0.7), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
+        let unsure = planka_letter_body(&est(Direction::Down, -0.3, 0.7), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, FULL);
         assert!(unsure.contains("Кажется, ваш вес снижается, но пока неуверенно."), "{unsure}");
 
-        let few = planka_letter_body(&WeightTrend::Insufficient { days: 1 }, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
+        let few = planka_letter_body(&WeightTrend::Insufficient { days: 1 }, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, FULL);
         assert!(few.contains("Взвешиваний пока слишком мало"), "{few}");
     }
 
     #[test]
     fn calorie_letter_advice_follows_the_direction() {
         // Планка выросла — зовём есть БОЛЬШЕ и подсказываем, чем добрать.
-        let up = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget);
+        let up = planka_letter_body(&est(Direction::Down, -1.2, 0.99), 90.0, 2500.0, 2650.0, 2650.0, Adherence::OnTarget, FULL);
         assert!(up.contains("чуть более калорийно"), "{up}");
         assert!(up.contains("ваша планка 2650 калорий"), "{up}");
         assert!(up.contains("конфетки, орешки"), "{up}");
         assert!(!up.contains("калорийной плотностью"), "{up}");
 
         // Планка упала — зовём есть МЕНЬШЕ и напоминаем про плотность.
-        let down = planka_letter_body(&est(Direction::Up, 0.4, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget);
+        let down = planka_letter_body(&est(Direction::Up, 0.4, 0.99), 90.0, 2500.0, 2400.0, 2400.0, Adherence::OnTarget, FULL);
         assert!(down.contains("чуть менее калорийно"), "{down}");
         assert!(down.contains("ваша планка 2400 калорий"), "{down}");
         assert!(down.contains("низкой калорийной плотностью"), "{down}");
         assert!(!down.contains("конфетки"), "{down}");
 
         // Планка не изменилась — не зовём ни туда, ни сюда.
-        let hold = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget);
+        let hold = planka_letter_body(&est(Direction::Down, -0.5, 0.99), 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, FULL);
         assert!(hold.contains("менять питание не нужно"), "{hold}");
         assert!(hold.contains("остаётся прежней — 2500 калорий"), "{hold}");
         assert!(!hold.contains("калорийно."), "{hold}");
+    }
+
+    /// Письмо не имеет права противоречить самому себе. Темп берётся у той же
+    /// функции, что двигает планку, — значит «слишком быстро» и «менять питание
+    /// не нужно» в одном письме встретиться не могут.
+    #[test]
+    fn calorie_letter_does_not_contradict_itself() {
+        // −0.75 кг/нед при 85 кг выше комфортной полосы ТОЧЕЧНО, но погрешность
+        // 0.19 не даёт этого утверждать. Планка стоит — и письмо это признаёт.
+        let noisy = est_se(Direction::Down, -0.75, 0.99, 0.19);
+        let body = planka_letter_body(&noisy, 85.0, 2800.0, 2800.0, 2800.0, Adherence::OnTarget, FULL);
+        assert!(body.contains("в пределах погрешности взвешиваний"), "{body}");
+        assert!(!body.contains("слишком быстро"), "{body}");
+        assert!(body.contains("остаётся прежней — 2800 калорий"), "{body}");
+    }
+
+    /// Неделя наблюдения после правки называется своим именем, а не «всё хорошо».
+    #[test]
+    fn calorie_letter_names_the_settling_week() {
+        let t = est(Direction::Down, -0.5, 0.99);
+        let body = planka_letter_body(&t, 90.0, 2500.0, 2500.0, 2500.0, Adherence::OnTarget, 7);
+        assert!(body.contains("вес пока отвечает на ту правку"), "{body}");
+        assert!(body.contains("остаётся прежней — 2500 калорий"), "{body}");
+        assert!(!body.contains("менять питание не нужно"), "{body}");
     }
 
     #[test]

@@ -57,20 +57,24 @@ pub struct Suggestion {
 /// означало бы, что человек и его куратор ведут разные программы.
 ///
 /// `previous` — планка, от которой отталкиваемся (действующая). `avg_kcal_7d` —
-/// сколько человек ел на самом деле; без него исполнение неизвестно, и стопор не
-/// срабатывает ни в какую сторону. `planka_changed_on` — день последней смены
-/// планки: окно тренда за него не заходит (см. [`trend_window_days`]).
+/// сколько человек ел на самом деле.
+///
+/// Без `avg_kcal_7d` планка СТОИТ. Раньше отсутствие этой величины наоборот
+/// снимало стопор и пускало вес двигать планку свободно — ровно наоборот тому,
+/// ради чего стопор заводился: пока неизвестно, исполнялась ли планка, вес
+/// говорит не о планке, а о том, сколько человек ел на самом деле.
 pub fn suggest(
     s: &Snapshot,
     previous: f64,
     weight: &[api_types::WeightEntry],
     avg_kcal_7d: Option<f64>,
-    planka_changed_on: Option<&str>,
 ) -> Suggestion {
-    let window = trend_window_days(planka_changed_on, weight);
-    let trend = weight_trend::weight_trend(weight, window);
+    let Some(avg) = avg_kcal_7d else {
+        return Suggestion { calories: previous, protein: default_for(Kind::Protein, s) };
+    };
+    let trend = weight_trend::weight_trend(weight, DECISION_WINDOW_DAYS);
     let weight_kg = s.weight_kg.unwrap_or(0.0);
-    let adh = adherence(avg_kcal_7d.unwrap_or(previous), previous, CALORIE_BAND_KCAL);
+    let adh = adherence(avg, previous, CALORIE_BAND_KCAL);
     let calories = calorie_planka_weekly(previous, &trend, weight_kg, adh);
     // Белок считается уже от НОВОЙ калорийности: куратор отправит их вместе, и
     // показывать норму от старой планки значило бы показывать неправду.
@@ -193,46 +197,166 @@ pub fn planka_factor(trend: &crate::weight_trend::WeightTrend, weight_kg: f64) -
     }
 }
 
-// ── Окно тренда: только те дни, что вес прожил при ДЕЙСТВУЮЩЕЙ планке ────────
+// ── Окно решения ─────────────────────────────────────────────────────────────
 //
-// Пересчёт идёт раз в 7 дней, а окно тренда — 14. Значит после каждого сдвига
-// планки половина окна относится к ПРЕЖНЕЙ, и следующий сдвиг делается по
-// данным, которые уже были один раз учтены. Отсюда разгон: 2500 → 2650 → 2800 →
-// 2950 за три недели подряд — планка успевает шагнуть трижды по одному и тому же
-// свидетельству, потому что вес просто не успевает ответить на первый шаг.
+// Виджет веса показывает тренд за 14 дней — человек смотрит на «что происходит
+// сейчас», и короткое окно там уместно. ПЛАНКА судится по 28 дням, и это разные
+// величины, а не одна с разными настройками.
 //
-// Лечится тем же способом, каким лечится любое двойное зачитывание: не смотреть
-// дальше собственной последней правки. Окно обрезается по дню, когда планка
-// менялась в последний раз, — и обрезанное окно само себя тормозит, потому что
-// SE наклона растёт как `window^-1.5`: семь дней вместо четырнадцати — это втрое
-// более широкая погрешность, и `pace` на ней почти никогда не значим. Через
-// неделю окно снова полное — и целиком из дней, прожитых при новой планке.
+// Почему шире. Четырнадцатидневный наклон у живого человека гуляет от +0.3 до
+// −1.2 кг/нед от недели к неделе — и это НЕ погрешность оценки, а настоящие
+// многодневные качели воды в ±1.5 кг, которые прямая честно ловит. Критерий
+// значимости от этого не спасает: четырнадцать дней действительно значимо
+// направлены вверх одну неделю и вниз другую.
 //
-// Отдельного правила «не чаще раза в две недели» не нужно: сильный сигнал
-// (вес поехал вверх) пробьётся и через семь дней, слабый подождёт. Тормоз ровно
-// такой, каких данных заслуживает.
+// Замер на живом ряде (61 день подряд, снижение 0.73 % массы в неделю — чуть
+// быстрее комфортной полосы, то есть правильный ответ «один подъём и стоять»):
+//
+//   окно 14 дн. — 4 хода, 2 разворота
+//   окно 21 дн. — 3 хода, 1 разворот
+//   окно 28 дн. — 1 ход,  0 разворотов
+//
+// И решающее: сдвиг расписания пересчёта на ОДИН день (человек поставил первую
+// планку во вторник, а не в понедельник) уводил итог четырнадцатидневного
+// правила с 2400 на 2950 — 550 ккал разницы на одних и тех же взвешиваниях.
+// Двадцативосьмидневное держится в пределах одного шага при любом расписании.
+// Правило, ответ которого зависит от дня недели, — не правило.
+//
+// Окно — ПОТОЛОК ОБЗОРА, а не требование: нет 28 дней истории, считаем по тому,
+// что есть. Отдельного режима прогрева не нужно — меньше точек даёт шире SE, а
+// шире SE значит «держим». Заглядывать за день первой планки при этом можно и
+// нужно: первая планка калибруется по среднему потреблению, значит дни до неё —
+// тот же пищевой режим, просто неназванный. Обрезать окно по последней ПРАВКЕ
+// планки пробовали — стало хуже: окно ужимается до восьми дней ровно в тот
+// момент, когда нужна ясная голова, и правило начинает гоняться за водой.
 
-/// Ширина окна тренда для пересчёта планки: не больше [`DEFAULT_WINDOW_DAYS`] и
-/// не дальше последнего ИЗМЕНЕНИЯ планки.
+/// Окно, по которому судится ПЛАНКА. Шире, чем окно виджета
+/// ([`weight_trend::DEFAULT_WINDOW_DAYS`]) — см. блок выше.
+pub const DECISION_WINDOW_DAYS: i64 = 28;
+
+// ── На чём позволительно решать ──────────────────────────────────────────────
+//
+// Планку двигают только тогда, когда известны ОБЕ стороны: и что происходит с
+// весом, и исполнялась ли планка. Это не новое правило, а доведение до конца
+// того, ради чего заводился стопор по исполнению (см. `calorie_planka_weekly`):
+// вес сам по себе о планке не говорит ничего.
+//
+// Раньше формулировка соблюдалась наполовину. Исполнение спрашивалось, но
+// принималось любое — одного залогированного дня из семи хватало, чтобы объявить
+// его известным. А вес не проверялся на актуальность вовсе: окно тренда
+// закреплено за последним ЗАМЕРОМ, не за сегодня, поэтому у бросившего весы
+// тренд не протухал, а ЗАМИРАЛ и продолжал выдаваться как текущий. Замер: человек
+// перестал взвешиваться, дневник ведёт — планка ехала +5 % в неделю бесконечно
+// (2500 → 2650 → … → 3750 за семь недель), а письмо каждую неделю сообщало
+// «ваш вес уверенно снижается» про замеры полуторамесячной давности. Разгон
+// останавливал стопор по исполнению — но случайно, он писался против другой петли.
+
+/// Свежесть веса: замер старше этого — не данные.
+pub const WEIGHT_FRESH_DAYS: i64 = 3;
+/// Столько дней со взвешиваниями должно быть в окне решения. На трёх-четырёх
+/// точках остаток случайно ложится в ноль, SE схлопывается, и критерий значимости
+/// объявляет уверенность там, где её нет.
+pub const WEIGHT_MIN_DAYS: usize = 4;
+/// Перерыв во взвешиваниях, после которого считается, что человек бросал.
+pub const WEIGHT_GAP_DAYS: i64 = 7;
+/// Сколько ждать после возобновления: полную неделю, чтобы накопились замеры.
+pub const RESUME_DAYS: i64 = 7;
+/// Столько из семи завершённых дней должно быть с записями в дневнике.
+pub const DIARY_MIN_DAYS: usize = 4;
+
+/// Почему пересчёт не состоялся. Не ошибка — отсрочка: данных не хватает, и
+/// появятся они сами.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoDecision {
+    /// Последнее взвешивание слишком давно.
+    WeightStale { days: i64 },
+    /// Взвешиваться начали снова после перерыва — ждём полную неделю.
+    WeightJustResumed { days: i64 },
+    /// Взвешиваний в окне слишком мало.
+    WeightSparse { days: usize },
+    /// Дневник вёлся слишком редко — исполнение планки неизвестно.
+    DiarySparse { days: usize },
+}
+
+impl NoDecision {
+    /// Причина ОДНОЙ строкой, без чисел. Журнал ошибок дедуплицирует записи по
+    /// точному совпадению текста, и число внутри («прошло 9 дн.») делало запись
+    /// новой каждый день — отсрочка плодила по строке на запуск.
+    pub fn reason(self) -> &'static str {
+        match self {
+            NoDecision::WeightStale { .. } => {
+                "пересчёт отложен: давно не было взвешиваний. Встаньте на весы — \
+                 пересчёт случится сам"
+            }
+            NoDecision::WeightJustResumed { .. } => {
+                "пересчёт отложен: взвешивания возобновились после перерыва, ждём \
+                 полную неделю замеров"
+            }
+            NoDecision::WeightSparse { .. } => {
+                "пересчёт отложен: взвешиваний за последний месяц слишком мало, \
+                 чтобы судить о тренде"
+            }
+            NoDecision::DiarySparse { .. } => {
+                "пересчёт отложен: дневник за последнюю неделю почти пуст — \
+                 неизвестно, исполнялась ли планка"
+            }
+        }
+    }
+}
+
+/// Хватает ли данных, чтобы двигать планку.
 ///
-/// `planka_changed_on` — дата последней смены планки (`YYYY-MM-DD`); `None` (не
-/// менялась, либо смена старше присланной истории) → полное окно. Отсчёт идёт от
-/// последнего ВЗВЕШИВАНИЯ, а не от календарного сегодня: окно тренда закреплено
-/// за ним же, и функция остаётся чистой.
-pub fn trend_window_days(
-    planka_changed_on: Option<&str>,
-    entries: &[api_types::WeightEntry],
-) -> i64 {
-    use crate::weight_trend::DEFAULT_WINDOW_DAYS;
-    let parse = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok();
-    let Some(changed) = planka_changed_on.and_then(parse) else {
-        return DEFAULT_WINDOW_DAYS;
+/// `today` приходит параметром: крейт чистый, часов у него нет. `diary_days` —
+/// сколько из семи ЗАВЕРШЁННЫХ дней имеют записи в дневнике; `None` — дневник не
+/// спрашивали (путь, где исполнение не при чём).
+pub fn check_evidence(
+    today: chrono::NaiveDate,
+    weight: &[api_types::WeightEntry],
+    diary_days: Option<usize>,
+) -> Result<(), NoDecision> {
+    if let Some(d) = diary_days {
+        if d < DIARY_MIN_DAYS {
+            return Err(NoDecision::DiarySparse { days: d });
+        }
+    }
+    let mut wdays: Vec<chrono::NaiveDate> = weight
+        .iter()
+        .filter_map(|e| chrono::NaiveDate::parse_from_str(&e.date, "%Y-%m-%d").ok())
+        .collect();
+    wdays.sort_unstable();
+    wdays.dedup();
+    let Some(&latest) = wdays.last() else {
+        return Err(NoDecision::WeightSparse { days: 0 });
     };
-    let Some(latest) = entries.iter().filter_map(|e| parse(&e.date)).max() else {
-        return DEFAULT_WINDOW_DAYS;
-    };
-    // +1: день самой правки уже прожит при новой планке, он в окно входит.
-    ((latest - changed).num_days() + 1).clamp(1, DEFAULT_WINDOW_DAYS)
+
+    let stale = (today - latest).num_days();
+    if stale > WEIGHT_FRESH_DAYS {
+        return Err(NoDecision::WeightStale { days: stale });
+    }
+
+    // Возобновление после перерыва: ищем ПОСЛЕДНИЙ разрыв длиннее `WEIGHT_GAP_DAYS`
+    // и смотрим, сколько прожито после него. Дни до разрыва в счёт не идут — это
+    // другая жизнь, и вес в ней о нынешней планке не говорит.
+    if let Some(resumed) = wdays
+        .windows(2)
+        .filter(|w| (w[1] - w[0]).num_days() > WEIGHT_GAP_DAYS)
+        .map(|w| w[1])
+        .next_back()
+    {
+        let since = (today - resumed).num_days();
+        if since < RESUME_DAYS {
+            return Err(NoDecision::WeightJustResumed { days: since });
+        }
+    }
+
+    // Плотность замеров в окне решения. Окно закреплено за последним замером —
+    // так же, как его считает `daily_means`.
+    let window_start = latest - chrono::Duration::days(DECISION_WINDOW_DAYS - 1);
+    let in_window = wdays.iter().filter(|d| **d >= window_start).count();
+    if in_window < WEIGHT_MIN_DAYS {
+        return Err(NoDecision::WeightSparse { days: in_window });
+    }
+    Ok(())
 }
 
 /// The daily calorie planka: the average intake nudged by [`planka_factor`] and
@@ -554,10 +678,10 @@ mod suggest_tests {
         let w: Vec<_> = (1..=14)
             .map(|i| weigh(&format!("2026-03-{i:02}"), 71.0 - i as f64 * 0.05))
             .collect();
-        let trend = weight_trend::weight_trend(&w, DEFAULT_WINDOW_DAYS);
+        let trend = weight_trend::weight_trend(&w, DECISION_WINDOW_DAYS);
         let adh = adherence(1900.0, 2000.0, CALORIE_BAND_KCAL);
         let expected = calorie_planka_weekly(2000.0, &trend, 70.0, adh);
-        assert_eq!(suggest(&person(), 2000.0, &w, Some(1900.0), None).calories, expected);
+        assert_eq!(suggest(&person(), 2000.0, &w, Some(1900.0)).calories, expected);
     }
 
     /// Белок считается от НОВОЙ калорийности, а не от прежней: отправляются они
@@ -565,33 +689,140 @@ mod suggest_tests {
     #[test]
     fn belok_schitaetsya_ot_novoj_kalorijnosti() {
         let s = person();
-        let sg = suggest(&s, 2000.0, &[], Some(2000.0), None);
+        let sg = suggest(&s, 2000.0, &[], Some(2000.0));
         let after = Snapshot { kcal_planka: Some(sg.calories), ..s };
         assert_eq!(sg.protein, default_for(Kind::Protein, &after));
     }
 
-    /// Окно тренда не заходит за день последней смены планки — иначе куратор
-    /// увидел бы предложение, посчитанное по весу, прожитому при ПРЕЖНЕЙ планке.
+    /// Неизвестное исполнение ДЕРЖИТ планку. Раньше оно её освобождало — и это
+    /// был самый опасный случай из всех: не зная, что человек ел, мы двигали
+    /// планку по весу, который как раз и говорил о том, что человек ел.
     #[test]
-    fn okno_ne_zahodit_za_smenu_planki() {
-        let w: Vec<_> = (1..=14)
-            .map(|i| weigh(&format!("2026-03-{i:02}"), 71.0 - i as f64 * 0.05))
+    fn bez_dnevnika_planka_stoit() {
+        let w: Vec<_> = (1..=28)
+            .map(|i| weigh(&format!("2026-03-{i:02}"), 75.0 - i as f64 * 0.15))
             .collect();
-        // Планка сменилась 2026-03-08, последнее взвешивание — 2026-03-14: 7 дней.
-        assert_eq!(trend_window_days(Some("2026-03-08"), &w), 7);
-        // Ничего не меняли — полное окно.
-        assert_eq!(trend_window_days(None, &w), DEFAULT_WINDOW_DAYS);
-        // Смена давняя — тоже полное, окно не растягивается.
-        assert_eq!(trend_window_days(Some("2026-01-01"), &w), DEFAULT_WINDOW_DAYS);
-        // Смена сегодня — один день, тренда не будет вовсе.
-        assert_eq!(trend_window_days(Some("2026-03-14"), &w), 1);
-        // И предложение считается ИМЕННО по обрезанному окну.
-        let short = weight_trend::weight_trend(&w, 7);
-        let adh = adherence(1900.0, 2000.0, CALORIE_BAND_KCAL);
+        // Вес валится на 1.05 кг/нед — правило само по себе кричит «поднимай».
+        let trend = weight_trend::weight_trend(&w, DECISION_WINDOW_DAYS);
+        assert_eq!(pace(&trend, 70.0), Some(Pace::Fast));
+        // Но без съеденного планка стоит.
+        assert_eq!(suggest(&person(), 2000.0, &w, None).calories, 2000.0);
+        // А с ним — двигается.
+        assert!(suggest(&person(), 2000.0, &w, Some(2000.0)).calories > 2000.0);
+    }
+
+    // ── Гейт по данным ───────────────────────────────────────────────────────
+
+    /// Ряд ежедневных взвешиваний за `n` дней, заканчивающийся `last`.
+    fn daily(last: &str, n: i64) -> Vec<api_types::WeightEntry> {
+        let last = chrono::NaiveDate::parse_from_str(last, "%Y-%m-%d").unwrap();
+        (0..n)
+            .map(|i| {
+                let d = last - chrono::Duration::days(i);
+                weigh(&d.format("%Y-%m-%d").to_string(), 80.0 + i as f64 * 0.1)
+            })
+            .collect()
+    }
+
+    fn day(s: &str) -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn dannyh_hvataet_kogda_vse_na_meste() {
+        let w = daily("2026-03-30", 28);
+        assert_eq!(check_evidence(day("2026-03-30"), &w, Some(7)), Ok(()));
+        // Замер вчерашний, дневник на четырёх днях — всё ещё считаем.
+        assert_eq!(check_evidence(day("2026-03-31"), &w, Some(4)), Ok(()));
+    }
+
+    /// Протухший вес. Тот самый случай, где окно тренда ЗАМИРАЛО и продолжало
+    /// выдаваться как текущее, а планка ехала на 5 % в неделю в никуда.
+    #[test]
+    fn protuhshij_ves_otkladyvaet_pereschet() {
+        let w = daily("2026-03-30", 28);
+        assert_eq!(check_evidence(day("2026-04-02"), &w, Some(7)), Ok(())); // 3 дня — ещё свежо
         assert_eq!(
-            suggest(&person(), 2000.0, &w, Some(1900.0), Some("2026-03-08")).calories,
-            calorie_planka_weekly(2000.0, &short, 70.0, adh)
+            check_evidence(day("2026-04-03"), &w, Some(7)),
+            Err(NoDecision::WeightStale { days: 4 })
         );
+        // Через месяц молчания — та же причина, не «мало взвешиваний».
+        assert!(matches!(
+            check_evidence(day("2026-05-01"), &w, Some(7)),
+            Err(NoDecision::WeightStale { .. })
+        ));
+    }
+
+    /// Возобновил после перерыва — ждём полную неделю, чтобы накопились замеры.
+    #[test]
+    fn posle_pereryva_zhdem_nedelyu() {
+        // Взвешивался в феврале, бросил, вернулся 2026-03-25.
+        let mut w = daily("2026-02-20", 20);
+        w.extend(daily("2026-03-28", 4));
+        assert_eq!(
+            check_evidence(day("2026-03-28"), &w, Some(7)),
+            Err(NoDecision::WeightJustResumed { days: 3 })
+        );
+        // Ещё четыре дня взвешиваний — неделя с возобновления набралась.
+        w.extend(daily("2026-04-01", 4));
+        assert_eq!(check_evidence(day("2026-04-01"), &w, Some(7)), Ok(()));
+    }
+
+    /// Редкие взвешивания: на трёх-четырёх точках SE схлопывается и правило
+    /// «уверенно» разворачивает планку на воде.
+    #[test]
+    fn redkih_vzveshivanij_ne_hvataet() {
+        let w = vec![weigh("2026-03-28", 80.0), weigh("2026-03-30", 80.4)];
+        assert_eq!(
+            check_evidence(day("2026-03-30"), &w, Some(7)),
+            Err(NoDecision::WeightSparse { days: 2 })
+        );
+        assert_eq!(
+            check_evidence(day("2026-03-30"), &[], Some(7)),
+            Err(NoDecision::WeightSparse { days: 0 })
+        );
+    }
+
+    /// Пустой дневник. Одного залогированного дня из семи раньше хватало, чтобы
+    /// объявить исполнение известным и двинуть планку.
+    #[test]
+    fn pustoj_dnevnik_otkladyvaet_pereschet() {
+        let w = daily("2026-03-30", 28);
+        assert_eq!(
+            check_evidence(day("2026-03-30"), &w, Some(1)),
+            Err(NoDecision::DiarySparse { days: 1 })
+        );
+        assert_eq!(
+            check_evidence(day("2026-03-30"), &w, Some(3)),
+            Err(NoDecision::DiarySparse { days: 3 })
+        );
+        // Дневник не спрашивали — не наше дело.
+        assert_eq!(check_evidence(day("2026-03-30"), &w, None), Ok(()));
+    }
+
+    /// Одинокий старый замер не должен читаться как «только что вернулся»: разрыв
+    /// закончился давно, и неделя с возобновления набрана с запасом. (Это ровно
+    /// раскладка сеятеля из `scripts/check-calorie-planka-weekly.mjs`: строка
+    /// старого формата тридцатидневной давности плюс три недели ежедневных.)
+    #[test]
+    fn davnij_odinokij_zamer_ne_meshaet() {
+        let mut w = vec![weigh("2026-03-01", 93.0)];
+        w.extend(daily("2026-03-31", 21));
+        assert_eq!(check_evidence(day("2026-03-31"), &w, Some(7)), Ok(()));
+    }
+
+    /// Причина для журнала — без чисел: журнал дедуплицирует записи по тексту, и
+    /// «прошло 9 дн.» внутри давало новую строку каждый день.
+    #[test]
+    fn prichina_dlya_zhurnala_bez_chisel() {
+        for r in [
+            NoDecision::WeightStale { days: 9 },
+            NoDecision::WeightJustResumed { days: 2 },
+            NoDecision::WeightSparse { days: 1 },
+            NoDecision::DiarySparse { days: 0 },
+        ] {
+            assert!(!r.reason().chars().any(|c| c.is_ascii_digit()), "{}", r.reason());
+        }
     }
 
     /// Ряд взвешиваний из живого случая, на котором планка задребезжала:
@@ -634,27 +865,26 @@ mod suggest_tests {
         assert_eq!(pace(&t29, 85.9), Some(Pace::Comfortable));
         assert_eq!(planka_factor(&t29, 85.9), 1.0);
 
-        // 05.09 — снижение стало быстрым и уже значимо: планка растёт.
+        // 05.09 по окну ВИДЖЕТА снижение выглядит быстрым и значимым.
         let t5 = weight_trend::weight_trend(&upto("2026-09-05"), DEFAULT_WINDOW_DAYS);
         assert_eq!(pace(&t5, 85.0), Some(Pace::Fast));
-        assert!(planka_factor(&t5, 85.0) > 1.0);
 
-        // И второй контур: неделей раньше окно обрезано последней сменой планки —
-        // семь дней вместо четырнадцати, погрешность втрое шире, шага нет.
-        let w7 = trend_window_days(Some("2026-08-30"), &upto("2026-09-05"));
-        assert_eq!(w7, 7);
-        let t7 = weight_trend::weight_trend(&upto("2026-09-05"), w7);
-        assert_eq!(planka_factor(&t7, 85.0), 1.0);
+        // А по окну РЕШЕНИЯ — нет: те же дни плюс предыдущая неделя дают −0.58
+        // кг/нед (0.68 % — внутри полосы), и планка стоит. Это и есть правильный
+        // ответ: за весь период человек снижался на 0.73 % в неделю, ровно.
+        let d5 = weight_trend::weight_trend(&upto("2026-09-05"), DECISION_WINDOW_DAYS);
+        assert_eq!(pace(&d5, 85.0), Some(Pace::Comfortable));
+        assert_eq!(planka_factor(&d5, 85.0), 1.0);
+
+        // Ни одного разворота на всём ряде — ни по одному окну.
+        assert_eq!(planka_factor(&t29, 85.9), planka_factor(&d5, 85.0));
     }
 
-    /// Без данных о съеденном стопор не срабатывает ни в какую сторону: неизвестное
-    /// исполнение — не повод ни поднимать, ни опускать.
+    /// Без данных о съеденном планка стоит — см. `bez_dnevnika_planka_stoit`.
     #[test]
-    fn bez_sedennogo_stopor_ne_srabatyvaet() {
+    fn bez_sedennogo_planka_ne_dvizhetsya() {
         let s = person();
-        let no_data = suggest(&s, 2000.0, &[], None, None);
-        let on_target = suggest(&s, 2000.0, &[], Some(2000.0), None);
-        assert_eq!(no_data.calories, on_target.calories);
+        assert_eq!(suggest(&s, 2000.0, &[], None).calories, 2000.0);
     }
 }
 

@@ -124,6 +124,10 @@ async fn build_body() -> Value {
         // расхождение в год даёт другую норму.
         "age_years": profile::get_age_years(),
         "sex": sex,
+        // Цель курса: от неё зависит целевая полоса, а значит и планка, которую
+        // куратор увидит по кнопке «Рассчитать». Без неё он считал бы по полосе
+        // похудения человеку, выбравшему набор.
+        "goal": profile::planka_goal().key(),
     })
 }
 
@@ -147,7 +151,7 @@ async fn build_weight() -> Value {
         WeightTrend::Tentative { direction, slope_kg_per_week, days } => {
             (Some(slope_kg_per_week), None, Some(dir_str(direction)), days)
         }
-        WeightTrend::Estimated { direction, slope_kg_per_week, confidence, days } => (
+        WeightTrend::Estimated { direction, slope_kg_per_week, confidence, days, .. } => (
             Some(slope_kg_per_week),
             Some(confidence),
             Some(dir_str(direction)),
@@ -512,7 +516,7 @@ pub async fn build_report(from: Option<String>, to: String) -> Value {
         WeightTrend::Tentative { direction, slope_kg_per_week, days } => {
             (Some(slope_kg_per_week), None, Some(dir_str(direction)), days)
         }
-        WeightTrend::Estimated { direction, slope_kg_per_week, confidence, days } => (
+        WeightTrend::Estimated { direction, slope_kg_per_week, confidence, days, .. } => (
             Some(slope_kg_per_week),
             Some(confidence),
             Some(dir_str(direction)),

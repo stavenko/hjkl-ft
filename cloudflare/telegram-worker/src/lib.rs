@@ -48,6 +48,11 @@ async fn tg_api(env: &Env, method: &str, body: &serde_json::Value) -> Result<()>
             if !(200..300).contains(&status) {
                 let txt = res.text().await.unwrap_or_default();
                 console_error!("tg_api {method}: {status} {txt}");
+                // ОТКАЗ ТЕЛЕГРАМА — ЭТО ОШИБКА, А НЕ ЗАМЕТКА В ЛОГЕ. Раньше здесь
+                // возвращался Ok, и вызывающий считал сообщение доставленным: платёж
+                // помечался «уведомлён», а журнал уведомлений — «написали», хотя
+                // человек не получал ничего. Теперь неудача видна наверху.
+                return Err(Error::RustError(format!("telegram {method}: {status} {txt}")));
             }
             Ok(())
         }
@@ -65,9 +70,29 @@ async fn send_message(
     text: &str,
     reply_markup: Option<serde_json::Value>,
 ) -> Result<()> {
-    let mut body = serde_json::json!({ "chat_id": chat_id, "text": text });
+    send_message_as(env, chat_id, text, reply_markup, None).await
+}
+
+/// То же, но с разметкой: `parse_mode` (у нас — `HTML`) нужен там, где в тексте есть
+/// ссылка. Превью ссылок выключено всегда: наши сообщения — служебные, карточка сайта
+/// под ними только шумит и растягивает сообщение на пол-экрана.
+async fn send_message_as(
+    env: &Env,
+    chat_id: i64,
+    text: &str,
+    reply_markup: Option<serde_json::Value>,
+    parse_mode: Option<&str>,
+) -> Result<()> {
+    let mut body = serde_json::json!({
+        "chat_id": chat_id,
+        "text": text,
+        "link_preview_options": { "is_disabled": true },
+    });
     if let Some(markup) = reply_markup {
         body["reply_markup"] = markup;
+    }
+    if let Some(mode) = parse_mode {
+        body["parse_mode"] = serde_json::json!(mode);
     }
     tg_api(env, "sendMessage", &body).await
 }
@@ -101,7 +126,10 @@ async fn internal_send(mut req: Request, env: &Env) -> Result<Response> {
     if text.is_empty() {
         return Ok(error_response("missing text", 400));
     }
-    send_message(env, tg_user_id, text, None).await?;
+    // `parseMode` — только когда вызывающий сам собрал разметку (например ссылку).
+    // По умолчанию текст уходит как есть: так его не сломает случайный «<» в имени.
+    let parse_mode = body.get("parseMode").and_then(|v| v.as_str());
+    send_message_as(env, tg_user_id, text, None, parse_mode).await?;
     Response::from_json(&serde_json::json!({ "ok": true }))
 }
 

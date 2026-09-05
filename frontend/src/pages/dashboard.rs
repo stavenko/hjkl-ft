@@ -79,30 +79,71 @@ fn gauge_label(key: &str) -> &'static str {
 async fn calorie_hint_text(planka: Option<f64>) -> String {
     let avg = local::avg_daily_kcal(7).await;
     let entries = local::list_weight_entries().await;
-    let trend = weight_trend::weight_trend(&entries, weight_trend::DEFAULT_WINDOW_DAYS);
+    // Окно РЕШЕНИЯ, а не окно виджета: текст объясняет, почему планка там, где
+    // она есть, и должен считать тем же, чем считалась она.
+    let trend = weight_trend::weight_trend(&entries, local::DECISION_WINDOW_DAYS);
     let weight_kg = entries
         .iter()
         .max_by(|a, b| a.date.cmp(&b.date))
         .map(|e| e.weight_kg)
         .unwrap_or(0.0);
-    let goal = match profile::get_goal() {
+    let goal_word = match profile::get_goal() {
         CourseGoal::Lose => "похудение",
         CourseGoal::Maintain => "удержание веса",
         CourseGoal::Gain => "набор веса",
     };
-    // Describe the ACTUAL adjustment via the single-source `planka_factor` (no drift).
-    let f = local::planka_factor(&trend, weight_kg);
-    let why = if f > 1.001 {
-        "а вес снижается слишком быстро — мы приподняли планку на 5% для комфорта"
-    } else if f < 0.999 {
-        "а вес пока не снижается уверенно — мы снизили планку на 5%, чтобы создать мягкий дефицит"
-    } else {
-        "а вес снижается комфортно (или мы ещё уточняем данные за неделю) — мы держим планку на вашем среднем"
+    // Что именно сделано — через тот же `planka_factor`, что и сделал это. Текст
+    // СВОЙ на каждую цель: одно и то же движение веса при разных целях — разные
+    // новости, и общая формулировка, покрывающая все три, не говорит ничего.
+    // «Вес снижается слишком быстро» человеку на наборе — просто бессмыслица.
+    let goal = profile::planka_goal();
+    let f = local::planka_factor(&trend, weight_kg, goal);
+    let up = f > 1.001;
+    let down = f < 0.999;
+    let why = match goal {
+        plankas::Goal::Lose if up => {
+            "а вес снижается быстрее комфортного — мы приподняли планку на 5%, чтобы \
+             сберечь мышцы"
+        }
+        plankas::Goal::Lose if down => {
+            "а вес снижается медленнее, чем нужно, или не снижается вовсе — мы срезали \
+             планку на 5%, чтобы создать мягкий дефицит"
+        }
+        plankas::Goal::Lose => {
+            "а вес снижается комфортно — или разброс взвешиваний пока не даёт отличить \
+             ваш темп от комфортного, и тогда мы тем более не трогаем планку"
+        }
+        plankas::Goal::Maintain if up => {
+            "а вес уходит вниз — мы приподняли планку на 5%, чтобы он остановился"
+        }
+        plankas::Goal::Maintain if down => {
+            "а вес ползёт вверх — мы срезали планку на 5%, чтобы он остановился"
+        }
+        plankas::Goal::Maintain => {
+            "и вес держится — или разброс взвешиваний пока не даёт утверждать обратное, \
+             и тогда мы тем более не трогаем планку"
+        }
+        plankas::Goal::Gain if up => {
+            "а набора не видно — мы подняли планку на 5%: без прибавки ему неоткуда взяться"
+        }
+        // Недостижимо: у полосы набора нет верхней границы, планка вниз не идёт.
+        plankas::Goal::Gain if down => {
+            "а вес растёт быстрее, чем нужно, — мы срезали планку на 5%"
+        }
+        plankas::Goal::Gain => {
+            "и набор идёт — или разброс взвешиваний пока не даёт сказать этого уверенно, \
+             и тогда мы тем более не трогаем планку"
+        }
     };
+    // Срок называется вслух: панель веса судит по 14 дням, планка — по 28, и без
+    // названного срока два числа рядом читаются как противоречие.
+    let days = local::DECISION_WINDOW_DAYS;
     let avg_s = avg.map(|a| format!("{a:.0}")).unwrap_or_else(|| "—".to_string());
     let planka_s = planka.map(|p| format!("{p:.0}")).unwrap_or_else(|| "—".to_string());
     format!(
-        "Поскольку ваша цель — {goal}, {why}.\n\nВаше среднее потребление за 7 дней: {avg_s} ккал.\n\
+        "Поскольку ваша цель — {goal_word}, {why}. Вес мы смотрим за последние {days} дней — \
+         одна неделя слишком коротка, чтобы отличить движение веса от воды.\n\n\
+         Ваше среднее потребление за 7 дней: {avg_s} ккал.\n\
          И поэтому ваша планка: {planka_s} ккал."
     )
 }
@@ -841,6 +882,7 @@ pub fn DashboardPage() -> impl IntoView {
                                 let pace = crate::components::gauge::GaugePace {
                                     segments: 7,
                                     passed: w.day_of_week.saturating_sub(1),
+                                    at_most: false,
                                 };
                                 view! {
                                     <Gauge value=w.absorbed_mg target=w.target_mg
@@ -863,6 +905,7 @@ pub fn DashboardPage() -> impl IntoView {
                                 let pace = crate::components::gauge::GaugePace {
                                     segments: 7,
                                     passed: w.day_of_week.saturating_sub(1),
+                                    at_most: false,
                                 };
                                 view! {
                                     <Gauge value=w.portions target=w.target
@@ -883,6 +926,7 @@ pub fn DashboardPage() -> impl IntoView {
                                 let pace = crate::components::gauge::GaugePace {
                                     segments: 7,
                                     passed: w.day_of_week.saturating_sub(1),
+                                    at_most: false,
                                 };
                                 // Точки темпа — только у накопительных величин, см.
                                 // тот же разбор в progress_widget.

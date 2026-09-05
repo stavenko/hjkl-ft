@@ -425,6 +425,64 @@ pub async fn cancel_subscription(contract_id: &str, email: &str) -> Result<(), A
     Ok(())
 }
 
+/// POST /admin/preview-notice — прислать СЕБЕ образец сообщения, которое получит
+/// человек. Тексты со ссылками и разметкой проверяются только так: глазами в телеграме.
+pub async fn preview_notice(kind: &str) -> Result<PreviewNotice, ApiError> {
+    let body = serde_json::to_string(&serde_json::json!({ "kind": kind }))
+        .map_err(|e| ApiError::Other(e.to_string()))?;
+    request_to(&payment_base()?, "POST", "/admin/preview-notice", Some(body)).await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PreviewNotice {
+    #[serde(default)]
+    pub sent: bool,
+    #[serde(default)]
+    pub text: String,
+}
+
+/// POST /admin/notify-cancelled — кому подписка закрылась, а мы об этом не написали.
+/// `dry_run = true` — только список, без единой отправки. Ответ отдаётся страницами:
+/// `next_offset` = None означает, что дошли до конца.
+pub async fn notify_cancelled(dry_run: bool, offset: u64) -> Result<NotifyCancelled, ApiError> {
+    let body = serde_json::to_string(&serde_json::json!({
+        "dryRun": dry_run, "offset": offset, "limit": 50,
+    }))
+    .map_err(|e| ApiError::Other(e.to_string()))?;
+    request_to(&payment_base()?, "POST", "/admin/notify-cancelled", Some(body)).await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NotifyCancelled {
+    #[serde(default)]
+    pub scanned: usize,
+    #[serde(default, rename = "totalUsers")]
+    pub total_users: usize,
+    #[serde(default, rename = "nextOffset")]
+    pub next_offset: Option<u64>,
+    #[serde(default)]
+    pub sent: usize,
+    #[serde(default)]
+    pub users: Vec<LostUser>,
+}
+
+/// Один потерянный подписчик: подписка закрыта или отменена, сообщения не было.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LostUser {
+    #[serde(default, rename = "userId")]
+    pub user_id: String,
+    #[serde(default, rename = "tgUserId")]
+    pub tg_user_id: Option<i64>,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, rename = "daysLeft")]
+    pub days_left: i64,
+    #[serde(default)]
+    pub sent: bool,
+    #[serde(default)]
+    pub skipped: Option<String>,
+}
+
 /// A paid user who hasn't set up durable access (no passkey) — «paid but can't get in yet».
 #[derive(Debug, Clone, Deserialize)]
 pub struct PaidNoAccess {
@@ -597,6 +655,9 @@ pub async fn users() -> Result<Vec<UserRow>, ApiError> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReceiptRow {
+    /// Нужен, чтобы открыть тело письма: список отдаёт только сумму и дату.
+    #[serde(default)]
+    pub id: String,
     #[serde(default)]
     pub amount: Option<i64>,
     #[serde(default)]

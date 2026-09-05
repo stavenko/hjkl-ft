@@ -55,7 +55,7 @@ const STORAGE_KEY_CHAPTERS_PREFIX: &str = "chapters:";
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Выбор области (app / admin / curator) по origin церемонии.
+/// Выбор области (app / admin / curator / gym) по origin церемонии.
 ///
 /// Inputs are the FIXED env-derived configs plus the ceremony origin. Selection is
 /// pure string equality against the configured origin of that scope; a client-supplied
@@ -325,6 +325,32 @@ impl AuthDO {
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| format!("https://{curator_rp_id}"))
         };
+        // Зал — четвёртая область, и НЕОБЯЗАТЕЛЬНАЯ так же, как кураторская:
+        // окружение без приложения тренировок обязано подниматься по-прежнему.
+        //
+        // Отдельные переменные, а не `RP_ORIGINS_EXTRA`, потому что в проде и в
+        // dev у зала РАЗНАЯ область ключей, и одним списком это не выражается:
+        //   prod — GYM_RP_ID = "renorma.app": тот же rp_id, что у приложения
+        //     худеющего, и он является registrable suffix для gym.renorma.app.
+        //     Значит паскей, заведённый на fit.renorma.app, подходит здесь как
+        //     есть — это и есть «вход тем же ключом».
+        //   dev  — GYM_RP_ID = "renorma-gym-dev.pages.dev": СВОЯ область. Иначе
+        //     нельзя: `pages.dev` — публичный суффикс, и rp_id приложения
+        //     (`renorma-fit-dev.pages.dev`) для gym-домена не суффикс вовсе, так
+        //     что браузер отверг бы церемонию ещё до нашего ответа.
+        let gym_rp_id = self
+            .env
+            .var("GYM_RP_ID")
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        let gym_rp_origin = if gym_rp_id.is_empty() {
+            String::new()
+        } else {
+            self.env
+                .var("GYM_RP_ORIGIN")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|_| format!("https://{gym_rp_id}"))
+        };
 
         // Fail loudly on empty origin: do NOT silently fall back to a scope.
         if origin.is_empty() {
@@ -352,6 +378,8 @@ impl AuthDO {
             (admin_rp_id, admin_rp_origin)
         } else if origin_selects(origin, &curator_rp_origin) {
             (curator_rp_id, curator_rp_origin)
+        } else if origin_selects(origin, &gym_rp_origin) {
+            (gym_rp_id, gym_rp_origin)
         } else if let Some(o) = extra_match {
             (app_rp_id, o)
         } else {
@@ -1910,6 +1938,8 @@ mod tests {
     const ADMIN_PROD: &str = "https://admin.renorma.app";
     const CURATOR_DEV: &str = "https://renorma-curator-dev.pages.dev";
     const CURATOR_PROD: &str = "https://curator.renorma.app";
+    const GYM_DEV: &str = "https://renorma-gym-dev.pages.dev";
+    const GYM_PROD: &str = "https://gym.renorma.app";
 
     #[test]
     fn admin_origin_selects_admin_dev() {
@@ -1956,5 +1986,29 @@ mod tests {
     fn nenastroennaya_oblast_ne_vybiraetsya() {
         assert!(!origin_selects("https://curator.renorma.app", ""));
         assert!(!origin_selects("", ""));
+    }
+
+    #[test]
+    fn zalnyj_origin_vybiraet_zalnuyu_oblast() {
+        assert!(origin_selects(GYM_DEV, GYM_DEV));
+        assert!(origin_selects(GYM_PROD, GYM_PROD));
+    }
+
+    // Зал НЕ выбирает чужие области — и его не выбирают чужие origin. Это про
+    // выбор конфигурации, а не про область ключей: в проде зал получает тот же
+    // rp_id, что и приложение худеющего (в этом весь смысл — один ключ), но
+    // конфигурацию под свой origin, а не под чужой.
+    #[test]
+    fn zal_ne_peresekaetsya_s_ostalnymi() {
+        assert!(!origin_selects(GYM_PROD, ADMIN_PROD));
+        assert!(!origin_selects(GYM_PROD, CURATOR_PROD));
+        assert!(!origin_selects("https://fit.renorma.app", GYM_PROD));
+        assert!(!origin_selects(ADMIN_PROD, GYM_PROD));
+    }
+
+    // Окружение без приложения тренировок — как без кураторского: ветка молчит.
+    #[test]
+    fn nenastroennyj_zal_ne_vybiraetsya() {
+        assert!(!origin_selects(GYM_PROD, ""));
     }
 }

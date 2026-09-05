@@ -58,6 +58,7 @@ fn is_allowed_origin(origin: &str) -> bool {
         || origin == "https://renorma-fit-dev.pages.dev"
         || origin == "https://renorma-admin-dev.pages.dev"
         || origin == "https://renorma-curator-dev.pages.dev"
+        || origin == "https://renorma-gym-dev.pages.dev"
         || origin.starts_with("http://localhost")
         || origin.starts_with("http://127.0.0.1")
 }

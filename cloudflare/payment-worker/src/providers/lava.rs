@@ -377,7 +377,17 @@ impl Lava {
             .or_else(|| b.get("eventTime").and_then(|v| v.as_str()))
             .map(String::from);
 
+        // Причина отказа: lava кладёт её в `errorMessage` события о неудачном списании.
+        // Раньше мы это поле выбрасывали, и в поддержке нечего было сказать человеку.
+        let error_message = b
+            .get("errorMessage")
+            .or_else(|| b.get("error_message"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
         let mut period_end: Option<i64> = None;
+        let lower = event_type.to_ascii_lowercase();
         let kind = match event_type {
             "payment.success" => WebhookKind::Paid,
             "subscription.recurring.payment.success" => WebhookKind::Recurring,
@@ -390,11 +400,26 @@ impl Lava {
             }
             "payment.failed" | "subscription.recurring.payment.failed" => WebhookKind::Failed,
             "payment.refunded" | "subscription.refunded" => WebhookKind::Refunded,
-            _ => WebhookKind::Failed,
+            // Точных имён у lava может быть больше, чем в её документации, и одно такое
+            // мы уже пропустили. Поэтому — подстраховка по смыслу слова в типе, и
+            // только совсем непонятное уходит в `Unknown` (громкая ошибка, не тишина).
+            _ if lower.contains("refund") => WebhookKind::Refunded,
+            _ if lower.contains("cancel") || lower.contains("terminat") => {
+                period_end = b
+                    .get("willExpireAt")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_date_ms);
+                WebhookKind::Cancelled
+            }
+            _ if lower.contains("fail") || lower.contains("declin") => WebhookKind::Failed,
+            _ if lower.contains("success") => WebhookKind::Recurring,
+            _ => WebhookKind::Unknown,
         };
 
         WebhookEvent {
             kind,
+            event_type: event_type.to_string(),
+            error_message,
             contract_id,
             parent_contract_id,
             email,

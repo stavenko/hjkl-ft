@@ -24,6 +24,38 @@ pub enum Sex {
     Female,
 }
 
+/// Цель курса. Живёт здесь, а не только в профиле приложения, потому что от неё
+/// зависит ЦЕЛЕВАЯ ПОЛОСА — та, к которой правило ведёт вес, — а полосу считают
+/// оба приложения.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Goal {
+    /// Похудение. Умолчание — им же отвечает `profile::get_goal` на незаполненном
+    /// профиле.
+    #[default]
+    Lose,
+    Maintain,
+    Gain,
+}
+
+impl Goal {
+    /// Из строки, какой цель хранится в профиле и ездит в отчёте.
+    pub fn from_key(key: &str) -> Goal {
+        match key {
+            "maintain" => Goal::Maintain,
+            "gain" => Goal::Gain,
+            _ => Goal::Lose,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Goal::Lose => "lose",
+            Goal::Maintain => "maintain",
+            Goal::Gain => "gain",
+        }
+    }
+}
+
 /// Цвет индикатора. Переехал сюда вместе с `next_steps_planka`: подъём планки
 /// шагов решается по нему, и без него формула не переносима.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -57,18 +89,25 @@ pub struct Suggestion {
 /// означало бы, что человек и его куратор ведут разные программы.
 ///
 /// `previous` — планка, от которой отталкиваемся (действующая). `avg_kcal_7d` —
-/// сколько человек ел на самом деле; без него исполнение неизвестно, и стопор не
-/// срабатывает ни в какую сторону.
+/// сколько человек ел на самом деле.
+///
+/// Без `avg_kcal_7d` планка СТОИТ. Раньше отсутствие этой величины наоборот
+/// снимало стопор и пускало вес двигать планку свободно — ровно наоборот тому,
+/// ради чего стопор заводился: пока неизвестно, исполнялась ли планка, вес
+/// говорит не о планке, а о том, сколько человек ел на самом деле.
 pub fn suggest(
     s: &Snapshot,
     previous: f64,
     weight: &[api_types::WeightEntry],
     avg_kcal_7d: Option<f64>,
 ) -> Suggestion {
-    let trend = weight_trend::weight_trend(weight, DEFAULT_WINDOW_DAYS);
+    let Some(avg) = avg_kcal_7d else {
+        return Suggestion { calories: previous, protein: default_for(Kind::Protein, s) };
+    };
+    let trend = weight_trend::weight_trend(weight, DECISION_WINDOW_DAYS);
     let weight_kg = s.weight_kg.unwrap_or(0.0);
-    let adh = adherence(avg_kcal_7d.unwrap_or(previous), previous, CALORIE_BAND_KCAL);
-    let calories = calorie_planka_weekly(previous, &trend, weight_kg, adh);
+    let adh = adherence(avg, previous, CALORIE_BAND_KCAL);
+    let calories = calorie_planka_weekly(previous, &trend, weight_kg, adh, s.goal);
     // Белок считается уже от НОВОЙ калорийности: куратор отправит их вместе, и
     // показывать норму от старой планки значило бы показывать неправду.
     let after = Snapshot { kcal_planka: Some(calories), ..*s };
@@ -85,14 +124,14 @@ pub fn suggest(
 //   • WEEKLY recompute — base = the PREVIOUS planka (`letters::maybe_recompute…`),
 //     so the target moves at most ±5%/week and a low-intake week (e.g. anxiety
 //     undereating) can NOT ratchet it down; only a confirmed weight trend moves it.
-// The step is cut ONLY when justified — so a slow, comfortable weight loss is
-// never disrupted by a premature reduction:
-//   • confident loss, rate inside the comfortable band → HOLD;
-//   • confident loss but too SLOW → −5% (gently speed up toward the band);
-//   • confident loss but too FAST → +5% (protect comfort / muscle);
-//   • probably-but-not-confidently losing → HOLD, gather another week;
-//   • flat / gaining → −5% (induce a deficit);
-//   • no usable trend yet (week 1 / too few weigh-ins) → HOLD (baseline = average).
+//
+// Куда двигать — решает ОДНА величина: темп снижения против комфортной полосы
+// (0.3–0.7 % массы тела в неделю). Значимо быстрее полосы → +5 % (беречь мышцы),
+// значимо медленнее → −5 % (создать дефицит), иначе → держим. «Стоит» и «растёт»
+// отдельными случаями не нужны: и то и другое значимо медленнее полосы.
+//
+// Ключевое слово здесь — ЗНАЧИМО, и оно появилось не из любви к статистике.
+// См. `pace`.
 //
 // И ПОВЕРХ ЭТОГО — второй контур, `calorie_planka_weekly`: шаг, к которому зовёт
 // вес, разрешается только если человек планку ИСПОЛНЯЛ. Один лишь вес образует
@@ -100,47 +139,304 @@ pub fn suggest(
 // планку, планка отдаляется от того, что человек ест, и так по кругу с растущим
 // разрывом. Подробный разбор петли — в доке к `calorie_planka_weekly`.
 
-/// Comfortable weekly weight-loss rate, as a FRACTION of body weight.
-const COMFORT_LOSS_MIN: f64 = 0.003; // 0.3 %/week
-const COMFORT_LOSS_MAX: f64 = 0.007; // 0.7 %/week
+/// Комфортный темп СНИЖЕНИЯ, долей массы тела в неделю. Полоса цели «похудение».
+const COMFORT_LOSS_MIN: f64 = 0.003; // 0.3 %/нед
+const COMFORT_LOSS_MAX: f64 = 0.007; // 0.7 %/нед
+/// Полуширина полосы для цели «удержание»: вес считается стоящим, пока он гуляет
+/// в этих пределах. Полоса шириной с шум — иначе планка задёргается на ровном
+/// месте у человека, который как раз всё делает правильно.
+const MAINTAIN_TOLERANCE: f64 = 0.0015; // ±0.15 %/нед
+/// Наименьший темп НАБОРА, ниже которого набор считается несостоявшимся.
+const GAIN_MIN: f64 = 0.0015; // +0.15 %/нед
 /// The largest single-step planka change per weekly recompute.
 const PLANKA_STEP: f64 = 0.05; // ±5 %
 
-/// Multiplier applied to the average intake, chosen from the weight trend +
-/// current body weight. Pure (no I/O) so it is unit-tested. See the block comment.
-pub fn planka_factor(trend: &crate::weight_trend::WeightTrend, weight_kg: f64) -> f64 {
-    use crate::weight_trend::{Direction, WeightTrend, CONFIDENT, WEAK};
-    // `p_down` = probability the weight is genuinely FALLING; `slope_wk` in kg/week.
-    let (p_down, slope_wk) = match *trend {
-        WeightTrend::Estimated { direction, confidence, slope_kg_per_week, .. } => {
-            let p = match direction {
-                Direction::Down => confidence,
-                Direction::Up => 1.0 - confidence,
-            };
-            (p, slope_kg_per_week)
+/// Целевая полоса изменения веса, кг/нед и СО ЗНАКОМ: снижение отрицательно.
+///
+/// `None` у границы означает, что с этой стороны ограничения нет.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TargetBand {
+    /// Ниже этого вес уходить не должен. `None` — падать можно сколько угодно.
+    pub lo: Option<f64>,
+    /// Выше этого вес подниматься не должен. `None` — расти можно сколько угодно.
+    pub hi: Option<f64>,
+}
+
+/// Полоса, к которой правило ведёт вес, — по цели курса и текущей массе.
+///
+/// До этого полоса была ОДНА, всегда полоса снижения (0.3–0.7 % массы в неделю),
+/// и цель курса в расчёт планки не входила вовсе — она попадала только в тексты.
+/// Человек, выбравший набор, начинал набирать, правило читало набор как «медленнее
+/// полосы снижения» и срезало планку на 5 % каждую неделю, пока набор не
+/// прекращался. Приложение методично отменяло цель, которую человек только что
+/// выбрал.
+///
+/// У набора ВЕРХНЕЙ границы нет — только нижняя. Решение заказчика: слишком
+/// быстрый набор планку не режет, растёт человек как растёт; правило вмешивается
+/// лишь тогда, когда набора не происходит.
+///
+/// `None` — вес неизвестен, полосу считать не от чего.
+pub fn target_band(goal: Goal, weight_kg: f64) -> Option<TargetBand> {
+    if weight_kg <= 0.0 {
+        return None;
+    }
+    Some(match goal {
+        Goal::Lose => TargetBand {
+            lo: Some(-COMFORT_LOSS_MAX * weight_kg),
+            hi: Some(-COMFORT_LOSS_MIN * weight_kg),
+        },
+        Goal::Maintain => TargetBand {
+            lo: Some(-MAINTAIN_TOLERANCE * weight_kg),
+            hi: Some(MAINTAIN_TOLERANCE * weight_kg),
+        },
+        Goal::Gain => TargetBand {
+            lo: Some(GAIN_MIN * weight_kg),
+            hi: None,
+        },
+    })
+}
+
+/// Где вес относительно целевой полосы.
+///
+/// Названия НЕ про «быстро/медленно»: у похудения и набора быстро означает
+/// противоположные вещи, и правило от этого дважды переворачивалось бы. Вопрос
+/// один и тот же при любой цели — с какой стороны полосы оказался вес.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pace {
+    /// Вес уходит ВНИЗ сильнее, чем задано целью: худеет быстрее комфортного,
+    /// или не набирает, или не удерживает. Планку поднимаем.
+    BelowBand,
+    /// Вес уходит ВВЕРХ сильнее, чем задано целью. Планку снижаем.
+    AboveBand,
+    /// В полосе либо неотличимо от неё. Планку не трогаем.
+    InBand,
+}
+
+/// Где вес относительно целевой полосы — С ОГЛЯДКОЙ НА ПОГРЕШНОСТЬ САМОЙ ОЦЕНКИ.
+///
+/// # Зачем оглядка
+///
+/// Полоса узкая: при 85 кг похудение — это 0.26–0.60 кг в неделю, ширина треть
+/// килограмма. Погрешность наклона по четырнадцати взвешиваниям на бытовых весах —
+/// те же 0.2 кг/нед. То есть полоса УЖЕ, чем погрешность числа, которое с ней
+/// сравнивают, и сравнение точечной оценки с границей — подбрасывание монеты.
+///
+/// Живой случай (85 кг, ежедневные взвешивания). 29 августа окно в 14 дней дало
+/// −0.21 кг/нед — на волосок ниже границы, планку срезали на 5 %. Через три дня то
+/// же окно (11 дней из 14 — те же самые!) дало −0.75 кг/нед, планку подняли на 5 %.
+/// Дальше это повторялось каждую неделю: 2650 → 2800 → 2950 → 2800 → 2950. Ни один
+/// из тех шагов не был обоснован: погрешность в обоих случаях накрывала полосу
+/// целиком.
+///
+/// Поэтому граница сравнивается не с точкой, а с распределением: планка двигается,
+/// только если ВЕРОЯТНОСТЬ того, что истинный темп вне полосы, дошла до
+/// [`CONFIDENT`] — той же планки уверенности, по которой мы уже решаем, снижается
+/// ли вес вообще. Неуверенность значит «держим», а не «шагнём наугад».
+///
+/// `None` — судить не по чему: окно меньше трёх дней взвешиваний либо вес
+/// неизвестен. Вызывающий держит планку.
+pub fn pace(
+    trend: &crate::weight_trend::WeightTrend,
+    weight_kg: f64,
+    goal: Goal,
+) -> Option<Pace> {
+    use crate::weight_trend::CONFIDENT;
+    let band = target_band(goal, weight_kg)?;
+    // Ниже нижней границы — только если граница есть. Нет границы значит, что с
+    // этой стороны вмешиваться не о чем (набор сверху не ограничен).
+    let below = match band.lo {
+        Some(lo) => trend.p_slope_below(lo)?,
+        None => 0.0,
+    };
+    let above = match band.hi {
+        Some(hi) => 1.0 - trend.p_slope_below(hi)?,
+        None => 0.0,
+    };
+    if below >= CONFIDENT {
+        Some(Pace::BelowBand)
+    } else if above >= CONFIDENT {
+        Some(Pace::AboveBand)
+    } else {
+        Some(Pace::InBand)
+    }
+}
+
+/// Множитель к планке, выбранный по положению веса относительно целевой полосы.
+/// Pure (no I/O) so it is unit-tested. See the block comment.
+pub fn planka_factor(
+    trend: &crate::weight_trend::WeightTrend,
+    weight_kg: f64,
+    goal: Goal,
+) -> f64 {
+    match pace(trend, weight_kg, goal) {
+        // Вес уходит вниз сильнее нужного → еды больше.
+        Some(Pace::BelowBand) => 1.0 + PLANKA_STEP,
+        // Вес уходит вверх сильнее нужного → еды меньше.
+        Some(Pace::AboveBand) => 1.0 - PLANKA_STEP,
+        Some(Pace::InBand) | None => 1.0,
+    }
+}
+
+// ── Окно решения ─────────────────────────────────────────────────────────────
+//
+// Виджет веса показывает тренд за 14 дней — человек смотрит на «что происходит
+// сейчас», и короткое окно там уместно. ПЛАНКА судится по 28 дням, и это разные
+// величины, а не одна с разными настройками.
+//
+// Почему шире. Четырнадцатидневный наклон у живого человека гуляет от +0.3 до
+// −1.2 кг/нед от недели к неделе — и это НЕ погрешность оценки, а настоящие
+// многодневные качели воды в ±1.5 кг, которые прямая честно ловит. Критерий
+// значимости от этого не спасает: четырнадцать дней действительно значимо
+// направлены вверх одну неделю и вниз другую.
+//
+// Замер на живом ряде (61 день подряд, снижение 0.73 % массы в неделю — чуть
+// быстрее комфортной полосы, то есть правильный ответ «один подъём и стоять»):
+//
+//   окно 14 дн. — 4 хода, 2 разворота
+//   окно 21 дн. — 3 хода, 1 разворот
+//   окно 28 дн. — 1 ход,  0 разворотов
+//
+// И решающее: сдвиг расписания пересчёта на ОДИН день (человек поставил первую
+// планку во вторник, а не в понедельник) уводил итог четырнадцатидневного
+// правила с 2400 на 2950 — 550 ккал разницы на одних и тех же взвешиваниях.
+// Двадцативосьмидневное держится в пределах одного шага при любом расписании.
+// Правило, ответ которого зависит от дня недели, — не правило.
+//
+// Окно — ПОТОЛОК ОБЗОРА, а не требование: нет 28 дней истории, считаем по тому,
+// что есть. Отдельного режима прогрева не нужно — меньше точек даёт шире SE, а
+// шире SE значит «держим». Заглядывать за день первой планки при этом можно и
+// нужно: первая планка калибруется по среднему потреблению, значит дни до неё —
+// тот же пищевой режим, просто неназванный. Обрезать окно по последней ПРАВКЕ
+// планки пробовали — стало хуже: окно ужимается до восьми дней ровно в тот
+// момент, когда нужна ясная голова, и правило начинает гоняться за водой.
+
+/// Окно, по которому судится ПЛАНКА. Шире, чем окно виджета
+/// ([`weight_trend::DEFAULT_WINDOW_DAYS`]) — см. блок выше.
+pub const DECISION_WINDOW_DAYS: i64 = 28;
+
+// ── На чём позволительно решать ──────────────────────────────────────────────
+//
+// Планку двигают только тогда, когда известны ОБЕ стороны: и что происходит с
+// весом, и исполнялась ли планка. Это не новое правило, а доведение до конца
+// того, ради чего заводился стопор по исполнению (см. `calorie_planka_weekly`):
+// вес сам по себе о планке не говорит ничего.
+//
+// Раньше формулировка соблюдалась наполовину. Исполнение спрашивалось, но
+// принималось любое — одного залогированного дня из семи хватало, чтобы объявить
+// его известным. А вес не проверялся на актуальность вовсе: окно тренда
+// закреплено за последним ЗАМЕРОМ, не за сегодня, поэтому у бросившего весы
+// тренд не протухал, а ЗАМИРАЛ и продолжал выдаваться как текущий. Замер: человек
+// перестал взвешиваться, дневник ведёт — планка ехала +5 % в неделю бесконечно
+// (2500 → 2650 → … → 3750 за семь недель), а письмо каждую неделю сообщало
+// «ваш вес уверенно снижается» про замеры полуторамесячной давности. Разгон
+// останавливал стопор по исполнению — но случайно, он писался против другой петли.
+
+/// Свежесть веса: замер старше этого — не данные.
+pub const WEIGHT_FRESH_DAYS: i64 = 3;
+/// Столько дней со взвешиваниями должно быть в окне решения. На трёх-четырёх
+/// точках остаток случайно ложится в ноль, SE схлопывается, и критерий значимости
+/// объявляет уверенность там, где её нет.
+pub const WEIGHT_MIN_DAYS: usize = 4;
+/// Перерыв во взвешиваниях, после которого считается, что человек бросал.
+pub const WEIGHT_GAP_DAYS: i64 = 7;
+/// Сколько ждать после возобновления: полную неделю, чтобы накопились замеры.
+pub const RESUME_DAYS: i64 = 7;
+/// Столько из семи завершённых дней должно быть с записями в дневнике.
+pub const DIARY_MIN_DAYS: usize = 4;
+
+/// Почему пересчёт не состоялся. Не ошибка — отсрочка: данных не хватает, и
+/// появятся они сами.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoDecision {
+    /// Последнее взвешивание слишком давно.
+    WeightStale { days: i64 },
+    /// Взвешиваться начали снова после перерыва — ждём полную неделю.
+    WeightJustResumed { days: i64 },
+    /// Взвешиваний в окне слишком мало.
+    WeightSparse { days: usize },
+    /// Дневник вёлся слишком редко — исполнение планки неизвестно.
+    DiarySparse { days: usize },
+}
+
+impl NoDecision {
+    /// Причина ОДНОЙ строкой, без чисел. Журнал ошибок дедуплицирует записи по
+    /// точному совпадению текста, и число внутри («прошло 9 дн.») делало запись
+    /// новой каждый день — отсрочка плодила по строке на запуск.
+    pub fn reason(self) -> &'static str {
+        match self {
+            NoDecision::WeightStale { .. } => {
+                "пересчёт отложен: давно не было взвешиваний. Встаньте на весы — \
+                 пересчёт случится сам"
+            }
+            NoDecision::WeightJustResumed { .. } => {
+                "пересчёт отложен: взвешивания возобновились после перерыва, ждём \
+                 полную неделю замеров"
+            }
+            NoDecision::WeightSparse { .. } => {
+                "пересчёт отложен: взвешиваний за последний месяц слишком мало, \
+                 чтобы судить о тренде"
+            }
+            NoDecision::DiarySparse { .. } => {
+                "пересчёт отложен: дневник за последнюю неделю почти пуст — \
+                 неизвестно, исполнялась ли планка"
+            }
         }
-        // < 3 distinct weigh-days: a sign exists but no confidence — HOLD, never cut on noise.
-        WeightTrend::Tentative { .. } | WeightTrend::Insufficient { .. } => return 1.0,
+    }
+}
+
+/// Хватает ли данных, чтобы двигать планку.
+///
+/// `today` приходит параметром: крейт чистый, часов у него нет. `diary_days` —
+/// сколько из семи ЗАВЕРШЁННЫХ дней имеют записи в дневнике; `None` — дневник не
+/// спрашивали (путь, где исполнение не при чём).
+pub fn check_evidence(
+    today: chrono::NaiveDate,
+    weight: &[api_types::WeightEntry],
+    diary_days: Option<usize>,
+) -> Result<(), NoDecision> {
+    if let Some(d) = diary_days {
+        if d < DIARY_MIN_DAYS {
+            return Err(NoDecision::DiarySparse { days: d });
+        }
+    }
+    let mut wdays: Vec<chrono::NaiveDate> = weight
+        .iter()
+        .filter_map(|e| chrono::NaiveDate::parse_from_str(&e.date, "%Y-%m-%d").ok())
+        .collect();
+    wdays.sort_unstable();
+    wdays.dedup();
+    let Some(&latest) = wdays.last() else {
+        return Err(NoDecision::WeightSparse { days: 0 });
     };
 
-    if p_down >= CONFIDENT {
-        // Confidently losing → steer toward the comfortable-rate band.
-        if weight_kg <= 0.0 {
-            return 1.0;
-        }
-        let rate = slope_wk.abs() / weight_kg; // fraction of body weight lost per week
-        if rate < COMFORT_LOSS_MIN {
-            1.0 - PLANKA_STEP // too slow → gentle cut
-        } else if rate > COMFORT_LOSS_MAX {
-            1.0 + PLANKA_STEP // too fast → ease up
-        } else {
-            1.0 // comfortable → hold
-        }
-    } else if p_down >= WEAK {
-        1.0 // probably losing but not confirmed → HOLD, wait another week (don't cut prematurely)
-    } else {
-        1.0 - PLANKA_STEP // flat / gaining → induce a deficit
+    let stale = (today - latest).num_days();
+    if stale > WEIGHT_FRESH_DAYS {
+        return Err(NoDecision::WeightStale { days: stale });
     }
+
+    // Возобновление после перерыва: ищем ПОСЛЕДНИЙ разрыв длиннее `WEIGHT_GAP_DAYS`
+    // и смотрим, сколько прожито после него. Дни до разрыва в счёт не идут — это
+    // другая жизнь, и вес в ней о нынешней планке не говорит.
+    if let Some(resumed) = wdays
+        .windows(2)
+        .filter(|w| (w[1] - w[0]).num_days() > WEIGHT_GAP_DAYS)
+        .map(|w| w[1])
+        .next_back()
+    {
+        let since = (today - resumed).num_days();
+        if since < RESUME_DAYS {
+            return Err(NoDecision::WeightJustResumed { days: since });
+        }
+    }
+
+    // Плотность замеров в окне решения. Окно закреплено за последним замером —
+    // так же, как его считает `daily_means`.
+    let window_start = latest - chrono::Duration::days(DECISION_WINDOW_DAYS - 1);
+    let in_window = wdays.iter().filter(|d| **d >= window_start).count();
+    if in_window < WEIGHT_MIN_DAYS {
+        return Err(NoDecision::WeightSparse { days: in_window });
+    }
+    Ok(())
 }
 
 /// The daily calorie planka: the average intake nudged by [`planka_factor`] and
@@ -149,8 +445,9 @@ pub fn calorie_planka(
     avg_kcal: f64,
     trend: &crate::weight_trend::WeightTrend,
     weight_kg: f64,
+    goal: Goal,
 ) -> f64 {
-    ((avg_kcal * planka_factor(trend, weight_kg)) / 50.0).round() * 50.0
+    ((avg_kcal * planka_factor(trend, weight_kg, goal)) / 50.0).round() * 50.0
 }
 
 /// Как человек ПРОЖИЛ неделю относительно своей планки.
@@ -218,11 +515,14 @@ pub fn calorie_planka_weekly(
     trend: &crate::weight_trend::WeightTrend,
     weight_kg: f64,
     adherence: Adherence,
+    goal: Goal,
 ) -> f64 {
+    // Стопор от цели НЕ зависит: он про планку против съеденного, а не про вес.
+    // Недоедающему планку не поднимаем при любой цели — он не ест и нынешнюю.
     let factor = match adherence {
-        Adherence::Under => planka_factor(trend, weight_kg).min(1.0),
-        Adherence::Over => planka_factor(trend, weight_kg).max(1.0),
-        Adherence::OnTarget => planka_factor(trend, weight_kg),
+        Adherence::Under => planka_factor(trend, weight_kg, goal).min(1.0),
+        Adherence::Over => planka_factor(trend, weight_kg, goal).max(1.0),
+        Adherence::OnTarget => planka_factor(trend, weight_kg, goal),
     };
     ((previous * factor) / 50.0).round() * 50.0
 }
@@ -452,6 +752,7 @@ mod suggest_tests {
             height_cm: Some(165.0),
             weight_kg: Some(70.0),
             kcal_planka: Some(2000.0),
+            goal: Goal::Lose,
         }
     }
 
@@ -462,9 +763,9 @@ mod suggest_tests {
         let w: Vec<_> = (1..=14)
             .map(|i| weigh(&format!("2026-03-{i:02}"), 71.0 - i as f64 * 0.05))
             .collect();
-        let trend = weight_trend::weight_trend(&w, DEFAULT_WINDOW_DAYS);
+        let trend = weight_trend::weight_trend(&w, DECISION_WINDOW_DAYS);
         let adh = adherence(1900.0, 2000.0, CALORIE_BAND_KCAL);
-        let expected = calorie_planka_weekly(2000.0, &trend, 70.0, adh);
+        let expected = calorie_planka_weekly(2000.0, &trend, 70.0, adh, Goal::Lose);
         assert_eq!(suggest(&person(), 2000.0, &w, Some(1900.0)).calories, expected);
     }
 
@@ -478,46 +779,237 @@ mod suggest_tests {
         assert_eq!(sg.protein, default_for(Kind::Protein, &after));
     }
 
-    /// Без данных о съеденном стопор не срабатывает ни в какую сторону: неизвестное
-    /// исполнение — не повод ни поднимать, ни опускать.
+    /// Неизвестное исполнение ДЕРЖИТ планку. Раньше оно её освобождало — и это
+    /// был самый опасный случай из всех: не зная, что человек ел, мы двигали
+    /// планку по весу, который как раз и говорил о том, что человек ел.
     #[test]
-    fn bez_sedennogo_stopor_ne_srabatyvaet() {
+    fn bez_dnevnika_planka_stoit() {
+        let w: Vec<_> = (1..=28)
+            .map(|i| weigh(&format!("2026-03-{i:02}"), 75.0 - i as f64 * 0.15))
+            .collect();
+        // Вес валится на 1.05 кг/нед — правило само по себе кричит «поднимай».
+        let trend = weight_trend::weight_trend(&w, DECISION_WINDOW_DAYS);
+        assert_eq!(pace(&trend, 70.0, Goal::Lose), Some(Pace::BelowBand));
+        // Но без съеденного планка стоит.
+        assert_eq!(suggest(&person(), 2000.0, &w, None).calories, 2000.0);
+        // А с ним — двигается.
+        assert!(suggest(&person(), 2000.0, &w, Some(2000.0)).calories > 2000.0);
+    }
+
+    // ── Гейт по данным ───────────────────────────────────────────────────────
+
+    /// Ряд ежедневных взвешиваний за `n` дней, заканчивающийся `last`.
+    fn daily(last: &str, n: i64) -> Vec<api_types::WeightEntry> {
+        let last = chrono::NaiveDate::parse_from_str(last, "%Y-%m-%d").unwrap();
+        (0..n)
+            .map(|i| {
+                let d = last - chrono::Duration::days(i);
+                weigh(&d.format("%Y-%m-%d").to_string(), 80.0 + i as f64 * 0.1)
+            })
+            .collect()
+    }
+
+    fn day(s: &str) -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn dannyh_hvataet_kogda_vse_na_meste() {
+        let w = daily("2026-03-30", 28);
+        assert_eq!(check_evidence(day("2026-03-30"), &w, Some(7)), Ok(()));
+        // Замер вчерашний, дневник на четырёх днях — всё ещё считаем.
+        assert_eq!(check_evidence(day("2026-03-31"), &w, Some(4)), Ok(()));
+    }
+
+    /// Протухший вес. Тот самый случай, где окно тренда ЗАМИРАЛО и продолжало
+    /// выдаваться как текущее, а планка ехала на 5 % в неделю в никуда.
+    #[test]
+    fn protuhshij_ves_otkladyvaet_pereschet() {
+        let w = daily("2026-03-30", 28);
+        assert_eq!(check_evidence(day("2026-04-02"), &w, Some(7)), Ok(())); // 3 дня — ещё свежо
+        assert_eq!(
+            check_evidence(day("2026-04-03"), &w, Some(7)),
+            Err(NoDecision::WeightStale { days: 4 })
+        );
+        // Через месяц молчания — та же причина, не «мало взвешиваний».
+        assert!(matches!(
+            check_evidence(day("2026-05-01"), &w, Some(7)),
+            Err(NoDecision::WeightStale { .. })
+        ));
+    }
+
+    /// Возобновил после перерыва — ждём полную неделю, чтобы накопились замеры.
+    #[test]
+    fn posle_pereryva_zhdem_nedelyu() {
+        // Взвешивался в феврале, бросил, вернулся 2026-03-25.
+        let mut w = daily("2026-02-20", 20);
+        w.extend(daily("2026-03-28", 4));
+        assert_eq!(
+            check_evidence(day("2026-03-28"), &w, Some(7)),
+            Err(NoDecision::WeightJustResumed { days: 3 })
+        );
+        // Ещё четыре дня взвешиваний — неделя с возобновления набралась.
+        w.extend(daily("2026-04-01", 4));
+        assert_eq!(check_evidence(day("2026-04-01"), &w, Some(7)), Ok(()));
+    }
+
+    /// Редкие взвешивания: на трёх-четырёх точках SE схлопывается и правило
+    /// «уверенно» разворачивает планку на воде.
+    #[test]
+    fn redkih_vzveshivanij_ne_hvataet() {
+        let w = vec![weigh("2026-03-28", 80.0), weigh("2026-03-30", 80.4)];
+        assert_eq!(
+            check_evidence(day("2026-03-30"), &w, Some(7)),
+            Err(NoDecision::WeightSparse { days: 2 })
+        );
+        assert_eq!(
+            check_evidence(day("2026-03-30"), &[], Some(7)),
+            Err(NoDecision::WeightSparse { days: 0 })
+        );
+    }
+
+    /// Пустой дневник. Одного залогированного дня из семи раньше хватало, чтобы
+    /// объявить исполнение известным и двинуть планку.
+    #[test]
+    fn pustoj_dnevnik_otkladyvaet_pereschet() {
+        let w = daily("2026-03-30", 28);
+        assert_eq!(
+            check_evidence(day("2026-03-30"), &w, Some(1)),
+            Err(NoDecision::DiarySparse { days: 1 })
+        );
+        assert_eq!(
+            check_evidence(day("2026-03-30"), &w, Some(3)),
+            Err(NoDecision::DiarySparse { days: 3 })
+        );
+        // Дневник не спрашивали — не наше дело.
+        assert_eq!(check_evidence(day("2026-03-30"), &w, None), Ok(()));
+    }
+
+    /// Одинокий старый замер не должен читаться как «только что вернулся»: разрыв
+    /// закончился давно, и неделя с возобновления набрана с запасом. (Это ровно
+    /// раскладка сеятеля из `scripts/check-calorie-planka-weekly.mjs`: строка
+    /// старого формата тридцатидневной давности плюс три недели ежедневных.)
+    #[test]
+    fn davnij_odinokij_zamer_ne_meshaet() {
+        let mut w = vec![weigh("2026-03-01", 93.0)];
+        w.extend(daily("2026-03-31", 21));
+        assert_eq!(check_evidence(day("2026-03-31"), &w, Some(7)), Ok(()));
+    }
+
+    /// Причина для журнала — без чисел: журнал дедуплицирует записи по тексту, и
+    /// «прошло 9 дн.» внутри давало новую строку каждый день.
+    #[test]
+    fn prichina_dlya_zhurnala_bez_chisel() {
+        for r in [
+            NoDecision::WeightStale { days: 9 },
+            NoDecision::WeightJustResumed { days: 2 },
+            NoDecision::WeightSparse { days: 1 },
+            NoDecision::DiarySparse { days: 0 },
+        ] {
+            assert!(!r.reason().chars().any(|c| c.is_ascii_digit()), "{}", r.reason());
+        }
+    }
+
+    /// Ряд взвешиваний из живого случая, на котором планка задребезжала:
+    /// 85–87 кг, ежедневные утренние взвешивания, ровное снижение.
+    fn drebezg_series() -> Vec<api_types::WeightEntry> {
+        [
+            ("2026-08-16", 86.2), ("2026-08-17", 87.5), ("2026-08-18", 86.2),
+            ("2026-08-19", 86.7), ("2026-08-20", 87.0), ("2026-08-21", 86.6),
+            ("2026-08-22", 86.6), ("2026-08-23", 86.6), ("2026-08-24", 87.1),
+            ("2026-08-25", 87.1), ("2026-08-26", 86.1), ("2026-08-27", 86.8),
+            ("2026-08-28", 86.3), ("2026-08-29", 85.9), ("2026-08-30", 85.9),
+            ("2026-08-31", 85.9), ("2026-09-01", 85.0), ("2026-09-02", 85.4),
+            ("2026-09-03", 86.0), ("2026-09-04", 85.4), ("2026-09-05", 85.0),
+        ]
+        .iter()
+        .map(|(d, kg)| weigh(d, *kg))
+        .collect()
+    }
+
+    /// РЕГРЕССИЯ на живых данных. Прежнее правило сравнивало точечную оценку с
+    /// границей полосы и на этом ряду дало −5 % 29 августа и +5 % 1 сентября —
+    /// по окнам, совпадающим на 11 дней из 14. Планка пошла 2800 → 2950 → 2800.
+    ///
+    /// Теперь 29-е держит (погрешность накрывает полосу целиком), а 5-е поднимает
+    /// (сигнал вырос до значимого). Ни одного разворота.
+    #[test]
+    fn drebezg_ne_povtoryaetsya() {
+        let all = drebezg_series();
+        let upto = |d: &str| -> Vec<_> {
+            all.iter().filter(|e| e.date.as_str() <= d).cloned().collect()
+        };
+
+        // 29.08 — точечная оценка НИЖЕ полосы (то самое основание для среза).
+        let t29 = weight_trend::weight_trend(&upto("2026-08-29"), DEFAULT_WINDOW_DAYS);
+        let WeightTrend::Estimated { slope_kg_per_week: s29, .. } = t29 else {
+            panic!("ожидали оценку, получили {t29:?}");
+        };
+        assert!(s29.abs() / 85.9 < 0.003, "темп {} — ожидали ниже полосы", s29.abs() / 85.9);
+        // …но значимости нет, и планка стоит.
+        assert_eq!(pace(&t29, 85.9, Goal::Lose), Some(Pace::InBand));
+        assert_eq!(planka_factor(&t29, 85.9, Goal::Lose), 1.0);
+
+        // 05.09 по окну ВИДЖЕТА снижение выглядит быстрым и значимым.
+        let t5 = weight_trend::weight_trend(&upto("2026-09-05"), DEFAULT_WINDOW_DAYS);
+        assert_eq!(pace(&t5, 85.0, Goal::Lose), Some(Pace::BelowBand));
+
+        // А по окну РЕШЕНИЯ — нет: те же дни плюс предыдущая неделя дают −0.58
+        // кг/нед (0.68 % — внутри полосы), и планка стоит. Это и есть правильный
+        // ответ: за весь период человек снижался на 0.73 % в неделю, ровно.
+        let d5 = weight_trend::weight_trend(&upto("2026-09-05"), DECISION_WINDOW_DAYS);
+        assert_eq!(pace(&d5, 85.0, Goal::Lose), Some(Pace::InBand));
+        assert_eq!(planka_factor(&d5, 85.0, Goal::Lose), 1.0);
+
+        // Ни одного разворота на всём ряде — ни по одному окну.
+        assert_eq!(planka_factor(&t29, 85.9, Goal::Lose), planka_factor(&d5, 85.0, Goal::Lose));
+    }
+
+    /// Без данных о съеденном планка стоит — см. `bez_dnevnika_planka_stoit`.
+    #[test]
+    fn bez_sedennogo_planka_ne_dvizhetsya() {
         let s = person();
-        let no_data = suggest(&s, 2000.0, &[], None);
-        let on_target = suggest(&s, 2000.0, &[], Some(2000.0));
-        assert_eq!(no_data.calories, on_target.calories);
+        assert_eq!(suggest(&s, 2000.0, &[], None).calories, 2000.0);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        adherence, calorie_planka, calorie_planka_weekly, next_steps_planka, planka_factor,
-        steps_planka_for_avg, Adherence, IndicatorState, PLANKA_STEP, STEPS_PLANKA_MAX,
+        adherence, calorie_planka, calorie_planka_weekly, next_steps_planka, pace, planka_factor,
+        steps_planka_for_avg, target_band, Adherence, Goal, IndicatorState, Pace, PLANKA_STEP,
+        STEPS_PLANKA_MAX,
     };
     use crate::weight_trend::{Direction, WeightTrend};
 
+    /// Готовая оценка тренда. Погрешность задаётся ЯВНО: с появлением `pace` она
+    /// такой же участник решения, как и сам наклон, и прятать её за «правдоподобным
+    /// значением по умолчанию» значило бы не проверять главного.
+    fn est(slope_wk: f64, se_wk: f64) -> WeightTrend {
+        WeightTrend::Estimated {
+            direction: if slope_wk < 0.0 { Direction::Down } else { Direction::Up },
+            slope_kg_per_week: slope_wk,
+            // Уверенность в ЗНАКЕ здесь уже никем не читается (её место занял
+            // `p_slope_below`), но поле обязано остаться правдоподобным.
+            confidence: 0.9,
+            slope_se_kg_per_week: se_wk,
+            days: 14,
+        }
+    }
+
+    /// Погрешность, при которой решает наклон, а не шум: вдесятеро уже полосы.
+    const TIGHT: f64 = 0.03;
 
     // ── Исполнение планки как стопор недельного пересчёта ────────────────────
 
     /// Уверенное быстрое похудение — тот случай, когда правило зовёт ПОДНЯТЬ планку.
     fn losing_fast() -> WeightTrend {
-        WeightTrend::Estimated {
-            direction: Direction::Down,
-            confidence: 0.99,
-            slope_kg_per_week: -1.2, // при 80 кг это 1.5 %/нед — сильно выше комфортных 0.7
-            days: 14,
-        }
+        est(-1.2, TIGHT) // при 80 кг это 1.5 %/нед — сильно выше комфортных 0.7
     }
 
     /// Вес стоит — правило зовёт ОПУСТИТЬ планку.
     fn flat() -> WeightTrend {
-        WeightTrend::Estimated {
-            direction: Direction::Up,
-            confidence: 0.9,
-            slope_kg_per_week: 0.05,
-            days: 14,
-        }
+        est(0.05, TIGHT)
     }
 
     #[test]
@@ -535,10 +1027,10 @@ mod tests {
     fn nedoedaet_planku_ne_podnimaem() {
         let base = 2400.0;
         // Само правило по весу зовёт вверх.
-        assert!(planka_factor(&losing_fast(), 80.0) > 1.0);
-        assert_eq!(calorie_planka_weekly(base, &losing_fast(), 80.0, Adherence::Under), base);
+        assert!(planka_factor(&losing_fast(), 80.0, Goal::Lose) > 1.0);
+        assert_eq!(calorie_planka_weekly(base, &losing_fast(), 80.0, Adherence::Under, Goal::Lose), base);
         // А тому, кто планку держал, поднимаем как и раньше.
-        assert!(calorie_planka_weekly(base, &losing_fast(), 80.0, Adherence::OnTarget) > base);
+        assert!(calorie_planka_weekly(base, &losing_fast(), 80.0, Adherence::OnTarget, Goal::Lose) > base);
     }
 
     /// Обратная сторона: перебор при стоящем весе. Опускать планку тому, кто её и
@@ -546,9 +1038,9 @@ mod tests {
     #[test]
     fn pereedaet_planku_ne_ponizhaem() {
         let base = 2400.0;
-        assert!(planka_factor(&flat(), 80.0) < 1.0);
-        assert_eq!(calorie_planka_weekly(base, &flat(), 80.0, Adherence::Over), base);
-        assert!(calorie_planka_weekly(base, &flat(), 80.0, Adherence::OnTarget) < base);
+        assert!(planka_factor(&flat(), 80.0, Goal::Lose) < 1.0);
+        assert_eq!(calorie_planka_weekly(base, &flat(), 80.0, Adherence::Over, Goal::Lose), base);
+        assert!(calorie_planka_weekly(base, &flat(), 80.0, Adherence::OnTarget, Goal::Lose) < base);
     }
 
     /// Стопор односторонний: недоедающему планку МОЖНО опустить (вес не падает —
@@ -556,13 +1048,8 @@ mod tests {
     #[test]
     fn stopor_ne_meshaet_dvizheniyu_v_druguyu_storonu() {
         let base = 2400.0;
-        assert!(calorie_planka_weekly(base, &flat(), 80.0, Adherence::Under) < base);
-        assert!(calorie_planka_weekly(base, &losing_fast(), 80.0, Adherence::Over) > base);
-    }
-
-
-    fn estimated(dir: Direction, slope_wk: f64, conf: f64) -> WeightTrend {
-        WeightTrend::Estimated { direction: dir, slope_kg_per_week: slope_wk, confidence: conf, days: 14 }
+        assert!(calorie_planka_weekly(base, &flat(), 80.0, Adherence::Under, Goal::Lose) < base);
+        assert!(calorie_planka_weekly(base, &losing_fast(), 80.0, Adherence::Over, Goal::Lose) > base);
     }
 
     #[test]
@@ -612,56 +1099,136 @@ mod tests {
         assert_eq!(next_steps_planka(16200, Green), 16200);
     }
 
+    /// Полоса — про ТЕМП, и при точной оценке правило то же, что и раньше:
+    /// 90 кг → комфортные 0.27..0.63 кг/нед.
     #[test]
-    fn planka_factor_confident_loss_steers_to_comfort_band() {
-        // 90 kg → comfortable 0.3..0.7 %/wk = 0.27..0.63 kg/wk.
-        // In band (0.5 kg/wk) → hold.
-        assert_eq!(planka_factor(&estimated(Direction::Down, -0.5, 0.9), 90.0), 1.0);
-        // Too slow (0.1 kg/wk ≈ 0.11 %) → gentle cut.
-        assert_eq!(planka_factor(&estimated(Direction::Down, -0.1, 0.9), 90.0), 1.0 - PLANKA_STEP);
-        // Too fast (1.0 kg/wk ≈ 1.11 %) → ease up.
-        assert_eq!(planka_factor(&estimated(Direction::Down, -1.0, 0.9), 90.0), 1.0 + PLANKA_STEP);
+    fn tochnaya_ocenka_vedet_k_polose() {
+        // В полосе (0.5 кг/нед) → держим.
+        assert_eq!(planka_factor(&est(-0.5, TIGHT), 90.0, Goal::Lose), 1.0);
+        // Слишком медленно (0.1 кг/нед) → мягко срезаем.
+        assert_eq!(planka_factor(&est(-0.1, TIGHT), 90.0, Goal::Lose), 1.0 - PLANKA_STEP);
+        // Слишком быстро (1.0 кг/нед) → приподнимаем.
+        assert_eq!(planka_factor(&est(-1.0, TIGHT), 90.0, Goal::Lose), 1.0 + PLANKA_STEP);
+        // Вес стоит и вес растёт — оба «значимо медленнее полосы», отдельных
+        // случаев для них не нужно.
+        assert_eq!(planka_factor(&est(0.0, TIGHT), 90.0, Goal::Lose), 1.0 - PLANKA_STEP);
+        assert_eq!(planka_factor(&est(0.4, TIGHT), 90.0, Goal::Lose), 1.0 - PLANKA_STEP);
     }
 
+    /// СУТЬ ФИКСА. Тот же наклон, что срезал бы планку при точной оценке, но
+    /// погрешность соизмерима с полосой — значит про темп не известно ничего, и
+    /// планка стоит. Именно на этом месте она дребезжала.
     #[test]
-    fn planka_factor_weak_signal_holds_no_premature_cut() {
-        // Probably losing (0.71) but not confident → HOLD (this user's case).
-        assert_eq!(planka_factor(&estimated(Direction::Down, -0.2, 0.71), 90.0), 1.0);
-        // Just over the WEAK threshold (0.66) → still holds.
-        assert_eq!(planka_factor(&estimated(Direction::Down, -0.1, 0.66), 90.0), 1.0);
+    fn shirokaya_pogreshnost_derzhit_planku() {
+        // −0.21 кг/нед при 86 кг — на волосок ниже полосы (0.26..0.60).
+        // При точной оценке это срез.
+        assert_eq!(planka_factor(&est(-0.21, TIGHT), 86.0, Goal::Lose), 1.0 - PLANKA_STEP);
+        // С реальной погрешностью бытовых весов (0.21 кг/нед) — держим.
+        assert_eq!(planka_factor(&est(-0.21, 0.21), 86.0, Goal::Lose), 1.0);
+        assert_eq!(pace(&est(-0.21, 0.21), 86.0, Goal::Lose), Some(Pace::InBand));
+        // И зеркально: −0.75 кг/нед выше полосы, но погрешность 0.19 не даёт
+        // назвать это «слишком быстро» — на следующей неделе как раз и вышел бы
+        // обратный шаг.
+        assert_eq!(planka_factor(&est(-0.75, 0.19), 85.0, Goal::Lose), 1.0);
+        // А настоящий сигнал через ту же погрешность проходит.
+        assert_eq!(planka_factor(&est(-0.99, 0.17), 85.0, Goal::Lose), 1.0 + PLANKA_STEP);
     }
 
+    // ── Полоса по цели курса ────────────────────────────────────────────────
+
+    /// Похудение: полоса снизу и сверху, обе отрицательные.
     #[test]
-    fn planka_factor_flat_or_gaining_cuts() {
-        // Down but low confidence (p_down 0.55 < WEAK) → plateau-ish → cut.
-        assert_eq!(planka_factor(&estimated(Direction::Down, -0.05, 0.55), 90.0), 1.0 - PLANKA_STEP);
-        // Confident gain (up 0.9 → p_down 0.1) → cut.
-        assert_eq!(planka_factor(&estimated(Direction::Up, 0.4, 0.9), 90.0), 1.0 - PLANKA_STEP);
-        // Weakly gaining (up 0.7 → p_down 0.3) → cut.
-        assert_eq!(planka_factor(&estimated(Direction::Up, 0.2, 0.7), 90.0), 1.0 - PLANKA_STEP);
+    fn polosa_pohudeniya() {
+        let b = target_band(Goal::Lose, 85.0).unwrap();
+        assert!((b.lo.unwrap() + 0.595).abs() < 1e-9, "{b:?}"); // −0.7 %
+        assert!((b.hi.unwrap() + 0.255).abs() < 1e-9, "{b:?}"); // −0.3 %
     }
 
+    /// Удержание: полоса вокруг нуля, симметричная и шириной с шум.
+    #[test]
+    fn polosa_uderzhaniya() {
+        let b = target_band(Goal::Maintain, 85.0).unwrap();
+        assert!((b.lo.unwrap() + 0.1275).abs() < 1e-9, "{b:?}");
+        assert!((b.hi.unwrap() - 0.1275).abs() < 1e-9, "{b:?}");
+        // Ровный вес — планка стоит.
+        assert_eq!(planka_factor(&est(0.0, TIGHT), 85.0, Goal::Maintain), 1.0);
+        // Уходит вниз — еды больше. Уходит вверх — меньше.
+        assert_eq!(planka_factor(&est(-0.5, TIGHT), 85.0, Goal::Maintain), 1.0 + PLANKA_STEP);
+        assert_eq!(planka_factor(&est(0.5, TIGHT), 85.0, Goal::Maintain), 1.0 - PLANKA_STEP);
+    }
+
+    /// Набор: ограничение ТОЛЬКО снизу — решение заказчика. Быстрый набор планку
+    /// не режет; правило вмешивается лишь тогда, когда набора не происходит.
+    #[test]
+    fn polosa_nabora_tolko_snizu() {
+        let b = target_band(Goal::Gain, 85.0).unwrap();
+        assert!((b.lo.unwrap() - 0.1275).abs() < 1e-9, "{b:?}");
+        assert_eq!(b.hi, None);
+
+        // Набирает как надо — держим.
+        assert_eq!(planka_factor(&est(0.3, TIGHT), 85.0, Goal::Gain), 1.0);
+        // Набирает ВТРОЕ быстрее нужного — всё равно держим: верхней границы нет.
+        assert_eq!(planka_factor(&est(2.0, TIGHT), 85.0, Goal::Gain), 1.0);
+        assert_eq!(pace(&est(2.0, TIGHT), 85.0, Goal::Gain), Some(Pace::InBand));
+        // А вот стоящий и тем более падающий вес поднимают планку.
+        assert_eq!(planka_factor(&est(0.0, TIGHT), 85.0, Goal::Gain), 1.0 + PLANKA_STEP);
+        assert_eq!(planka_factor(&est(-0.4, TIGHT), 85.0, Goal::Gain), 1.0 + PLANKA_STEP);
+    }
+
+    /// БАГ, ради которого всё это. Один и тот же вес — растёт на 0.5 кг/нед — при
+    /// разных целях обязан вести планку в РАЗНЫЕ стороны. Раньше полоса была одна,
+    /// всегда полоса снижения, и набирающему планку резали на 5 % каждую неделю,
+    /// пока набор не прекращался.
+    #[test]
+    fn odin_ves_raznye_celi() {
+        let rising = est(0.5, TIGHT); // +0.59 % от 85 кг в неделю
+        assert_eq!(planka_factor(&rising, 85.0, Goal::Lose), 1.0 - PLANKA_STEP);
+        assert_eq!(planka_factor(&rising, 85.0, Goal::Maintain), 1.0 - PLANKA_STEP);
+        assert_eq!(planka_factor(&rising, 85.0, Goal::Gain), 1.0);
+    }
+
+    /// Значимость работает при любой цели: широкая погрешность держит планку.
+    #[test]
+    fn znachimost_rabotaet_pri_lyuboj_celi() {
+        for goal in [Goal::Lose, Goal::Maintain, Goal::Gain] {
+            assert_eq!(planka_factor(&est(-0.2, 0.5), 85.0, goal), 1.0, "{goal:?}");
+        }
+    }
+
+    /// Шум вокруг нуля больше НЕ повод срезать планку: «неизвестно» — это не
+    /// «стоит на месте». Настоящее плато при ежедневных взвешиваниях даёт узкую
+    /// погрешность и срезается как прежде.
+    #[test]
+    fn shum_ne_prinimaetsya_za_plato() {
+        assert_eq!(planka_factor(&est(-0.05, 0.4), 90.0, Goal::Lose), 1.0);
+        assert_eq!(planka_factor(&est(-0.05, 0.1), 90.0, Goal::Lose), 1.0 - PLANKA_STEP);
+    }
+
+    /// Без оценки (меньше трёх дней взвешиваний) и без веса судить не по чему.
     #[test]
     fn planka_factor_no_trend_holds() {
-        assert_eq!(planka_factor(&WeightTrend::Insufficient { days: 1 }, 90.0), 1.0);
+        assert_eq!(planka_factor(&WeightTrend::Insufficient { days: 1 }, 90.0, Goal::Lose), 1.0);
         assert_eq!(
             planka_factor(
                 &WeightTrend::Tentative { direction: Direction::Down, slope_kg_per_week: -0.5, days: 2 },
                 90.0,
+                Goal::Lose,
             ),
             1.0
         );
+        assert_eq!(pace(&est(-1.0, TIGHT), 0.0, Goal::Lose), None);
+        assert_eq!(planka_factor(&est(-1.0, TIGHT), 0.0, Goal::Lose), 1.0);
     }
 
     #[test]
     fn calorie_planka_rounds_to_50() {
-        // Hold (weak down) → avg unchanged, rounded to 50.
-        let hold = estimated(Direction::Down, -0.2, 0.71);
-        assert_eq!(calorie_planka(2600.0, &hold, 90.0), 2600.0);
-        assert_eq!(calorie_planka(2490.0, &hold, 90.0), 2500.0); // 49.8 -> 50
+        // Hold (темп в полосе) → avg unchanged, rounded to 50.
+        let hold = est(-0.4, TIGHT);
+        assert_eq!(calorie_planka(2600.0, &hold, 90.0, Goal::Lose), 2600.0);
+        assert_eq!(calorie_planka(2490.0, &hold, 90.0, Goal::Lose), 2500.0); // 49.8 -> 50
         // Cut (plateau) → avg*0.95, rounded to 50.
-        let cut = estimated(Direction::Down, -0.05, 0.55);
-        assert_eq!(calorie_planka(2600.0, &cut, 90.0), 2450.0); // 2470 -> 49.4 -> 2450
-        assert_eq!(calorie_planka(2000.0, &cut, 90.0), 1900.0);
+        let cut = est(-0.05, TIGHT);
+        assert_eq!(calorie_planka(2600.0, &cut, 90.0, Goal::Lose), 2450.0); // 2470 -> 49.4 -> 2450
+        assert_eq!(calorie_planka(2000.0, &cut, 90.0, Goal::Lose), 1900.0);
     }
 }

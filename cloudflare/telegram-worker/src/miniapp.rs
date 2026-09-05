@@ -793,6 +793,7 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
           font-size: 13px; line-height: 1.45; color: var(--muted); text-align: left; }
   .crow input { flex: 0 0 auto; width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
   .crow a { color: var(--accent-700); font-weight: 600; text-decoration: underline; }
+  .payinfo { margin: 12px 0 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
   button.secondary { background: transparent; color: var(--muted); border: 1.5px solid var(--line);
     box-shadow: none; font-weight: 600; }
   /* Отладочный вход на тестовую версию — красный, чтобы не спутать с обычным. */
@@ -875,6 +876,10 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
           <span>Я согласен с <a href="https://renorma.app/privacy" data-doc>политикой конфиденциальности</a></span>
         </label>
       </div>
+      <!-- Раскрытие провайдера: оферта его намеренно не называет, чтобы смена
+           провайдера не требовала новой редакции. Значит, назвать его нужно
+           здесь — в точке, где человек подтверждает оплату. -->
+      <p class="payinfo">Платёжный провайдер — lava.top. Данные карты вводятся на его стороне: мы их не получаем и не храним.</p>
     </div>
 
     <div id="wizStatus" class="status"></div>
@@ -895,7 +900,7 @@ const MINIAPP_HTML: &str = r##"<!DOCTYPE html>
   <button id="devSmokeBtn" class="danger hidden" style="margin-top:10px;">Получить доступ к тестовой версии (для разработчиков)</button>
   <div id="buildTag" style="font-size:10px; opacity:0.5; text-align:center; margin-top:10px;
        padding:14px 0; touch-action:manipulation; user-select:none; -webkit-user-select:none;
-       -webkit-tap-highlight-color:transparent; cursor:pointer;">build: pay-r20</div>
+       -webkit-tap-highlight-color:transparent; cursor:pointer;">build: pay-r21</div>
 </div>
 
 <!-- Предупреждение перед уходом на тестовую версию. Кнопки намеренно

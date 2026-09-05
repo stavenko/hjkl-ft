@@ -1,0 +1,59 @@
+# Синхронизация данных ПРИЛОЖЕНИЯ ТРЕНИРОВОК (gym.renorma.app).
+#
+# Отдельный воркер, а не новые stores в `sync-worker`, — и это принципиально.
+# Журнал там ОДИН на пользователя и проигрывается целиком: чужие батчи пришлось
+# бы реплеить каждому клиенту (приложению тренировок — всю историю питания, и
+# наоборот), а незнакомый `store` у соседа честно уходит в лог ошибкой. Своя
+# DO-неймспейса разводит две истории структурно, а не уговором.
+#
+# Токен тот же: JWT_SECRET общий с auth-worker, `sub` — тот же user_id. Один
+# ключ, один аккаунт, два независимых журнала.
+name = "gym-sync-worker-dev"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-12-01"
+
+[build]
+# Pin worker-build to match the `worker`/`wasm-bindgen` versions in Cargo.lock —
+# an unpinned `cargo install worker-build` pulls a newer build that passes
+# wasm-bindgen flags the locked CLI doesn't support.
+command = "cargo install -q worker-build --version 0.8.5 && worker-build --release"
+
+[[durable_objects.bindings]]
+name = "SYNC_DO"
+class_name = "SyncDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SyncDO"]
+
+[vars]
+JWT_SECRET = "dev-secret-change-in-production"
+# Account teardown: payment-worker reaches /internal/user-wipe over a service
+# binding and proves itself with this shared key (prod: Secrets Store below).
+INTERNAL_PUSH_KEY = "dev-internal-push-key"
+
+# ── Production (separate worker on gym-sync.renorma.app, clean DO data) ──
+# Deploy: wrangler deploy --env production
+[env.production]
+name = "gym-sync-worker-prod"
+workers_dev = false
+
+[[env.production.routes]]
+pattern = "gym-sync.renorma.app"
+custom_domain = true
+
+[[env.production.durable_objects.bindings]]
+name = "SYNC_DO"
+class_name = "SyncDO"
+
+# JWT_SECRET is mounted from the global Secrets Store in prod (dev keeps the
+# [vars] value above). The binding name MUST equal the env name the code reads.
+[[env.production.secrets_store_secrets]]
+binding = "JWT_SECRET"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "jwt-secret"
+
+[[env.production.secrets_store_secrets]]
+binding = "INTERNAL_PUSH_KEY"
+store_id = "e2b7d6c72d1f44ea889bd02a27d215f7"
+secret_name = "internal-push-key"

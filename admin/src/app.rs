@@ -970,6 +970,8 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
     let confirming_reset = create_rw_signal(false);
     let wiping = create_rw_signal(false);
     let report = create_rw_signal(Option::<api::WipeReport>::None);
+    // Открытый чек — письмо от lava целиком.
+    let receipt_open = create_rw_signal(Option::<api::ReceiptFull>::None);
 
     let uid_load = user_id.clone();
     spawn_local(async move {
@@ -1174,15 +1176,37 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
                             <div style="font-weight:650; margin:12px 0 6px;">
                                 {format!("Чеки · {}", receipts.len())}
                             </div>
+                            // Строка чека ОТКРЫВАЕТСЯ: письмо от lava — это не только сумма.
+                            // Про сорванное продление и отмену подписки провайдер сообщает
+                            // только письмом, и разобрать, что там написано, нужно уметь
+                            // прямо отсюда. Кнопка, а не <a>: на iOS клик по ссылке без href
+                            // не доходит (см. reference_ios_leptos_click_delegation).
                             {if receipts.is_empty() {
                                 view! { <div class="row__meta">"нет"</div> }.into_view()
                             } else {
-                                receipts.into_iter().map(|r| view! {
-                                    <div class="row__meta">
-                                        {format!("{} · получен {}",
-                                            fmt_money(r.amount, r.currency.as_deref()),
-                                            r.received_at.map(fmt_ts).unwrap_or_else(|| "—".into()))}
-                                    </div>
+                                receipts.into_iter().map(|r| {
+                                    let id = r.id.clone();
+                                    let open = move |_| {
+                                        let id = id.clone();
+                                        spawn_local(async move {
+                                            match api::receipt_detail(&id).await {
+                                                Ok(Some(full)) => receipt_open.set(Some(full)),
+                                                Ok(None) => error.set(Some("чек не найден".into())),
+                                                Err(e) => error.set(Some(e.message().to_string())),
+                                            }
+                                        });
+                                    };
+                                    view! {
+                                        <button attr:data-testid="user-receipt-row" class="row__meta"
+                                                style="display:block; width:100%; text-align:left; \
+                                                       background:none; border:none; padding:2px 0; \
+                                                       color:inherit; cursor:pointer; text-decoration:underline dotted;"
+                                                on:click=open>
+                                            {format!("{} · получен {}",
+                                                fmt_money(r.amount, r.currency.as_deref()),
+                                                r.received_at.map(fmt_ts).unwrap_or_else(|| "—".into()))}
+                                        </button>
+                                    }
                                 }).collect_view()
                             }}
                         }
@@ -1278,6 +1302,32 @@ fn UserModal(user_id: String, on_close: Callback<()>) -> impl IntoView {
                         </div>
                     </div>
                 </div>
+            })}
+
+            // Тело чека — то же окно, что и на экране платежей. Письмо приходит
+            // размеченным, поэтому показывается как есть.
+            {move || receipt_open.get().map(|full| {
+                let body = full.body_text.clone().unwrap_or_default();
+                let amount = fmt_money(full.amount, full.currency.as_deref());
+                let when = full.received_at.map(fmt_ts).unwrap_or_default();
+                view! {
+                    <div on:click=move |_| receipt_open.set(None)
+                         attr:data-testid="user-receipt-body"
+                         style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:90; \
+                                display:flex; align-items:center; justify-content:center; padding:16px;">
+                        <div on:click=move |ev: leptos::ev::MouseEvent| ev.stop_propagation()
+                             style="background:#fff; color:#111; max-width:660px; width:100%; \
+                                    max-height:86vh; overflow:auto; border-radius:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; \
+                                        padding:12px 16px; border-bottom:1px solid #eee; \
+                                        position:sticky; top:0; background:#fff;">
+                                <div><b>"Чек"</b>" · "<span class="mono">{amount}</span>" · "{when}</div>
+                                <button class="btn btn--ghost" on:click=move |_| receipt_open.set(None)>"✕"</button>
+                            </div>
+                            <div inner_html=body style="padding:12px 16px;"></div>
+                        </div>
+                    </div>
+                }
             })}
         </div>
     }
@@ -1390,6 +1440,14 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
     let selected_payment = create_rw_signal(Option::<api::UnboundPayment>::None);
     let error = create_rw_signal(Option::<String>::None);
     let loading = create_rw_signal(true);
+    // Что ответила отправка образца — показываем прямо на экране.
+    let preview_note = create_rw_signal(Option::<String>::None);
+    // Потерянные подписчики: подписка закрылась, а сообщения от нас не было.
+    let lost = create_rw_signal(Vec::<api::LostUser>::new());
+    let lost_note = create_rw_signal(Option::<String>::None);
+    let lost_busy = create_rw_signal(false);
+    // Отправка — только после просмотра списка и подтверждения.
+    let lost_confirm = create_rw_signal(false);
 
     let load = Callback::new(move |_: ()| {
         loading.set(true);
@@ -1451,6 +1509,180 @@ fn Payments(view: RwSignal<View>) -> impl IntoView {
 
         <div class="screen">
             {move || error.get().map(|e| view! { <div class="banner">{e}</div> })}
+
+            // ОБРАЗЦЫ СООБЩЕНИЙ. Тексты о судьбе подписки уходят людям в бот, и
+            // проверить их можно только глазами в телеграме: разметку и ссылки по
+            // исходнику не утвердить. Кнопка шлёт образец САМОМУ оператору.
+            <div style="padding: 16px 16px 2px;">
+                <span class="badge">"Образцы сообщений в бот"</span>
+            </div>
+            <div style="padding: 6px 16px 10px; display:flex; gap:8px; flex-wrap:wrap;">
+                {[("renewal_failed", "не удалось продлить"),
+                  ("cancelled_after_failure", "отменена по неоплате"),
+                  ("cancelled", "отменена")]
+                    .into_iter()
+                    .map(|(kind, label)| {
+                        let send = move |_| {
+                            preview_note.set(Some("отправляю…".to_string()));
+                            spawn_local(async move {
+                                match api::preview_notice(kind).await {
+                                    Ok(p) if p.sent => preview_note.set(Some(
+                                        "образец отправлен — смотрите в боте".to_string())),
+                                    Ok(_) => preview_note.set(Some(
+                                        "телеграм ответил отказом — сообщение не доставлено".to_string())),
+                                    Err(e) => preview_note.set(Some(e.message().to_string())),
+                                }
+                            });
+                        };
+                        view! {
+                            <button attr:data-testid="preview-notice" class="btn btn--ghost"
+                                    on:click=send>{label}</button>
+                        }
+                    })
+                    .collect_view()}
+            </div>
+            {move || preview_note.get().map(|t| view! {
+                <div class="row__meta" style="padding:0 16px 10px;">{t}</div>
+            })}
+
+            // ПОТЕРЯННЫЕ ПОДПИСЧИКИ. Тем, у кого подписка закрылась молча — до того,
+            // как мы научились писать о срыве продления, — сообщение можно отправить
+            // вдогонку. Сначала список, отправка только после него.
+            <div style="padding: 10px 16px 2px;">
+                <span class="badge">"Кому не написали об отмене"</span>
+            </div>
+            <div style="padding: 6px 16px 10px; display:flex; gap:8px; flex-wrap:wrap;">
+                <button attr:data-testid="lost-scan" class="btn btn--ghost"
+                        disabled=move || lost_busy.get()
+                        on:click=move |_| {
+                            lost_busy.set(true);
+                            lost_confirm.set(false);
+                            lost_note.set(Some("считаю…".to_string()));
+                            spawn_local(async move {
+                                // Ходим страницами до конца: список пользователей
+                                // длиннее, чем воркер успевает обойти за раз.
+                                let mut all: Vec<api::LostUser> = Vec::new();
+                                let mut offset = 0u64;
+                                let mut total = 0usize;
+                                loop {
+                                    match api::notify_cancelled(true, offset).await {
+                                        Ok(page) => {
+                                            total = page.total_users;
+                                            all.extend(page.users);
+                                            match page.next_offset {
+                                                Some(next) => offset = next,
+                                                None => break,
+                                            }
+                                        }
+                                        Err(e) => {
+                                            lost_note.set(Some(e.message().to_string()));
+                                            lost_busy.set(false);
+                                            return;
+                                        }
+                                    }
+                                }
+                                lost_note.set(Some(format!(
+                                    "проверено {total} чел., ждут сообщения: {}", all.len()
+                                )));
+                                lost.set(all);
+                                lost_busy.set(false);
+                            });
+                        }>"Показать список"</button>
+                {move || (!lost.get().is_empty()).then(|| {
+                    let n = lost.get().iter().filter(|u| u.tg_user_id.is_some()).count();
+                    view! {
+                        <button attr:data-testid="lost-send" class="btn"
+                                disabled=move || lost_busy.get()
+                                on:click=move |_| lost_confirm.set(true)>
+                            {format!("Разослать ({n})")}
+                        </button>
+                    }
+                })}
+            </div>
+            {move || lost_note.get().map(|t| view! {
+                <div class="row__meta" style="padding:0 16px 10px;">{t}</div>
+            })}
+            {move || {
+                let list = lost.get();
+                (!list.is_empty()).then(|| view! {
+                    <div class="list">
+                        {list.into_iter().map(|u| {
+                            let who = u.tg_user_id.map(|id| format!("tg:{id}"))
+                                .unwrap_or_else(|| "телеграма нет".to_string());
+                            let state = if u.days_left > 0 {
+                                format!("{} · доступ ещё {} дн.", u.status, u.days_left)
+                            } else {
+                                format!("{} · доступ закрыт", u.status)
+                            };
+                            view! {
+                                <div class="row" style="cursor:default;">
+                                    <div class="row__top">
+                                        <span class="row__title mono">{short_uid(&u.user_id)}</span>
+                                        {u.sent.then(|| view! { <span class="badge">"отправлено"</span> })}
+                                    </div>
+                                    <div class="row__sub">{who}</div>
+                                    <div class="row__meta">{state}</div>
+                                </div>
+                            }
+                        }).collect_view()}
+                    </div>
+                })
+            }}
+
+            // Подтверждение рассылки: сообщение уходит живым людям, поэтому
+            // отдельным шагом и с числом получателей в тексте.
+            {move || lost_confirm.get().then(|| {
+                let n = lost.get().iter().filter(|u| u.tg_user_id.is_some()).count();
+                view! {
+                    <div attr:data-testid="lost-confirm"
+                         style="position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:80; \
+                                display:flex; align-items:center; justify-content:center; padding:16px;">
+                        <div style="background:var(--surface); color:var(--text); max-width:440px; \
+                                    width:100%; border-radius:12px; border:1px solid var(--line); padding:16px;">
+                            <div style="font-weight:700; margin-bottom:8px;">"Разослать сообщения?"</div>
+                            <div class="row__meta" style="line-height:1.5;">
+                                {format!("Сообщение об отмене подписки получат {n} чел. Каждому — один \
+                                          раз: повторно эта кнопка им уже не напишет.", )}
+                            </div>
+                            <div style="display:flex; gap:8px; margin-top:14px;">
+                                <button class="btn btn--ghost" style="flex:1;"
+                                        on:click=move |_| lost_confirm.set(false)>"Отмена"</button>
+                                <button attr:data-testid="lost-confirm-yes" class="btn" style="flex:1;"
+                                        on:click=move |_| {
+                                            lost_confirm.set(false);
+                                            lost_busy.set(true);
+                                            lost_note.set(Some("рассылаю…".to_string()));
+                                            spawn_local(async move {
+                                                let mut sent = 0usize;
+                                                let mut offset = 0u64;
+                                                let mut done: Vec<api::LostUser> = Vec::new();
+                                                loop {
+                                                    match api::notify_cancelled(false, offset).await {
+                                                        Ok(page) => {
+                                                            sent += page.sent;
+                                                            done.extend(page.users);
+                                                            match page.next_offset {
+                                                                Some(next) => offset = next,
+                                                                None => break,
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            lost_note.set(Some(e.message().to_string()));
+                                                            lost_busy.set(false);
+                                                            return;
+                                                        }
+                                                    }
+                                                }
+                                                lost_note.set(Some(format!("отправлено: {sent}")));
+                                                lost.set(done);
+                                                lost_busy.set(false);
+                                            });
+                                        }>"Да, разослать"</button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            })}
 
             // Список ПОЛЬЗОВАТЕЛЕЙ: ровно одна строка на человека, сколько бы у
             // него ни было платежей и инвойсов. Что именно пошло не так — видно

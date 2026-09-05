@@ -311,6 +311,7 @@ fn weekly_egg_gauge(w: crate::services::egg::WeeklyEggs) -> impl IntoView {
     let pace = crate::components::gauge::GaugePace {
         segments: 7,
         passed: w.day_of_week.saturating_sub(1),
+        at_most: false,
     };
     view! {
         <crate::components::gauge::Gauge
@@ -337,6 +338,7 @@ fn weekly_iron_gauge(w: crate::services::iron::WeeklyIron) -> impl IntoView {
     let pace = crate::components::gauge::GaugePace {
         segments: 7,
         passed: w.day_of_week.saturating_sub(1),
+        at_most: false,
     };
     view! {
         <crate::components::gauge::Gauge
@@ -361,6 +363,7 @@ fn weekly_heme_gauge(w: crate::services::heme::WeeklyHeme) -> impl IntoView {
     let pace = crate::components::gauge::GaugePace {
         segments: 7,
         passed: w.day_of_week.saturating_sub(1),
+        at_most: false,
     };
     view! {
         <crate::components::gauge::Gauge
@@ -393,9 +396,17 @@ fn weekly_red_meat_gauge(w: crate::services::red_meat::WeeklyRedMeat) -> impl In
         IndicatorState::Orange => ("#f5a524", Some("#f5a524")),
         _ => ("#20c997", None),
     };
+    // ПОТОЛОК, а не цель: пустая шкала здесь — лучший исход, и обводка зелена, пока
+    // заливка не обогнала горящие точки.
+    //
+    // Точек горит на одну больше, чем у шкал-целей: у цели точка значит «сюда надо
+    // успеть», и сегодняшнюю долю с утра не требуют, а у потолка — «столько уже
+    // можно», и дневная доля доступна сразу. Отсюда же берётся порог цвета, тот
+    // самый `limit × день / 7`, которым судит полоса (`WeeklyRedMeat::state`).
     let pace = crate::components::gauge::GaugePace {
         segments: 7,
-        passed: w.day_of_week.saturating_sub(1),
+        passed: w.day_of_week.min(7),
+        at_most: true,
     };
     view! {
         <crate::components::gauge::Gauge
@@ -419,6 +430,7 @@ fn weekly_fat_gauges(w: crate::services::fats::WeeklyFats) -> impl IntoView {
     let pace = crate::components::gauge::GaugePace {
         segments: 7,
         passed: w.day_of_week.saturating_sub(1),
+        at_most: false,
     };
     // Точки стоят у обеих шкал, но означают разное: у граммов — темп набора («где
     // вы были бы, набирая ровно»), у баланса — просто ход недели, догонять там

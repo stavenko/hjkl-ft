@@ -24,6 +24,11 @@ pub struct Period {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Body {
+    /// Цель курса: `lose` / `maintain` / `gain`. От неё зависит ЦЕЛЕВАЯ ПОЛОСА, к
+    /// которой правило ведёт вес, а значит и предложенная планка. Старые отчёты её
+    /// не везут — тогда `None` и умолчание «похудение», как и в приложении.
+    #[serde(default)]
+    pub goal: Option<String>,
     #[serde(default)]
     pub weight_kg: Option<f64>,
     #[serde(default)]
@@ -243,9 +248,10 @@ impl Scope {
 
 impl Report {
     /// Снимок человека для правил планок — ровно тот же, что приложение худеющего
-    /// собирает из профиля. Пять чисел, и правило не должно знать, откуда они.
+    /// собирает из профиля. Правило не должно знать, откуда взялись эти величины.
     pub fn snapshot(&self) -> plankas::Snapshot {
         plankas::Snapshot {
+            goal: plankas::Goal::from_key(self.body.goal.as_deref().unwrap_or("lose")),
             sex: match self.body.sex.as_deref() {
                 Some("male") => Some(plankas::Sex::Male),
                 Some("female") => Some(plankas::Sex::Female),

@@ -47,6 +47,12 @@ pub enum WeightTrend {
         direction: Direction,
         slope_kg_per_week: f64,
         confidence: f64,
+        /// Стандартная ошибка наклона, в тех же кг/нед. Хранится рядом с самой
+        /// оценкой, потому что БЕЗ НЕЁ оценку нельзя ни с чем сравнивать: 14 дней
+        /// бытовых весов дают SE порядка 0.2 кг/нед, и точечное «−0.21 кг/нед»
+        /// значит «где-то между нулём и полукилограммом». `confidence` отвечает
+        /// только на вопрос о ЗНАКЕ; на вопрос о ВЕЛИЧИНЕ отвечает эта величина.
+        slope_se_kg_per_week: f64,
         days: usize,
     },
 }
@@ -83,6 +89,36 @@ impl WeightTrend {
             }
             _ => BalanceState::Maintenance,
         }
+    }
+
+    /// Вероятность того, что ИСТИННЫЙ недельный наклон меньше `bound` (кг/нед).
+    ///
+    /// Оценка наклона распределена по Стьюденту с `dof = days − 2` вокруг `β̂` с
+    /// масштабом SE, поэтому `P(β < bound) = T_dof((bound − β̂)/SE)`, а хвост
+    /// Стьюдента — та же неполная бета-функция, которой считается уверенность в
+    /// направлении. То есть это ровно то же самое сравнение, что и `confidence`,
+    /// только граница не ноль, а любая заданная.
+    ///
+    /// `None` — окно не даёт оценки (меньше трёх дней): сравнивать нечего.
+    pub fn p_slope_below(&self, bound: f64) -> Option<f64> {
+        let (slope, se, days) = match *self {
+            WeightTrend::Estimated { slope_kg_per_week, slope_se_kg_per_week, days, .. } => {
+                (slope_kg_per_week, slope_se_kg_per_week, days)
+            }
+            _ => return None,
+        };
+        let dof = days as f64 - 2.0;
+        if dof <= 0.0 || !se.is_finite() {
+            return None;
+        }
+        if se <= 0.0 {
+            // Идеальная посадка: разброса нет, наклон известен точно.
+            return Some(if bound > slope { 1.0 } else { 0.0 });
+        }
+        let t = (bound - slope) / se;
+        let x = dof / (dof + t * t);
+        let tail = 0.5 * betai(dof / 2.0, 0.5, x); // P(T > |t|)
+        Some(if t >= 0.0 { 1.0 - tail } else { tail })
     }
 }
 
@@ -170,6 +206,7 @@ pub fn weight_trend(entries: &[WeightEntry], window_days: i64) -> WeightTrend {
         direction,
         slope_kg_per_week,
         confidence,
+        slope_se_kg_per_week: se * 7.0,
         days,
     }
 }
@@ -309,7 +346,7 @@ mod tests {
             v.push(day(dd, 90.0 - 0.1 * dd as f64 + noise));
         }
         match weight_trend(&v, DEFAULT_WINDOW_DAYS) {
-            WeightTrend::Estimated { direction, slope_kg_per_week, confidence, days } => {
+            WeightTrend::Estimated { direction, slope_kg_per_week, confidence, days, .. } => {
                 assert_eq!(direction, Direction::Down);
                 assert_eq!(days, 14);
                 assert!((slope_kg_per_week + 0.7).abs() < 0.1, "slope {slope_kg_per_week}");
@@ -470,6 +507,51 @@ mod tests {
             }
             other => panic!("expected Estimated, got {other:?}"),
         }
+    }
+
+    /// Погрешность наклона — не украшение: по ней решается, отличается ли темп
+    /// от комфортной полосы. Четырнадцать дней бытовых весов дают SE порядка
+    /// 0.2 кг/нед, и это ровно тот масштаб, на котором полоса (треть килограмма)
+    /// перестаёт быть различимой.
+    #[test]
+    fn pogreshnost_naklona_soizmerima_s_poloso() {
+        match weight_trend(&noisy(85.0, -0.1), DEFAULT_WINDOW_DAYS) {
+            WeightTrend::Estimated { slope_se_kg_per_week, .. } => {
+                assert!(
+                    (0.05..0.6).contains(&slope_se_kg_per_week),
+                    "SE {slope_se_kg_per_week} — ожидали десятые доли кг/нед"
+                );
+            }
+            other => panic!("expected Estimated, got {other:?}"),
+        }
+    }
+
+    /// `p_slope_below` — то же сравнение, что и `confidence`, но с произвольной
+    /// границей. При границе в нуле оно обязано совпасть с уверенностью в знаке.
+    #[test]
+    fn veroyatnost_nizhe_nulya_sovpadaet_s_uverennostyu() {
+        match weight_trend(&noisy(85.0, -0.1), DEFAULT_WINDOW_DAYS) {
+            t @ WeightTrend::Estimated { confidence, .. } => {
+                let p = t.p_slope_below(0.0).unwrap();
+                assert!((p - confidence).abs() < 1e-9, "p {p} vs conf {confidence}");
+            }
+            other => panic!("expected Estimated, got {other:?}"),
+        }
+    }
+
+    /// Вероятность монотонна по границе, лежит в [0, 1], и без оценки её нет.
+    #[test]
+    fn veroyatnost_monotonna_i_ogranichena() {
+        let t = weight_trend(&noisy(85.0, -0.1), DEFAULT_WINDOW_DAYS);
+        let below = t.p_slope_below(-2.0).unwrap();
+        let mid = t.p_slope_below(-0.7).unwrap();
+        let above = t.p_slope_below(2.0).unwrap();
+        assert!(below < mid && mid < above, "{below} {mid} {above}");
+        assert!(below >= 0.0 && above <= 1.0);
+        assert!(weight_trend(&[day(13, 81.0), day(14, 80.5)], DEFAULT_WINDOW_DAYS)
+            .p_slope_below(0.0)
+            .is_none());
+        assert!(weight_trend(&[], DEFAULT_WINDOW_DAYS).p_slope_below(0.0).is_none());
     }
 
     #[test]
